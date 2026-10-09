@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	goplugin "github.com/hollis-labs/plugin-sdk"
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"

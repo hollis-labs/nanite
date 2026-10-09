@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
-	"github.com/hollis-labs/go-toolresult/sqlstore"
-	"github.com/hollis-labs/go-toolresult/storetest"
 	"github.com/hollis-labs/nanite/internal/store"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	"github.com/hollis-labs/substrate/agent/toolresult/sqlstore"
+	"github.com/hollis-labs/substrate/agent/toolresult/storetest"
 )
 
 func TestResultCache_SQLStoreConformance(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	svcerr "github.com/hollis-labs/go-svcerr"
+	svcerr "github.com/hollis-labs/libs/util/svcerr"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )

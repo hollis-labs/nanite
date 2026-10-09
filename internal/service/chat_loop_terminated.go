@@ -10,7 +10,7 @@ import (
 
 // chatLoopTerminatedEnvelopeType is the envelope `type` field emitted when
 // the chat loop exits abnormally. Registered as a core type in the external
-// github.com/hollis-labs/go-envelopes module's manifest/envelopes.yaml and
+// github.com/hollis-labs/libs/ui-go/envelopes module's manifest/envelopes.yaml and
 // backed by that module's manifest/schemas/chat-loop-terminated.schema.json
 // (config/envelopes.yaml and internal/envelope/schemas/ do not exist in
 // this repo — see TASKS/phase-6/06-fix-cli-boot-content-card-type-list.md).

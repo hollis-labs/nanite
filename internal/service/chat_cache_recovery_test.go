@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 type recoverySource struct{ body string }

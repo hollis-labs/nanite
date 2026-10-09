@@ -15,7 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/truncate"
 
 	"github.com/google/uuid"
-	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
+	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
 
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"

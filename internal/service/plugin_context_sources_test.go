@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
 type contextCallerFunc func(context.Context, *sdkprocess.HTTPRequest) (*sdkprocess.HTTPResponse, error)

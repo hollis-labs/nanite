@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // OrchestrationPlan represents the plan for executing decomposed sub-tasks.

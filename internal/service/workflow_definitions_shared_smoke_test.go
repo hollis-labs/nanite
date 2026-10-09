@@ -6,10 +6,10 @@ import (
 	"runtime"
 	"testing"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/workflowhost"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func exampleWorkflowDefinitionsDir(t *testing.T) string {

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 type ModelSelection struct {

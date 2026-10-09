@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 func TestBuildRepairConfig_ProviderResolution(t *testing.T) {

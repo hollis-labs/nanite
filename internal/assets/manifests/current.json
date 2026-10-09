@@ -6,9 +6,9 @@
     {
       "output": "docs/tesseract-v0.9-contract.md",
       "module": "github.com/hollis-labs/tesseract",
-      "version": "v0.10.0",
+      "version": "v0.11.0",
       "path": "docs/guides/tesseract-adoption-and-v0.9-migration.md",
-      "source_url": "https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md"
+      "source_url": "https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/guides/tesseract-adoption-and-v0.9-migration.md"
     }
   ],
   "files": {
@@ -39,13 +39,13 @@
     "docs/nanite-messaging.md": "b5cd2fde7c73e5505f2ff252a515fbd8bf9fc3f66c7101e7591f773178ef4c32",
     "docs/nanite-planner.md": "3004ecb313a54c0f7b4f32636821553d4240963987b8cb00feca7700ed8fccc3",
     "docs/nanite-setup-guide.md": "bb7b4069e3b279a31e6ef6fb4975b5275cb708e787d9fc4880ce31e3ada337df",
-    "docs/ref-envelope-component.md": "a9d5054251970fc93bd6c26dffc6d2c261a088a17c38f2a101cbae4216c10562",
-    "docs/ref-nanite-plugin.md": "75a5c92b4ca3d89ca94cf92770c733629def2b7cc8da01c3ae7f31636610ddcf",
+    "docs/ref-envelope-component.md": "6e5aa73fafbcab1635b7f5dbeb6dd786a717fd821ce93c64c2f0d3cc2259df29",
+    "docs/ref-nanite-plugin.md": "83a844baf270c7a7df45c966d3ea6c117dc407cc2987e4c6b96014e3f8e98139",
     "docs/ref-playwright-bowser/SKILL.md": "993cf29d1d88b1857286ed69ebd3520e46229a613401537271844ab209580622",
     "docs/ref-tokf-filter/SKILL.md": "15d7173500efb6c3d9fecd6f1bfa1afe067e4c0d1fe5e489aec0ee0cbe9fa526",
     "docs/ref-tokf-filter/references/examples.toml": "d423458845fd29f90625c2e3f65478ce912df23811351a1a9551c18c5aa0e222",
     "docs/ref-tokf-filter/references/step-reference.md": "32de2af0a7d4386fa5f2c5790f0922292ff964bd6ba0f2450507e564fa9f1c7c",
-    "docs/tesseract-v0.9-contract.md": "f2e62c596ca9543df979add5149393a0e2c5517f794af081cff9512333330457",
+    "docs/tesseract-v0.9-contract.md": "54035660a64fcc9c470c5ae565f97c70f5272d51e891bb884a774238c591149d",
     "roles/domain/auditor.md": "1343c3611f59895af66feb1edad961372c80a5e07ca7370fb264d1adec46d787",
     "roles/domain/backend.md": "01798d52cc1deab17db23c3109b84a3e8c8c8c10cb99a8f41d1b298e71aca76d",
     "roles/domain/code-review.md": "da63758adac6c417e41e729d977e27ed13c555deee794ac60f04f099b693d62e",

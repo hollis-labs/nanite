@@ -82,7 +82,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/hollis-labs/go-materialize/artifact"
+	"github.com/hollis-labs/substrate/harness/workspace/materialize/artifact"
 )
 
 // HookEvent is a harness lifecycle event a planted hook can bind to. The

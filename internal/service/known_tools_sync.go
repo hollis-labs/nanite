@@ -13,8 +13,8 @@ import (
 	"errors"
 	"log/slog"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // KnownToolsSyncResult reports what SyncKnownTools did, for startup logging.

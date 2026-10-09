@@ -1,5 +1,5 @@
 // Package plugin exposes Nanite's host-specific extensions to the universal
-// plugin contract defined in github.com/hollis-labs/plugin-sdk.
+// plugin contract defined in github.com/hollis-labs/libs/plugin-mcp/plugin-sdk.
 //
 // The SDK in plugin-sdk is intentionally host-agnostic. Nanite layers on UI
 // primitives (slot mount points, slash commands, keybindings) that only make

@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/hollis-labs/go-sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	_ "modernc.org/sqlite"
 )

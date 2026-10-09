@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
 )
 
 func TestPluginContextSourcesApprovedSDKLifecycle(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // seedMessageInbox inserts one unread message addressed to

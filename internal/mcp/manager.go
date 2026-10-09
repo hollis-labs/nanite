@@ -10,18 +10,18 @@ import (
 	"sync"
 	"sync/atomic"
 
-	gmcpclient "github.com/hollis-labs/go-mcp/client"
-	feotel "github.com/hollis-labs/go-otel"
+	gmcpclient "github.com/hollis-labs/libs/plugin-mcp/go-mcp/client"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/mcpconfig"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // MCPTransport is the interface for MCP server connections (stdio or HTTP).

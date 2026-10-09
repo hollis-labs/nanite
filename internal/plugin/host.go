@@ -6,17 +6,18 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 	"github.com/hollis-labs/nanite/internal/artifactstore"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/plugin-sdk"
 )
 
 // validComponentID matches alphanumeric + hyphens, 2-64 chars, no leading/trailing hyphens.
@@ -163,7 +164,8 @@ type Host struct {
 	// record). Consumers (e.g. the B.7 handler cache) read RegistryVersion()
 	// and invalidate when the counter changes. B.8 will additionally bump this
 	// from lifecycle event emitters; for B.7 the load/unload paths are enough.
-	registryVersion uint64
+	registryVersion  uint64
+	ownerGenerations map[string]uint64 // successful in-process loads; never reused
 	// envelopeConsumer routes validated post-hook plugin envelopes to the
 	// session-scoped chat SSE stream (see BLG-20260413-012). Nil means
 	// drop — the subprocess hook still issues the post-hook RPC so the
@@ -203,6 +205,8 @@ func NewHost(router *http.ServeMux, logger plugin.Logger) *Host {
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
 		manifests:          make(map[string]*PluginManifest),
+		registryVersion:    1,
+		ownerGenerations:   make(map[string]uint64),
 		router:             router,
 		pluginMux:          NewMutablePluginMux(),
 		routePatterns:      make(map[string]bool),
@@ -251,6 +255,8 @@ func NewHostWithStore(s *store.Store) *Host {
 		configs:            make(map[string]*PluginConfig),
 		envelopes:          make(map[string]EnvelopeRegistryEntry),
 		manifests:          make(map[string]*PluginManifest),
+		registryVersion:    1,
+		ownerGenerations:   make(map[string]uint64),
 		router:             http.NewServeMux(),
 		pluginMux:          NewMutablePluginMux(),
 		routePatterns:      make(map[string]bool),
@@ -624,6 +630,26 @@ func (h *Host) Logger() plugin.Logger {
 // Context returns the plugin's execution context.
 func (h *Host) Context() context.Context {
 	return h.ctx
+}
+
+// RegistryOwner reports a successful current load, rather than manufacturing
+// ownership from a retained declaration. Subprocess restarts expose the actual
+// newly issued incarnation; failed/unloaded processes have no active owner.
+func (h *Host) RegistryOwner(id string) (string, bool) {
+	h.mu.RLock()
+	p := h.plugins[id]
+	generation := h.ownerGenerations[id]
+	h.mu.RUnlock()
+	if p == nil {
+		return "", false
+	}
+	if child, ok := p.(*subprocess.SubprocessPlugin); ok {
+		generation = child.Incarnation().OwnerGeneration
+	}
+	if generation == 0 {
+		return "", false
+	}
+	return strconv.FormatUint(generation, 10), true
 }
 
 // SetPluginConfig stores configuration for a plugin, typically called before
@@ -1230,11 +1256,22 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 		}
 	}
 	h.mu.Unlock()
+	var ownerGeneration uint64
+	if child, ok := p.(*subprocess.SubprocessPlugin); ok {
+		child.SetLifecycleObserver(h.BumpRegistryVersion)
+	} else {
+		owner, err := subprocess.NewOwnerIncarnation(h.ctx, id)
+		if err != nil {
+			return err
+		}
+		ownerGeneration = owner.OwnerGeneration
+	}
 
 	// Set active plugin so GetConfig knows which plugin is calling.
 	h.mu.Lock()
 	h.activePlugin = id
 	h.mu.Unlock()
+	defer func() { h.mu.Lock(); h.activePlugin = ""; h.mu.Unlock() }()
 
 	// Load the plugin WITHOUT holding the lock — Load calls back into
 	// RegisterCRUDHandler / RegisterUIComponent / etc. which acquire h.mu.
@@ -1251,6 +1288,7 @@ func (h *Host) LoadPlugin(p plugin.Plugin) error {
 	// Store the loaded plugin.
 	h.mu.Lock()
 	h.plugins[id] = p
+	h.ownerGenerations[id] = ownerGeneration
 	h.mu.Unlock()
 
 	h.logger.Info("loaded plugin", "id", id, "name", p.Name(), "version", p.Version())
@@ -1333,6 +1371,7 @@ func (h *Host) UnloadPlugin(id string) error {
 	// Re-acquire to mutate host state.
 	h.mu.Lock()
 	delete(h.plugins, id)
+	delete(h.ownerGenerations, id)
 	// B.7 registry side-map sweep + version bump so GET /api/plugins/registry
 	// cache invalidates as soon as the plugin's manifest goes away.
 	delete(h.manifests, id)

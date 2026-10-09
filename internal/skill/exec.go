@@ -107,8 +107,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // DefaultMarkerTimeout bounds a single inline “ !`cmd` “ marker

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // fixedOverrideStore returns a fixed override regardless of session ID.

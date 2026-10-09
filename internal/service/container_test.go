@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
+	pluginsdk "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	pluginsdk "github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 type blockingShutdownChatService struct {

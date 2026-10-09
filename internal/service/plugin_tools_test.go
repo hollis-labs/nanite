@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 func TestPluginToolsPreserveRosterIdentityAcrossUnload(t *testing.T) {

@@ -1,10 +1,16 @@
 package install
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/nanite/internal/plugin/plugintest"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -19,13 +25,29 @@ func writeFile(t *testing.T, path, content string) {
 
 // validManifest is a generated shared declaration with a public Nanite block.
 func validManifest() string {
-	return `{"schema_version":2,"id":"giphy","name":"Giphy","version":"1.0.0","runtime":"subprocess","protocol":1,"entrypoint":{"command":"bin/giphy"},"hosts":{"nanite":{"min":"0.1.0"}},"nanite":{"ui":{"bundle":"ui/dist/index.js"},"registers":{"envelopes":[{"type":"giphy-modal","component":"GiphyModalCard","version":1,"schema":"envelopes/giphy-modal.schema.json"}],"commands":[{"name":"giphy","description":"search"}]}}}`
+	data := []byte("#!/bin/sh\n")
+	sum := sha256.Sum256(data)
+	uiSum := sha256.Sum256([]byte("export {};"))
+	files := []manifest.ArtifactFile{{Path: "bin/giphy", SHA256: hex.EncodeToString(sum[:]), Executable: true}, {Path: "ui/dist/index.js", SHA256: hex.EncodeToString(uiSum[:])}}
+	tree, err := manifest.TreeDigest(files)
+	if err != nil {
+		panic(err)
+	}
+	declaration := manifest.Manifest{SchemaVersion: 2, ID: "giphy", Name: "Giphy", Version: "1.0.0", Runtime: "subprocess", Protocol: 2,
+		Server: manifest.Server{Runtime: "binary", Entry: "bin/giphy", Engines: map[string]manifest.HostRange{"binary": {Min: "0.0.0"}}},
+		UI:     &manifest.UI{Bundle: "ui/dist/index.js", Isolation: "main-origin"}, Artifact: manifest.Artifact{Files: files, TreeSHA256: tree}, Hosts: map[string]manifest.HostRange{"nanite": {Min: "0.2.0"}},
+		Nanite: json.RawMessage(`{"ui":{"bundle":"ui/dist/index.js"},"registers":{"envelopes":[{"type":"giphy-modal","component":"GiphyModalCard","version":1,"schema":"envelopes/giphy-modal.schema.json"}],"commands":[{"name":"giphy","description":"search"}]}}`)}
+	raw, err := json.Marshal(declaration)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
 }
 
-func setupPlugin(t *testing.T, manifest string, files map[string]string) string {
+func setupPlugin(t *testing.T, manifestText string, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "plugin.yaml"), manifest)
+	writeFile(t, filepath.Join(dir, "plugin.yaml"), manifestText)
 	writeFile(t, filepath.Join(dir, "ui/dist/index.js"), "export {};")
 	for rel, content := range files {
 		writeFile(t, filepath.Join(dir, rel), content)
@@ -34,6 +56,21 @@ func setupPlugin(t *testing.T, manifest string, files map[string]string) string 
 				t.Fatal(err)
 			}
 		}
+	}
+	// Inventory only structurally valid positive declarations. Malformed inputs
+	// remain malformed, so negative admission tests reach the real decoder.
+	if parsed, decodeErr := manifest.Decode(strings.NewReader(manifestText)); decodeErr == nil {
+		// Missing-executable fixtures preserve the original valid declaration;
+		// the real bundle validator must refuse the absent physical file.
+		if _, present := files[parsed.Server.Entry]; !present {
+			return dir
+		}
+		plugintest.Inventory(t, &parsed, dir)
+		var encoded strings.Builder
+		if encodeErr := manifest.Encode(&encoded, parsed); encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		writeFile(t, filepath.Join(dir, "plugin.yaml"), encoded.String())
 	}
 	return dir
 }
@@ -159,4 +196,31 @@ func TestValidateBytes_SchemaOnly(t *testing.T) {
 	if err == nil || !err.HasRefusals() {
 		t.Fatal("expected refuse")
 	}
+}
+
+func refreshInventory(t *testing.T, root string) {
+	t.Helper()
+	confined, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closeErr := confined.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	}()
+	raw, err := confined.ReadFile("plugin.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := manifest.Decode(strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugintest.Inventory(t, &parsed, root)
+	var encoded strings.Builder
+	if err := manifest.Encode(&encoded, parsed); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "plugin.yaml"), encoded.String())
 }

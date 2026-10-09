@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/hollis-labs/go-egress-proxy/egress"
+	"github.com/hollis-labs/substrate/harness/interception/egress"
 )
 
 // DefaultMaxArchiveBytes caps plugin archive size at 100 MiB. Matches the

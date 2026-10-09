@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // syncBuffer is a goroutine-safe bytes.Buffer wrapper, used below to
@@ -428,14 +429,14 @@ func TestDriveBootSession_ACPSessionSkipsSkillReplant(t *testing.T) {
 	}
 }
 
-// TestDriveBootSession_RealBootDirStillTriggersSkillReplant is the
+// TestDriveBootSession_BoundRootRefusesSkillReplant is the
 // positive control for the ACP guard above: a session with a genuine,
 // non-empty BootDir must still reach the PlantAgentSkillFiles call site
 // every turn (proving the sess.BootDir != "" guard doesn't overzealously
 // suppress the legitimate case too). Wires a real granted skill through
 // runtimeagent.Dependencies.Skills/SkillVendor and asserts the file
 // actually lands on disk in the boot dir.
-func TestDriveBootSession_RealBootDirStillTriggersSkillReplant(t *testing.T) {
+func TestDriveBootSession_BoundRootRefusesSkillReplant(t *testing.T) {
 	bootDir := t.TempDir()
 
 	vendor := &fakeSkillVendorForBootDrive{files: map[string]skillvendor.FileMap{
@@ -471,14 +472,14 @@ func TestDriveBootSession_RealBootDirStillTriggersSkillReplant(t *testing.T) {
 		t.Fatalf("driveBootSession: %v", err)
 	}
 
-	if _, err := os.ReadFile(filepath.Join(bootDir, ".claude/skills/demo/SKILL.md")); err != nil {
-		t.Fatalf("expected skill replanted into real boot dir, read failed: %v", err)
+	if _, err := os.Stat(filepath.Join(bootDir, ".claude/skills/demo/SKILL.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsupported active replant changed the bound root: %v", err)
 	}
 }
 
 // fakeSkillStoreForBootDrive/fakeSkillVendorForBootDrive satisfy
 // runtimeagent.SkillStore/SkillVendorReader for
-// TestDriveBootSession_RealBootDirStillTriggersSkillReplant without
+// TestDriveBootSession_BoundRootRefusesSkillReplant without
 // depending on internal/runtime/agent's own unexported test doubles
 // (different package).
 type fakeSkillStoreForBootDrive struct {

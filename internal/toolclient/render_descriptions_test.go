@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/describer"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // TestRenderDescriptions_StaticToolsUnchanged is the regression test for

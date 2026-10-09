@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"time"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
-	"github.com/hollis-labs/go-toolresult/sqlstore"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	"github.com/hollis-labs/substrate/agent/toolresult/sqlstore"
 	"github.com/oklog/ulid/v2"
 )
 

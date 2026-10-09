@@ -99,6 +99,10 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 		namespaces = append(namespaces, memory.ProjectMemoryPrefix(projectID))
 	}
 
+	// App-owned GUI/learning memory shares the host user binding with legacy
+	// user reads; mutable tags never provide that binding.
+	namespaces = append(namespaces, memory.AppMemoryPrefix())
+
 	// User-scoped memories (broadest).
 	if s.UserID != "" {
 		namespaces = append(namespaces, memory.UserMemoryPrefix(s.UserID))
@@ -122,7 +126,7 @@ func (s *MemorySource) Fetch(ctx context.Context, intent Intent, budget int) ([]
 	defer cancel()
 
 	start := time.Now()
-	memories, err := s.Memory.Recall(recallCtx, opts)
+	memories, err := s.Memory.RecallAppForUser(recallCtx, s.UserID, opts)
 	elapsed := time.Since(start)
 
 	if err != nil {

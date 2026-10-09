@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // mockProvider implements ChatProvider with a configurable response function.

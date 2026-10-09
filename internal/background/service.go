@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/classify"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // Messenger is the narrow surface Service uses to deliver completion

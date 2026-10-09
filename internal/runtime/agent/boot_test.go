@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // makeBootDeps wires a Dependencies struct with fakes plus a real

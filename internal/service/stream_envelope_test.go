@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/chat"
-	sdkplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // TestStreamManager_DeliverSessionEnvelopes_ActiveStream covers the happy

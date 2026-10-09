@@ -3,7 +3,7 @@
 -- TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md.
 -- docs/engineering/architecture/12-scheduling.md ("Full replace, not
 -- dual-run" and "Retry, backoff, and on_fail policy") is the design this
--- migration implements: adopting github.com/hollis-labs/go-scheduler as
+-- migration implements: adopting github.com/hollis-labs/libs/util/scheduler as
 -- the single replacement for the "durable-agent-wake-tick" 2-minute poller
 -- and wakeScheduleDue's 15-minute-lookback heuristic (both retired by a
 -- later task in this same batch, not this one).

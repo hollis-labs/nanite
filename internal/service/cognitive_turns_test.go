@@ -15,9 +15,9 @@ import (
 
 	agentservice "github.com/hollis-labs/substrate/agent/service"
 
-	chatstream "github.com/hollis-labs/go-chatstream"
-	"github.com/hollis-labs/go-chatstream/hubbind"
-	streamhub "github.com/hollis-labs/go-streamhub"
+	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
+	"github.com/hollis-labs/libs/ui-go/chatstream/hubbind"
+	streamhub "github.com/hollis-labs/libs/ui-go/streamhub"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )

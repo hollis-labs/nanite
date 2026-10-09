@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hollis-labs/go-envelopes"
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
+	"github.com/hollis-labs/substrate/llm-core/modelsdev"
 
-	"github.com/hollis-labs/go-worktree"
+	"github.com/hollis-labs/libs/util/worktree"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
@@ -30,10 +30,10 @@ import (
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-providers/provider"
-	gosched "github.com/hollis-labs/go-scheduler"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
@@ -64,7 +64,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/workflowhost"
 	"github.com/hollis-labs/nanite/internal/workflowrunner"
 
-	agentbroker "github.com/hollis-labs/agentkit/broker"
+	agentbroker "github.com/hollis-labs/substrate/harness/broker"
 )
 
 type serveLoggingInitializer func(slogx.Config) (*slog.Logger, io.Closer, error)

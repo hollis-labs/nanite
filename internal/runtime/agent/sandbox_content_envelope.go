@@ -13,7 +13,7 @@ import (
 // The "Registered Envelope Types" section is built at call time from
 // chat.RegisteredEnvelopeTypeNames() / chat.EnvelopeRegistry() — the live,
 // in-process registry populated at startup from the external
-// github.com/hollis-labs/go-envelopes module's embedded manifest, plus any
+// github.com/hollis-labs/libs/ui-go/envelopes module's embedded manifest, plus any
 // plugin-registered types (internal/plugin's Host.RegisterEnvelope). Do NOT
 // hardcode a static type table here again: a hand-maintained list silently
 // drifts every time a core type is added/removed or a plugin (un)registers

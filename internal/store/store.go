@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hollis-labs/go-sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
 	_ "modernc.org/sqlite"

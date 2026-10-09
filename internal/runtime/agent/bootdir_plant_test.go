@@ -2,23 +2,26 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-agent-wrapper/plant"
-	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/agentlaunch"
+	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
+	"github.com/hollis-labs/substrate/harness/workspace/materialize/artifact"
 )
 
 // TestPlantSpec_FilesMCPAndProviderSettings verifies the shared plantSpec
 // write routine writes Files entries, the MCPConfig ".mcp.json" shortcut,
 // and the configured ProviderSettings destination.
 func TestPlantSpec_FilesMCPAndProviderSettings(t *testing.T) {
-	bootDir := t.TempDir()
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
 
-	spec := plant.Spec{
+	spec := plant.PlantSpec{
 		Files: map[string][]byte{
 			"top.md":             []byte("top-content"),
 			"nested/dir/file.md": []byte("nested-content"),
@@ -30,6 +33,7 @@ func TestPlantSpec_FilesMCPAndProviderSettings(t *testing.T) {
 	}
 	result, err := plantSpec(context.Background(), bootDir, spec, plantConfig{
 		provider:             "claude",
+		authorize:            authorize,
 		providerSettingsPath: ".claude/settings.json",
 	})
 	if err != nil {
@@ -64,21 +68,23 @@ func TestPlantSpec_FilesMCPAndProviderSettings(t *testing.T) {
 // configured providerSettingsMode / fileModeOverrides entry is honored —
 // codex's config.toml/auth.json need 0o600, not the 0o644 Files default.
 func TestPlantSpec_ProviderSettingsAndFileModeOverrides(t *testing.T) {
-	bootDir := t.TempDir()
-	spec := plant.Spec{
-		Files:            map[string][]byte{"auth.json": []byte("secret")},
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	spec := plant.PlantSpec{
+		Files:            map[string][]byte{"private-settings.json": []byte("secret")},
 		ProviderSettings: map[string][]byte{"codex": []byte("policy")},
 	}
 	_, err := plantSpec(context.Background(), bootDir, spec, plantConfig{
 		provider:             "codex",
+		authorize:            authorize,
 		providerSettingsPath: "config.toml",
 		providerSettingsMode: 0o600,
-		fileModeOverrides:    map[string]os.FileMode{"auth.json": 0o600},
+		fileModeOverrides:    map[string]os.FileMode{"private-settings.json": 0o600},
 	})
 	if err != nil {
 		t.Fatalf("plantSpec: %v", err)
 	}
-	for _, p := range []string{"config.toml", "auth.json"} {
+	for _, p := range []string{"config.toml", "private-settings.json"} {
 		info, err := os.Stat(filepath.Join(bootDir, p))
 		if err != nil {
 			t.Fatalf("stat %s: %v", p, err)
@@ -93,10 +99,11 @@ func TestPlantSpec_ProviderSettingsAndFileModeOverrides(t *testing.T) {
 // gate (agentlaunch.ValidateBootDirRelPath) rejects a traversal path
 // before any write happens.
 func TestPlantSpec_RejectsUnsafePath(t *testing.T) {
-	bootDir := t.TempDir()
-	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	_, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		Files: map[string][]byte{"../escape.txt": []byte("nope")},
-	}, plantConfig{provider: "claude"})
+	}, plantConfig{provider: "claude", authorize: authorize})
 	if err == nil {
 		t.Fatal("expected path-safety rejection, got nil")
 	}
@@ -110,10 +117,11 @@ func TestPlantSpec_RejectsUnsafePath(t *testing.T) {
 // this package populates Hooks today, so a non-empty value can only mean
 // a caller expected behavior that isn't implemented.
 func TestPlantSpec_RejectsHooks(t *testing.T) {
-	bootDir := t.TempDir()
-	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
-		Hooks: []plant.Hook{{Provider: "claude", Name: "pre-tool-use"}},
-	}, plantConfig{provider: "claude"})
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	_, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
+		Hooks: []plant.PlantHook{{Provider: "claude", Name: "pre-tool-use"}},
+	}, plantConfig{provider: "claude", authorize: authorize})
 	if err == nil || !strings.Contains(err.Error(), "hooks") {
 		t.Fatalf("expected hooks-unsupported error, got %v", err)
 	}
@@ -122,17 +130,18 @@ func TestPlantSpec_RejectsHooks(t *testing.T) {
 // TestPlantSpec_RejectsRecoveryPrompt mirrors TestPlantSpec_RejectsHooks
 // for Spec.RecoveryPrompt.
 func TestPlantSpec_RejectsRecoveryPrompt(t *testing.T) {
-	bootDir := t.TempDir()
-	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	_, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		RecoveryPrompt: "resume here",
-	}, plantConfig{provider: "claude"})
+	}, plantConfig{provider: "claude", authorize: authorize})
 	if err == nil || !strings.Contains(err.Error(), "RecoveryPrompt") {
 		t.Fatalf("expected RecoveryPrompt-unsupported error, got %v", err)
 	}
 }
 
 // TestClaudePlantSpec_Shape verifies the claude layout's app-extra files
-// (.sandbox/* docs) and provider settings ride the plant.Spec vocabulary
+// (.sandbox/* docs) and provider settings ride the plant.PlantSpec vocabulary
 // correctly — i.e. the Nanite app extras land in Spec.Files and the MCP
 // descriptor lands in Spec.MCPConfig.
 func TestClaudePlantSpec_Shape(t *testing.T) {
@@ -193,10 +202,11 @@ func TestPlanters_ImplementPlanterInterface(t *testing.T) {
 // change data) reaches the caller instead of being discarded at the
 // planting boundary, which is what CW-20260910-0006 originally wanted.
 func TestPlantSpec_SurfacesMaterializationHandle(t *testing.T) {
-	bootDir := t.TempDir()
-	result, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	result, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		Files: map[string][]byte{"CLAUDE.md": []byte("prompt")},
-	}, plantConfig{provider: "claude"})
+	}, plantConfig{provider: "claude", authorize: authorize})
 	if err != nil {
 		t.Fatalf("plantSpec: %v", err)
 	}
@@ -221,10 +231,11 @@ func TestPlantSpec_SurfacesMaterializationHandle(t *testing.T) {
 func TestPlantSpec_PreservesReservedPrefixGate(t *testing.T) {
 	for _, relPath := range []string{".ssh/authorized_keys", ".aws/credentials", ".git/config", ".gnupg/secring.gpg"} {
 		t.Run(relPath, func(t *testing.T) {
-			bootDir := t.TempDir()
-			_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+			bootDir, authorize, seal := authorizedPlantRoot(t)
+			defer seal()
+			_, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 				Files: map[string][]byte{relPath: []byte("nope")},
-			}, plantConfig{provider: "claude"})
+			}, plantConfig{provider: "claude", authorize: authorize})
 			if err == nil {
 				t.Fatalf("expected %q to be rejected by the reserved-prefix gate", relPath)
 			}
@@ -239,10 +250,11 @@ func TestPlantSpec_PreservesReservedPrefixGate(t *testing.T) {
 // artifact.Entry.Validate rejects a file entry whose Bytes is nil, and an
 // empty planted file is legitimate (boot.md with no kickoff content).
 func TestPlantSpec_PlantsEmptyFile(t *testing.T) {
-	bootDir := t.TempDir()
-	if _, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	if _, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		Files: map[string][]byte{"boot.md": []byte("")},
-	}, plantConfig{provider: "claude"}); err != nil {
+	}, plantConfig{provider: "claude", authorize: authorize}); err != nil {
 		t.Fatalf("plantSpec with empty content: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(bootDir, "boot.md")) //nolint:gosec // reads a file this test just planted into t.TempDir()
@@ -259,10 +271,11 @@ func TestPlantSpec_PlantsEmptyFile(t *testing.T) {
 // conversion uses 0600, so this is the assertion that catches a
 // regression back onto the legacy field path.
 func TestPlantSpec_MCPConfigModeUnchanged(t *testing.T) {
-	bootDir := t.TempDir()
-	if _, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	if _, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		MCPConfig: []byte(`{"mcpServers":{}}`),
-	}, plantConfig{provider: "claude"}); err != nil {
+	}, plantConfig{provider: "claude", authorize: authorize}); err != nil {
 		t.Fatalf("plantSpec: %v", err)
 	}
 	info, err := os.Stat(filepath.Join(bootDir, ".mcp.json"))
@@ -274,55 +287,34 @@ func TestPlantSpec_MCPConfigModeUnchanged(t *testing.T) {
 	}
 }
 
-// TestPlantSpec_SeparatePlantsCompose is the regression test for the
-// ownership trap CW-20260910-0020 found. The shared engine refuses a
-// desired path that exists on disk but is absent from its manifest, and
-// refuses the WHOLE plant rather than that one entry.
-//
-// The real sequence this models: a boot-time Populate plants the bootdir
-// file-set; PlantAgentSkillFiles then plants a mid-session skill grant
-// into the SAME live boot dir; crash recovery then calls Populate again,
-// whose Spec.Files legitimately contains both. That third step is the one
-// that used to be at risk — it only stays green because the mid-session
-// plant also goes through plantSpec and lands in the manifest.
-func TestPlantSpec_SeparatePlantsCompose(t *testing.T) {
-	ctx := context.Background()
-	bootDir := t.TempDir()
-	cfg := plantConfig{provider: "claude"}
-
-	bootFiles := map[string][]byte{"CLAUDE.md": []byte("v1"), "boot.md": []byte("kickoff")}
-	if _, err := plantSpec(ctx, bootDir, plant.Spec{Files: bootFiles}, cfg); err != nil {
-		t.Fatalf("initial Populate: %v", err)
+// Returning the binding ends fresh-root custody. A subsequent plant cannot
+// infer authority from an earlier manifest or silently mutate bound artifacts.
+func TestPlantSpec_BoundRootRefusesRefresh(t *testing.T) {
+	root, authorize, seal := authorizedPlantRoot(t)
+	cfg := plantConfig{provider: "claude", authorize: authorize}
+	result, err := plantSpec(context.Background(), root, plant.PlantSpec{Files: map[string][]byte{"CLAUDE.md": []byte("v1")}}, cfg)
+	if err != nil || result.Handle == nil {
+		t.Fatalf("initial plant: %v", err)
 	}
-
-	// Mid-session skill grant, planted on its own (PlantAgentSkillFiles).
-	skillFiles := map[string][]byte{".claude/skills/demo/SKILL.md": []byte("skill body")}
-	if _, err := plantSpec(ctx, bootDir, plant.Spec{Files: skillFiles}, cfg); err != nil {
-		t.Fatalf("mid-session skill plant: %v", err)
+	seal()
+	_, err = plantSpec(context.Background(), root, plant.PlantSpec{Files: map[string][]byte{"CLAUDE.md": []byte("v2"), "skills/new/SKILL.md": []byte("new")}}, cfg)
+	if !errors.Is(err, ErrArtifactRefreshUnavailable) {
+		t.Fatalf("refresh: %v", err)
 	}
-
-	// Crash-recovery Repopulate: the full set, including the skill.
-	full := map[string][]byte{}
-	for k, v := range bootFiles {
-		full[k] = v
+	confined, openErr := os.OpenRoot(root)
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
-	for k, v := range skillFiles {
-		full[k] = v
+	t.Cleanup(func() { _ = confined.Close() })
+	body, err := confined.ReadFile("CLAUDE.md")
+	if err != nil || string(body) != "v1" {
+		t.Fatalf("bound prompt changed: %q %v", body, err)
 	}
-	full["CLAUDE.md"] = []byte("v2-regenerated")
-	result, err := plantSpec(ctx, bootDir, plant.Spec{Files: full}, cfg)
-	if err != nil {
-		t.Fatalf("Repopulate after a separate mid-session plant: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "skills/new/SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("refused skill created: %v", err)
 	}
-	if len(result.ConflictFiles) != 0 {
-		t.Errorf("ConflictFiles = %v, want none", result.ConflictFiles)
-	}
-	body, err := os.ReadFile(filepath.Join(bootDir, ".claude/skills/demo/SKILL.md")) //nolint:gosec // reads a file this test just planted into t.TempDir()
-	if err != nil || string(body) != "skill body" {
-		t.Errorf("skill file = %q (err %v), want %q", body, err, "skill body")
-	}
-	if c, _ := os.ReadFile(filepath.Join(bootDir, "CLAUDE.md")); string(c) != "v2-regenerated" { //nolint:gosec // reads a file this test just planted into t.TempDir()
-		t.Errorf("CLAUDE.md = %q, want the regenerated body", c)
+	if _, ok := BootArtifactEvidence(root); !ok {
+		t.Fatal("materialization evidence lost")
 	}
 }
 
@@ -334,10 +326,11 @@ func TestPlantSpec_SeparatePlantsCompose(t *testing.T) {
 // future caller is tempted to os.WriteFile into a planted boot dir.
 func TestPlantSpec_RejectsUnownedDestination(t *testing.T) {
 	ctx := context.Background()
-	bootDir := t.TempDir()
-	cfg := plantConfig{provider: "claude"}
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	cfg := plantConfig{provider: "claude", authorize: authorize}
 
-	if _, err := plantSpec(ctx, bootDir, plant.Spec{
+	if _, err := plantSpec(ctx, bootDir, plant.PlantSpec{
 		Files: map[string][]byte{"CLAUDE.md": []byte("v1")},
 	}, cfg); err != nil {
 		t.Fatalf("initial plant: %v", err)
@@ -346,7 +339,7 @@ func TestPlantSpec_RejectsUnownedDestination(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bootDir, "rogue.md"), []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := plantSpec(ctx, bootDir, plant.Spec{
+	_, err := plantSpec(ctx, bootDir, plant.PlantSpec{
 		Files: map[string][]byte{"CLAUDE.md": []byte("v2"), "rogue.md": []byte("owned now")},
 	}, cfg)
 	if err == nil {
@@ -359,12 +352,13 @@ func TestPlantSpec_RejectsUnownedDestination(t *testing.T) {
 // per-entry mode. This is CW-20260910-0010's primitive, and the shape
 // CW-20260910-0015 needs for hook scripts (0700, under hooks/<provider>/).
 func TestPlantSpec_ArtifactsPlantDirectoriesAndModes(t *testing.T) {
-	bootDir := t.TempDir()
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
 	tree := artifact.Tree{Entries: []artifact.Entry{
 		{Path: "hooks/claude", Kind: artifact.EntryDirectory, Mode: 0o700},
 		{Path: "hooks/claude/pre-tool-use.sh", Kind: artifact.EntryFile, Mode: 0o700, Bytes: []byte("#!/usr/bin/env bash\nexit 0\n")},
 	}}
-	result, err := plantSpec(context.Background(), bootDir, plant.Spec{Artifacts: tree}, plantConfig{provider: "claude"})
+	result, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{Artifacts: tree}, plantConfig{provider: "claude", authorize: authorize})
 	if err != nil {
 		t.Fatalf("plantSpec with Artifacts: %v", err)
 	}
@@ -396,14 +390,15 @@ func TestPlantSpec_ArtifactsPlantDirectoriesAndModes(t *testing.T) {
 // additive: a caller can supply Artifacts entries alongside the legacy
 // Files/MCPConfig/ProviderSettings fields in one plant.
 func TestPlantSpec_ArtifactsAndFilesCoexist(t *testing.T) {
-	bootDir := t.TempDir()
-	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	_, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		Files:     map[string][]byte{"CLAUDE.md": []byte("prompt")},
 		MCPConfig: []byte(`{"mcpServers":{}}`),
 		Artifacts: artifact.Tree{Entries: []artifact.Entry{
 			{Path: "hooks/claude/stop.sh", Kind: artifact.EntryFile, Mode: 0o700, Bytes: []byte("exit 0\n")},
 		}},
-	}, plantConfig{provider: "claude"})
+	}, plantConfig{provider: "claude", authorize: authorize})
 	if err != nil {
 		t.Fatalf("plantSpec: %v", err)
 	}
@@ -420,12 +415,13 @@ func TestPlantSpec_ArtifactsAndFilesCoexist(t *testing.T) {
 // reserved-prefix denylist — so this has to be checked on the Artifacts
 // path explicitly, not just on Files.
 func TestPlantSpec_ArtifactsRespectPathGate(t *testing.T) {
-	bootDir := t.TempDir()
-	_, err := plantSpec(context.Background(), bootDir, plant.Spec{
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	_, err := plantSpec(context.Background(), bootDir, plant.PlantSpec{
 		Artifacts: artifact.Tree{Entries: []artifact.Entry{
 			{Path: ".ssh/authorized_keys", Kind: artifact.EntryFile, Mode: 0o600, Bytes: []byte("ssh-rsa AAAA")},
 		}},
-	}, plantConfig{provider: "claude"})
+	}, plantConfig{provider: "claude", authorize: authorize})
 	if err == nil {
 		t.Fatal("expected the reserved-prefix gate to reject a caller-built tree entry")
 	}
@@ -468,8 +464,9 @@ func TestBootDirTreeFromDir_PlantsDirectoryTree(t *testing.T) {
 		t.Error("expected an explicit directory entry for the nested dir")
 	}
 
-	bootDir := t.TempDir()
-	if _, plantErr := plantSpec(context.Background(), bootDir, plant.Spec{Artifacts: tree}, plantConfig{provider: "claude"}); plantErr != nil {
+	bootDir, authorize, seal := authorizedPlantRoot(t)
+	defer seal()
+	if _, plantErr := plantSpec(context.Background(), bootDir, plant.PlantSpec{Artifacts: tree}, plantConfig{provider: "claude", authorize: authorize}); plantErr != nil {
 		t.Fatalf("plant the resolved tree: %v", plantErr)
 	}
 	top, err := os.Stat(filepath.Join(bootDir, "hooks/claude/top.sh"))
@@ -517,4 +514,13 @@ func TestBootDirTreeFromDir_EnforcesLimits(t *testing.T) {
 	if _, err := bootDirTreeFromDir(context.Background(), src, "hooks/claude", ""); err == nil {
 		t.Fatal("expected the depth limit to reject an over-deep source tree")
 	}
+}
+
+func authorizedPlantRoot(t *testing.T) (string, agentlaunch.ArtifactAuthorizer, func()) {
+	t.Helper()
+	root, authorize, seal, err := makeAuthorizedBootDir("claude", SetupParams{SessionID: "plant-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, authorize, seal
 }

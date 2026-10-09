@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
-	"github.com/hollis-labs/go-agent-wrapper/launch"
-	"github.com/hollis-labs/go-providers/registry"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters"
+	"github.com/hollis-labs/substrate/harness/adapters/launch"
+	"github.com/hollis-labs/substrate/harness/adapters/registry"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 // runtime_select.go is Nanite's one launch decision (CW-20260930-0113,

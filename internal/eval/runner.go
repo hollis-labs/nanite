@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // ChatProvider is the minimal interface the runner needs. It matches the

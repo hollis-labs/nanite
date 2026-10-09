@@ -3,9 +3,9 @@ package service
 import (
 	"log/slog"
 
+	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
-	fplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // PluginCleanupService supplies store-backed uninstall cleanup to the

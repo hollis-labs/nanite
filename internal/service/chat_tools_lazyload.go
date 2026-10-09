@@ -1,8 +1,8 @@
 package service
 
 import (
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // loadToolPartitionState returns the previous-turn partition state for a

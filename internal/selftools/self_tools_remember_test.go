@@ -37,6 +37,13 @@ func (s *rememberStubStore) Recall(_ context.Context, _ memory.RecallOpts) ([]me
 	return s.recallReply, nil
 }
 
+func (s *rememberStubStore) StoreAppForUser(ctx context.Context, _ string, m memory.Memory) error {
+	return s.Store(ctx, m)
+}
+func (s *rememberStubStore) RecallAppForUser(ctx context.Context, _ string, opts memory.RecallOpts) ([]memory.Memory, error) {
+	return s.Recall(ctx, opts)
+}
+
 // newRememberSelfTools wires a SelfToolsTransport with a stub
 // LearningStore so callRemember executes end-to-end without touching
 // real Tesseract.
@@ -112,8 +119,8 @@ func TestRemember_HappyPath_ToolUse(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
 		t.Fatalf("unmarshal: %v\nbody: %s", err, res.Content[0].Text)
 	}
-	if out.Namespace != "user/default/memory/learnings" {
-		t.Errorf("namespace = %q, want user/default/memory/learnings", out.Namespace)
+	if out.Namespace != "app/nanite/memory/learnings" {
+		t.Errorf("namespace = %q, want app/nanite/memory/learnings", out.Namespace)
 	}
 	if out.MemoryID == "" {
 		t.Error("memory_id must be non-empty")
@@ -323,5 +330,17 @@ func TestDescribe_NoPriorLearningsField_WhenAbsent(t *testing.T) {
 	_ = json.Unmarshal([]byte(res.Content[0].Text), &out)
 	if _, present := out["prior_learnings"]; present {
 		t.Errorf("prior_learnings should be omitted when empty, got: %v", out["prior_learnings"])
+	}
+}
+
+func TestRemember_RequestedUserCannotSelectAnotherAppOwner(t *testing.T) {
+	sink := &rememberStubStore{}
+	st := newRememberSelfTools(t, sink)
+	result, err := st.CallTool(context.Background(), "lesson_capture", map[string]any{"scope": "tool_use", "subject": "card_show", "hint": "foreign lesson", "user_id": "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || len(sink.stored) != 0 {
+		t.Fatal("request metadata wrote another user's app memory")
 	}
 }

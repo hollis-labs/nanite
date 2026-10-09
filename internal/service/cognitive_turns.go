@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"sync"
 
-	chatstream "github.com/hollis-labs/go-chatstream"
-	streamhub "github.com/hollis-labs/go-streamhub"
+	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
+	streamhub "github.com/hollis-labs/libs/ui-go/streamhub"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	agentservice "github.com/hollis-labs/substrate/agent/service"

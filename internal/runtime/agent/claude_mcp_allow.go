@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 // claude_mcp_allow.go lets a Nanite-launched Claude agent call the tools of

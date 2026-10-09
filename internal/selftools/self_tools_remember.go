@@ -65,7 +65,7 @@ func rememberToolDefinition() mcp.Tool {
 				},
 				"user_id": map[string]any{
 					"type":        "string",
-					"description": "Optional. User namespace root. Defaults to `default` for single-user dogfood.",
+					"description": "Optional compatibility field. Only the host-selected `default` user is accepted; this field cannot select another memory owner.",
 				},
 			},
 			"required": []string{"scope", "subject", "hint"},
@@ -169,7 +169,13 @@ func (st *SelfToolsTransport) callRemember(ctx context.Context, args map[string]
 	// Optional fields.
 	sourceEventID := strArg(args, "source_event_id", "")
 	sessionID := strArg(args, "session_id", "")
-	userID := strArg(args, "user_id", "")
+	requestedUser := strArg(args, "user_id", "")
+	// The current host is single-user. An agent's tool arguments do not
+	// authenticate another user or select app-memory visibility authority.
+	userID := learnings.DefaultUserID
+	if requestedUser != "" && requestedUser != userID {
+		return mcp.ErrorResult("lesson_capture: user_id does not match the host user"), nil
+	}
 
 	var extraTags []string
 	if raw, ok := args["tags"].([]any); ok {

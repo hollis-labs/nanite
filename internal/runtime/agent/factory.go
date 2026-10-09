@@ -3,8 +3,8 @@ package agent
 import (
 	"encoding/json"
 
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters"
 )
 
 // streamingStdioUserFrame wraps raw text as a single NDJSON object in the

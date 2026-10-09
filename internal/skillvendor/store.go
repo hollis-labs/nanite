@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // stagingDirName is the sibling directory under Store.root that Write

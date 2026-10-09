@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
 	"golang.org/x/sys/unix"
 
 	// Register the SQLite driver used by sqlitekit's read-only validator.
@@ -229,6 +229,11 @@ func validateInitializedTesseractDB(path string) error {
 		return fmt.Errorf("tesseract schema history is incomplete: min=%d max=%d rows=%d", minimumVersion, version, versionRows)
 	}
 
+	// Tesseract migration 22 renamed origin without changing its values.
+	provenanceColumn := "origin"
+	if version >= 22 {
+		provenanceColumn = "derived_from"
+	}
 	coreSchemaProbes := []struct {
 		minimumVersion int
 		name           string
@@ -247,7 +252,7 @@ func validateInitializedTesseractDB(path string) error {
 		{minimumVersion: 7, name: "heads v7", query: `SELECT record_type, status FROM heads LIMIT 0`},
 		{minimumVersion: 8, name: "embeddings", query: `SELECT record_id, model, dimensions, vector, created_at FROM embeddings LIMIT 0`},
 		{minimumVersion: 9, name: "memory_state v9", query: `SELECT memory_id, namespace, memory_key, current_revision, activation, access_count, last_accessed_at, created_at FROM memory_state LIMIT 0`},
-		{minimumVersion: 9, name: "memory_revisions v9", query: `SELECT revision_id, memory_id, namespace, memory_key, status, supersedes, created_at, author_agent_id, author_version, "trigger", session_id, origin, confidence, tags, ttl_seconds, expires_at, payload_summary, payload_body, embedding_model, embedding_vector FROM memory_revisions LIMIT 0`},
+		{minimumVersion: 9, name: "memory_revisions v9", query: fmt.Sprintf(`SELECT revision_id, memory_id, namespace, memory_key, status, supersedes, created_at, author_agent_id, author_version, "trigger", session_id, %s, confidence, tags, ttl_seconds, expires_at, payload_summary, payload_body, embedding_model, embedding_vector FROM memory_revisions LIMIT 0`, provenanceColumn)},
 		{minimumVersion: 10, name: "memory domains", query: `SELECT s.domain, r.domain FROM memory_state AS s, memory_revisions AS r LIMIT 0`},
 		{minimumVersion: 11, name: "knowledge facets", query: `SELECT facet_kind, facet_source, facet_pointer_scheme, facet_pointer_locator, facet_pointer_resolved_at FROM memory_revisions LIMIT 0`},
 		{minimumVersion: 12, name: "memory FTS v12", query: `SELECT payload_summary, payload_body, tags FROM memory_revisions_fts LIMIT 0`},

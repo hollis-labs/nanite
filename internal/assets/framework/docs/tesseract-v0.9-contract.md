@@ -1,13 +1,13 @@
 <!-- Generated dependency snapshot; DO NOT EDIT. -->
-<!-- Upstream-owned source: github.com/hollis-labs/tesseract@v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
-<!-- Stable source URL: https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
+<!-- Upstream-owned source: github.com/hollis-labs/tesseract@v0.11.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
+<!-- Stable source URL: https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
 <!-- Relative upstream links are rewritten to tag-pinned URLs. -->
 
 # Tesseract v0.9 adoption and migration guide
 
 > Version-specific historical guide. It documents the v0.8-to-v0.9 cutover and
 > is not the install or upgrade guide for the current preview. Use
-> [Quick start](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/QUICKSTART.md) and [Operations](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/OPERATIONS.md) for current
+> [Quick start](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/QUICKSTART.md) and [Operations](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/OPERATIONS.md) for current
 > guidance.
 
 This guide is for applications and agents adopting Tesseract `v0.9.0`, especially consumers upgrading from `v0.8.x`. It covers the supported Go and MCP contracts, the breaking migration, and the operating rules that keep stored context trustworthy.
@@ -51,7 +51,7 @@ Tesseract owns:
 
 The consuming app owns:
 
-- honest domain, namespace, origin, trigger, confidence, and status selection;
+- honest domain, namespace, derived_from, trigger, confidence, and status selection;
 - the external resource named by a knowledge pointer;
 - calling `tesseract_touch` only for recall results that actually informed work;
 - coordinating process-manager and data-path changes before upgrading the daemon.
@@ -74,7 +74,7 @@ Knowledge namespaces have the shape `{user|app}/{id}/knowledge[/...]`. Every kno
 
 ```text
 doc, handoff, investigation, learning, mcp_server, note, package,
-playbook, pointer, project_canonical, session_close
+playbook, pointer, project_canonical, session_close, wiki_page
 ```
 
 These rules are enforced at the shared persistence boundary. Therefore the root Go facade, the memory store, HTTP, MCP, promotion, and the knowledge wrapper cannot bypass them. Memory-domain revisions must carry zero knowledge facets. `memory.ErrInvalidInput` is the canonical Go validation sentinel; HTTP and MCP translate it to their validation error shape.
@@ -125,12 +125,28 @@ func main() {
 		Author:     memory.Author{AgentID: "nanite"},
 		Trigger:    memory.TriggerExplicit,
 		SessionID:  "adoption-v0.9",
-		Origin:     memory.OriginProject,
+		DerivedFrom: memory.DerivedFromProject,
 		Confidence: 0.95,
-		Payload: memory.Payload{
-			Summary: "Nanite consumes immutable Tesseract release tags.",
-		},
+		Summary:     "Nanite consumes immutable Tesseract release tags.",
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	resolved, err := db.ResolveReference(ctx, tesseract.ReferenceSelector{
+		RevisionID: rev.RevisionID,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if resolved.Status != tesseract.ReferenceResolved || resolved.Ref == nil {
+		log.Fatalf("unexpected reference resolution: %+v", resolved)
+	}
+
+	current, err := db.GetCurrentItem(ctx, rev.ItemID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	history, err := db.GetItemHistory(ctx, rev.ItemID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -145,11 +161,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("wrote %s; recalled %d result(s)", rev.RevisionID, len(hits))
+	log.Printf("item %s current revision %s; canonical revision ref %s; %d revision(s), %d recalled result(s)",
+		current.ItemID, current.RevisionID, resolved.Ref.URI, len(history), len(hits))
 }
 ```
 
-The complete compile-checked version lives at [`../../examples/adoption-go/main.go`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/examples/adoption-go/main.go).
+The complete compile-checked version lives at [`../../examples/adoption-go/main.go`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/examples/adoption-go/main.go).
 
 That example intentionally uses a disposable temporary root. An embedded production
 consumer must resolve a stable absolute `RootDir` (or explicit `DBPath` and
@@ -184,22 +201,23 @@ Run the stdio server from the same resolved layout as the daemon:
     "tesseract": {
       "type": "stdio",
       "command": "/absolute/path/to/tesseract",
-      "args": ["mcp", "--token", "<capability-token>"]
+      "args": ["mcp", "--token-file", "/path/to/protected/token"]
     }
   }
 }
 ```
 
-Begin discovery with `tesseract_skills` and then `tesseract_skills {"name":"start-here"}`. This progressive help is shipped by the `tesseract mcp` binary. The authoritative catalog is [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/MCP_TOOLS.md).
+Begin discovery with `tesseract_skills` and then `tesseract_skills {"name":"start-here"}`. This progressive help is shipped by the `tesseract mcp` binary. The authoritative catalog is [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/MCP_TOOLS.md).
 
 The current domain writes are `context_write`, `memory_write`, and `knowledge_write`. The collapsed reads and revision operations are:
 
 | Current tool | Purpose |
 |---|---|
-| `tesseract_get` | Current entry at `domain`, `namespace`, and `key` |
-| `tesseract_history` | Revision history for `domain`, `namespace`, and `key` |
+| `tesseract_get` | Current item by `item_id`, or by legacy `domain`, `namespace`, and `key` |
+| `tesseract_history` | Item history by `item_id`, or by legacy `domain`, `namespace`, and `key` |
 | `tesseract_recall` | Ranked recall across selected memory/knowledge `domains` |
 | `tesseract_get_revision` | Full revision by `revision_id` |
+| `tesseract_ref_resolve` | Metadata-only identity normalization by typed ID, current key, or canonical Tesseract URI |
 | `tesseract_deprecate` | Deprecate a revision by `revision_id` |
 | `tesseract_touch` | Reinforce recalled revisions that actually informed work |
 
@@ -209,8 +227,8 @@ There are no compatibility aliases. Update allowlists and prompts as well as exe
 
 | Retired in v0.9 | Replacement |
 |---|---|
-| `context_head`, `memory_get`, `knowledge_get` | `tesseract_get` with required `domain`, `namespace`, `key` |
-| `context_history`, `memory_history`, `knowledge_history` | `tesseract_history` with required `domain`, `namespace`, `key` |
+| `context_head`, `memory_get`, `knowledge_get` | `tesseract_get` with legacy `domain`, `namespace`, `key` selector |
+| `context_history`, `memory_history`, `knowledge_history` | `tesseract_history` with legacy `domain`, `namespace`, `key` selector |
 | `memory_get_revision` | `tesseract_get_revision` |
 | `memory_deprecate` | `tesseract_deprecate` |
 | `memory_recall`, `tesseract_lookup` | `tesseract_recall`; narrow with `domains` |
@@ -347,4 +365,4 @@ Run `tesseract path` to resolve the authoritative locations. Defaults follow XDG
 - [ ] Rename the process/binary and coordinate XDG data migration before restart; delete `CONTEXTD_ROOT` from runtime configuration.
 - [ ] Run Nanite's generated assets/contracts after the dependency update and verify no generated file restores a retired name.
 
-For the complete per-tool schema, HTTP peers, scopes, and current examples, use [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/MCP_TOOLS.md). For first-run daemon configuration, use [`../QUICKSTART.md`](https://github.com/hollis-labs/tesseract/blob/v0.10.0/docs/QUICKSTART.md).
+For the complete per-tool schema, HTTP peers, scopes, and current examples, use [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/MCP_TOOLS.md). For first-run daemon configuration, use [`../QUICKSTART.md`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/QUICKSTART.md).

@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	ledger "github.com/hollis-labs/go-usage-ledger"
+	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )

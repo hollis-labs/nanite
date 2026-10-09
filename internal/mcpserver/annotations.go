@@ -1,6 +1,6 @@
 package mcpserver
 
-import gmcpserver "github.com/hollis-labs/go-mcp/server"
+import gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
 
 // toolAnnotations is the MCP tool-annotation table for every self/dev tool
 // this server registers. go-mcp/server's RegisterTool makes the four hint

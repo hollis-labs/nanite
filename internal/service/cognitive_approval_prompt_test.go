@@ -8,10 +8,10 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/approval"
 
-	"github.com/hollis-labs/go-chatstream/conformance"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	permissionlib "github.com/hollis-labs/go-permission"
+	"github.com/hollis-labs/libs/ui-go/chatstream/conformance"
 	"github.com/hollis-labs/nanite/internal/chat"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestCognitiveApprovalPromptPublishesBindingBeforeResponse(t *testing.T) {

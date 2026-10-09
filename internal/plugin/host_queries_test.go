@@ -9,8 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	"github.com/hollis-labs/nanite/internal/plugin/plugintest"
+
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
@@ -102,18 +104,19 @@ func TestHostQueryFailedLaunchRevokesGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	declaration.Config = manifest.Config{}
-	declaration.Entrypoint = manifest.Entrypoint{Command: "plugin"}
+	declaration.Server.Entry = "bin/plugin"
 	declaration.Capabilities = []sdkprocess.CapabilityRequest{{Name: pluginapi.CapabilityReadOnlyQuery, Metadata: json.RawMessage(`{"resources":["sessions"],"all_sessions":true}`)}}
 	binary, err := os.ReadFile("/bin/false")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// #nosec G306 G703 -- executable fixture copied into a private test bundle; 0700 is required to launch it.
-	if checkErr := os.WriteFile(filepath.Join(directory, "plugin"), binary, 0700); checkErr != nil {
+	if checkErr := os.WriteFile(filepath.Join(directory, "bin/plugin"), binary, 0700); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	approve := func() *PluginManifest {
 		t.Helper()
+		plugintest.Inventory(t, &declaration, directory)
 		var encoded strings.Builder
 		if checkErr := manifest.Encode(&encoded, declaration); checkErr != nil {
 			t.Fatal(checkErr)

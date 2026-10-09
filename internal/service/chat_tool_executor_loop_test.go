@@ -11,12 +11,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-loopdetect"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/inspector"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	"github.com/hollis-labs/substrate/agent/loopdetect"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // ─── ToolService stub ─────────────────────────────────────────────────────────

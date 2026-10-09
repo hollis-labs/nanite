@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/hollis-labs/go-apppaths/paths"
+	paths "github.com/hollis-labs/libs/util/apppaths"
 	"github.com/hollis-labs/nanite/internal/config"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )

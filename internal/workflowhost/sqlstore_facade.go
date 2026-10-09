@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/hollis-labs/go-workflow-host/sqlstore"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/host/sqlstore"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
 

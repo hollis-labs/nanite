@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // TestLoopState_ResolvedMaxTurns pins resolvedMaxTurns()'s remaining

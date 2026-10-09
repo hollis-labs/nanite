@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func newTestBroker(t *testing.T) (*ContextClient, *store.Store) {

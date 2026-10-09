@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
 )
 
 // DefaultArgumentBudgetBytes bounds the body persisted per tool call. It is

@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/hollis-labs/agentkit/broker"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/agent/subagent"
+	"github.com/hollis-labs/substrate/harness/broker"
 )
 
 // callExecuteTask handles task_execute — the Chat agent's

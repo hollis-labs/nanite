@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"testing"
 
-	workflowcompile "github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/graph"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	"github.com/hollis-labs/libs/workflow/values"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // TestAssembleSlotSources_PermissionsSlot_EmptyWhenNothingConfigured asserts

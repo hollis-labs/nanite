@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/recovery/pack"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
 )
 
 // CW-20260525-0001 Slice 1 — CLI session auto-recovery after daemon restart.

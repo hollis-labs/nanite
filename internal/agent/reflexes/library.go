@@ -3,8 +3,8 @@ package reflexes
 import (
 	"context"
 
-	shared "github.com/hollis-labs/go-reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
+	shared "github.com/hollis-labs/substrate/agent/reflexes"
 )
 
 // libraryState copies only host-collected signals. First-class live

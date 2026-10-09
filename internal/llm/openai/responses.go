@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/llm/toolargs"
 	"github.com/hollis-labs/nanite/internal/usagecost"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"github.com/openai/openai-go/v3/responses"
 )
 

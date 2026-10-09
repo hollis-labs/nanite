@@ -1,5 +1,5 @@
 // Package scheduler is Nanite's own adapter around
-// github.com/hollis-labs/go-scheduler — see
+// github.com/hollis-labs/libs/util/scheduler — see
 // docs/engineering/architecture/12-scheduling.md ("The Runner adapter and
 // job taxonomy") for the design this package implements, and
 // apps/hadron/internal/scheduler/adapter.go for the directly-transferable
@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/loop"

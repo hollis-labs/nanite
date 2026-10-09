@@ -11,7 +11,7 @@
 //   - Timeout defaults to 5 min, configurable via NANITE_ELICITATION_TIMEOUT_SEC.
 //   - UI: text input for string schemas, accept/decline buttons for boolean.
 //   - Envelope type: "elicitation-prompt" (registered as a core type in the
-//     external github.com/hollis-labs/go-envelopes module's manifest/envelopes.yaml,
+//     external github.com/hollis-labs/libs/ui-go/envelopes module's manifest/envelopes.yaml,
 //     loaded into the in-process registry via chat.EnvelopeRegistry()/
 //     envelopes.LoadCore — config/envelopes.yaml does not exist in this repo).
 package mcp

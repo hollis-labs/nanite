@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
 	modsemver "golang.org/x/mod/semver"
 )
 
@@ -31,6 +31,17 @@ func DecodeManifest(reader io.Reader) (*PluginManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The common declaration owns browser artifacts and isolation. Nanite's
+	// extension may select components, but cannot substitute another bundle or
+	// silently turn a requested frame into main-origin execution.
+	if block.UI.Bundle != "" || common.UI != nil {
+		if common.UI == nil || common.UI.Bundle != block.UI.Bundle || common.UI.Stylesheet != block.UI.Stylesheet {
+			return nil, fmt.Errorf("nanite UI artifacts must match the shared UI declaration")
+		}
+		if common.UI.Isolation != "main-origin" {
+			return nil, fmt.Errorf("nanite does not support UI isolation %q", common.UI.Isolation)
+		}
+	}
 	if _, scopeErr := pluginapi.AlwaysShipScopeFor(block, common.Capabilities, common.Tools); scopeErr != nil {
 		return nil, scopeErr
 	}
@@ -47,8 +58,8 @@ func DecodeManifest(reader io.Reader) (*PluginManifest, error) {
 		SchemaVersion: common.SchemaVersion, ID: common.ID, Name: common.Name,
 		Version: common.Version, Description: common.Description, License: common.License,
 		Homepage: common.Homepage, Repository: common.Repository, Protocol: common.Protocol,
-		Runtime: common.Runtime, Entrypoint: common.Entrypoint.Command,
-		EntrypointArgs: append([]string(nil), common.Entrypoint.Args...), Shared: &common,
+		Runtime: common.Runtime, Entrypoint: common.Server.Entry,
+		EntrypointArgs: nil, Shared: &common,
 		Config: make(map[string]ConfigEntry), LoadType: LoadType(block.LoadType),
 		UI: ManifestUI{Entry: block.UI.Bundle, Stylesheet: block.UI.Stylesheet, ReactVersion: block.UI.ReactVersion, ShadcnVersion: block.UI.ShadcnVersion},
 	}

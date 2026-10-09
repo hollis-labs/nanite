@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hollis-labs/go-envelopes/admin"
+	"github.com/hollis-labs/libs/ui-go/envelopes/admin"
 	"github.com/hollis-labs/nanite/internal/brand"
 )
 

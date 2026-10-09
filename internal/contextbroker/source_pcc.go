@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // PCCSource retrieves context from the Project Context Cache (PCC) files.

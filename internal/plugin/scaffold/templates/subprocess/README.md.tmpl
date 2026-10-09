@@ -5,14 +5,14 @@
 ## Build
 
 ```
-make build      # native binary + ui/dist, for `nanite plugin install ./`
+make build      # native binary + ui/dist, for `nanite plugin install dist/native/`
 make release    # full cross-platform archives under dist/archives/
 ```
 
 ## Install from source
 
 ```
-nanite plugin install ./ --link
+nanite plugin install dist/native/ --link
 ```
 
 `--link` symlinks the source directory into `$NANITE_PLUGINS_DIR` so iterative
@@ -20,8 +20,12 @@ rebuilds (`make build`) take effect on the next plugin reload.
 
 ## Layout
 
-- `main.go` — subprocess entrypoint (speaks JSON-RPC over stdio via plugin-sdk v0.6.0).
+- `main.go` — subprocess entrypoint (speaks JSON-RPC over stdio via libs/plugin-mcp v0.2.0).
 - `plugin.yaml` — generated schema-v2 JSON (valid YAML), declaring the `{{.Name}}` command and shared `echo` tool.
 - `./{{.Name}} --manifest` — emits the declaration from `main.go`; regenerate `plugin.yaml` after changing it.
 - `ui/src/index.tsx` — React envelope components, bundled into `ui/dist/index.js`.
 - `envelopes/` — JSON Schemas for emitted envelopes.
+
+The root `plugin.yaml` is an unbuilt draft. `make build` creates `dist/native`
+and generates its protocol 2 manifest from actual binary and UI files. Install
+that completed bundle; never fill artifact hashes by hand.

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/loop"

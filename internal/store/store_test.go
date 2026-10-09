@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hollis-labs/go-sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
 )
 
 var (

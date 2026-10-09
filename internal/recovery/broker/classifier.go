@@ -3,7 +3,7 @@ package broker
 import (
 	"strings"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // CauseHTTPRequestRejected is supplied by the HTTP chat path after surfacing

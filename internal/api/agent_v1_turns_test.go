@@ -14,11 +14,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	agentservice "github.com/hollis-labs/substrate/agent/service"
 
-	chatstream "github.com/hollis-labs/go-chatstream"
-	"github.com/hollis-labs/go-chatstream/conformance"
-	"github.com/hollis-labs/go-chatstream/framing"
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
+	"github.com/hollis-labs/libs/ui-go/chatstream/conformance"
+	"github.com/hollis-labs/libs/ui-go/chatstream/framing"
 	"github.com/hollis-labs/nanite/internal/service"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 type cognitiveHTTPProvider struct {

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // isScratchpadTool reports whether name is one of the P4 scratchpad tools.

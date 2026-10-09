@@ -487,16 +487,13 @@ func TestPlantAgentSkillFiles_MidSession(t *testing.T) {
 	sstore.known["agent-late-1"] = []store.AgentKnownSkill{
 		{AgentID: "agent-late-1", SkillName: "late", ApprovedContentHash: skillAddrGood},
 	}
-	if err := PlantAgentSkillFiles(context.Background(), deps, bootDir, "claude", "agent-late-1"); err != nil {
-		t.Fatalf("PlantAgentSkillFiles (post-grant): %v", err)
+	if err := PlantAgentSkillFiles(context.Background(), deps, bootDir, "claude", "agent-late-1"); !errors.Is(err, ErrArtifactRefreshUnavailable) {
+		t.Fatalf("bound skill refresh: %v", err)
 	}
-	body, err := os.ReadFile(filepath.Join(bootDir, ".claude/skills/late/SKILL.md"))
-	if err != nil {
-		t.Fatalf("read newly planted SKILL.md: %v", err)
+	if _, err := os.Stat(filepath.Join(bootDir, ".claude/skills/late/SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("unavailable refresh wrote skill: %v", err)
 	}
-	if string(body) != "# Late Grant\n" {
-		t.Errorf("SKILL.md content = %q", body)
-	}
+
 }
 
 // TestPlantAgentSkillFiles_NoWiring confirms a Dependencies with no skill

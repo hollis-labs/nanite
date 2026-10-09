@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	svcerr "github.com/hollis-labs/go-svcerr"
+	svcerr "github.com/hollis-labs/libs/util/svcerr"
 
 	"github.com/oklog/ulid/v2"
 

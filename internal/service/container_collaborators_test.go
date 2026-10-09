@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // TestNewContainer_WiresStoreCollaborators pins that every narrow store

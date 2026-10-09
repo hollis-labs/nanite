@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
+	"github.com/hollis-labs/substrate/llm-core/modelsdev"
 )
 
 // emptyCatalog is a valid models.dev response with no providers.

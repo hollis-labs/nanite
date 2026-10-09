@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // Components is Nanite's host wiring around the reusable mailbox

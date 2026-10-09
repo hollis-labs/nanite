@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
@@ -35,6 +34,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // recordingReflexDispatchToolService is a minimal ToolService fake that

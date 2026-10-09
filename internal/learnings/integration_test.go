@@ -6,6 +6,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/tesseract"
+	tesseractMemory "github.com/hollis-labs/tesseract/memory"
 )
 
 // newTesseractMemory spins up a real embedded Tesseract instance backed by
@@ -109,7 +110,7 @@ func TestIntegration_AcceptanceFromTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if out.Namespace != "user/default/memory/learnings" {
+	if out.Namespace != "app/nanite/memory/learnings" {
 		t.Errorf("unexpected namespace: %s", out.Namespace)
 	}
 	hints := rcl.RecallByToolName(ctx, "default", "card_show")
@@ -118,5 +119,51 @@ func TestIntegration_AcceptanceFromTicket(t *testing.T) {
 	}
 	if hints[0].Summary != lesson {
 		t.Errorf("recalled summary = %q, want %q", hints[0].Summary, lesson)
+	}
+}
+
+func TestIntegration_AppLearningsAreSeparatedByUserWithoutTrustingTags(t *testing.T) {
+	svc := newTesseractMemory(t)
+	rec := NewRecorder(svc)
+	recall := NewRecaller(svc)
+	ctx := context.Background()
+	for _, user := range []string{"alice", "bob"} {
+		_, err := rec.Capture(ctx, CaptureInput{Scope: ScopeToolUse, Subject: "card_show", Hint: "lesson for " + user, UserID: user, Tags: []string{"user:alice", "user:bob"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, user := range []string{"alice", "bob"} {
+		hints := recall.RecallByToolName(ctx, user, "card_show")
+		if len(hints) != 1 || hints[0].Summary != "lesson for "+user {
+			t.Fatalf("user %s saw foreign rows: %+v", user, hints)
+		}
+	}
+}
+
+// The raw store seeds a historical fixture; production writers never assert a
+// human actor to recreate these retained rows.
+func TestIntegration_LegacyUserLearningsRemainReadableWithoutBackfill(t *testing.T) {
+	instance, err := tesseract.Open(context.Background(), tesseract.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = instance.Close() }()
+	ctx := context.Background()
+	_, err = instance.MemoryStore().WriteRevision(ctx, tesseractMemory.WriteInput{Domain: tesseractMemory.DomainMemory, Namespace: memory.UserNamespace("alice", "learnings"), MemoryKey: "historic_card", Actor: "user", Summary: "retained lesson", Confidence: 0.9, Tags: []string{"learning", "tool:card_show"}, Status: tesseractMemory.StatusReviewed, Author: tesseractMemory.Author{AgentID: "fixture", AgentVersion: "1"}, Trigger: tesseractMemory.TriggerExplicit, SessionID: "fixture", DerivedFrom: tesseractMemory.DerivedFromUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := memory.NewService(instance.MemoryStore())
+	recall := NewRecaller(svc)
+	own := recall.RecallByToolName(ctx, "alice", "card_show")
+	if len(own) != 1 || own[0].Summary != "retained lesson" {
+		t.Fatalf("legacy lesson missing: %+v", own)
+	}
+	if foreign := recall.RecallByToolName(ctx, "bob", "card_show"); len(foreign) != 0 {
+		t.Fatalf("foreign historical lesson leaked: %+v", foreign)
+	}
+	if rows, err := svc.RecallAppForUser(ctx, "alice", memory.RecallOpts{Namespaces: []string{memory.AppNamespace("learnings")}}); err != nil || len(rows) != 0 {
+		t.Fatalf("read created a backfill: %+v %v", rows, err)
 	}
 }

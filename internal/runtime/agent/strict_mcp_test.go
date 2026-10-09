@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
+	"github.com/hollis-labs/substrate/harness/adapters"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 // plantedBootDir is a boot dir with a planted .mcp.json, as layout.Setup

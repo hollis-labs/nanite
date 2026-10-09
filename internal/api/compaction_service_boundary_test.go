@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 type compactionFailingContext struct {

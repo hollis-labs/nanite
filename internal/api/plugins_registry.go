@@ -1,15 +1,20 @@
 package api
 
 import (
+	"context"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"sync"
 
+	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/registry"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
-	goplugin "github.com/hollis-labs/plugin-sdk"
-	"github.com/hollis-labs/plugin-sdk/registry"
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )
 
 // RegistryEnvelopeEntry is one envelope entry in the /api/plugins/registry
@@ -142,39 +147,55 @@ func (c *registryCache) serve(host *naniteplugin.Host) ([]byte, error) {
 // live HTTP handler. Never returns nil maps — the frontend relies on the
 // shared top-level maps always being present.
 func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (RegistryResponse, error) {
-	response := registry.NewResponse()
+	epoch, err := subprocess.HostInstance()
+	if err != nil {
+		return registry.Response{}, err
+	}
+	revision := uint64(1)
+	if host != nil {
+		revision = host.RegistryVersion()
+	}
+	response := registry.NewResponse(epoch, revision)
+	for _, kind := range []string{"envelope", "widget", "slot", "panel"} {
+		response.Kinds[kind] = registry.KindDescriptor{SchemaVersion: 1, MetadataSchema: json.RawMessage(`{}`), Representations: []registry.Representation{registry.Component}, Regions: []string{kind}, RequiredCapabilities: []string{}}
+		response.Regions[kind] = registry.RegionDescriptor{Kinds: []string{kind}, Representations: []registry.Representation{registry.Component}, ContextSchema: json.RawMessage(`{}`), Ordering: "manifest"}
+	}
 	if host == nil {
 		return response, nil
 	}
 	for id, declaration := range host.GetManifests() {
-		item := registry.Plugin{}
-		if declaration.UI.Entry != "" {
-			item.BundleURL = buildUIURL(id, declaration.UI.BundleDir, declaration.UI.Entry)
+		generation, live := host.RegistryOwner(id)
+		if !live {
+			continue
 		}
-		if declaration.UI.Stylesheet != "" {
-			item.StylesheetURL = buildUIURL(id, declaration.UI.BundleDir, declaration.UI.Stylesheet)
-		}
-		if declaration.UI.ReactVersion != "" {
-			item.Runtime = &registry.Runtime{Name: "react", Version: declaration.UI.ReactVersion}
-		}
-		if declaration.Shared != nil {
-			if declaration.UI.Entry != "" {
-				item.BundleURL = path.Join("/api/plugins", id, "bundle", declaration.UI.Entry)
-			}
-			if declaration.UI.Stylesheet != "" {
-				item.StylesheetURL = path.Join("/api/plugins", id, "bundle", declaration.UI.Stylesheet)
-			}
-			if pluginsDir != "" {
-				if approval, err := naniteplugin.ReadInstallApproval(pluginsDir, id); err == nil {
-					item.BundleVersion = approval.Review.BundleDigest
-					if item.StylesheetURL != "" {
-						item.StylesheetURL += "?v=" + url.QueryEscape(item.BundleVersion)
+		item := registry.Plugin{OwnerGeneration: generation}
+		// Component execution requires the reviewed declaration of exactly these
+		// bytes and the same acceptance that launched the current subprocess.
+		child, loaded := host.GetPlugin(id)
+		process, isProcess := child.(*subprocess.SubprocessPlugin)
+		if loaded && isProcess && declaration.Shared != nil && pluginsDir != "" {
+			directory := filepath.Join(pluginsDir, id)
+			approval, approvalErr := naniteplugin.VerifyInstallApproval(context.Background(), directory)
+			if approvalErr == nil && process.AcceptedReviewDigest() != "" && approval.ReviewDigest == process.AcceptedReviewDigest() {
+				for _, file := range declaration.Shared.Artifact.Files {
+					if file.Path == declaration.UI.Entry {
+						item.BundleURL = path.Join("/api/plugins", id, "bundle", file.Path)
+						item.BundleVersion = "sha256:" + file.SHA256
+						break
 					}
 				}
+				if declaration.UI.Stylesheet != "" && item.BundleURL != "" {
+					item.StylesheetURL = path.Join("/api/plugins", id, "bundle", declaration.UI.Stylesheet) + "?v=" + url.QueryEscape(approval.Review.BundleDigest)
+				}
+				if version := declaration.UI.ReactVersion; manifest.ValidVersion(version) {
+					item.Runtime = []registry.Runtime{{Name: "react", Min: version, Max: version}}
+				}
+
 			}
 		}
 		response.Plugins[id] = item
 	}
+
 	for _, envelope := range host.GetEnvelopes() {
 		if envelope.Component == "" || envelope.PluginID == "" {
 			continue
@@ -186,7 +207,7 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (Registry
 				metadata.SchemaURL = path.Join("/api/plugins", envelope.PluginID, "schema", envelope.Type)
 			}
 		}
-		if contributionErr := addRegistryContribution(&response, "envelope", envelope.Type, envelope.PluginID, envelope.Component, metadata); contributionErr != nil {
+		if contributionErr := addRegistryContribution(&response, "envelope", envelope.Type, envelope.PluginID, envelope.Component, metadata, registryReactRange(host, envelope.PluginID)); contributionErr != nil {
 			return registry.Response{}, contributionErr
 		}
 	}
@@ -202,7 +223,7 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (Registry
 		}
 		for _, declared := range declaration.Registers.Components {
 			if declared.Name == component.ID && declared.Export != "" {
-				if contributionErr := addRegistryContribution(&response, "widget", component.ID, component.PluginID, declared.Export, RegistryWidgetEntry{PluginID: component.PluginID, Name: component.Name, Description: component.Description}); contributionErr != nil {
+				if contributionErr := addRegistryContribution(&response, "widget", component.ID, component.PluginID, declared.Export, RegistryWidgetEntry{PluginID: component.PluginID, Name: component.Name, Description: component.Description}, registryReactRange(host, component.PluginID)); contributionErr != nil {
 					return registry.Response{}, contributionErr
 				}
 			}
@@ -217,7 +238,7 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (Registry
 				RegistrySlotEntry
 				Slot string `json:"slot"`
 			}{RegistrySlotEntry: RegistrySlotEntry{ID: entry.ID, PluginID: entry.PluginID, Label: entry.Label, Icon: entry.Icon, Priority: entry.Priority, Component: entry.Component, Action: entry.Action, Props: entry.Props}, Slot: string(slot)}
-			if contributionErr := addRegistryContribution(&response, "slot", string(slot)+"/"+entry.ID, entry.PluginID, entry.Component, metadata); contributionErr != nil {
+			if contributionErr := addRegistryContribution(&response, "slot", string(slot)+"/"+entry.ID, entry.PluginID, entry.Component, metadata, registryReactRange(host, entry.PluginID)); contributionErr != nil {
 				return registry.Response{}, contributionErr
 			}
 		}
@@ -227,23 +248,52 @@ func buildRegistryResponse(host *naniteplugin.Host, pluginsDir string) (Registry
 			continue
 		}
 		metadata := RegistryPanelEntry{Title: panel.Title, Description: panel.Description, Icon: panel.Icon, DefaultVisible: panel.DefaultVisible, Order: panel.Order}
-		if contributionErr := addRegistryContribution(&response, "panel", panel.ID, panel.PluginID, panel.Component, metadata); contributionErr != nil {
+		if contributionErr := addRegistryContribution(&response, "panel", panel.ID, panel.PluginID, panel.Component, metadata, registryReactRange(host, panel.PluginID)); contributionErr != nil {
 			return registry.Response{}, contributionErr
 		}
 	}
 	return response, nil
 }
 
-func addRegistryContribution(response *registry.Response, kind, key, owner, export string, metadata any) error {
+func addRegistryContribution(response *registry.Response, kind, key, owner, export string, metadata any, reactRange string) error {
 	raw, err := registry.Meta(metadata)
 	if err != nil {
 		return err
 	}
-	if _, exists := response.Plugins[owner]; !exists {
-		response.Plugins[owner] = registry.Plugin{}
+	if reactRange != "" {
+		var fields map[string]json.RawMessage
+		if decodeErr := json.Unmarshal(raw, &fields); decodeErr != nil {
+			return decodeErr
+		}
+		fields["react_range"], err = json.Marshal(reactRange)
+		if err != nil {
+			return err
+		}
+		raw, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
 	}
-	response.Set(kind, key, registry.Contribution{PluginID: owner, Export: export, Meta: raw})
-	return nil
+	plugin, exists := response.Plugins[owner]
+	if !exists {
+		return nil
+	} // no successful live owner for this declaration
+	localKey := key
+	if kind == "slot" {
+		localKey = "slot-" + hex.EncodeToString([]byte(key))
+	}
+	if plugin.BundleURL == "" {
+		response.Refusals = append(response.Refusals, registry.Refusal{OwnerID: owner, OwnerGeneration: plugin.OwnerGeneration, Kind: kind, LocalKey: localKey, Reason: "reviewed_component_bundle_unavailable"})
+		return nil
+	}
+	return response.Set(registry.Contribution{Status: registry.StatusAccepted, OwnerID: owner, OwnerGeneration: plugin.OwnerGeneration, LocalKey: localKey, Kind: kind, SchemaVersion: 1, Representation: registry.Component, Metadata: raw, Component: &registry.ComponentRef{Export: export, Region: kind}, PublicBinding: key})
+}
+
+func registryReactRange(host *naniteplugin.Host, owner string) string {
+	if declaration := host.GetManifest(owner); declaration != nil {
+		return declaration.UI.ReactVersion
+	}
+	return ""
 }
 
 // buildUIURL composes the /api/plugins/{plugin}/ui/{file} path served by the

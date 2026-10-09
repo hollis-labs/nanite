@@ -25,8 +25,8 @@ package reflexes
 import (
 	"context"
 
-	shared "github.com/hollis-labs/go-reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
+	shared "github.com/hollis-labs/substrate/agent/reflexes"
 )
 
 // ActionKindLookup resolves one reflex_action_kinds row by name (one of the

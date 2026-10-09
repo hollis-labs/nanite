@@ -11,10 +11,10 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/runloop"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	feotel "github.com/hollis-labs/go-otel"
-	"github.com/hollis-labs/go-providers/provider"
+	feotel "github.com/hollis-labs/libs/util/otel"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/hollis-labs/nanite/internal/chat"

@@ -431,13 +431,24 @@ func TestExecuteGated_NetworkBlockedOutsideGrant_AllowedWithGrant(t *testing.T) 
 	}()
 
 	url := "http://" + ln.Addr().String()
-	curlCmd := []string{"/bin/sh", "-c", "curl -sf --max-time 2 " + url}
+	deniedCmd := []string{"/bin/sh", "-c", "curl -sf --max-time 2 " + url}
+	curlCmd := deniedCmd
+	if runtime.GOOS == "linux" {
+		// Loopback is local to the sandbox's network namespace. Forwarding the
+		// host listener would require a separate explicit port capability.
+		executable, exeErr := os.Executable()
+		if exeErr != nil {
+			t.Fatal(exeErr)
+		}
+		t.Setenv("NANITE_SKILL_LOOPBACK_FIXTURE", "1")
+		curlCmd = []string{executable, "-test.run=^TestSkillSandboxLoopbackChild$"}
+	}
 
 	t.Run("blocked without network capability", func(t *testing.T) {
 		g, agentID, skillSlug := newAuthorizedGate(t, `{}`)
 		req := ExecRequest{
 			SkillSlug: skillSlug, AgentID: agentID,
-			Command: curlCmd, WorkDir: t.TempDir(),
+			Command: deniedCmd, WorkDir: t.TempDir(),
 			Kind: ExecKindMarker, Label: "network-test",
 		}
 		if _, err := g.ExecuteGated(context.Background(), req); err == nil {
@@ -457,6 +468,16 @@ func TestExecuteGated_NetworkBlockedOutsideGrant_AllowedWithGrant(t *testing.T) 
 			t.Fatalf("expected sandboxed curl to succeed with loopback network capability granted: %v", err)
 		}
 	})
+	if runtime.GOOS == "linux" {
+		t.Run("loopback grant does not bridge host listener", func(t *testing.T) {
+			g, agentID, slug := newAuthorizedGate(t, `{"network":{"allow_loopback":true}}`)
+			_, err := g.ExecuteGated(context.Background(), ExecRequest{SkillSlug: slug, AgentID: agentID, Command: deniedCmd, WorkDir: t.TempDir(), Kind: ExecKindMarker, Label: "network-host-refusal"})
+			if err == nil {
+				t.Fatal("loopback-only grant reached an unapproved host bridge")
+			}
+		})
+	}
+
 }
 
 // TestFilterSecretEnv_StripsSecretsKeepsOrdinaryVars is a narrow unit test
@@ -609,5 +630,29 @@ func TestGate_ExactlyOneSandboxApplyCallInPackage(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected exactly one sandbox.Apply call in internal/skill's non-test files, got %d", count)
+	}
+}
+
+// The importing binary enters the real sandbox before running this fixture.
+// It must establish and use loopback there, without any host-network bridge.
+func TestSkillSandboxLoopbackChild(t *testing.T) {
+	if os.Getenv("NANITE_SKILL_LOOPBACK_FIXTURE") != "1" {
+		return
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+	defer func() { _ = server.Close() }()
+	go func() { _ = server.Serve(listener) }()
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Get("http://" + listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatal("sandbox loopback response", response.StatusCode)
 	}
 }

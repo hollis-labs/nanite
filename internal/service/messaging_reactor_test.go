@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/agent/subagent"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // --- resolveMessageWakePolicy ---

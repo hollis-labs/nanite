@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // Admission uses the real transaction; only the post-admission snapshot save

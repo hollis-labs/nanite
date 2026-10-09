@@ -37,9 +37,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hollis-labs/agentkit/agentcontext"
-	"github.com/hollis-labs/agentkit/agentcontext/resolvers"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/agent/agentcontext"
+	"github.com/hollis-labs/substrate/agent/agentcontext/resolvers"
 )
 
 // ResolveContextBlocks drains a list of DB-configured

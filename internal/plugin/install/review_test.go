@@ -45,6 +45,7 @@ func TestReviewedInstallerRefusalStaleDigestAndCommitRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(source, "ui/dist/index.js"), "changed asset")
+	refreshInventory(t, source)
 	installer, _ = NewInstaller(options)
 	if _, checkErr := installer.Install(context.Background(), src); checkErr == nil {
 		t.Fatal("stale review approved changed source")

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/truncate"
 	"github.com/hollis-labs/nanite/pkg/models"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
 )
 
 func textResult(s string) *mcp.ToolResult {

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hollis-labs/plugin-sdk"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 )
 
 // cancelingHook returns plugin.ErrCancelled to signal cancellation.

@@ -11,13 +11,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agent"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
 	adaptercodex "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-codex"
 	nanitenative "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-nanite-native"
 	adapteropencode "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-opencode"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 // adapterTargetFiles is the set of project-root markdown files that the

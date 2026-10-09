@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/envelope"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestNaniteToolDescribe_ConnectedMCPTool(t *testing.T) {
@@ -281,7 +281,7 @@ func TestNaniteToolDescribe_ExamplesIncludePassiveRenderableCoverage(t *testing.
 // envelope types is anchored on a real example rather than guesswork.
 //
 // Source of truth for the type list: the external
-// github.com/hollis-labs/go-envelopes module's manifest/envelopes.yaml +
+// github.com/hollis-labs/libs/ui-go/envelopes module's manifest/envelopes.yaml +
 // manifest/schemas/<type>.schema.json (config/envelopes.yaml and
 // internal/envelope/schemas/ do not exist in this repo).
 func TestNaniteToolDescribe_ShowCardExamplesCoverAllCoreTypes(t *testing.T) {

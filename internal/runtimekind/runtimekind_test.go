@@ -3,7 +3,7 @@ package runtimekind
 import (
 	"testing"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 // The tokens rows were written with before agentkit v0.12.0 must still read

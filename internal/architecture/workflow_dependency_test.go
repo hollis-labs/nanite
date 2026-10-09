@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	workflowModule       = "github.com/hollis-labs/go-workflow"
+	workflowModule       = "github.com/hollis-labs/libs/workflow"
 	workflowVersion      = "v0.1.0"
 	hadronModule         = "github.com/hollis-labs/hadron"
 	legacyWorkflowImport = "github.com/hollis-labs/nanite/internal/workflow"

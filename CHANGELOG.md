@@ -8,6 +8,27 @@ lives in the git log.
 
 ### Breaking
 
+- **Memory editor writes are owned by the Nanite app.** New notes and tool-use
+  lessons use an app namespace with user-specific keys and enforced read
+  filtering. Existing user memories remain readable without backfill and are
+  read-only in the editor. Project and session automation retains its own
+  namespaces; request metadata does not grant permission to write protected
+  user memories.
+
+- **Provider boot artifacts require fresh private-root custody.** Nanite
+  preserves authored private directory modes and retains materialization
+  evidence. Refreshing an already bound root returns an explicit unavailable
+  error and leaves its binding and files unchanged. Restart the agent into a
+  fresh boot root to apply changed system prompts or newly granted skills.
+
+- **Subprocess plugins use protocol 2 and incarnation-bound host grants.**
+  Unsupported reviewed scopes refuse launch rather than broaden access.
+  The host grant policy defaults to 24 hours; `NANITE_PLUGIN_GRANT_LIFETIME`
+  accepts a positive Go duration. Expiry and unload cancel in-flight authority.
+  Host-initiated renewal requires unchanged approval, policy, scope and runtime
+  identity and an acknowledged child update; uncertain acknowledgment fences
+  the child. Renewal cannot revive an expired or revoked grant.
+
 - **Agent Workflows now use the shared `go-workflow v0.1.0` engine
   exclusively** (EP-20260904-0006 / CW-20260904-0061). The parallel local
   sequencer and its mutable engine-selection path have been removed. New

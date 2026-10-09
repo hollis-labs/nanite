@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
-	"github.com/hollis-labs/plugin-sdk/manifest"
 )
 
 // AddPluginTools installs manifest-authoritative tools immediately, including

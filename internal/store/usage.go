@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/usagecost"
 	"github.com/hollis-labs/nanite/pkg/models"
+	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 // TokenUsage represents a single token usage record.

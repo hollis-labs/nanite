@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/stepkind"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	"github.com/hollis-labs/libs/workflow/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/stepkind"
+	workflowwait "github.com/hollis-labs/libs/workflow/wait"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	nanitescheduler "github.com/hollis-labs/nanite/internal/scheduler"

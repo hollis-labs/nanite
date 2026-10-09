@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/slogx"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // cliProcessStartUnix captures the unix time at the CLI process's

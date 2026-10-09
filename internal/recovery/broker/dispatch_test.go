@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/nanite/internal/runtime/agent"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // fakeAgentBoot captures Boot calls, lets tests script the response,

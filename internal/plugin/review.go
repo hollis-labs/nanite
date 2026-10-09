@@ -14,12 +14,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 const MaxBundleBytes int64 = 512 << 20
@@ -77,6 +77,10 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	if declared.Shared == nil {
 		return InstallReview{}, fmt.Errorf("install review requires shared manifest")
 	}
+	if verifyErr := declared.Shared.VerifyBundle(directory); verifyErr != nil {
+		return InstallReview{}, fmt.Errorf("verify manifest artifact inventory: %w", verifyErr)
+	}
+
 	digest, err := BundleDigest(ctx, directory)
 	if err != nil {
 		return InstallReview{}, err
@@ -85,7 +89,7 @@ func BuildInstallReview(ctx context.Context, directory string) (InstallReview, e
 	if err := pluginapi.ValidateAgentTools(common.Tools); err != nil {
 		return InstallReview{}, err
 	}
-	review := InstallReview{ID: common.ID, Name: common.Name, Version: common.Version, Entrypoint: common.Entrypoint.Command, Arguments: append([]string{}, common.Entrypoint.Args...), BundleDigest: digest, Capabilities: []sdkprocess.CapabilityRequest{}, Secrets: []ReviewSecret{}, Environment: []string{}, Tools: []ReviewTool{}}
+	review := InstallReview{ID: common.ID, Name: common.Name, Version: common.Version, Entrypoint: common.Server.Entry, Arguments: []string{}, BundleDigest: digest, Capabilities: []sdkprocess.CapabilityRequest{}, Secrets: []ReviewSecret{}, Environment: []string{}, Tools: []ReviewTool{}}
 	for _, request := range common.Capabilities {
 		if _, known := capabilityEnvironment[request.Name]; !known && !request.Optional {
 			return InstallReview{}, fmt.Errorf("unknown required capability %q", request.Name)
@@ -315,6 +319,7 @@ func VerifyInstallApproval(ctx context.Context, directory string) (*InstallAppro
 
 // ReviewedLaunch contains only grants and configuration accepted for these bytes.
 type ReviewedLaunch struct {
+	Scopes        map[string]json.RawMessage
 	QueryScope    *pluginapi.QueryScope
 	QueryOptional bool
 	WakeScope     *pluginapi.DurableWakeScope
@@ -349,7 +354,7 @@ func ResolveReviewedLaunch(ctx context.Context, directory string, overrides ...m
 			}
 		}
 	}
-	result := ReviewedLaunch{Config: map[string]string{}, ReviewDigest: approval.ReviewDigest}
+	result := ReviewedLaunch{Scopes: map[string]json.RawMessage{}, Config: map[string]string{}, ReviewDigest: approval.ReviewDigest}
 	for name, entry := range declaration.Config {
 		var value string
 		if entry.Secret {
@@ -396,6 +401,11 @@ func ResolveReviewedLaunch(ctx context.Context, directory string, overrides ...m
 			result.QueryScope = &scope
 			result.QueryOptional = request.Optional
 		}
+		scope := append(json.RawMessage(nil), request.Metadata...)
+		if len(scope) == 0 {
+			scope = json.RawMessage(`{}`)
+		}
+		result.Scopes[request.Name] = scope
 		result.Granted = append(result.Granted, request.Name)
 		for _, key := range keys {
 			if value := os.Getenv(key); value != "" {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-envelopes"
-	"github.com/hollis-labs/go-envelopes/codegen"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes/codegen"
 )
 
 func TestReleasedEnvelopeCatalogAndTypeScriptAreDeterministic(t *testing.T) {
@@ -72,10 +72,10 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/go-envelopes v0.5.0\n") {
+	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/libs/ui-go v0.1.0\n") {
 		t.Fatal("go.mod does not pin the released go-envelopes version")
 	}
-	if strings.Contains(string(goMod), "replace github.com/hollis-labs/go-envelopes") {
+	if strings.Contains(string(goMod), "replace github.com/hollis-labs/libs/ui-go") {
 		t.Fatal("go.mod replaces go-envelopes instead of consuming the released module")
 	}
 	generationFiles := []string{
@@ -99,14 +99,14 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 			t.Errorf("generation files retain forbidden coupling %q", forbidden)
 		}
 	}
-	if !strings.Contains(source, "github.com/hollis-labs/go-envelopes") || !strings.Contains(source, "/cmd/envelopes-export") {
+	if !strings.Contains(source, "github.com/hollis-labs/libs/ui-go") || !strings.Contains(source, "/cmd/envelopes-export") {
 		t.Fatal("generation files do not invoke the module-owned exporter")
 	}
 	generatedRegistry, err := os.ReadFile(filepath.Join(root, "ui", "src", "generated", "plugin-envelopes.ts"))
 	if err != nil {
 		t.Fatalf("read generated plugin registry: %v", err)
 	}
-	if !strings.Contains(string(generatedRegistry), "Source: github.com/hollis-labs/go-envelopes@v0.5.0; manifest sha256:") {
+	if !strings.Contains(string(generatedRegistry), "Source: github.com/hollis-labs/libs/ui-go@v0.1.0; manifest sha256:") {
 		t.Fatal("generated plugin registry does not identify the reviewed module pin and manifest")
 	}
 

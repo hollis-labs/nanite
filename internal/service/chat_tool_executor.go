@@ -15,11 +15,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/store"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-loopdetect"
-	feotel "github.com/hollis-labs/go-otel"
-	permissionlib "github.com/hollis-labs/go-permission"
-	toolresult "github.com/hollis-labs/go-toolresult"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
@@ -28,6 +24,10 @@ import (
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/truncate"
+	"github.com/hollis-labs/substrate/agent/loopdetect"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )

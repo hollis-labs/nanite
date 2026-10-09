@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 	"gopkg.in/yaml.v3"
 )
 

@@ -6,7 +6,7 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/approval"
 
-	permissionlib "github.com/hollis-labs/go-permission"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // handleRespondApproval handles POST /api/sessions/{id}/approvals/{requestId}.

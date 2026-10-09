@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"os"
 
-	feotel "github.com/hollis-labs/go-otel"
+	feotel "github.com/hollis-labs/libs/util/otel"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace/noop"
 )

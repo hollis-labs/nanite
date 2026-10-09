@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool/intent"
 	"github.com/hollis-labs/nanite/internal/tool/stash"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // ContextService assembles system prompts, message history, and performs

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 )
 
 // TestRegisterOrphans_EmptyListIsNoop locks the current state of

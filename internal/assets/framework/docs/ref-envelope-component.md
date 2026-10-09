@@ -1,6 +1,6 @@
 # Build a Nanite envelope component
 
-Envelopes are structured cards embedded in chat messages. Core envelope definitions are owned by the pinned [`github.com/hollis-labs/go-envelopes`](https://github.com/hollis-labs/go-envelopes) module: its `manifest/envelopes.yaml`, `manifest/envelopes.schema.json`, and `manifest/schemas/` tree are the upstream source of truth. Nanite consumes the released module's public catalog and TypeScript exporter selected by `go.mod`; it does not locate module-cache files, require a sibling checkout, or maintain a second local core manifest.
+Envelopes are structured cards embedded in chat messages. Core envelope definitions are owned by the pinned [`github.com/hollis-labs/libs/ui-go/envelopes`](https://github.com/hollis-labs/libs/ui-go/envelopes) module: its `manifest/envelopes.yaml`, `manifest/envelopes.schema.json`, and `manifest/schemas/` tree are the upstream source of truth. Nanite consumes the released module's public catalog and TypeScript exporter selected by `go.mod`; it does not locate module-cache files, require a sibling checkout, or maintain a second local core manifest.
 
 ## Wire format
 
@@ -25,9 +25,9 @@ Agents emit JSON in a `nanite-envelope` fence:
 ## Add a core envelope
 
 1. Add the definition and schema to the go-envelopes module's `manifest/envelopes.yaml` and `manifest/schemas/`, validate it against `manifest/envelopes.schema.json`, then release that module.
-2. Bump Nanite's pinned `github.com/hollis-labs/go-envelopes` version.
+2. Bump Nanite's pinned `github.com/hollis-labs/libs/ui-go/envelopes` version.
 3. Add the React component under `ui/src/components/chat/envelopes/` and keep its data props aligned with the released schema. Declare the Nanite-owned `component`, `export`, and `props` mapping in `scripts/lib/core-envelope-bindings.json`; give backend-only types an explicit `backendOnly` disposition.
-4. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for wire types and Nanite-owned bindings for imports and owns `ui/src/generated/plugin-envelopes.ts`.
+4. Run `make generate-envelopes`; `scripts/generate-envelope-types.mjs` invokes `github.com/hollis-labs/libs/ui-go/envelopes/cmd/envelopes-export` for module-owned TypeScript. Run `npm run generate:plugins` from `ui/`; `scripts/generate-plugin-imports.mjs` uses the same public exporter for wire types and Nanite-owned bindings for imports and owns `ui/src/generated/plugin-envelopes.ts`.
 5. Run `make check-envelopes`, then exercise the live SSE streaming and persisted-message reload paths.
 
 Never hand-edit generated registries. The upstream wire manifest, host bindings and component are authored inputs; generators own derived files.
@@ -44,7 +44,7 @@ Keep interactions narrow. An envelope should submit a clear user intent back thr
 |---|---|
 | Core manifest source of truth | go-envelopes `manifest/envelopes.yaml` |
 | Core manifest schema | go-envelopes `manifest/envelopes.schema.json` |
-| Released catalog and type exporter | `github.com/hollis-labs/go-envelopes/cmd/envelopes-export` |
+| Released catalog and type exporter | `github.com/hollis-labs/libs/ui-go/envelopes/cmd/envelopes-export` |
 | Envelope parser | `internal/chat/envelope.go` |
 | Host renderer bindings | `scripts/lib/core-envelope-bindings.json` |
 | React renderers | `ui/src/components/chat/envelopes/` |

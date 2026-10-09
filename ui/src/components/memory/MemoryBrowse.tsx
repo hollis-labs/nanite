@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useMemories } from "@/hooks/useMemories";
 import { MemoryCard } from "./MemoryCard";
 
-type ScopeFilter = "" | "session" | "project" | "user";
+type ScopeFilter = "" | "session" | "project" | "user" | "app";
 type StatusFilter = "" | "canonical" | "draft" | "reviewed" | "deprecated";
 
 interface MemoryBrowseProps {
@@ -22,7 +22,8 @@ interface MemoryBrowseProps {
 
 const SCOPE_OPTIONS: { label: string; value: ScopeFilter }[] = [
   { label: "All", value: "" },
-  { label: "User", value: "user" },
+  { label: "App", value: "app" },
+  { label: "Legacy user", value: "user" },
   { label: "Project", value: "project" },
   { label: "Session", value: "session" },
 ];
@@ -62,9 +63,7 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
       <div className="px-3 pt-3 pb-2 pr-10 shrink-0 flex items-center gap-2 border-b border-border-subtle">
         <span className="text-sm font-medium text-fg flex-1">Memories</span>
         {total > 0 && (
-          <span className="text-xs px-1.5 py-0.5 rounded-md bg-surface text-fg-muted">
-            {total}
-          </span>
+          <span className="text-xs px-1.5 py-0.5 rounded-md bg-surface text-fg-muted">{total}</span>
         )}
         <button
           type="button"
@@ -122,8 +121,8 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
       {/* Content */}
       {isLoading ? (
         <div className="p-3 space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-lg" />
+          {["summary", "body", "origin", "tags"].map((key) => (
+            <Skeleton key={key} className="h-16 w-full rounded-lg" />
           ))}
         </div>
       ) : memories.length === 0 ? (
@@ -144,11 +143,7 @@ export function MemoryBrowse({ onSelect, onCreate }: MemoryBrowseProps) {
         <ScrollArea className="flex-1 min-h-0">
           <div className="p-3 space-y-2">
             {memories.map((memory) => (
-              <MemoryCard
-                key={memory.key}
-                memory={memory}
-                onClick={() => onSelect(memory.key)}
-              />
+              <MemoryCard key={memory.key} memory={memory} onClick={() => onSelect(memory.key)} />
             ))}
           </div>
         </ScrollArea>

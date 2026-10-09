@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"strings"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 	"github.com/hollis-labs/substrate/agent/subagent"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // evaluateAndInjectSubagentResults surfaces pending kind=subagent_result

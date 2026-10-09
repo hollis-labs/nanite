@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
-	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/usagecost"
+	"github.com/hollis-labs/substrate/llm-core/modelsdev"
+	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 type mutableUsageCatalog struct{ rates modelsdev.Pricing }

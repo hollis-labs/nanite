@@ -10,7 +10,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/service"
 
-	gmcpserver "github.com/hollis-labs/go-mcp/server"
+	gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hollis-labs/nanite/internal/brand"

@@ -17,15 +17,8 @@ import (
 
 	"github.com/hollis-labs/substrate/agent/approval"
 
-	embedcontracts "github.com/hollis-labs/go-embed-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	"github.com/hollis-labs/go-loopdetect"
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
-	permissionlib "github.com/hollis-labs/go-permission"
-	"github.com/hollis-labs/go-providers/provider"
-	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/go-worktree"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	"github.com/hollis-labs/libs/util/worktree"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -67,7 +60,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/pkg/models"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	"github.com/hollis-labs/substrate/agent/loopdetect"
 	"github.com/hollis-labs/substrate/agent/subagent"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	embedcontracts "github.com/hollis-labs/substrate/llm-core/embedcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/substrate/llm-core/modelsdev"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 	"github.com/hollis-labs/tesseract"
 )
 

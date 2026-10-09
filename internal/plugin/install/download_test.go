@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-egress-proxy/egress"
+	"github.com/hollis-labs/substrate/harness/interception/egress"
 )
 
 func TestDownload_HappyPath(t *testing.T) {

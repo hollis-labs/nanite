@@ -13,12 +13,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/go-safefs/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agent"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 
-	plugin "github.com/hollis-labs/plugin-sdk"
+	plugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 )
 
 //go:embed plugin.yaml

@@ -2,13 +2,14 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 func hookTestParams(hooks []BootDirHook) SetupParams {
@@ -36,13 +37,13 @@ func TestDefaultBootDirHooks_IsEmpty(t *testing.T) {
 // is executable, AND the settings document declares it. Either half alone
 // is inert.
 func TestClaudeLayout_PlantsHookScriptAndDeclaration(t *testing.T) {
-	bootDir := t.TempDir()
 	hooks := []BootDirHook{{
 		Event:  HookStop,
 		Name:   "stop-disposition.sh",
 		Script: []byte("#!/usr/bin/env bash\nexit 0\n"),
 	}}
-	if _, err := (claudeLayout{}).Populate(bootDir, hookTestParams(hooks)); err != nil {
+	bootDir, err := (claudeLayout{}).Setup(hookTestParams(hooks))
+	if err != nil {
 		t.Fatalf("Populate with hooks: %v", err)
 	}
 
@@ -206,8 +207,8 @@ func TestHookArtifactEntries_EmptySetPlantsNothing(t *testing.T) {
 	if len(entries) != 0 {
 		t.Errorf("entries = %v, want none for an empty hook set", entries)
 	}
-	bootDir := t.TempDir()
-	if _, err := (claudeLayout{}).Populate(bootDir, hookTestParams(nil)); err != nil {
+	bootDir, err := (claudeLayout{}).Setup(hookTestParams(nil))
+	if err != nil {
 		t.Fatalf("Populate: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(bootDir, "hooks")); !os.IsNotExist(err) {
@@ -215,20 +216,18 @@ func TestHookArtifactEntries_EmptySetPlantsNothing(t *testing.T) {
 	}
 }
 
-// TestClaudeLayout_HookSurvivesSlotRegeneration verifies a planted hook
-// is still there after RegenerateSystemPromptSlot — the watchdog
-// remediation path rewrites only CLAUDE.md, and a gate that vanished on
-// remediation would be worse than no gate.
+// TestClaudeLayout_HookSurvivesSlotRegeneration verifies that refusal to
+// refresh a bound root leaves its original hook and settings intact.
 func TestClaudeLayout_HookSurvivesSlotRegeneration(t *testing.T) {
-	bootDir := t.TempDir()
 	params := hookTestParams([]BootDirHook{{
 		Event: HookStop, Name: "stop.sh", Script: []byte("exit 0\n"),
 	}})
-	if _, err := (claudeLayout{}).Populate(bootDir, params); err != nil {
+	bootDir, err := (claudeLayout{}).Setup(params)
+	if err != nil {
 		t.Fatalf("Populate: %v", err)
 	}
-	if err := (claudeLayout{}).RegenerateSystemPromptSlot(bootDir, params); err != nil {
-		t.Fatalf("RegenerateSystemPromptSlot: %v", err)
+	if refreshErr := (claudeLayout{}).RegenerateSystemPromptSlot(bootDir, params); !errors.Is(refreshErr, ErrArtifactRefreshUnavailable) {
+		t.Fatalf("RegenerateSystemPromptSlot: %v", refreshErr)
 	}
 	info, err := os.Stat(filepath.Join(bootDir, "hooks/claude/stop.sh"))
 	if err != nil {

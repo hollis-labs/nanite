@@ -14,12 +14,6 @@ import (
 	"github.com/hollis-labs/substrate/agent/approval"
 
 	"github.com/google/uuid"
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	"github.com/hollis-labs/go-loopdetect"
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
-	"github.com/hollis-labs/go-modelsdev/modelsdev"
-	permissionlib "github.com/hollis-labs/go-permission"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -38,6 +32,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/task"
 	"github.com/hollis-labs/nanite/internal/tool"
 	"github.com/hollis-labs/nanite/internal/worker"
+	"github.com/hollis-labs/substrate/agent/loopdetect"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	"github.com/hollis-labs/substrate/llm-core/modelsdev"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // chatShutdownMaxWait bounds how long chatServiceImpl.Shutdown waits for

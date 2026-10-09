@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/safego"
-	"github.com/hollis-labs/plugin-sdk"
 )
 
 // Event Catalog

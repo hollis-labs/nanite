@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/classify"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // stubMessenger captures every SendMessage call so tests can assert

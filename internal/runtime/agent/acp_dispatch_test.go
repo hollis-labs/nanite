@@ -7,10 +7,10 @@ package agent
 import (
 	"testing"
 
-	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
-	"github.com/hollis-labs/go-agent-wrapper/adapters"
-	"github.com/hollis-labs/go-agent-wrapper/launch"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters"
+	"github.com/hollis-labs/substrate/harness/adapters/launch"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 func TestUseACPProtocol(t *testing.T) {

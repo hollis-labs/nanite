@@ -45,7 +45,7 @@ func BuildCLAUDEMD(agentName, agentDescription, systemPrompt string) string {
 // chat.RegisteredEnvelopeTypeNames() rather than pointing the agent at a
 // path to separately resolve — even a *correct* path wouldn't help here,
 // since the real manifest source (the external
-// github.com/hollis-labs/go-envelopes module) lives in a different repo,
+// github.com/hollis-labs/libs/ui-go/envelopes module) lives in a different repo,
 // not inside this project's boot dir the agent can actually read. The two
 // paths this used to name (config/envelopes.yaml,
 // internal/envelope/schemas/*.schema.json) don't exist anywhere in this

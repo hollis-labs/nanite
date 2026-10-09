@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 
@@ -356,8 +356,8 @@ func TestEmbeddedEnvelopeReferencesDescribeCurrentWorkflow(t *testing.T) {
 			}
 		}
 		requiredPaths := append(append([]string{
-			"github.com/hollis-labs/go-envelopes",
-			"github.com/hollis-labs/go-envelopes/cmd/envelopes-export",
+			"github.com/hollis-labs/libs/ui-go/envelopes",
+			"github.com/hollis-labs/libs/ui-go/envelopes/cmd/envelopes-export",
 			"manifest/envelopes.yaml",
 		}, localPaths...), documentedGeneratedPaths...)
 		for _, required := range requiredPaths {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 
-	embedcontracts "github.com/hollis-labs/go-embed-contracts"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/secrets"
+	embedcontracts "github.com/hollis-labs/substrate/llm-core/embedcontracts"
 )
 
 // Embedding status values returned by SelectEmbedder. Surfaced by the settings

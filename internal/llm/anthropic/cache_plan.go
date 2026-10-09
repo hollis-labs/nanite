@@ -1,9 +1,9 @@
 package anthropic
 
 import (
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // maxCacheControlMarkers is Anthropic's per-request cap on cache_control

@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/agent/subagent"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // fallbackRoleSlug is the agent profile slug used when a requested role

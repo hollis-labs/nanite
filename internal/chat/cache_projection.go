@@ -3,9 +3,9 @@ package chat
 import (
 	"context"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/tool"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // ReconcileCachedResults copies the model projection so neither persisted

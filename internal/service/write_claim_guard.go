@@ -7,23 +7,25 @@ import (
 	"strings"
 	"unicode"
 
-	hooks "github.com/hollis-labs/go-hooks"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/writeclaim"
 )
 
-// The write-claim guard (D-34) is a go-hooks Stop implementation. When a reply
-// is about to be finalized it looks for a completed-write claim citing an id and
-// checks it against what the turn actually did. It replaces nothing in the
-// reflex engine, whose predicate cannot see the reply being written.
-//
-// Fields relied on: hooks.StopInput{LastAssistantMessage} and
-// hooks.Output{Decision, Reason, SystemMessage, Continue, StopReason}. None is
-// among the fields go-hooks flags as unverified upstream. The upstream Stop
-// catalog honors continue/stopReason/systemMessage; this host also reads
-// Decision, so a deny sets both.
+// The write-claim guard is a host-owned turn-stopping check. It reads the
+// pending reply and actual tool receipts; it grants no tool or plugin authority.
+// The retired native hook DTO is not the generic plugin-hooks registry contract.
+// Its allow/deny/ask result uses the host permission vocabulary.
+
+type writeClaimHookResult struct {
+	Decision      permissionlib.Decision
+	Reason        string
+	SystemMessage string
+	Continue      *bool
+	StopReason    string
+}
 
 // Reasons recorded for every decision, so the false-positive rate can be tuned
 // from the event log.
@@ -190,16 +192,16 @@ type writeClaimDecision struct {
 }
 
 // writeClaimHook is the Stop hook. It is pure: the reply and the turn's facts
-// in, a hooks.Output and the recorded decision out.
-func writeClaimHook(mode harnessprofile.GuardMode, in hooks.StopInput, facts writeClaimFacts) (hooks.Output, writeClaimDecision) {
+// in, a writeClaimHookResult and the recorded decision out.
+func writeClaimHook(mode harnessprofile.GuardMode, narration string, facts writeClaimFacts) (writeClaimHookResult, writeClaimDecision) {
 	d := writeClaimDecision{Mode: mode, Reason: wcNoClaim}
 	if mode == harnessprofile.GuardOff || mode == "" {
 		d.Reason = wcOff
-		return hooks.Output{Decision: hooks.DecisionAllow}, d
+		return writeClaimHookResult{Decision: permissionlib.DecisionAllow}, d
 	}
-	finding, claimed := writeclaim.Detect(in.LastAssistantMessage, facts.GroundedIDs)
+	finding, claimed := writeclaim.Detect(narration, facts.GroundedIDs)
 	if !claimed {
-		return hooks.Output{Decision: hooks.DecisionAllow}, d
+		return writeClaimHookResult{Decision: permissionlib.DecisionAllow}, d
 	}
 	d.Finding = finding
 	// Every cited id must be grounded in a successful write-capable result.
@@ -209,19 +211,19 @@ func writeClaimHook(mode harnessprofile.GuardMode, in hooks.StopInput, facts wri
 		if facts.WroteThisTurn {
 			d.Reason = wcWriteSucceeded
 		}
-		return hooks.Output{Decision: hooks.DecisionAllow}, d
+		return writeClaimHookResult{Decision: permissionlib.DecisionAllow}, d
 	}
 	d.Fired, d.Reason = true, wcUnbackedClaim
 	reason := fmt.Sprintf("the reply reports a completed write citing %s, but no successful write result this session returned it", strings.Join(finding.Ungrounded, ", "))
-	out := hooks.Output{Reason: reason, SystemMessage: "write-claim guard: " + reason}
+	out := writeClaimHookResult{Reason: reason, SystemMessage: "write-claim guard: " + reason}
 	switch mode {
 	case harnessprofile.GuardDeny:
 		stop := false
-		out.Decision, out.Continue, out.StopReason = hooks.DecisionDeny, &stop, reason
+		out.Decision, out.Continue, out.StopReason = permissionlib.DecisionDeny, &stop, reason
 	case harnessprofile.GuardAsk:
-		out.Decision = hooks.DecisionAsk
+		out.Decision = permissionlib.DecisionAsk
 	default: // warn
-		out.Decision = hooks.DecisionAllow
+		out.Decision = permissionlib.DecisionAllow
 	}
 	return out, d
 }
@@ -338,7 +340,7 @@ func (s *chatServiceImpl) narrationClaimFooter(ctx context.Context, sessionID, m
 	if narration == "" || mode == harnessprofile.GuardOff {
 		return ""
 	}
-	stop := hooks.StopInput{LastAssistantMessage: narration}
+	stop := narration
 	facts := s.writeClaimFactsFor(ctx, sessionID, ls, false)
 	out, d := writeClaimHook(mode, stop, facts)
 	if d.Reason == wcUnbackedClaim {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // TestRenderUserMessageActionRouting pins the (Action -> Kind) routing.

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-envelopes"
-	"github.com/hollis-labs/go-envelopes/envelopestest"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes/envelopestest"
 )
 
 // TestGoEnvelopesContract runs the lib's downstream-consumer contract

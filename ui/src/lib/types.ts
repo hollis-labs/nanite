@@ -2420,10 +2420,11 @@ export interface WorkflowRun {
 
 export type MemoryOrigin = "user" | "feedback" | "project" | "reference" | "observation";
 export type MemoryStatus = "draft" | "reviewed" | "canonical" | "deprecated";
-export type MemoryScope = "session" | "project" | "user";
+export type MemoryScope = "session" | "project" | "user" | "app";
 
 export interface Memory {
   key: string;
+  editable?: boolean;
   memory_key: string;
   namespace: string;
   summary: string;

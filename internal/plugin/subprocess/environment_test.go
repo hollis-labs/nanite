@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/plugin-host/pluginhosttest"
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-host/pluginhosttest"
 )
 
 func TestPluginEnvironmentAllowlist(t *testing.T) {
@@ -29,8 +29,8 @@ func TestManagerLaunchFiltersActualChildEnvironment(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "/tmp/test-agent-socket")
 	t.Setenv("DOCKER_HOST", "unix:///tmp/test-daemon")
 	command, env := pluginhosttest.FixtureCommand(pluginhosttest.BehaviourEcho, t.TempDir(), "NANITE_ENV_APPROVED=declared-value")
-	mgr := NewManager(ManagerConfig{Command: command, Env: env, ShutdownTimeout: time.Second})
-	transport, startErr := mgr.Start(context.Background(), InitParams{})
+	mgr := NewManager(ManagerConfig{ID: "fixture", Command: command, Env: env, ShutdownTimeout: time.Second})
+	transport, startErr := mgr.Start(context.Background(), fixtureInit(t))
 	if startErr != nil {
 		t.Fatal(startErr)
 	}

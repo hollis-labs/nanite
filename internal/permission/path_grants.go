@@ -44,7 +44,7 @@ import (
 	"strings"
 	"sync"
 
-	permissionlib "github.com/hollis-labs/go-permission"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // lineageMaxHops bounds how many parent links LookupPath will walk before

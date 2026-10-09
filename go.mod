@@ -1,6 +1,6 @@
 module github.com/hollis-labs/nanite
 
-go 1.26.7
+go 1.26.9
 
 require (
 	github.com/creack/pty v1.1.24 // indirect
@@ -16,13 +16,6 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/hollis-labs/agentkit v0.21.0
-	github.com/hollis-labs/go-envelopes v0.5.0
-	github.com/hollis-labs/go-modelsdev v0.3.0
-	github.com/hollis-labs/go-otel v0.10.0
-	github.com/hollis-labs/go-providers v0.42.0
-	github.com/hollis-labs/go-reflexes v0.2.0
-	github.com/hollis-labs/go-sandbox v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/robfig/cron/v3 v3.0.1
@@ -37,12 +30,10 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
-	github.com/hollis-labs/go-harness-filters v0.1.1 // indirect
-	github.com/hollis-labs/go-queue v0.2.1 // indirect
-	github.com/hollis-labs/go-runner v0.8.2 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
+	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
@@ -62,6 +53,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.46.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
@@ -83,7 +75,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
-	github.com/hollis-labs/plugin-sdk v0.6.1
+	github.com/hollis-labs/plugin-sdk v0.6.1 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -102,42 +94,17 @@ require (
 )
 
 require (
-	github.com/hollis-labs/agent-contracts-leaf v0.3.0
-	github.com/hollis-labs/go-agent-wrapper v0.25.6
-	github.com/hollis-labs/go-apppaths v0.3.0
-	github.com/hollis-labs/go-chatstream v0.1.0
-	github.com/hollis-labs/go-egress-proxy v0.2.3
-	github.com/hollis-labs/go-embed-contracts v0.1.1
-	github.com/hollis-labs/go-hooks v0.1.0
-	github.com/hollis-labs/go-llm-contracts v0.4.0
-	github.com/hollis-labs/go-llm-types v0.5.1
-	github.com/hollis-labs/go-localdaemon v0.1.0
-	github.com/hollis-labs/go-loopdetect v0.1.0
-	github.com/hollis-labs/go-materialize v0.1.0
-	github.com/hollis-labs/go-mcp v0.14.1
-	github.com/hollis-labs/go-messaging v0.7.0
-	github.com/hollis-labs/go-modelsdev-catalog-helpers v0.1.0
-	github.com/hollis-labs/go-permission v0.1.0
-	github.com/hollis-labs/go-runtime-events v0.2.1
-	github.com/hollis-labs/go-safefs v0.1.0
-	github.com/hollis-labs/go-scheduler v0.3.0
-	github.com/hollis-labs/go-sqlite v0.1.0
-	github.com/hollis-labs/go-ssekit v0.2.0
-	github.com/hollis-labs/go-streamhub v0.1.0
-	github.com/hollis-labs/go-svcerr v0.1.0
-	github.com/hollis-labs/go-tether-client v0.8.0
-	github.com/hollis-labs/go-toolresult v0.1.0
-	github.com/hollis-labs/go-transportparity v0.1.0
-	github.com/hollis-labs/go-usage-ledger v0.1.0
-	github.com/hollis-labs/go-workflow v0.1.0
-	github.com/hollis-labs/go-workflow-host v0.1.0
-	github.com/hollis-labs/go-worktree v0.1.0
-	github.com/hollis-labs/nanite/pkg/pluginapi v0.1.8
-	github.com/hollis-labs/plugin-host v0.1.2
+	github.com/hollis-labs/libs/plugin-mcp v0.2.0
+	github.com/hollis-labs/libs/ui-go v0.1.0
+	github.com/hollis-labs/libs/util v0.2.0
+	github.com/hollis-labs/libs/workflow v0.1.0
+	github.com/hollis-labs/nanite/pkg/pluginapi v0.2.0
 	github.com/hollis-labs/plugins-catalog v0.1.0
-	github.com/hollis-labs/substrate/agent v0.1.0
+	github.com/hollis-labs/substrate/agent v0.3.0
+	github.com/hollis-labs/substrate/harness v0.3.1
+	github.com/hollis-labs/substrate/llm-core v0.1.0
 	github.com/hollis-labs/substrate/mesh v0.1.0
-	github.com/hollis-labs/tesseract v0.10.0
+	github.com/hollis-labs/tesseract v0.11.0
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/mod v0.41.0

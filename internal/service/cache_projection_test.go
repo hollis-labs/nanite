@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
-	toolresult "github.com/hollis-labs/go-toolresult"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool"
+	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestCacheProjection_RechecksEveryProviderIteration(t *testing.T) {

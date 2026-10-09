@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	gosched "github.com/hollis-labs/go-scheduler"
-	"github.com/hollis-labs/go-scheduler/sqlstore"
+	gosched "github.com/hollis-labs/libs/util/scheduler"
+	"github.com/hollis-labs/libs/util/scheduler/sqlstore"
 )
 
 // SchedulerTimeLayout is the released SQLStore's nanosecond UTC encoding.

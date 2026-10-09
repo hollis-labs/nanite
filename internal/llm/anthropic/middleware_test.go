@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	llmcontracts "github.com/hollis-labs/go-llm-contracts"
+	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // stubResponse builds a synthetic *http.Response with the given status,

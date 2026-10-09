@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
-	"github.com/hollis-labs/go-agent-wrapper/acp"
-	"github.com/hollis-labs/go-agent-wrapper/wrapper"
-	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/substrate/harness/adapters/acp"
+	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	"github.com/hollis-labs/substrate/harness/adapters/wrapper"
 )
 
 // ErrTurnCancelUnsupported is the wrapper-owned native-runtime ceiling. It is

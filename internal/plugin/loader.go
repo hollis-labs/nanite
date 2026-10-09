@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sync"
 
+	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
+
+	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	fplugin "github.com/hollis-labs/plugin-sdk"
 )
 
 // DiscoveredPlugin holds metadata parsed from a plugin.yaml plus the
@@ -281,11 +284,14 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 	if m.Shared == nil {
 		return nil, fmt.Errorf("subprocess plugin requires a shared manifest")
 	}
-	command, err := ResolveBundleFile(dp.Dir, m.Shared.Entrypoint.Command, true)
+	command, err := ResolveBundleFile(dp.Dir, m.Shared.Server.Entry, true)
 	if err != nil {
 		return nil, fmt.Errorf("entrypoint: %w", err)
 	}
-	args := append([]string(nil), m.Shared.Entrypoint.Args...)
+	if m.Shared.Server.Runtime != "binary" {
+		return nil, fmt.Errorf("unsupported plugin server runtime %q: Nanite requires an approved bundled binary", m.Shared.Server.Runtime)
+	}
+	args := []string{}
 
 	if _, approvalErr := VerifyInstallApproval(ctx, dp.Dir); approvalErr != nil {
 		return nil, approvalErr
@@ -302,91 +308,132 @@ func NewSubprocessPluginFromManifest(ctx context.Context, dp DiscoveredPlugin, h
 		return nil, err
 	}
 	mgrCfg := subprocess.DefaultManagerConfig(command, dp.Dir)
+	if host != nil {
+		mgrCfg.LifecycleContext = host.Context()
+	}
 	mgrCfg.Args = args
 	mgrCfg.Secrets = launch.Secrets
 	mgrCfg.Env = launch.Environment
 	mgrCfg.Granted = launch.Granted
 	mgrCfg.ReviewDigest = launch.ReviewDigest
 
+	origin := ""
+	if host != nil {
+		host.mu.RLock()
+		origin = host.queryURL
+		host.mu.RUnlock()
+	}
+	if launch.QueryScope != nil && origin == "" {
+		if !launch.QueryOptional {
+			return nil, fmt.Errorf("host read-only queries are unavailable")
+		}
+		launch.QueryScope = nil
+		mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityReadOnlyQuery })
+	}
+	if launch.WakeScope != nil && origin == "" {
+		if !launch.WakeOptional {
+			return nil, fmt.Errorf("host durable wakes are unavailable")
+		}
+		launch.WakeScope = nil
+		mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityDurableWake })
+	}
+	var credentialMu sync.Mutex
 	var queryGrant *pluginapi.QueryGrant
 	var wakeGrant *pluginapi.DurableWakeGrant
-	identity := map[string]any{}
-	if launch.QueryScope != nil {
-		var grant pluginapi.QueryGrant
-		var grantErr error
-		if host == nil {
-			grantErr = fmt.Errorf("host read-only queries are unavailable")
-		} else {
-			grant, grantErr = host.prepareHostQueryGrant(m.Identifier(), *launch.QueryScope)
-		}
-		if grantErr != nil {
-			if !launch.QueryOptional {
-				return nil, grantErr
+	revokeCredentials := func() {
+		credentialMu.Lock()
+		query, wake := queryGrant, wakeGrant
+		queryGrant, wakeGrant = nil, nil
+		credentialMu.Unlock()
+		if host != nil {
+			if query != nil {
+				host.revokeHostQueryGrant(query.Token)
 			}
-			mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityReadOnlyQuery })
-		} else {
-			queryGrant = &grant
-			identity["nanite_host_query"] = grant
-			mgrCfg.Secrets = append(mgrCfg.Secrets, grant.Token)
+			if wake != nil {
+				host.revokeHostDurableWakeGrant(wake.Token)
+			}
 		}
 	}
-	if launch.WakeScope != nil {
-		var grant pluginapi.DurableWakeGrant
-		var grantErr error
-		if host == nil {
-			grantErr = fmt.Errorf("host durable wakes are unavailable")
-		} else {
-			grant, grantErr = host.prepareHostDurableWakeGrant(m.Identifier(), *launch.WakeScope)
-		}
-		if grantErr != nil {
-			if !launch.WakeOptional {
-				return nil, grantErr
-			}
-			mgrCfg.Granted = slices.DeleteFunc(mgrCfg.Granted, func(name string) bool { return name == pluginapi.CapabilityDurableWake })
-		} else {
-			wakeGrant = &grant
-			identity["nanite_durable_wake"] = grant
-			mgrCfg.Secrets = append(mgrCfg.Secrets, grant.Token)
-		}
+	mgrCfg.IssueGrants = func(ctx context.Context, runtime capability.RuntimeIdentity) (capability.GrantSet, error) {
+		return issueReviewedGrants(ctx, dp.Dir, launch, runtime, mgrCfg.Granted)
 	}
-	if len(identity) > 0 {
-		mgrCfg.Identity, err = json.Marshal(identity)
-		if err != nil {
+	mgrCfg.RevalidateGrants = func(ctx context.Context, grants capability.GrantSet) error {
+		return revalidateReviewedGrants(ctx, dp.Dir, launch.ReviewDigest, grants)
+	}
+	mgrCfg.InitIdentity = func(ctx context.Context, _ capability.RuntimeIdentity, lease *subprocess.GrantLease) (json.RawMessage, error) {
+		if err := CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest); err != nil {
 			return nil, err
 		}
+		identity := map[string]any{}
+		if launch.QueryScope != nil {
+			if host == nil {
+				return nil, fmt.Errorf("host query grant issuer unavailable")
+			}
+			grant, err := host.prepareHostQueryGrant(m.Identifier(), *launch.QueryScope)
+			if err != nil {
+				return nil, err
+			}
+			if err := host.bindHostQueryGrant(ctx, grant); err != nil {
+				return nil, err
+			}
+			host.attachHostQueryLease(grant.Token, lease, func(ctx context.Context) error {
+				return revalidateReviewedGrants(ctx, dp.Dir, launch.ReviewDigest, lease.Grants())
+			})
+			credentialMu.Lock()
+			queryGrant = &grant
+			credentialMu.Unlock()
+			identity["nanite_host_query"] = grant
+		}
+		if launch.WakeScope != nil {
+			if host == nil {
+				return nil, fmt.Errorf("host wake grant issuer unavailable")
+			}
+			grant, err := host.prepareHostDurableWakeGrant(m.Identifier(), *launch.WakeScope)
+			if err != nil {
+				return nil, err
+			}
+			if err := host.bindHostDurableWakeGrant(ctx, grant); err != nil {
+				return nil, err
+			}
+			host.attachHostDurableWakeLease(grant.Token, lease, func(ctx context.Context) error {
+				return revalidateReviewedGrants(ctx, dp.Dir, launch.ReviewDigest, lease.Grants())
+			})
+			credentialMu.Lock()
+			wakeGrant = &grant
+			credentialMu.Unlock()
+			identity["nanite_durable_wake"] = grant
+		}
+		return json.Marshal(identity)
 	}
+	mgrCfg.IdentitySecrets = func(identity json.RawMessage) []string {
+		var claims struct {
+			Query *pluginapi.QueryGrant       `json:"nanite_host_query"`
+			Wake  *pluginapi.DurableWakeGrant `json:"nanite_durable_wake"`
+		}
+		if json.Unmarshal(identity, &claims) != nil {
+			return nil
+		}
+		var values []string
+		if claims.Query != nil {
+			values = append(values, claims.Query.Token)
+		}
+		if claims.Wake != nil {
+			values = append(values, claims.Wake.Token)
+		}
+		return values
+	}
+	mgrCfg.OnDisconnect = revokeCredentials
 	mgrCfg.OnUnload = func() {
+		revokeCredentials()
 		if host == nil {
 			return
-		}
-		if queryGrant != nil {
-			host.revokeHostQueryGrant(queryGrant.Token)
-		}
-		if wakeGrant != nil {
-			host.revokeHostDurableWakeGrant(wakeGrant.Token)
 		}
 		host.removePluginContextSources(m.Identifier())
 		host.removePluginAlwaysShipSources(m.Identifier())
 		host.removePluginReflexSeeds(m.Identifier())
 	}
 	mgrCfg.BeforeSpawn = func(ctx context.Context) error {
-		if checkErr := CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest); checkErr != nil {
-			return checkErr
-		}
-		if queryGrant != nil {
-			if checkErr := host.bindHostQueryGrant(ctx, *queryGrant); checkErr != nil {
-				return checkErr
-			}
-		}
-		if wakeGrant != nil {
-			if checkErr := host.bindHostDurableWakeGrant(ctx, *wakeGrant); checkErr != nil {
-				if queryGrant != nil {
-					host.revokeHostQueryGrant(queryGrant.Token)
-				}
-				return checkErr
-			}
-		}
-		return nil
+		return CheckAcceptedBundle(ctx, dp.Dir, launch.ReviewDigest)
 	}
 
 	return subprocess.NewSubprocessPlugin(dp.Dir, m.Identifier(), launch.Config, mgrCfg), nil

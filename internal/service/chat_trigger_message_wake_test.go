@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
+	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 func newTriggerMessageWakeTestService(t *testing.T) (*chatServiceImpl, *capturingStore) {

@@ -134,7 +134,7 @@ documented in [the engine boundary](docs/architecture/workflow-engine.md) and
 
 Embedded-memory and external MCP operators upgrading to Tesseract v0.10
 should follow
-[Nanite's Tesseract v0.10 migration guide](docs/tesseract-v0.10-migration.md).
+[Nanite's Tesseract embedding and migration guide](docs/tesseract-v0.10-migration.md).
 
 ## Admin preferences API
 

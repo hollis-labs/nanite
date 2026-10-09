@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-safefs/pathsafe"
 	"github.com/hollis-labs/nanite/internal/sandbox"
+	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // --- BLG-007 / 04-08 dev-tools input-validation High findings ---

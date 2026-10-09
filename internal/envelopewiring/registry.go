@@ -1,7 +1,7 @@
 package envelopewiring
 
 import (
-	"github.com/hollis-labs/go-envelopes"
+	"github.com/hollis-labs/libs/ui-go/envelopes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/envelope"
 )

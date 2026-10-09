@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // fakeRequestToolsService satisfies ToolService for the reflection unit test.

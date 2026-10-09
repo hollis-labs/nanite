@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	llmtypes "github.com/hollis-labs/go-llm-types"
+	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // BuiltinToolRegistry holds built-in tool definitions that are always available

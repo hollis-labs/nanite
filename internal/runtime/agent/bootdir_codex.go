@@ -3,11 +3,11 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/hollis-labs/go-agent-wrapper/plant"
-	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	"github.com/hollis-labs/substrate/harness/agentlaunch"
+	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 )
 
 // codexLayout plants the codex-specific shape:
@@ -25,7 +25,7 @@ import (
 // which carries the session's work root (CW-20261001-0020).
 //
 // TASKS/agent-host-acp/04: the bootdir file-set is declared as a
-// plant.Spec (github.com/hollis-labs/go-agent-wrapper/plant) and planted
+// plant.PlantSpec (github.com/hollis-labs/substrate/harness/agentlaunch/planting) and planted
 // through codexPlanter, which implements plant.Planter — see
 // bootdir_plant.go for why Nanite uses go-agent-wrapper's Planter
 // contract rather than agentkit/agentlaunch/providerplant.Plant.
@@ -49,13 +49,15 @@ type codexLayout struct{}
 // lands at "config.toml" at 0o600. See bootdir_plant.go's plantSpec for
 // the shared write routine. auth.json is not planted through here — see
 // codexLayout.Populate.
-type codexPlanter struct{}
+type codexPlanter struct {
+	authorize agentlaunch.ArtifactAuthorizer
+}
 
 var _ plant.Planter = codexPlanter{}
 
-func (codexPlanter) Plant(ctx context.Context, bootDir string, spec plant.Spec) (plant.Result, error) {
+func (p codexPlanter) Plant(ctx context.Context, bootDir string, spec plant.PlantSpec) (plant.PlantResult, error) {
 	return plantSpec(ctx, bootDir, spec, plantConfig{
-		provider:             "codex",
+		authorize: p.authorize, provider: "codex",
 		providerSettingsPath: "config.toml",
 		providerSettingsMode: codexConfigFileMode,
 	})
@@ -75,7 +77,7 @@ func codexAgentsMD(params SetupParams) string {
 }
 
 // codexPlantSpec assembles the full codex bootdir file-set as a
-// plant.Spec.
+// plant.PlantSpec.
 //
 // config.toml is a provider CONFIG file sourced from go-providers'
 // CodexAdapter.BootDirSpec (not hand-rolled). It carries approval_policy +
@@ -96,7 +98,7 @@ func codexAgentsMD(params SetupParams) string {
 // documented, legitimate "provider has no equivalent native-skill
 // mechanism" outcome 20-skills.md's own Context anticipates, not an
 // oversight.
-func codexPlantSpec(params SetupParams) (plant.Spec, error) {
+func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	// CW-20260910-0015: codex has no verified hook wiring in Nanite.
 	// go-providers' capability matrix reports FeatureHooks as
 	// "explicit-effect" for codex — the provider is understood to have
@@ -107,12 +109,12 @@ func codexPlantSpec(params SetupParams) (plant.Spec, error) {
 	// drop: a caller that asked for a gate should be told it did not get
 	// one. See bootdir_hooks.go's header.
 	if len(params.Hooks) > 0 {
-		return plant.Spec{}, hooksUnsupportedError("codex",
+		return plant.PlantSpec{}, hooksUnsupportedError("codex",
 			"no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape")
 	}
 	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
 	if err != nil {
-		return plant.Spec{}, err
+		return plant.PlantSpec{}, err
 	}
 
 	files := map[string][]byte{
@@ -125,10 +127,10 @@ func codexPlantSpec(params SetupParams) (plant.Spec, error) {
 
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {
-		return plant.Spec{}, err
+		return plant.PlantSpec{}, err
 	}
 
-	return plant.Spec{
+	return plant.PlantSpec{
 		Files:            files,
 		MCPConfig:        mcp,
 		ProviderSettings: map[string][]byte{"codex": []byte(configTOML)},
@@ -136,32 +138,34 @@ func codexPlantSpec(params SetupParams) (plant.Spec, error) {
 }
 
 func (l codexLayout) Setup(params SetupParams) (string, error) {
-	bootDir, err := makeBootDir("codex", params)
+	bootDir, authorize, seal, err := makeAuthorizedBootDir("codex", params)
 	if err != nil {
 		return "", err
 	}
-	if _, err := l.Populate(bootDir, params); err != nil {
-		_ = os.RemoveAll(bootDir)
-		return "", err
+	defer seal()
+	result, err := l.populateInactive(bootDir, params, authorize)
+	bootArtifactEvidence.Store(bootDir, result)
+	if err != nil {
+		return "", &BootArtifactFailure{BootDir: bootDir, Result: result, Cause: err}
 	}
 	return bootDir, nil
 }
 
-// Populate writes the codex boot-dir shape into bootDir, then links
-// auth.json to the host's codex login (linkCodexHostAuth). Idempotent.
-//
-// Layout.Populate has no context.Context parameter (see bootdir.go
-// and claudeLayout.Populate's comment for why codexPlanter.Plant is
-// called with context.Background() here).
-func (codexLayout) Populate(bootDir string, params SetupParams) (plant.Result, error) {
+// Populate refuses refresh of an existing bound root under the published
+// inactive-only artifact contract. Setup uses its private custody port instead.
+func (codexLayout) Populate(bootDir string, params SetupParams) (plant.PlantResult, error) {
+	return plant.PlantResult{}, &ArtifactRefreshUnavailable{Provider: "codex", Operation: "populate bound root"}
+}
+
+func (codexLayout) populateInactive(bootDir string, params SetupParams, authorize agentlaunch.ArtifactAuthorizer) (plant.PlantResult, error) {
 	if params.AgentProfile == nil {
-		return plant.Result{}, fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
+		return plant.PlantResult{}, fmt.Errorf("agent: codexLayout.Populate: AgentProfile is required")
 	}
 	spec, err := codexPlantSpec(params)
 	if err != nil {
-		return plant.Result{}, err
+		return plant.PlantResult{}, err
 	}
-	result, err := codexPlanter{}.Plant(context.Background(), bootDir, spec)
+	result, err := (codexPlanter{authorize: authorize}).Plant(context.Background(), bootDir, spec)
 	if err != nil {
 		return result, err
 	}
@@ -171,19 +175,10 @@ func (codexLayout) Populate(bootDir string, params SetupParams) (plant.Result, e
 	return result, nil
 }
 
-// RegenerateSystemPromptSlot rewrites only AGENTS.md, leaving the rest
-// of the sandbox dir intact.
+// RegenerateSystemPromptSlot retains the binding and returns typed unavailable
+// until a provider acknowledged, fenced active-update contract is implemented.
 func (codexLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) error {
-	if params.AgentProfile == nil {
-		return fmt.Errorf("agent: codexLayout.RegenerateSystemPromptSlot: AgentProfile is required")
-	}
-	spec := plant.Spec{
-		Files: map[string][]byte{
-			"AGENTS.md": []byte(codexAgentsMD(params)),
-		},
-	}
-	_, err := codexPlanter{}.Plant(context.Background(), bootDir, spec)
-	return err
+	return &ArtifactRefreshUnavailable{Provider: "codex", Operation: "refresh system prompt"}
 }
 
 // AmendEnv sets CODEX_HOME=<bootDir>. Codex reads its config (config.toml)

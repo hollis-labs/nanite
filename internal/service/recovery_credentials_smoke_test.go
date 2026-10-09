@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-providers/provider"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // TestSmoke_BrokerRemediateThroughCredentialsAdapter exercises the full

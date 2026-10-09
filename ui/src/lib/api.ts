@@ -1,13 +1,15 @@
-import type { PluginRegistryResponse } from "./plugin-loader";
 import type {
-  AgentKnowledgeSeed,
-  AgentSchedule,
   AgentBuilderDraftRequest,
   AgentBuilderDraftResponse,
   AgentBuilderDryRunRequest,
   AgentBuilderDryRunResponse,
   AgentBuilderReviewRequest,
   AgentBuilderReviewResponse,
+  AgentCancelResponse,
+  AgentCapabilitiesResponse,
+  AgentCreateSessionRequest,
+  AgentInitializeResponse,
+  AgentKnowledgeSeed,
   AgentKnowledgeSeedUpsertRequest,
   AgentKnownSkill,
   AgentKnownSkillUpsertRequest,
@@ -16,26 +18,28 @@ import type {
   AgentMessage,
   AgentMessageChannel,
   AgentMessageKind,
-  AgentProfile,
   AgentProcedure,
   AgentProcedureUpsertRequest,
+  AgentProfile,
   AgentReflexRow,
+  AgentSchedule,
+  AgentSessionResponse,
   AgentSkillGrantRequest,
   AgentSkillGrantView,
   AgentStateScope,
   AgentToolItem,
+  AgentTurnRequest,
+  AgentTurnResponse,
   ApprovalDecision,
   ApprovalScope,
   Artifact,
   AttachDurableAgentSessionRequest,
   CatalogBrowseEntry,
-  PluginInstallReviewResponse,
   CatalogSource,
   CLIDetectionResult,
-  ProviderTestResult,
   ContextBreakdown,
-  CreateAgentReflexRequest,
   CreateAgentProfileRequest,
+  CreateAgentReflexRequest,
   CreateDurableAgentRequest,
   DiscoveryDiff,
   Document,
@@ -62,13 +66,6 @@ import type {
   FragmentsTask,
   GlobalUsageSummary,
   GrantAgentToolRequest,
-  AgentCapabilitiesResponse,
-  AgentCancelResponse,
-  AgentCreateSessionRequest,
-  AgentInitializeResponse,
-  AgentSessionResponse,
-  AgentTurnRequest,
-  AgentTurnResponse,
   InspectorTurnSnapshot,
   InspectorTurnsResponse,
   MCPServerConfig,
@@ -79,23 +76,25 @@ import type {
   Message,
   MessagePage,
   ModelRecord,
-  PermissionMode,
-  Plan,
-  PlanFilter,
-  PlanStep,
+  PatchAgentReflexRequest,
   PendingReflexApproveRequest,
   PendingReflexRejectRequest,
   PendingReflexRejectResponse,
   PendingReflexRow,
-  PatchAgentReflexRequest,
+  PermissionMode,
+  Plan,
+  PlanFilter,
+  PlanStep,
   PluginConfig,
   PluginInfo,
+  PluginInstallReviewResponse,
   PluginKeybinding,
   PluginUIComponent,
   ProcessHealthResponse,
   Project,
   ProviderConfig,
   ProviderStatus,
+  ProviderTestResult,
   SearchResult,
   ServerInfo,
   Session,
@@ -111,8 +110,8 @@ import type {
   ToolDefinition,
   ToolSelection,
   UISlotEntry,
-  UpdateDurableAgentRequest,
   UpdateAgentProfileRequest,
+  UpdateDurableAgentRequest,
   UserSettings,
   UtilityCallSummary,
   ValidateReflexRequest,
@@ -166,8 +165,7 @@ function hydrateTodo(raw: Record<string, unknown>): Todo {
       todo.metadata = {};
     }
   }
-  if (typeof todo.metadata !== "object" || todo.metadata === null)
-    todo.metadata = {};
+  if (typeof todo.metadata !== "object" || todo.metadata === null) todo.metadata = {};
   return todo;
 }
 
@@ -188,15 +186,12 @@ function hydratePlan(raw: Record<string, unknown>): Plan {
       plan.metadata = {};
     }
   }
-  if (typeof plan.metadata !== "object" || plan.metadata === null)
-    plan.metadata = {};
+  if (typeof plan.metadata !== "object" || plan.metadata === null) plan.metadata = {};
   return plan;
 }
 
 // Serialize structured fields back to JSON strings for the Go backend.
-function serializeTodoUpdates(
-  updates: Record<string, unknown>,
-): Record<string, unknown> {
+function serializeTodoUpdates(updates: Record<string, unknown>): Record<string, unknown> {
   const out = { ...updates };
   if (out.labels !== undefined && typeof out.labels !== "string")
     out.labels = JSON.stringify(out.labels);
@@ -205,9 +200,7 @@ function serializeTodoUpdates(
   return out;
 }
 
-function serializePlanPayload(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
+function serializePlanPayload(data: Record<string, unknown>): Record<string, unknown> {
   const out = { ...data };
   if (out.steps !== undefined && typeof out.steps !== "string")
     out.steps = JSON.stringify(out.steps);
@@ -232,50 +225,38 @@ async function readAPIError(res: Response, fallback: string): Promise<Error> {
 export const api = {
   getAgentInitialize: async (): Promise<AgentInitializeResponse> => {
     const res = await fetch(`${API_BASE}/agent/v1/initialize`);
-    if (!res.ok)
-      throw new Error(`Failed to get agent initialize: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent initialize: ${res.status}`);
     return res.json();
   },
 
   getAgentCapabilities: async (): Promise<AgentCapabilitiesResponse> => {
     const res = await fetch(`${API_BASE}/agent/v1/capabilities`);
-    if (!res.ok)
-      throw new Error(`Failed to get agent capabilities: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent capabilities: ${res.status}`);
     return res.json();
   },
 
-  createAgentSession: async (
-    data: AgentCreateSessionRequest,
-  ): Promise<AgentSessionResponse> => {
+  createAgentSession: async (data: AgentCreateSessionRequest): Promise<AgentSessionResponse> => {
     const res = await fetch(`${API_BASE}/agent/v1/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to create agent session: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to create agent session: ${res.status}`);
     return res.json();
   },
 
   getAgentSession: async (id: string): Promise<AgentSessionResponse> => {
     const res = await fetch(`${API_BASE}/agent/v1/sessions/${encodeURIComponent(id)}`);
-    if (!res.ok)
-      throw new Error(`Failed to get agent session: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent session: ${res.status}`);
     return res.json();
   },
 
-  sendAgentTurn: async (
-    id: string,
-    data: AgentTurnRequest,
-  ): Promise<AgentTurnResponse> => {
-    const res = await fetch(
-      `${API_BASE}/agent/v1/sessions/${encodeURIComponent(id)}/turns`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
+  sendAgentTurn: async (id: string, data: AgentTurnRequest): Promise<AgentTurnResponse> => {
+    const res = await fetch(`${API_BASE}/agent/v1/sessions/${encodeURIComponent(id)}/turns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
     if (!res.ok) throw new Error(`Failed to send agent turn: ${res.status}`);
     return res.json();
   },
@@ -316,11 +297,8 @@ export const api = {
   },
 
   getSessionDetails: async (id: string): Promise<SessionDetailsResponse> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${encodeURIComponent(id)}/details`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get session details: ${res.status}`);
+    const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(id)}/details`);
+    if (!res.ok) throw new Error(`Failed to get session details: ${res.status}`);
     return res.json();
   },
 
@@ -349,10 +327,7 @@ export const api = {
     return res.json();
   },
 
-  updateSession: async (
-    id: string,
-    data: Partial<Session>,
-  ): Promise<Session> => {
+  updateSession: async (id: string, data: Partial<Session>): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -362,10 +337,7 @@ export const api = {
     return res.json();
   },
 
-  forkSession: async (
-    id: string,
-    data: ForkSessionRequest,
-  ): Promise<Session> => {
+  forkSession: async (id: string, data: ForkSessionRequest): Promise<Session> => {
     const res = await fetch(`${API_BASE}/sessions/${id}/fork`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -436,9 +408,7 @@ export const api = {
    * the LLM stream + tool work instead of just closing the SSE
    * client-side (which would leave the BE generating wasted tokens).
    */
-  cancelChatStream: async (
-    sessionId: string,
-  ): Promise<"canceled" | "idle" | "error"> => {
+  cancelChatStream: async (sessionId: string): Promise<"canceled" | "idle" | "error"> => {
     try {
       const res = await fetch(`${API_BASE}/sessions/${sessionId}/chat/cancel`, {
         method: "POST",
@@ -468,19 +438,14 @@ export const api = {
     sessionId: string,
   ): Promise<"rebooted" | "no_active_agent" | "busy" | "error"> => {
     try {
-      const res = await fetch(
-        `${API_BASE}/sessions/${sessionId}/agent/reboot`,
-        {
-          method: "POST",
-        },
-      );
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/agent/reboot`, {
+        method: "POST",
+      });
       if (res.ok) {
         const body = (await res.json().catch(() => null)) as {
           status?: string;
         } | null;
-        return body?.status === "no_active_agent"
-          ? "no_active_agent"
-          : "rebooted";
+        return body?.status === "no_active_agent" ? "no_active_agent" : "rebooted";
       }
       if (res.status === 409) return "busy";
       return "error";
@@ -495,9 +460,7 @@ export const api = {
    * resuming prior context — distinct from rebootSessionAgent (which boots
    * fresh). BE: POST /api/sessions/{id}/recover (no body).
    */
-  recoverSession: async (
-    sessionId: string,
-  ): Promise<"recovered" | "busy" | "error"> => {
+  recoverSession: async (sessionId: string): Promise<"recovered" | "busy" | "error"> => {
     try {
       const res = await fetch(`${API_BASE}/sessions/${sessionId}/recover`, {
         method: "POST",
@@ -530,23 +493,18 @@ export const api = {
     sessionId: string,
     token: string,
   ): Promise<"canceled" | "stale" | "error"> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/recovery/cancel`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      },
-    );
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/recovery/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
     if (res.ok) return "canceled";
     if (res.status === 404) return "stale";
     return "error";
   },
 
   getMessages: async (sessionId: string, limit = 50): Promise<Message[]> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/messages?limit=${limit}`,
-    );
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?limit=${limit}`);
     if (!res.ok) throw new Error(`Failed to get messages: ${res.status}`);
     const page = (await res.json()) as MessagePage | Message[];
     // Backend now returns MessagePage; handle both shapes for safety.
@@ -554,16 +512,10 @@ export const api = {
     return page.messages;
   },
 
-  getMessagePage: async (
-    sessionId: string,
-    limit = 50,
-    offset?: number,
-  ): Promise<MessagePage> => {
+  getMessagePage: async (sessionId: string, limit = 50, offset?: number): Promise<MessagePage> => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (offset !== undefined) params.set("offset", String(offset));
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/messages?${params}`,
-    );
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?${params}`);
     if (!res.ok) throw new Error(`Failed to get messages: ${res.status}`);
     return res.json();
   },
@@ -579,20 +531,14 @@ export const api = {
       before: String(before),
       after: String(after),
     });
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/messages?${params}`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get messages around: ${res.status}`);
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages?${params}`);
+    if (!res.ok) throw new Error(`Failed to get messages around: ${res.status}`);
     return res.json();
   },
 
   getSessionPluginEnvelopes: async (sessionId: string): Promise<Envelope[]> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/plugin-envelopes`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get session plugin envelopes: ${res.status}`);
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/plugin-envelopes`);
+    if (!res.ok) throw new Error(`Failed to get session plugin envelopes: ${res.status}`);
     return res.json();
   },
 
@@ -618,9 +564,7 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create project: ${res.status}`);
     }
     return res.json();
@@ -647,23 +591,16 @@ export const api = {
   },
 
   listAgentKnownTools: async (agentId: string): Promise<AgentKnownTool[]> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list agent known tools: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools`);
+    if (!res.ok) throw new Error(`Failed to list agent known tools: ${res.status}`);
     return res.json();
   },
 
-  getAgentKnownTool: async (
-    agentId: string,
-    toolName: string,
-  ): Promise<AgentKnownTool> => {
+  getAgentKnownTool: async (agentId: string, toolName: string): Promise<AgentKnownTool> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools/${encodeURIComponent(toolName)}`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to get agent known tool: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent known tool: ${res.status}`);
     return res.json();
   },
 
@@ -671,16 +608,12 @@ export const api = {
     agentId: string,
     data: AgentKnownToolUpsertRequest,
   ): Promise<AgentKnownTool> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to create agent known tool: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to create agent known tool: ${res.status}`);
     return res.json();
   },
 
@@ -697,44 +630,32 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to update agent known tool: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to update agent known tool: ${res.status}`);
     return res.json();
   },
 
-  deleteAgentKnownTool: async (
-    agentId: string,
-    toolName: string,
-  ): Promise<{ status: string }> => {
+  deleteAgentKnownTool: async (agentId: string, toolName: string): Promise<{ status: string }> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-tools/${encodeURIComponent(toolName)}`,
       {
         method: "DELETE",
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent known tool: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to delete agent known tool: ${res.status}`);
     return res.json();
   },
 
   listAgentKnownSkills: async (agentId: string): Promise<AgentKnownSkill[]> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list agent known skills: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills`);
+    if (!res.ok) throw new Error(`Failed to list agent known skills: ${res.status}`);
     return res.json();
   },
 
-  getAgentKnownSkill: async (
-    agentId: string,
-    skillName: string,
-  ): Promise<AgentKnownSkill> => {
+  getAgentKnownSkill: async (agentId: string, skillName: string): Promise<AgentKnownSkill> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills/${encodeURIComponent(skillName)}`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to get agent known skill: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent known skill: ${res.status}`);
     return res.json();
   },
 
@@ -742,16 +663,12 @@ export const api = {
     agentId: string,
     data: AgentKnownSkillUpsertRequest,
   ): Promise<AgentKnownSkill> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to create agent known skill: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/known-skills`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to create agent known skill: ${res.status}`);
     return res.json();
   },
 
@@ -768,8 +685,7 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to update agent known skill: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to update agent known skill: ${res.status}`);
     return res.json();
   },
 
@@ -783,29 +699,21 @@ export const api = {
         method: "DELETE",
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent known skill: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to delete agent known skill: ${res.status}`);
     return res.json();
   },
 
   listAgentProcedures: async (agentId: string): Promise<AgentProcedure[]> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list agent procedures: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures`);
+    if (!res.ok) throw new Error(`Failed to list agent procedures: ${res.status}`);
     return res.json();
   },
 
-  getAgentProcedure: async (
-    agentId: string,
-    name: string,
-  ): Promise<AgentProcedure> => {
+  getAgentProcedure: async (agentId: string, name: string): Promise<AgentProcedure> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures/${encodeURIComponent(name)}`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to get agent procedure: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent procedure: ${res.status}`);
     return res.json();
   },
 
@@ -813,16 +721,12 @@ export const api = {
     agentId: string,
     data: AgentProcedureUpsertRequest,
   ): Promise<AgentProcedure> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to create agent procedure: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to create agent procedure: ${res.status}`);
     return res.json();
   },
 
@@ -839,46 +743,32 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to update agent procedure: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to update agent procedure: ${res.status}`);
     return res.json();
   },
 
-  deleteAgentProcedure: async (
-    agentId: string,
-    name: string,
-  ): Promise<{ status: string }> => {
+  deleteAgentProcedure: async (agentId: string, name: string): Promise<{ status: string }> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/procedures/${encodeURIComponent(name)}`,
       {
         method: "DELETE",
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent procedure: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to delete agent procedure: ${res.status}`);
     return res.json();
   },
 
-  listAgentKnowledgeSeeds: async (
-    agentId: string,
-  ): Promise<AgentKnowledgeSeed[]> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list agent knowledge seeds: ${res.status}`);
+  listAgentKnowledgeSeeds: async (agentId: string): Promise<AgentKnowledgeSeed[]> => {
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds`);
+    if (!res.ok) throw new Error(`Failed to list agent knowledge seeds: ${res.status}`);
     return res.json();
   },
 
-  getAgentKnowledgeSeed: async (
-    agentId: string,
-    seedKey: string,
-  ): Promise<AgentKnowledgeSeed> => {
+  getAgentKnowledgeSeed: async (agentId: string, seedKey: string): Promise<AgentKnowledgeSeed> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds/${encodeURIComponent(seedKey)}`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to get agent knowledge seed: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent knowledge seed: ${res.status}`);
     return res.json();
   },
 
@@ -886,16 +776,12 @@ export const api = {
     agentId: string,
     data: AgentKnowledgeSeedUpsertRequest,
   ): Promise<AgentKnowledgeSeed> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to create agent knowledge seed: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/knowledge-seeds`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to create agent knowledge seed: ${res.status}`);
     return res.json();
   },
 
@@ -912,8 +798,7 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to update agent knowledge seed: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to update agent knowledge seed: ${res.status}`);
     return res.json();
   },
 
@@ -927,8 +812,7 @@ export const api = {
         method: "DELETE",
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent knowledge seed: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to delete agent knowledge seed: ${res.status}`);
     return res.json();
   },
 
@@ -942,19 +826,13 @@ export const api = {
         method: "POST",
       },
     );
-    if (!res.ok)
-      throw new Error(
-        `Failed to mark agent knowledge seed applied: ${res.status}`,
-      );
+    if (!res.ok) throw new Error(`Failed to mark agent knowledge seed applied: ${res.status}`);
     return res.json();
   },
 
   listAgentReflexes: async (agentId: string): Promise<AgentReflexRow[]> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list agent reflexes: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes`);
+    if (!res.ok) throw new Error(`Failed to list agent reflexes: ${res.status}`);
     return res.json();
   },
 
@@ -962,16 +840,12 @@ export const api = {
     agentId: string,
     data: CreateAgentReflexRequest,
   ): Promise<AgentReflexRow> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to create agent reflex: ${res.status}`);
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/reflexes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to create agent reflex: ${res.status}`);
     return res.json();
   },
 
@@ -988,8 +862,7 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to update agent reflex: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to update agent reflex: ${res.status}`);
     return res.json();
   },
 
@@ -1003,14 +876,11 @@ export const api = {
         method: "DELETE",
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to delete agent reflex: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to delete agent reflex: ${res.status}`);
     return res.json();
   },
 
-  validateReflex: async (
-    data: ValidateReflexRequest,
-  ): Promise<ValidateReflexResponse> => {
+  validateReflex: async (data: ValidateReflexRequest): Promise<ValidateReflexResponse> => {
     const res = await fetch(`${API_BASE}/reflexes/validate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1023,8 +893,7 @@ export const api = {
   listPendingReflexes: async (status?: string): Promise<PendingReflexRow[]> => {
     const qs = status ? `?status=${encodeURIComponent(status)}` : "";
     const res = await fetch(`${API_BASE}/pending/reflexes${qs}`);
-    if (!res.ok)
-      throw new Error(`Failed to list pending reflexes: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list pending reflexes: ${res.status}`);
     return res.json();
   },
 
@@ -1040,8 +909,7 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to approve pending reflex: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to approve pending reflex: ${res.status}`);
     return res.json();
   },
 
@@ -1057,21 +925,17 @@ export const api = {
         body: JSON.stringify(data),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to reject pending reflex: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to reject pending reflex: ${res.status}`);
     return res.json();
   },
 
-  createAgentProfile: async (
-    data: CreateAgentProfileRequest,
-  ): Promise<AgentProfile> => {
+  createAgentProfile: async (data: CreateAgentProfileRequest): Promise<AgentProfile> => {
     const res = await fetch(`${API_BASE}/agents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to create agent profile: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to create agent profile: ${res.status}`);
     return res.json();
   },
 
@@ -1086,11 +950,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to update agent profile: ${res.status}`,
-      );
+    if (!res.ok) throw await readAPIError(res, `Failed to update agent profile: ${res.status}`);
     return res.json();
   },
 
@@ -1102,21 +962,17 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to dry-run agent builder request: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to dry-run agent builder request: ${res.status}`);
     return res.json();
   },
 
-  agentBuilderDraft: async (
-    data: AgentBuilderDraftRequest,
-  ): Promise<AgentBuilderDraftResponse> => {
+  agentBuilderDraft: async (data: AgentBuilderDraftRequest): Promise<AgentBuilderDraftResponse> => {
     const res = await fetch(`${API_BASE}/agent-builder/draft`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to draft agent builder config: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to draft agent builder config: ${res.status}`);
     return res.json();
   },
 
@@ -1128,92 +984,62 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to review agent builder config: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to review agent builder config: ${res.status}`);
     return res.json();
   },
 
   // Delete a managed agent (file + DB + children). Non-managed agents → 409
   // with an `agent_not_managed` body; surface the BE message to the user.
-  deleteAgentProfile: async (
-    id: string,
-  ): Promise<{ status: string; slug?: string }> => {
+  deleteAgentProfile: async (id: string): Promise<{ status: string; slug?: string }> => {
     const res = await fetch(`${API_BASE}/agents/${id}`, { method: "DELETE" });
-    if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to delete agent profile: ${res.status}`,
-      );
+    if (!res.ok) throw await readAPIError(res, `Failed to delete agent profile: ${res.status}`);
     return res.json();
   },
 
   // Fork a read-only (plugin/external) agent into an editable managed copy with
   // a NEW slug (`<slug>-copy`) and identity. Already-managed → 409.
   copyAgentToManaged: async (id: string): Promise<AgentProfile> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(id)}/copy-to-managed`,
-      { method: "POST" },
-    );
-    if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to copy agent to managed: ${res.status}`,
-      );
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(id)}/copy-to-managed`, {
+      method: "POST",
+    });
+    if (!res.ok) throw await readAPIError(res, `Failed to copy agent to managed: ${res.status}`);
     return res.json();
   },
 
   // Start surface and durable-agent control plane
-  getStartSurfaceCapabilities:
-    async (): Promise<StartSurfaceCapabilitiesResponse> => {
-      const res = await fetch(`${API_BASE}/start-surface/capabilities`);
-      if (!res.ok)
-        throw new Error(
-          `Failed to get start surface capabilities: ${res.status}`,
-        );
-      return res.json();
-    },
+  getStartSurfaceCapabilities: async (): Promise<StartSurfaceCapabilitiesResponse> => {
+    const res = await fetch(`${API_BASE}/start-surface/capabilities`);
+    if (!res.ok) throw new Error(`Failed to get start surface capabilities: ${res.status}`);
+    return res.json();
+  },
 
-  listDurableAgents: async (
-    includeArchived = false,
-  ): Promise<DurableAgentInstance[]> => {
+  listDurableAgents: async (includeArchived = false): Promise<DurableAgentInstance[]> => {
     const qs = includeArchived ? "?include_archived=true" : "";
     const res = await fetch(`${API_BASE}/durable-agents${qs}`);
-    if (!res.ok)
-      throw new Error(`Failed to list durable agents: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list durable agents: ${res.status}`);
     return res.json();
   },
 
   getDurableAgent: async (id: string): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}`,
-    );
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}`);
     if (!res.ok) throw new Error(`Failed to get durable agent: ${res.status}`);
     return res.json();
   },
 
-  listDurableAgentEvents: async (
-    id: string,
-    limit?: number,
-  ): Promise<DurableAgentEvent[]> => {
+  listDurableAgentEvents: async (id: string, limit?: number): Promise<DurableAgentEvent[]> => {
     const qs = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/events${qs}`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list durable agent events: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/events${qs}`);
+    if (!res.ok) throw new Error(`Failed to list durable agent events: ${res.status}`);
     return res.json();
   },
 
-  createDurableAgent: async (
-    data: CreateDurableAgentRequest,
-  ): Promise<DurableAgentInstance> => {
+  createDurableAgent: async (data: CreateDurableAgentRequest): Promise<DurableAgentInstance> => {
     const res = await fetch(`${API_BASE}/durable-agents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to create durable agent: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to create durable agent: ${res.status}`);
     return res.json();
   },
 
@@ -1221,107 +1047,62 @@ export const api = {
     id: string,
     data: UpdateDurableAgentRequest,
   ): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to update durable agent: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to update durable agent: ${res.status}`);
     return res.json();
   },
 
   archiveDurableAgent: async (id: string): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/archive`,
-      {
-        method: "POST",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to archive durable agent: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(`Failed to archive durable agent: ${res.status}`);
     return res.json();
   },
 
-  requestDurableAgentStart: async (
-    id: string,
-  ): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/start-request`,
-      {
-        method: "POST",
-      },
-    );
+  requestDurableAgentStart: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/start-request`, {
+      method: "POST",
+    });
     if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to request durable agent start: ${res.status}`,
-      );
+      throw await readAPIError(res, `Failed to request durable agent start: ${res.status}`);
     return res.json();
   },
 
-  requestDurableAgentStop: async (
-    id: string,
-  ): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/stop-request`,
-      {
-        method: "POST",
-      },
-    );
+  requestDurableAgentStop: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/stop-request`, {
+      method: "POST",
+    });
     if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to request durable agent stop: ${res.status}`,
-      );
+      throw await readAPIError(res, `Failed to request durable agent stop: ${res.status}`);
     return res.json();
   },
 
-  requestDurableAgentPause: async (
-    id: string,
-  ): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/pause-request`,
-      {
-        method: "POST",
-      },
-    );
+  requestDurableAgentPause: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/pause-request`, {
+      method: "POST",
+    });
     if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to request durable agent pause: ${res.status}`,
-      );
+      throw await readAPIError(res, `Failed to request durable agent pause: ${res.status}`);
     return res.json();
   },
 
-  requestDurableAgentResume: async (
-    id: string,
-  ): Promise<DurableAgentInstance> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/resume-request`,
-      {
-        method: "POST",
-      },
-    );
+  requestDurableAgentResume: async (id: string): Promise<DurableAgentInstance> => {
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/resume-request`, {
+      method: "POST",
+    });
     if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to request durable agent resume: ${res.status}`,
-      );
+      throw await readAPIError(res, `Failed to request durable agent resume: ${res.status}`);
     return res.json();
   },
 
-  getDurableAgentLaunchPlan: async (
-    id: string,
-  ): Promise<DurableAgentLaunchPlan> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/launch-plan`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get durable agent launch plan: ${res.status}`);
+  getDurableAgentLaunchPlan: async (id: string): Promise<DurableAgentLaunchPlan> => {
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/launch-plan`);
+    if (!res.ok) throw new Error(`Failed to get durable agent launch plan: ${res.status}`);
     return res.json();
   },
 
@@ -1329,19 +1110,12 @@ export const api = {
     id: string,
     data: DurableAgentStartRequest,
   ): Promise<DurableAgentLaunchResult> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/start`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to start durable agent: ${res.status}`,
-      );
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw await readAPIError(res, `Failed to start durable agent: ${res.status}`);
     return res.json();
   },
 
@@ -1349,99 +1123,69 @@ export const api = {
     id: string,
     data: DurableAgentStartRequest,
   ): Promise<DurableAgentLaunchResult> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/resume`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw await readAPIError(
-        res,
-        `Failed to resume durable agent: ${res.status}`,
-      );
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw await readAPIError(res, `Failed to resume durable agent: ${res.status}`);
     return res.json();
   },
 
-  listDurableAgentSessions: async (
-    id: string,
-  ): Promise<DurableAgentSessionAttachmentState[]> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/sessions`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list durable agent sessions: ${res.status}`);
+  listDurableAgentSessions: async (id: string): Promise<DurableAgentSessionAttachmentState[]> => {
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/sessions`);
+    if (!res.ok) throw new Error(`Failed to list durable agent sessions: ${res.status}`);
     return res.json();
   },
 
   listDurableAgentSchedules: async (id: string): Promise<AgentSchedule[]> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to list durable agent schedules: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules`);
+    if (!res.ok) throw new Error(`Failed to list durable agent schedules: ${res.status}`);
     return res.json();
   },
 
-  pauseDurableAgentSchedule: async (
-    id: string,
-    scheduleId: string,
-  ): Promise<void> => {
+  pauseDurableAgentSchedule: async (id: string, scheduleId: string): Promise<void> => {
     const res = await fetch(
       `${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules/${encodeURIComponent(scheduleId)}/pause`,
       { method: "POST" },
     );
-    if (!res.ok)
-      throw new Error(`Failed to pause durable agent schedule: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to pause durable agent schedule: ${res.status}`);
   },
 
-  resumeDurableAgentSchedule: async (
-    id: string,
-    scheduleId: string,
-  ): Promise<void> => {
+  resumeDurableAgentSchedule: async (id: string, scheduleId: string): Promise<void> => {
     const res = await fetch(
       `${API_BASE}/durable-agents/${encodeURIComponent(id)}/schedules/${encodeURIComponent(scheduleId)}/resume`,
       { method: "POST" },
     );
-    if (!res.ok)
-      throw new Error(`Failed to resume durable agent schedule: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to resume durable agent schedule: ${res.status}`);
   },
 
   wakeDurableAgent: async (
     id: string,
     data: DurableAgentStartRequest,
   ): Promise<DurableAgentWakeResult> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/wake`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/wake`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
     if (!res.ok) throw new Error(`Failed to wake durable agent: ${res.status}`);
     return res.json();
   },
 
   listDurableAgentDueWake: async (): Promise<DurableAgentWakeDueItem[]> => {
     const res = await fetch(`${API_BASE}/durable-agent-wake/due`);
-    if (!res.ok)
-      throw new Error(`Failed to list due durable wakes: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list due durable wakes: ${res.status}`);
     return res.json();
   },
 
-  runDurableAgentDueWake: async (
-    dryRun = false,
-  ): Promise<DurableAgentWakeRunResult> => {
+  runDurableAgentDueWake: async (dryRun = false): Promise<DurableAgentWakeRunResult> => {
     const res = await fetch(`${API_BASE}/durable-agent-wake/run-due`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dry_run: dryRun }),
     });
-    if (!res.ok)
-      throw new Error(`Failed to run due durable wakes: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to run due durable wakes: ${res.status}`);
     return res.json();
   },
 
@@ -1449,31 +1193,23 @@ export const api = {
     id: string,
     data: AttachDurableAgentSessionRequest,
   ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agents/${encodeURIComponent(id)}/sessions`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to attach durable agent session: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agents/${encodeURIComponent(id)}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to attach durable agent session: ${res.status}`);
   },
 
   listDurableAgentRecipes: async (): Promise<DurableAgentRecipe[]> => {
     const res = await fetch(`${API_BASE}/durable-agent-recipes`);
-    if (!res.ok)
-      throw new Error(`Failed to list durable agent recipes: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list durable agent recipes: ${res.status}`);
     return res.json();
   },
 
   getDurableAgentRecipe: async (id: string): Promise<DurableAgentRecipe> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get durable agent recipe: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`Failed to get durable agent recipe: ${res.status}`);
     return res.json();
   },
 
@@ -1481,16 +1217,12 @@ export const api = {
     id: string,
     data: DurableAgentRecipeRequest,
   ): Promise<DurableAgentRecipePlan> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}/dry-run`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to dry-run durable agent recipe: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}/dry-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to dry-run durable agent recipe: ${res.status}`);
     return res.json();
   },
 
@@ -1498,16 +1230,12 @@ export const api = {
     id: string,
     data: DurableAgentRecipeRequest,
   ): Promise<DurableAgentRecipeApplyResult> => {
-    const res = await fetch(
-      `${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}/apply`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to apply durable agent recipe: ${res.status}`);
+    const res = await fetch(`${API_BASE}/durable-agent-recipes/${encodeURIComponent(id)}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to apply durable agent recipe: ${res.status}`);
     return res.json();
   },
 
@@ -1561,8 +1289,7 @@ export const api = {
       ? `?exclude_session_id=${encodeURIComponent(excludeSessionId)}`
       : "";
     const res = await fetch(`${API_BASE}/projects/${projectId}/artifacts${qs}`);
-    if (!res.ok)
-      throw new Error(`Failed to list project artifacts: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list project artifacts: ${res.status}`);
     return res.json();
   },
 
@@ -1631,18 +1358,12 @@ export const api = {
     return data.prompt ?? "";
   },
 
-  setSessionContextPrompt: async (
-    sessionId: string,
-    prompt: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/context-prompt`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
-      },
-    );
+  setSessionContextPrompt: async (sessionId: string, prompt: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-prompt`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
     if (!res.ok) throw new Error(`Failed to set context prompt: ${res.status}`);
   },
 
@@ -1699,8 +1420,7 @@ export const api = {
   },
   listProviderStatuses: async (): Promise<ProviderStatus[]> => {
     const res = await fetch(`${API_BASE}/providers/status`);
-    if (!res.ok)
-      throw new Error(`Failed to list provider statuses: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list provider statuses: ${res.status}`);
     return res.json();
   },
   updateProvider: async (
@@ -1765,9 +1485,7 @@ export const api = {
     return res.json();
   },
 
-  updateSettings: async (
-    data: Partial<UserSettings>,
-  ): Promise<UserSettings> => {
+  updateSettings: async (data: Partial<UserSettings>): Promise<UserSettings> => {
     const res = await fetch(`${API_BASE}/settings`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1777,12 +1495,9 @@ export const api = {
     return res.json();
   },
 
-  listEmbeddingProviders: async (): Promise<
-    import("./types").EmbeddingProviderInfo[]
-  > => {
+  listEmbeddingProviders: async (): Promise<import("./types").EmbeddingProviderInfo[]> => {
     const res = await fetch(`${API_BASE}/settings/embedding/providers`);
-    if (!res.ok)
-      throw new Error(`Failed to list embedding providers: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list embedding providers: ${res.status}`);
     const body = await res.json();
     return body.providers ?? [];
   },
@@ -1790,8 +1505,7 @@ export const api = {
   // Session Agents
   listSessionAgents: async (sessionId: string): Promise<SessionAgent[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents`);
-    if (!res.ok)
-      throw new Error(`Failed to list session agents: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list session agents: ${res.status}`);
     return res.json();
   },
 
@@ -1805,23 +1519,15 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agent_id: agentId, role }),
     });
-    if (!res.ok)
-      throw new Error(`Failed to add agent to session: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to add agent to session: ${res.status}`);
     return res.json();
   },
 
-  removeSessionAgent: async (
-    sessionId: string,
-    agentId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/agents/${agentId}`,
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to remove agent from session: ${res.status}`);
+  removeSessionAgent: async (sessionId: string, agentId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/agents/${agentId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`Failed to remove agent from session: ${res.status}`);
   },
 
   // Token Usage
@@ -1838,40 +1544,33 @@ export const api = {
   },
 
   getContextBreakdown: async (sessionId: string): Promise<ContextBreakdown> => {
-    const res = await fetch(
-      `${API_BASE}/sessions/${sessionId}/context-breakdown`,
-    );
-    if (!res.ok)
-      throw new Error(`Failed to get context breakdown: ${res.status}`);
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-breakdown`);
+    if (!res.ok) throw new Error(`Failed to get context breakdown: ${res.status}`);
     return res.json();
   },
 
   // Execution Metrics
   getSessionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`);
-    if (!res.ok)
-      throw new Error(`Failed to get session metrics: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get session metrics: ${res.status}`);
     return res.json();
   },
 
   getRecentExecutions: async (limit = 50): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/metrics/executions?limit=${limit}`);
-    if (!res.ok)
-      throw new Error(`Failed to get recent executions: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get recent executions: ${res.status}`);
     return res.json();
   },
 
   getUtilityCallSummary: async (): Promise<UtilityCallSummary[]> => {
     const res = await fetch(`${API_BASE}/metrics/utility`);
-    if (!res.ok)
-      throw new Error(`Failed to get utility call summary: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get utility call summary: ${res.status}`);
     return res.json();
   },
 
   getUtilityCallLog: async (limit = 50): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/metrics/utility/log?limit=${limit}`);
-    if (!res.ok)
-      throw new Error(`Failed to get utility call log: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get utility call log: ${res.status}`);
     return res.json();
   },
 
@@ -1886,8 +1585,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/processes/kill-stale`, {
       method: "POST",
     });
-    if (!res.ok)
-      throw new Error(`Failed to kill stale processes: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to kill stale processes: ${res.status}`);
     return res.json();
   },
 
@@ -1918,9 +1616,7 @@ export const api = {
 
   updateSkill: async (
     id: string,
-    data: Partial<
-      Omit<Skill, "id" | "created_at" | "updated_at" | "is_builtin">
-    >,
+    data: Partial<Omit<Skill, "id" | "created_at" | "updated_at" | "is_builtin">>,
   ): Promise<Skill> => {
     const res = await fetch(`${API_BASE}/skills/${id}`, {
       method: "PUT",
@@ -1959,35 +1655,26 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to assign skill to agent: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to assign skill to agent: ${res.status}`);
     return res.json();
   },
 
-  removeSkillFromAgent: async (
-    agentId: string,
-    skillId: string,
-  ): Promise<void> => {
+  removeSkillFromAgent: async (agentId: string, skillId: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/skills/${skillId}`, {
       method: "DELETE",
     });
-    if (!res.ok)
-      throw new Error(`Failed to remove skill from agent: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to remove skill from agent: ${res.status}`);
   },
 
   // Agent skill grant/approval — the real capability gate. Distinct from
   // assignSkillToAgent/removeSkillFromAgent above, which only manage bare
   // (agent_id, skill_name) row existence. See docs/adding-an-agent.md
   // "Skills: a catalog entry is not a grant."
-  getAgentSkillGrant: async (
-    agentId: string,
-    slug: string,
-  ): Promise<AgentSkillGrantView> => {
+  getAgentSkillGrant: async (agentId: string, slug: string): Promise<AgentSkillGrantView> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}/grant`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to get agent skill grant: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get agent skill grant: ${res.status}`);
     return res.json();
   },
 
@@ -2005,33 +1692,25 @@ export const api = {
       },
     );
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to grant agent skill: ${res.status}`);
     }
     return res.json();
   },
 
-  revokeAgentSkillGrant: async (
-    agentId: string,
-    slug: string,
-  ): Promise<{ status: string }> => {
+  revokeAgentSkillGrant: async (agentId: string, slug: string): Promise<{ status: string }> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}/grant`,
       { method: "DELETE" },
     );
-    if (!res.ok)
-      throw new Error(`Failed to revoke agent skill grant: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to revoke agent skill grant: ${res.status}`);
     return res.json();
   },
 
   // Agent tool grants (agent_tools) — the real, sole tool-execution gate.
   // See docs/adding-an-agent.md "Tools: a grant, not a declaration."
   listAgentTools: async (agentId: string): Promise<AgentToolItem[]> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/tools`,
-    );
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/tools`);
     if (!res.ok) throw new Error(`Failed to list agent tools: ${res.status}`);
     return res.json();
   },
@@ -2040,27 +1719,19 @@ export const api = {
     agentId: string,
     data: GrantAgentToolRequest,
   ): Promise<{ tool_names: string[] }> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${encodeURIComponent(agentId)}/tools`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      },
-    );
+    const res = await fetch(`${API_BASE}/agents/${encodeURIComponent(agentId)}/tools`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to grant agent tool: ${res.status}`);
     }
     return res.json();
   },
 
-  revokeAgentTool: async (
-    agentId: string,
-    toolId: string,
-  ): Promise<{ status: string }> => {
+  revokeAgentTool: async (agentId: string, toolId: string): Promise<{ status: string }> => {
     const res = await fetch(
       `${API_BASE}/agents/${encodeURIComponent(agentId)}/tools/${encodeURIComponent(toolId)}`,
       { method: "DELETE" },
@@ -2083,12 +1754,8 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to create backlog item: ${res.status}`,
-      );
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to create backlog item: ${res.status}`);
     }
     return res.json();
   },
@@ -2140,9 +1807,7 @@ export const api = {
       body: JSON.stringify(config),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to add MCP server: ${res.status}`);
     }
     return res.json();
@@ -2152,69 +1817,48 @@ export const api = {
     name: string,
     config: Partial<MCPServerConfig>,
   ): Promise<MCPServerConfig> => {
-    const res = await fetch(
-      `${API_BASE}/mcp-servers/${encodeURIComponent(name)}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-      },
-    );
+    const res = await fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to update MCP server: ${res.status}`,
-      );
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update MCP server: ${res.status}`);
     }
     return res.json();
   },
 
   deleteMCPServer: async (name: string): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/mcp-servers/${encodeURIComponent(name)}`,
-      {
-        method: "DELETE",
-      },
-    );
+    const res = await fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete MCP server: ${res.status}`);
   },
 
-  importMCPServers: async (
-    json: string,
-  ): Promise<{ created: string[]; skipped: string[] }> => {
+  importMCPServers: async (json: string): Promise<{ created: string[]; skipped: string[] }> => {
     const res = await fetch(`${API_BASE}/mcp-servers/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: json,
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to import MCP servers: ${res.status}`,
-      );
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to import MCP servers: ${res.status}`);
     }
     return res.json();
   },
 
   // Tool Load Preferences
-  fetchAllToolsWithLoadType: async (): Promise<
-    import("./types").ToolLoadItem[]
-  > => {
+  fetchAllToolsWithLoadType: async (): Promise<import("./types").ToolLoadItem[]> => {
     const res = await fetch(`${API_BASE}/tools/all`);
     if (!res.ok) throw new Error(`Failed to fetch tools: ${res.status}`);
     return res.json();
   },
 
-  fetchToolLoadPreferences: async (): Promise<
-    import("./types").ToolLoadPreferences
-  > => {
+  fetchToolLoadPreferences: async (): Promise<import("./types").ToolLoadPreferences> => {
     const res = await fetch(`${API_BASE}/tools/load-preferences`);
-    if (!res.ok)
-      throw new Error(`Failed to fetch load preferences: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to fetch load preferences: ${res.status}`);
     return res.json();
   },
 
@@ -2227,12 +1871,8 @@ export const api = {
       body: JSON.stringify(updates),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to update load preferences: ${res.status}`,
-      );
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update load preferences: ${res.status}`);
     }
     return res.json();
   },
@@ -2247,9 +1887,7 @@ export const api = {
   getFragmentsSprints: async (
     projectId?: string,
   ): Promise<{ items: FragmentsSprint[]; count: number }> => {
-    const params = projectId
-      ? `?project_id=${encodeURIComponent(projectId)}`
-      : "";
+    const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const res = await fetch(`${API_BASE}/plugins/engine/sprints${params}`);
     if (!res.ok) throw new Error(`Failed to list sprints: ${res.status}`);
     return res.json();
@@ -2265,9 +1903,7 @@ export const api = {
     if (status) params.set("status", status);
     if (projectId) params.set("project_id", projectId);
     const qs = params.toString();
-    const res = await fetch(
-      `${API_BASE}/plugins/engine/tasks${qs ? `?${qs}` : ""}`,
-    );
+    const res = await fetch(`${API_BASE}/plugins/engine/tasks${qs ? `?${qs}` : ""}`);
     if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`);
     return res.json();
   },
@@ -2275,18 +1911,13 @@ export const api = {
   getFragmentsBacklog: async (
     projectId?: string,
   ): Promise<{ items: FragmentsBacklogItem[]; count: number }> => {
-    const params = projectId
-      ? `?project_id=${encodeURIComponent(projectId)}`
-      : "";
+    const params = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const res = await fetch(`${API_BASE}/plugins/engine/backlog${params}`);
     if (!res.ok) throw new Error(`Failed to list backlog: ${res.status}`);
     return res.json();
   },
 
-  transitionFragmentsTask: async (
-    id: string,
-    status: string,
-  ): Promise<unknown> => {
+  transitionFragmentsTask: async (id: string, status: string): Promise<unknown> => {
     const res = await fetch(
       `${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}/transition`,
       {
@@ -2300,12 +1931,9 @@ export const api = {
   },
 
   deleteFragmentsTask: async (id: string): Promise<unknown> => {
-    const res = await fetch(
-      `${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}`,
-      {
-        method: "DELETE",
-      },
-    );
+    const res = await fetch(`${API_BASE}/plugins/engine/tasks/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`);
     return res.json();
   },
@@ -2340,9 +1968,7 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create todo: ${res.status}`);
     }
     return hydrateTodo(await res.json());
@@ -2357,18 +1983,13 @@ export const api = {
   updateTodo: async (
     id: string,
     updates: Partial<
-      Pick<
-        Todo,
-        "title" | "description" | "status" | "priority" | "labels" | "metadata"
-      >
+      Pick<Todo, "title" | "description" | "status" | "priority" | "labels" | "metadata">
     >,
   ): Promise<Todo> => {
     const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        serializeTodoUpdates(updates as Record<string, unknown>),
-      ),
+      body: JSON.stringify(serializeTodoUpdates(updates as Record<string, unknown>)),
     });
     if (!res.ok) throw new Error(`Failed to update todo: ${res.status}`);
     return hydrateTodo(await res.json());
@@ -2388,33 +2009,24 @@ export const api = {
     scopeId: string,
     projectId?: string,
   ): Promise<Todo> => {
-    const res = await fetch(
-      `${API_BASE}/todos/${encodeURIComponent(id)}/scope`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope,
-          scope_id: scopeId,
-          project_id: projectId ?? "",
-        }),
-      },
-    );
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/scope`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope,
+        scope_id: scopeId,
+        project_id: projectId ?? "",
+      }),
+    });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to update todo scope: ${res.status}`,
-      );
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update todo scope: ${res.status}`);
     }
     return hydrateTodo(await res.json());
   },
 
   listTodoChildren: async (id: string): Promise<Todo[]> => {
-    const res = await fetch(
-      `${API_BASE}/todos/${encodeURIComponent(id)}/children`,
-    );
+    const res = await fetch(`${API_BASE}/todos/${encodeURIComponent(id)}/children`);
     if (!res.ok) throw new Error(`Failed to list todo children: ${res.status}`);
     const todos = await res.json();
     return todos.map(hydrateTodo);
@@ -2444,14 +2056,10 @@ export const api = {
     const res = await fetch(`${API_BASE}/plans`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        serializePlanPayload(data as Record<string, unknown>),
-      ),
+      body: JSON.stringify(serializePlanPayload(data as Record<string, unknown>)),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create plan: ${res.status}`);
     }
     return hydratePlan(await res.json());
@@ -2465,16 +2073,12 @@ export const api = {
 
   updatePlan: async (
     id: string,
-    updates: Partial<
-      Pick<Plan, "title" | "description" | "status" | "steps" | "metadata">
-    >,
+    updates: Partial<Pick<Plan, "title" | "description" | "status" | "steps" | "metadata">>,
   ): Promise<Plan> => {
     const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        serializePlanPayload(updates as Record<string, unknown>),
-      ),
+      body: JSON.stringify(serializePlanPayload(updates as Record<string, unknown>)),
     });
     if (!res.ok) throw new Error(`Failed to update plan: ${res.status}`);
     return hydratePlan(await res.json());
@@ -2505,18 +2109,13 @@ export const api = {
   },
 
   approvePlan: async (id: string, createTodos = true): Promise<Plan> => {
-    const res = await fetch(
-      `${API_BASE}/plans/${encodeURIComponent(id)}/approve`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ create_todos: createTodos }),
-      },
-    );
+    const res = await fetch(`${API_BASE}/plans/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ create_todos: createTodos }),
+    });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to approve plan: ${res.status}`);
     }
     return hydratePlan(await res.json());
@@ -2542,12 +2141,9 @@ export const api = {
   },
 
   cancelWorker: async (id: string): Promise<{ status: string }> => {
-    const res = await fetch(
-      `${API_BASE}/workers/${encodeURIComponent(id)}/cancel`,
-      {
-        method: "POST",
-      },
-    );
+    const res = await fetch(`${API_BASE}/workers/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
     if (!res.ok) throw new Error(`Failed to cancel worker: ${res.status}`);
     return res.json();
   },
@@ -2559,11 +2155,10 @@ export const api = {
     return res.json();
   },
 
-  fetchPluginRegistry: async (): Promise<PluginRegistryResponse> => {
+  fetchPluginRegistry: async (): Promise<string> => {
     const res = await fetch(`${API_BASE}/plugins/registry`);
-    if (!res.ok)
-      throw new Error(`Failed to fetch plugin registry: ${res.status}`);
-    return res.json();
+    if (!res.ok) throw new Error(`Failed to fetch plugin registry: ${res.status}`);
+    return res.text();
   },
 
   uninstallPlugin: async (name: string): Promise<void> => {
@@ -2594,9 +2189,7 @@ export const api = {
   },
 
   getPluginConfig: async (pluginId: string): Promise<PluginConfig> => {
-    const res = await fetch(
-      `${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`,
-    );
+    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`);
     if (!res.ok) throw new Error(`Failed to get plugin config: ${res.status}`);
     return res.json();
   },
@@ -2618,16 +2211,12 @@ export const api = {
     pluginId: string,
     settings: Record<string, unknown>,
   ): Promise<PluginConfig> => {
-    const res = await fetch(
-      `${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to update plugin config: ${res.status}`);
+    const res = await fetch(`${API_BASE}/plugin-config/${encodeURIComponent(pluginId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) throw new Error(`Failed to update plugin config: ${res.status}`);
     return res.json();
   },
 
@@ -2638,9 +2227,7 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to browse catalog: ${res.status}`);
     const ct = res.headers.get("content-type") ?? "";
     if (!ct.includes("application/json")) {
-      throw new Error(
-        "Catalog API not available — backend may need a rebuild (cerberus_rebuild)",
-      );
+      throw new Error("Catalog API not available — backend may need a rebuild (cerberus_rebuild)");
     }
     return res.json();
   },
@@ -2669,9 +2256,7 @@ export const api = {
       body: JSON.stringify({ name, approved_digest: approvedDigest, upgrade }),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Install failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Install failed: ${res.status}` }));
       if (err.status === "review_required") throw new PluginReviewRequiredError(err);
       throw new Error(err.error || `Install failed: ${res.status}`);
     }
@@ -2680,25 +2265,18 @@ export const api = {
 
   listCatalogSources: async (): Promise<CatalogSource[]> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/sources`);
-    if (!res.ok)
-      throw new Error(`Failed to list catalog sources: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list catalog sources: ${res.status}`);
     return res.json();
   },
 
-  addCatalogSource: async (
-    name: string,
-    url: string,
-    priority: number,
-  ): Promise<CatalogSource> => {
+  addCatalogSource: async (name: string, url: string, priority: number): Promise<CatalogSource> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/sources`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, url, priority }),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Add source failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Add source failed: ${res.status}` }));
       throw new Error(err.error || `Add source failed: ${res.status}`);
     }
     return res.json();
@@ -2713,16 +2291,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok)
-      throw new Error(`Failed to update catalog source: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to update catalog source: ${res.status}`);
   },
 
   deleteCatalogSource: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/plugins/catalog/sources/${id}`, {
       method: "DELETE",
     });
-    if (!res.ok)
-      throw new Error(`Failed to delete catalog source: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to delete catalog source: ${res.status}`);
   },
 
   // --- Messaging subsystem (agent-to-agent + agent-to-user) ---
@@ -2746,8 +2322,7 @@ export const api = {
     if (filter?.channel) params.set("channel", filter.channel);
     if (filter?.kind) params.set("kind", filter.kind);
     const res = await fetch(`${API_BASE}/messaging/inbox?${params}`);
-    if (!res.ok)
-      throw new Error(`Failed to get messaging inbox: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get messaging inbox: ${res.status}`);
     return res.json();
   },
 
@@ -2792,38 +2367,22 @@ export const api = {
     return res.json();
   },
 
-  ackAgentMessage: async (
-    id: string,
-    sessionId: string,
-    agentId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/messaging/${encodeURIComponent(id)}/ack`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to acknowledge agent message: ${res.status}`);
+  ackAgentMessage: async (id: string, sessionId: string, agentId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/ack`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
+    });
+    if (!res.ok) throw new Error(`Failed to acknowledge agent message: ${res.status}`);
   },
 
-  resolveAgentMessage: async (
-    id: string,
-    sessionId: string,
-    agentId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to resolve agent message: ${res.status}`);
+  resolveAgentMessage: async (id: string, sessionId: string, agentId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(id)}/resolve`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, agent_id: agentId }),
+    });
+    if (!res.ok) throw new Error(`Failed to resolve agent message: ${res.status}`);
   },
 
   getAgentMessageUnreadCount: async (
@@ -2858,15 +2417,11 @@ export const api = {
   // Agent Projects (many-to-many)
   listAgentProjects: async (agentId: string): Promise<Project[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/projects`);
-    if (!res.ok)
-      throw new Error(`Failed to list agent projects: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to list agent projects: ${res.status}`);
     return res.json();
   },
 
-  addAgentProject: async (
-    agentId: string,
-    projectId: string,
-  ): Promise<Project[]> => {
+  addAgentProject: async (agentId: string, projectId: string): Promise<Project[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/projects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2876,36 +2431,24 @@ export const api = {
     return res.json();
   },
 
-  removeAgentProject: async (
-    agentId: string,
-    projectId: string,
-  ): Promise<void> => {
-    const res = await fetch(
-      `${API_BASE}/agents/${agentId}/projects/${projectId}`,
-      {
-        method: "DELETE",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to remove agent project: ${res.status}`);
+  removeAgentProject: async (agentId: string, projectId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/projects/${projectId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`Failed to remove agent project: ${res.status}`);
   },
 
   // Project Management. Workspace CRUD (updateWorkspace/deleteWorkspace)
   // is retired along with the workspaces table — see the Projects block
   // above.
-  updateProject: async (
-    projectId: string,
-    data: Partial<Project>,
-  ): Promise<Project> => {
+  updateProject: async (projectId: string, data: Partial<Project>): Promise<Project> => {
     const res = await fetch(`${API_BASE}/projects/${projectId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update project: ${res.status}`);
     }
     return res.json();
@@ -2939,7 +2482,14 @@ export const api = {
     sessionId: string,
     requestId: string,
     decision: ApprovalDecision,
-  ): Promise<{ approval_id: string; run_id: string; call_id: string; decision: ApprovalDecision; scope: "once"; session_view_id: string }> => {
+  ): Promise<{
+    approval_id: string;
+    run_id: string;
+    call_id: string;
+    decision: ApprovalDecision;
+    scope: "once";
+    session_view_id: string;
+  }> => {
     const res = await fetch(
       `${API_BASE}/agent/v1/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(requestId)}/responses`,
       {
@@ -2948,8 +2498,7 @@ export const api = {
         body: JSON.stringify({ decision, scope: "once" }),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to respond to native approval: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to respond to native approval: ${res.status}`);
     return res.json();
   },
 
@@ -2967,36 +2516,29 @@ export const api = {
         body: JSON.stringify({ decision, scope }),
       },
     );
-    if (!res.ok)
-      throw new Error(`Failed to respond to approval: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to respond to approval: ${res.status}`);
     return res.json();
   },
 
   getPermissionMode: async (): Promise<{ mode: PermissionMode }> => {
     const res = await fetch(`${API_BASE}/permissions/mode`);
-    if (!res.ok)
-      throw new Error(`Failed to get permission mode: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get permission mode: ${res.status}`);
     return res.json();
   },
 
-  setPermissionMode: async (
-    mode: PermissionMode,
-  ): Promise<{ mode: PermissionMode }> => {
+  setPermissionMode: async (mode: PermissionMode): Promise<{ mode: PermissionMode }> => {
     const res = await fetch(`${API_BASE}/permissions/mode`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode }),
     });
-    if (!res.ok)
-      throw new Error(`Failed to set permission mode: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to set permission mode: ${res.status}`);
     return res.json();
   },
 
   // --- Shell Execution ---
 
-  getShellMode: async (
-    sessionId: string,
-  ): Promise<{ mode: import("./types").ShellMode }> => {
+  getShellMode: async (sessionId: string): Promise<{ mode: import("./types").ShellMode }> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/shell-mode`);
     if (!res.ok) throw new Error(`Failed to get shell mode: ${res.status}`);
     return res.json();
@@ -3035,9 +2577,7 @@ export const api = {
       body: JSON.stringify({ command, approved }),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `HTTP ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       throw new Error(err.error || `Shell exec failed: ${res.status}`);
     }
     return res.json();
@@ -3050,8 +2590,7 @@ export const api = {
     const res = await fetch(
       `${API_BASE}/sessions/${sessionId}/shell-check?command=${encodeURIComponent(command)}`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to check shell command: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to check shell command: ${res.status}`);
     return res.json();
   },
 
@@ -3069,12 +2608,9 @@ export const api = {
 
   // --- vNext: Execution Metrics (with debug snapshots) ---
 
-  getExecutionMetrics: async (
-    sessionId: string,
-  ): Promise<ExecutionMetrics[]> => {
+  getExecutionMetrics: async (sessionId: string): Promise<ExecutionMetrics[]> => {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/metrics`);
-    if (!res.ok)
-      throw new Error(`Failed to get execution metrics: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get execution metrics: ${res.status}`);
     return res.json();
   },
 
@@ -3087,30 +2623,22 @@ export const api = {
     if (params?.status) qs.set("status", params.status);
     if (params?.pipeline_id) qs.set("pipeline_id", params.pipeline_id);
     const query = qs.toString();
-    const res = await fetch(
-      `${API_BASE}/workflows/runs${query ? `?${query}` : ""}`,
-    );
+    const res = await fetch(`${API_BASE}/workflows/runs${query ? `?${query}` : ""}`);
     if (!res.ok) throw new Error(`Failed to list workflow runs: ${res.status}`);
     return res.json();
   },
 
   getWorkflowRun: async (runId: string): Promise<WorkflowRun> => {
-    const res = await fetch(
-      `${API_BASE}/workflows/runs/${encodeURIComponent(runId)}`,
-    );
+    const res = await fetch(`${API_BASE}/workflows/runs/${encodeURIComponent(runId)}`);
     if (!res.ok) throw new Error(`Failed to get workflow run: ${res.status}`);
     return res.json();
   },
 
   cancelWorkflowRun: async (runId: string): Promise<{ status: string }> => {
-    const res = await fetch(
-      `${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/cancel`,
-      {
-        method: "POST",
-      },
-    );
-    if (!res.ok)
-      throw new Error(`Failed to cancel workflow run: ${res.status}`);
+    const res = await fetch(`${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(`Failed to cancel workflow run: ${res.status}`);
     return res.json();
   },
 
@@ -3143,27 +2671,20 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to create memory: ${res.status}`);
     }
     return res.json();
   },
 
-  updateMemory: async (
-    key: string,
-    data: MemoryUpdateRequest,
-  ): Promise<Memory> => {
+  updateMemory: async (key: string, data: MemoryUpdateRequest): Promise<Memory> => {
     const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
       throw new Error(err.error || `Failed to update memory: ${res.status}`);
     }
     return res.json();
@@ -3178,21 +2699,14 @@ export const api = {
   },
 
   updateMemoryStatus: async (key: string, status: string): Promise<Memory> => {
-    const res = await fetch(
-      `${API_BASE}/memories/${encodeURIComponent(key)}/status`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      },
-    );
+    const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(key)}/status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
     if (!res.ok) {
-      const err = await res
-        .json()
-        .catch(() => ({ error: `Request failed: ${res.status}` }));
-      throw new Error(
-        err.error || `Failed to update memory status: ${res.status}`,
-      );
+      const err = await res.json().catch(() => ({ error: `Request failed: ${res.status}` }));
+      throw new Error(err.error || `Failed to update memory status: ${res.status}`);
     }
     return res.json();
   },
@@ -3204,22 +2718,15 @@ export const api = {
   // from the client.
 
   // Inspector (I1, CW-20260426-0004)
-  getInspectorTurns: async (
-    sessionId: string,
-    limit = 20,
-  ): Promise<InspectorTurnsResponse> => {
+  getInspectorTurns: async (sessionId: string, limit = 20): Promise<InspectorTurnsResponse> => {
     const res = await fetch(
       `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns?limit=${limit}`,
     );
-    if (!res.ok)
-      throw new Error(`Failed to get inspector turns: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to get inspector turns: ${res.status}`);
     return res.json();
   },
 
-  getInspectorTurn: async (
-    sessionId: string,
-    turnId: string,
-  ): Promise<InspectorTurnSnapshot> => {
+  getInspectorTurn: async (sessionId: string, turnId: string): Promise<InspectorTurnSnapshot> => {
     const res = await fetch(
       `${API_BASE}/inspector/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}`,
     );

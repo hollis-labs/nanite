@@ -8,14 +8,18 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
+
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
 
 type hostQueryGrant struct {
-	owner  string
-	scope  pluginapi.QueryScope
-	ctx    context.Context
-	cancel context.CancelFunc
+	owner    string
+	scope    pluginapi.QueryScope
+	ctx      context.Context
+	cancel   context.CancelFunc
+	lease    *subprocess.GrantLease
+	validate func(context.Context) error
 }
 
 // HostQueryPermit is an authenticated, narrowed read lease. Unload cancels its
@@ -95,7 +99,11 @@ func (h *Host) bindHostQueryGrant(ctx context.Context, grant pluginapi.QueryGran
 	if h.queryGrants == nil {
 		h.queryGrants = make(map[[32]byte]hostQueryGrant)
 	}
-	lease, cancel := context.WithCancel(h.ctx)
+	lifetime, _, policyErr := pluginGrantPolicy("bearer-connection")
+	if policyErr != nil {
+		return policyErr
+	}
+	lease, cancel := context.WithTimeout(h.ctx, lifetime)
 	h.queryGrants[hash] = hostQueryGrant{owner: grant.PluginID, scope: cloneQueryScope(grant.Scope), ctx: lease, cancel: cancel}
 	return nil
 }
@@ -108,6 +116,9 @@ func (h *Host) revokeHostQueryGrant(token string) {
 	h.mu.Unlock()
 	if exists {
 		grant.cancel()
+		if grant.lease != nil {
+			grant.lease.Revoke()
+		}
 	}
 }
 
@@ -125,5 +136,35 @@ func (h *Host) AuthorizeHostQuery(token string) (HostQueryPermit, bool) {
 	if !exists || grant.ctx.Err() != nil {
 		return HostQueryPermit{}, false
 	}
-	return HostQueryPermit{PluginID: grant.owner, Scope: cloneQueryScope(grant.scope), Context: grant.ctx}, true
+	if grant.validate != nil && grant.validate(h.ctx) != nil {
+		if grant.lease != nil {
+			grant.lease.Revoke()
+		}
+		return HostQueryPermit{}, false
+	}
+	permitContext := grant.ctx
+	if grant.lease != nil {
+		var err error
+		permitContext, err = grant.lease.Context()
+		if err != nil {
+			return HostQueryPermit{}, false
+		}
+	}
+	return HostQueryPermit{PluginID: grant.owner, Scope: cloneQueryScope(grant.scope), Context: permitContext}, true
+}
+
+func (h *Host) attachHostQueryLease(token string, lease *subprocess.GrantLease, validate func(context.Context) error) {
+	hash := sha256.Sum256([]byte(token))
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	grant, ok := h.queryGrants[hash]
+	if ok {
+		// The incarnation lease owns expiry from now on. Stop the initial
+		// provisional bearer timeout so a valid renewal can extend it.
+		grant.cancel()
+		grant.ctx, grant.cancel = context.WithCancel(h.ctx)
+		grant.lease = lease
+		grant.validate = validate
+		h.queryGrants[hash] = grant
+	}
 }

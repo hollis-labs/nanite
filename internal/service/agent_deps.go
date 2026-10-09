@@ -1316,6 +1316,7 @@ func (b *agentEventBridge) typedCallback(sessionID string) provider.EventsCallba
 				Type:    "tool_result",
 				ToolID:  evt.ID,
 				Summary: evt.ContentPreview,
+				IsError: evt.IsError,
 				Error: func() string {
 					if evt.IsError {
 						return evt.ContentPreview

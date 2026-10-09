@@ -24,6 +24,37 @@ Channel 1 (LLM ↔ Nanite) = A + B (§2). Channel 2 (Nanite → subscribers) = C
 
 Nanite's internal message object is Anthropic-shaped: `llmtypes.ContentBlock` types `text | tool_use | tool_result | thinking`; tools carry `input_schema`; stop reasons use Anthropic's vocabulary (OpenAI finish reasons are mapped into it).
 
+## Shared framing ownership
+
+Nanite's canonical CLI consumer uses `go-chatstream/framing.SSE`, which delegates
+SSE parsing to `go-ssekit.Read`; it does not implement another SSE parser.
+Retained product HTTP feeds use `newSSEWriter` backed by `go-ssekit.Writer`, while
+native feeds use substrate agent's `transport/httpstream` canonical encoder.
+Provider SDKs own their upstream wire protocols, and the MCP SDK owns MCP
+Streamable HTTP. These protocol adapters are separate from application event
+reduction; CLI JSONL and ACP JSON-RPC are not SSE parsers.
+
+## Tool result outcome
+
+`chat.StreamEvent.IsError` is the authoritative tool outcome. Denials, blocks,
+validation failures, cancellations and execution failures emit `is_error: true`.
+A successful result leaves the flag false; omission in the retained JSON shape
+also means false. The retained `error` string is optional compatibility text,
+not an outcome discriminator: failed results can have an empty preview and
+successful results can contain text such as "error".
+
+`agentEventBridge.typedCallback` copies the typed runtime `ToolResult.IsError`
+independently of `ContentPreview`, retaining the old error preview when present.
+`cognitiveRun.consume` carries the same flag into substrate agent's canonical
+projection, where a `tool_result` part exposes `meta.is_error`. Consumers must use
+that metadata for the tool outcome. A failed tool is not itself a failed turn;
+the model can recover, so a turn can finish normally after a failed tool result.
+
+`TestAgentEventBridgeToolResultOutcomes` covers typed runtime projection into
+retained events and canonical reduction, including empty failures and successful
+error-looking content. `TestToolResultHTTPWireOutcomes` characterizes both HTTP
+wire representations using shared framing.
+
 ## 2. Channel 1: provider → Nanite
 
 ### 2.1 Adapters

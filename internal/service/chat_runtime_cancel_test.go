@@ -1057,3 +1057,76 @@ func TestPerTurnRouter_StaleCleanupCannotCloseOrInjectSuccessor(t *testing.T) {
 var _ adapters.Adapter = (*cancelACPAdapter)(nil)
 var _ acp.ClientAdapter = (*cancelACPAdapter)(nil)
 var _ acp.Client = (*cancelACPClient)(nil)
+
+// terminalBeforeSendReturnRunner models a runtime terminal that reaches the
+// stream consumer while SendInput still owns the runtime's in-flight guard.
+type terminalBeforeSendReturnRunner struct {
+	entered chan string
+	binding chan *runtimeTurnBinding
+}
+
+func (r *terminalBeforeSendReturnRunner) Invoke(ctx context.Context, _, msgID, _ string, ch chan chat.StreamEvent) {
+	r.entered <- msgID
+	if msgID == "first" {
+		gen := generationFromContext(ctx)
+		binding := &runtimeTurnBinding{session: &runtimeagent.Session{}, router: newSessionRouter(make(chan llmtypes.StreamEvent, 1))}
+		if !gen.admitRuntimeTurn(ctx, binding, func() bool { return true }) || !gen.beginRuntimeSend(ctx, binding) {
+			panic("test runtime send admission failed")
+		}
+		r.binding <- binding
+	}
+	close(ch)
+}
+
+func TestRunGeneration_TerminalWaitsForRuntimeSendReturnBeforeSuccessor(t *testing.T) {
+	owner := lifecycle.NewManager("test.runtime-send-return")
+	runner := &terminalBeforeSendReturnRunner{entered: make(chan string, 2), binding: make(chan *runtimeTurnBinding, 1)}
+	svc := &chatServiceImpl{lifecycle: owner, activeGen: make(map[string]*inFlightGen), dispatcher: dispatcher.New(runner)}
+	_, first := svc.registerGeneration("session", "first", func() {})
+	firstStream := make(chan chat.StreamEvent)
+	svc.runGeneration(context.Background(), "first", "session", "first", "payload", firstStream, dispatcher.CallerChat, chat.DeltaModePhased, func() {}, first, nil)
+	binding := <-runner.binding
+	// Always release the blocked send before shutting down the lifecycle, even
+	// when an assertion fails.
+	t.Cleanup(func() {
+		select {
+		case <-binding.sendReturned:
+		default:
+			first.completeRuntimeSend(binding, nil)
+		}
+		_ = owner.Shutdown(time.Second)
+	})
+	if got := <-runner.entered; got != "first" {
+		t.Fatalf("first dispatch = %q", got)
+	}
+	select {
+	case <-firstStream:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor did not publish its terminal")
+	}
+	predecessor, second := svc.registerGeneration("session", "second", func() {})
+	secondStream := make(chan chat.StreamEvent)
+	svc.runGeneration(context.Background(), "second", "session", "second", "payload", secondStream, dispatcher.CallerChat, chat.DeltaModePhased, func() {}, second, predecessor)
+	select {
+	case got := <-runner.entered:
+		t.Fatalf("successor %q dispatched before predecessor SendInput returned", got)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if generationResolvedSafe(first) {
+		t.Fatal("terminal-only predecessor was marked safe before its send returned")
+	}
+	first.completeRuntimeSend(binding, nil)
+	select {
+	case got := <-runner.entered:
+		if got != "second" {
+			t.Fatalf("successor dispatch = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("successor did not dispatch after predecessor SendInput returned")
+	}
+	select {
+	case <-second.done:
+	case <-time.After(time.Second):
+		t.Fatal("successor did not finish")
+	}
+}

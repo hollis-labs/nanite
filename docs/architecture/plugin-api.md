@@ -379,8 +379,11 @@ binary loads the plugin. A running old process retains compiled queries against
 MCP tools, HTTP routes and `reminders` context source. `PluginCoreData` also
 allows this owner to transfer the `reminders` table through the same committed,
 verified export transaction. No core reminder tool, API, store method or
-in-process trigger engine remains. Historical schema migrations still create
-an empty legacy table until a reviewed plugin first activates.
+in-process trigger engine remains. If the historical reminder tool name is
+offered again, it is offered by this plugin through the manifest-v2 tool path,
+with reviewed schema, effect and annotations; the core self-tool registry must
+not recreate it. Historical schema migrations still create an empty legacy
+table until a reviewed plugin first activates.
 
 Plugin context reads leave reminders pending. An agent calls `reminders_ack`,
 or a user acknowledges in the plugin drawer, to stop injection. Budget omission
@@ -397,9 +400,12 @@ leave core rows retained for a later committed transfer.
 ## Pins extraction
 
 The released `nanite.pins` plugin owns durable pinned content, its working-drawer
-UI, tools, HTTP routes and bounded E3 context source. Core pin readers/writers,
-`context_pin`/`context_unpin` and pin REST routes are retired. Generic pinned
-envelope cards remain a separate host feature.
+UI, tools, HTTP routes and bounded E3 context source. Core pin readers/writers
+and pin REST routes are retired. If the historical `context_pin` and
+`context_unpin` names are offered again, they are offered by this plugin through
+the manifest-v2 tool path, with reviewed schemas, effects and annotations; the
+core self-tool registry must not recreate them. Generic pinned envelope cards
+remain a separate host feature.
 
 After every required registration succeeds, the host's fixed allowlist maps
 owner `nanite.pins`, feature `pins`, to table `pinned_content`. E1 exports all

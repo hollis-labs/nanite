@@ -38,7 +38,7 @@ func newKeyFixture(t *testing.T) *keyFixture {
 	}
 	f.svc = NewProviderConfigService(nil)
 	f.svc.setSecret = func(k, v string) error { f.keychain[k] = v; return nil }
-	f.svc.deleteSecret = func(k string) { delete(f.keychain, k) }
+	f.svc.deleteSecret = func(k string) error { delete(f.keychain, k); return nil }
 	f.svc.resolveKey = func(providerID, envKey string) (string, string) {
 		return resolveAPIKey(func(k string) string { return f.keychain[k] }, func(k string) string { return f.env[k] }, providerID, envKey)
 	}
@@ -279,5 +279,58 @@ func TestNewUtilityCall_ResolvesProviderPerUse(t *testing.T) {
 	reg.Register("anthropic", &recordingProvider{name: "second"})
 	if got, err := call(ctx, "p"); err != nil || !strings.HasPrefix(got, "second:haiku") {
 		t.Fatalf("after swap: %q, %v — the call must not keep the adapter it first saw", got, err)
+	}
+}
+
+func TestSetAPIKey_CredentialFailurePreservesRuntimeAndCause(t *testing.T) {
+	for _, operation := range []string{"save", "clear"} {
+		t.Run(operation, func(t *testing.T) {
+			f := newKeyFixture(t)
+			ctx := context.Background()
+			if _, err := f.svc.SetAPIKey(ctx, "anthropic-001", "retained-key"); err != nil {
+				t.Fatal(err)
+			}
+			previous, _ := f.registered(t)
+			cause := errors.New("backend error containing private-credential")
+			f.svc.setSecret = func(string, string) error { return cause }
+			f.svc.deleteSecret = func(string) error { return cause }
+			key := "private-credential"
+			if operation == "clear" {
+				key = ""
+			}
+			_, err := f.svc.SetAPIKey(ctx, "anthropic-001", key)
+			var unavailable *ProviderCredentialStoreError
+			if !errors.As(err, &unavailable) || !errors.Is(err, cause) || unavailable.Operation != operation || unavailable.EnvironmentVariable != "ANTHROPIC_API_KEY" {
+				t.Fatalf("missing typed error/cause: %v", err)
+			}
+			if strings.Contains(err.Error(), "private-credential") || !strings.Contains(err.Error(), "restart Nanite") {
+				t.Fatalf("unsafe or unhelpful error: %v", err)
+			}
+			current, ok := f.registered(t)
+			if !ok || current != previous || f.keychain[secrets.ProviderKeyName("anthropic-001")] != "retained-key" {
+				t.Fatal("failed key update changed retained runtime/credential")
+			}
+		})
+	}
+}
+
+func TestSetAPIKey_CanceledRequestDoesNotTouchCredentialOrRuntime(t *testing.T) {
+	f := newKeyFixture(t)
+	if _, err := f.svc.SetAPIKey(context.Background(), "anthropic-001", "retained-key"); err != nil {
+		t.Fatal(err)
+	}
+	previous, _ := f.registered(t)
+	f.svc.setSecret = func(string, string) error { t.Fatal("canceled save reached credential store"); return nil }
+	f.svc.deleteSecret = func(string) error { t.Fatal("canceled clear reached credential store"); return nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, key := range []string{"replacement", ""} {
+		if _, err := f.svc.SetAPIKey(ctx, "anthropic-001", key); !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled request: %v", err)
+		}
+	}
+	current, ok := f.registered(t)
+	if !ok || current != previous || f.keychain[secrets.ProviderKeyName("anthropic-001")] != "retained-key" {
+		t.Fatal("canceled request changed runtime or credential")
 	}
 }

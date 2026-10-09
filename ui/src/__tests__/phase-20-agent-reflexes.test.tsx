@@ -109,7 +109,7 @@ describe("Phase 20 agent reflexes panel", () => {
     expect(screen.getByLabelText("Delete reflex agent-reflex")).toBeTruthy();
   });
 
-  it("renders validation results for reflex dry-runs", async () => {
+  it("renders trigger matching separately from execution", async () => {
     vi.spyOn(api, "listAgentReflexes").mockResolvedValue([]);
     vi.spyOn(api, "listPendingReflexes").mockResolvedValue([]);
     const validateSpy = vi
@@ -125,8 +125,30 @@ describe("Phase 20 agent reflexes panel", () => {
 
     await waitFor(() => expect(validateSpy).toHaveBeenCalled());
     expect(await screen.findByText("Validation Result")).toBeTruthy();
-    expect(screen.getByText("Would fire")).toBeTruthy();
+    expect(screen.getByText("Trigger matches")).toBeTruthy();
     expect(screen.getByText("State source: store")).toBeTruthy();
+    expect(screen.getByText("No action executed")).toBeTruthy();
+  });
+
+  it("does not report an unsupported preview as a nonmatching trigger", async () => {
+    vi.spyOn(api, "listAgentReflexes").mockResolvedValue([]);
+    vi.spyOn(api, "listPendingReflexes").mockResolvedValue([]);
+    vi.spyOn(api, "validateReflex").mockResolvedValue(
+      validationResult({
+        matched: false,
+        fired: false,
+        evaluation_supported: false,
+        action_executed: false,
+      }),
+    );
+    renderWithClient(<AgentReflexesPanel agentId="agent-1" isReadOnly={false} />);
+    await screen.findByText("No reflexes configured for this agent yet.");
+    fireEvent.click(screen.getByRole("button", { name: "New Reflex" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "unsupported-event" } });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(await screen.findByText("Trigger not evaluated")).toBeTruthy();
+    expect(screen.queryByText("Trigger does not match")).toBeNull();
+    expect(screen.getByText("No action executed")).toBeTruthy();
   });
 
   it("approves pending reflexes and refreshes the pending queue", async () => {
@@ -151,7 +173,9 @@ describe("Phase 20 agent reflexes panel", () => {
     expect(await screen.findByText("mail-reminder")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
-    await waitFor(() => expect(approveSpy).toHaveBeenCalledWith("pending-1", { reviewed_by: "operator-ui" }));
+    await waitFor(() =>
+      expect(approveSpy).toHaveBeenCalledWith("pending-1", { reviewed_by: "operator-ui" }),
+    );
     await waitFor(() =>
       expect(screen.getByText("No pending reflex proposals for this agent.")).toBeTruthy(),
     );
@@ -170,7 +194,9 @@ describe("Phase 20 agent reflexes panel", () => {
     expect(await screen.findByText("mail-reminder")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
 
-    await waitFor(() => expect(rejectSpy).toHaveBeenCalledWith("pending-1", { reviewed_by: "operator-ui" }));
+    await waitFor(() =>
+      expect(rejectSpy).toHaveBeenCalledWith("pending-1", { reviewed_by: "operator-ui" }),
+    );
   });
 
   it("disables pending review actions for read-only agent profiles", async () => {

@@ -1,8 +1,11 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/service"
 
 	"github.com/hollis-labs/nanite/internal/secrets"
 )
@@ -41,7 +44,15 @@ func (a *API) handleSetProviderAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.Services.ProviderConfig.SetAPIKey(r.Context(), id, body.APIKey)
 	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, "failed to store API key in keychain: "+err.Error())
+		var unavailable *service.ProviderCredentialStoreError
+		if errors.As(err, &unavailable) {
+			a.jsonResp(w, http.StatusServiceUnavailable, map[string]any{
+				"error": unavailable.Error(), "code": "credential_store_unavailable",
+				"environment_variable": unavailable.EnvironmentVariable, "restart_required": true,
+			})
+		} else {
+			a.errorResp(w, http.StatusInternalServerError, "could not update provider credential")
+		}
 		return
 	}
 

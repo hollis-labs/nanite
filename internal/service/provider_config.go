@@ -23,7 +23,7 @@ type ProviderConfigService struct {
 	resolveKey   func(providerID, envKey string) (key, source string)
 	newVerifier  func(spec APIProviderSpec, key string) keyVerifier
 	setSecret    func(key, value string) error
-	deleteSecret func(key string)
+	deleteSecret func(key string) error
 
 	// keyMu serializes SetAPIKey and guards registry/catalog, the live
 	// provider runtime it swaps adapters in (SetProviderRuntime).
@@ -38,7 +38,7 @@ func NewProviderConfigService(st ProviderStore) *ProviderConfigService {
 		resolveKey:   ResolveAPIKey,
 		newVerifier:  defaultKeyVerifier,
 		setSecret:    secrets.Set,
-		deleteSecret: secrets.Delete,
+		deleteSecret: secrets.DeleteChecked,
 	}
 }
 

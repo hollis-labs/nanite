@@ -37,9 +37,18 @@ func Get(key string) string {
 
 // Delete removes a secret from the OS keychain. No error if not found.
 func Delete(key string) {
-	if err := keyring.Delete(serviceName, key); err != nil {
+	if err := DeleteChecked(key); err != nil {
 		slog.Warn("secrets: delete failed", "key", key, "err", err)
 	}
+}
+
+// DeleteChecked reports backend failures to callers that must not claim a
+// credential was removed when the keychain is unavailable. Missing is success.
+func DeleteChecked(key string) error {
+	if err := keyring.Delete(serviceName, key); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return fmt.Errorf("keyring delete %q: %w", key, err)
+	}
+	return nil
 }
 
 // Has returns true if a secret exists in the OS keychain for the given key.

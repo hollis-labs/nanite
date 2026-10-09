@@ -7,6 +7,7 @@ import { TaskThreadPanel } from "@/components/messaging/TaskThreadPanel";
 import { useChat } from "@/hooks/useChat";
 import { useSettings } from "@/hooks/useSettings";
 import { useTaskContext } from "@/hooks/useTaskContext";
+import { isSelectableAgent } from "@/lib/agent-visibility";
 import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/useAppStore";
 import { useLayoutStore } from "@/stores/useLayoutStore";
@@ -167,11 +168,7 @@ function AgentLaunchCards({ onStarted, fallback }: { onStarted: () => void; fall
     queryFn: () => api.listAgents(),
   });
 
-  // Same rule the chat picker and header use. /api/agents already applies the
-  // operator's NANITE_AGENT_SLUGS allowlist server-side, so this only has to
-  // drop the disabled ones — a fifth list with its own idea of what to show is
-  // exactly the drift bf83a0f1 went and fixed.
-  const launchable = agents.filter((a) => a.status !== "disabled");
+  const launchable = agents.filter(isSelectableAgent);
 
   const startChat = useMutation({
     // Provider and model are sent explicitly, as the Start launcher did.

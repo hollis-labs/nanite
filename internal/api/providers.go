@@ -35,9 +35,7 @@ func (a *API) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dbProviders = visibleProviderRows(dbProviders)
-
-	providers := mergeCatalogAndDBProviders(a.Services.ProviderCatalog, dbProviders)
+	providers := visibleProviderRows(mergeCatalogAndDBProviders(a.Services.ProviderCatalog, dbProviders))
 
 	a.jsonResp(w, http.StatusOK, providerConfigsToView(providers))
 }

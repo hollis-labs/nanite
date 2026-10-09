@@ -77,6 +77,76 @@ func TestLogicalGeneralChatProvisionCreatesProfileNotSessionOrAuthority(t *testi
 	}
 }
 
+func TestLogicalGeneralChatProvisionAppliesNanitePolicyExtensions(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	host, verified := logicalProvisionHost(t)
+	raw, err := json.Marshal(verified.Definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var definition agentdef.Definition
+	if err = json.Unmarshal(raw, &definition); err != nil {
+		t.Fatal(err)
+	}
+	definition.Extensions = map[string]agentdef.Extension{
+		"com.hollislabs.nanite/native-policy": {
+			Version:   "1",
+			Area:      "harness_profile",
+			Mandatory: true,
+			Data: map[string]any{"model_selection": map[string]any{
+				"provider": "fixture-provider",
+				"model":    "fixture-model",
+			}},
+		},
+		"com.hollislabs.nanite/reflex-policy": {
+			Version:   "1",
+			Area:      "behavior",
+			Mandatory: true,
+			Data: map[string]any{"reflexes": []any{map[string]any{
+				"name":         "agentdef-reminder",
+				"trigger_kind": "predicate",
+				"trigger_spec": map[string]any{"kind": "always"},
+				"action_kind":  "inject_reminder",
+				"action_spec":  map[string]any{"message": "stay on task"},
+				"priority":     float64(12),
+			}}},
+		},
+	}
+	digest, err := agentdef.Digest(&definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified.Definition = &definition
+	verified.Ref.SemanticDigest = digest
+	host.Resolver = logicalProvisionResolver(func(context.Context, DefinitionRef) (VerifiedDefinition, error) { return verified, nil })
+	host.Models = ModelAuthorizerFunc(func(_ context.Context, pin DefinitionRef, requested *ModelSelection) (ModelSelection, error) {
+		model := ModelSelection{Provider: "fixture-provider", Model: "fixture-model"}
+		if pin != verified.Ref || requested == nil || *requested != model {
+			return ModelSelection{}, ErrUnsupportedModel
+		}
+		return model, nil
+	})
+
+	result, err := svc.ProvisionGeneralChat(t.Context(), host, ProvisionGeneralChatRequest{Name: "General chat", Slug: "general-chat", DefinitionRef: verified.Ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.GetAgent(t.Context(), result.Agent.Profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultProvider != "fixture-provider" || p.DefaultModel != "fixture-model" {
+		t.Fatalf("native-policy model not authorized/applied: %s/%s", p.DefaultProvider, p.DefaultModel)
+	}
+	reflexes, err := st.ListAgentReflexesForAgent(t.Context(), p.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reflexes) != 1 || reflexes[0].Name != "agentdef-reminder" || reflexes[0].Priority != 12 || reflexes[0].CreatedBy != "operator:agentdef" {
+		t.Fatalf("reflex-policy not materialized: %#v", reflexes)
+	}
+}
+
 func TestLogicalGeneralChatProvisionRefusesUnappliedSemanticsAndForgedContent(t *testing.T) {
 	for _, mutation := range []string{"readonly", "body-with-old-digest", "capability", "foreign-id"} {
 		t.Run(mutation, func(t *testing.T) {

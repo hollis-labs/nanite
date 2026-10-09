@@ -155,17 +155,26 @@ func (r *FileDefinitionResolver) Resolve(ctx context.Context, pin DefinitionRef)
 // ChatDefinitionConfig contains only the applied chat-loop semantics. It is
 // stored separately from caller metadata, which confers no host authority.
 type ChatDefinitionConfig struct {
-	Instructions      string         `json:"instructions"`
-	PermissionProfile string         `json:"permission_profile"`
-	Model             ModelSelection `json:"model"`
+	Instructions      string          `json:"instructions"`
+	PermissionProfile string          `json:"permission_profile"`
+	Model             ModelSelection  `json:"model"`
+	RequestedModel    *ModelSelection `json:"-"`
 }
 
 func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error) {
+	return mapChatDefinition(verified, false)
+}
+
+func mapRetainedProfileDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error) {
+	return mapChatDefinition(verified, true)
+}
+
+func mapChatDefinition(verified VerifiedDefinition, allowReflexPolicy bool) (ChatDefinitionConfig, error) {
 	d := verified.Definition
 	if d == nil {
 		return ChatDefinitionConfig{}, ErrUnsupportedDefinition
 	}
-	if err := d.Validate(); err != nil {
+	if err := d.Validate(agentdef.WithExtensions(naniteAgentdefExtensions)); err != nil {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: %w", ErrUnsupportedDefinition, err)
 	}
 	if len(d.Behavior.Instructions)+len(d.Behavior.SOPs)+len(d.Behavior.Hooks)+len(d.Capabilities)+len(d.Requirements.Requires)+len(d.Requirements.Uses)+len(d.Requirements.Tools)+len(d.Requirements.Skills)+len(d.Requirements.Resources)+len(d.HarnessProfile.Steering)+len(d.HarnessProfile.Context.Sources)+len(d.HarnessProfile.Approvals)+len(d.HarnessProfile.Escalation) > 0 || d.HarnessProfile.Context.Policy != nil || d.Continuity.Mode != agentdef.Ephemeral || d.Continuity.MemoryPolicy != nil || d.Continuity.RecoveryStrategy != nil {
@@ -175,11 +184,36 @@ func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error
 	if p != "default" && p != "read-only" {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: permission profile %q", ErrUnsupportedDefinition, p)
 	}
+	nativePolicy, hasNativePolicy, err := definitionNativePolicy(d)
+	if err != nil {
+		return ChatDefinitionConfig{}, fmt.Errorf("%w: native-policy: %w", ErrUnsupportedDefinition, err)
+	}
+	if hasNativePolicy {
+		if requested := nativePolicy.permissionProfile(); requested != "" {
+			if err := validateNativePermissionProfile(requested); err != nil {
+				return ChatDefinitionConfig{}, fmt.Errorf("%w: native-policy: %w", ErrUnsupportedDefinition, err)
+			}
+			if p == "read-only" && requested == "default" {
+				return ChatDefinitionConfig{}, fmt.Errorf("%w: native-policy cannot widen read-only permission profile", ErrUnsupportedDefinition)
+			}
+			p = requested
+		}
+	}
+	if reflexPolicy, hasReflexPolicy, err := definitionReflexPolicy(d); err != nil {
+		return ChatDefinitionConfig{}, fmt.Errorf("%w: reflex-policy: %w", ErrUnsupportedDefinition, err)
+	} else if hasReflexPolicy && len(reflexPolicy.Reflexes) > 0 && !allowReflexPolicy {
+		return ChatDefinitionConfig{}, fmt.Errorf("%w: reflex-policy applies only when provisioning a retained profile", ErrUnsupportedDefinition)
+	}
 	// Unknown optional extensions are preserved by the resolver/digest. They are
 	// neither negotiated host policy nor an authority source. Mandatory ones fail Validate.
 	instructions := d.Behavior.Purpose + "\n\n" + d.Body
 	if d.Behavior.Completion != "" {
 		instructions += "\n\nCompletion: " + d.Behavior.Completion
 	}
-	return ChatDefinitionConfig{Instructions: instructions, PermissionProfile: p}, nil
+	var requestedModel *ModelSelection
+	if hasNativePolicy && nativePolicy.ModelSelection != nil {
+		model := *nativePolicy.ModelSelection
+		requestedModel = &model
+	}
+	return ChatDefinitionConfig{Instructions: instructions, PermissionProfile: p, RequestedModel: requestedModel}, nil
 }

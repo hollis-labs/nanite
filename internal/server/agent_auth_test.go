@@ -57,3 +57,31 @@ func TestAgentAuthBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestLogicalGeneralChatProvisionAuthBoundary(t *testing.T) {
+	t.Setenv("NANITE_AUTH_USER", "operator")
+	t.Setenv("NANITE_AUTH_PASSWORD", "fixture-password")
+	t.Setenv("NANITE_AUTH_TOKEN", "fixture-token")
+	for _, test := range []struct {
+		name, remote, authorization string
+		want                        int
+	}{
+		{"local missing auth", "127.0.0.1:123", "", http.StatusUnauthorized},
+		{"local wrong auth", "127.0.0.1:123", "Basic b3BlcmF0b3I6d3Jvbmc=", http.StatusUnauthorized},
+		{"remote basic is insufficient", "192.0.2.1:123", "Basic b3BlcmF0b3I6Zml4dHVyZS1wYXNzd29yZA==", http.StatusUnauthorized},
+		{"remote bearer", "192.0.2.1:123", "Bearer fixture-token", http.StatusOK},
+		{"local basic", "127.0.0.1:123", "Basic b3BlcmF0b3I6Zml4dHVyZS1wYXNzd29yZA==", http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := agentAuthMiddleware(basicAuthMiddleware(dummyHandler))
+			request := httptest.NewRequest(http.MethodPost, "/api/agents/provision/general-chat", nil)
+			request.RemoteAddr = test.remote
+			request.Header.Set("Authorization", test.authorization)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status %d want %d", response.Code, test.want)
+			}
+		})
+	}
+}

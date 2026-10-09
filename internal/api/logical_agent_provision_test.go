@@ -13,7 +13,6 @@ import (
 
 func TestLogicalGeneralChatProvisionAPIRequiresExplicitVerifiedPin(t *testing.T) {
 	a, mux := newTestAPI(t)
-	a.registerLogicalAgentProvisionRoutes(mux)
 	verified, err := service.EmbeddedDefinition()
 	if err != nil {
 		t.Fatal(err)

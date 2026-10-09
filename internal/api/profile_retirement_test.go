@@ -13,7 +13,6 @@ import (
 
 func TestProfileRetirementAPIRequiresPersistedExport(t *testing.T) {
 	a, mux := newTestAPI(t)
-	a.registerProfileRetirementRoutes(mux)
 	p, err := a.Services.AgentConfig.Create(&store.AgentProfile{Name: "Test", Slug: "api-retirement", SystemPrompt: "private secret fixture"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +59,6 @@ func TestProfileRetirementAPIRequiresPersistedExport(t *testing.T) {
 
 func TestProfileRetirementAPIProtectsBuiltinAndPluginOwnership(t *testing.T) {
 	a, mux := newTestAPI(t)
-	a.registerProfileRetirementRoutes(mux)
 	for _, p := range []*store.AgentProfile{{Name: "Builtin", Slug: "builtin-retirement", Source: "builtin", SystemPrompt: "x"}, {Name: "Plugin", Slug: "plugin-retirement", Source: "user", PluginID: "fixture-plugin", SystemPrompt: "x"}} {
 		if err := a.store.CreateAgent(t.Context(), p); err != nil {
 			t.Fatal(err)
@@ -70,5 +68,42 @@ func TestProfileRetirementAPIProtectsBuiltinAndPluginOwnership(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Fatal("protected source export accepted", w.Code)
 		}
+	}
+}
+
+func TestProfileRetirementAPIRejectsStateChangedAfterExport(t *testing.T) {
+	a, mux := newTestAPI(t)
+	created, err := a.Services.AgentConfig.Create(&store.AgentProfile{Name: "Test", Slug: "retirement-cas-public", SystemPrompt: "original"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/agents/" + created.Profile.ID
+	exported := httptest.NewRecorder()
+	mux.ServeHTTP(exported, httptest.NewRequest(http.MethodPost, path+"/retirement-export", nil))
+	if exported.Code != http.StatusCreated {
+		t.Fatal(exported.Code, exported.Body.String())
+	}
+	var receipt service.ProfileRetirementReceipt
+	if err := json.Unmarshal(exported.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	changed := httptest.NewRecorder()
+	mux.ServeHTTP(changed, httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"system_prompt":"changed"}`)))
+	if changed.Code != http.StatusOK {
+		t.Fatal(changed.Code, changed.Body.String())
+	}
+	request, err := json.Marshal(map[string]string{"export_id": receipt.ExportID, "digest": receipt.Digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := httptest.NewRecorder()
+	mux.ServeHTTP(retired, httptest.NewRequest(http.MethodPost, path+"/retire", bytes.NewReader(request)))
+	if retired.Code != http.StatusConflict {
+		t.Fatal(retired.Code, retired.Body.String())
+	}
+	retained := httptest.NewRecorder()
+	mux.ServeHTTP(retained, httptest.NewRequest(http.MethodGet, path, nil))
+	if retained.Code != http.StatusOK || !bytes.Contains(retained.Body.Bytes(), []byte("changed")) {
+		t.Fatal(retained.Code, retained.Body.String())
 	}
 }

@@ -197,6 +197,46 @@ func TestCmdServeStartupFailureReturns(t *testing.T) {
 	}
 }
 
+func TestCmdServeLoadsPluginsBeforeRecoveryAndBackgroundWorkers(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	body := string(source)
+
+	serverNew := strings.Index(body, "server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)")
+	discover := strings.Index(body, "discoverAndLoadPlugins(pluginHost, mcpManager, s)")
+	teamRecovery := strings.Index(body, "container.TeamRunLauncher.ReconcileTeamRuns(context.Background(), 100)")
+	workflowRecovery := strings.Index(body, "sharedWorkflowEngine.RecoverActive(context.Background(), workflowStepExecutor, 100)")
+	backgroundWorkers := strings.Index(body, "startBackgroundWorkers(daemonLifecycle, container, s)")
+
+	checks := map[string]int{
+		"server.New":               serverNew,
+		"discoverAndLoadPlugins":   discover,
+		"TeamRunLauncher recovery": teamRecovery,
+		"workflow recovery":        workflowRecovery,
+		"startBackgroundWorkers":   backgroundWorkers,
+	}
+	for label, index := range checks {
+		if index < 0 {
+			t.Fatalf("%s not found in main.go", label)
+		}
+	}
+
+	if serverNew >= discover {
+		t.Fatalf("plugin discovery must run after server.New installs the plugin router: server.New=%d discover=%d", serverNew, discover)
+	}
+	for label, index := range map[string]int{
+		"TeamRunLauncher recovery": teamRecovery,
+		"workflow recovery":        workflowRecovery,
+		"startBackgroundWorkers":   backgroundWorkers,
+	} {
+		if discover >= index {
+			t.Fatalf("plugin discovery must precede %s: discover=%d %s=%d", label, discover, label, index)
+		}
+	}
+}
+
 func TestLoadPersistedMCPServersMalformedJSON(t *testing.T) {
 	tests := []struct {
 		name        string

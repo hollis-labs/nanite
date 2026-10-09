@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/tool"
 	wsutil "github.com/hollis-labs/nanite/internal/workspace"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -269,6 +270,8 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		}
 		chatMessages[i] = llmtypes.ChatMessage{Role: role, Content: replayContent(m.Content)}
 	}
+
+	chatMessages = ReconcileCachedResults(ctx, tool.NewResultCache(cb.Store.DB, tool.ResultCacheConfig{}).Results, session.ID, chatMessages)
 
 	// J10 (CW-20260426-0008): user context prompt + included documents.
 	// Both are pinned and NOT compactable (SlotUserContext). The user context
@@ -924,7 +927,11 @@ func pruneToolResultsInMemory(messages []llmtypes.ChatMessage) []llmtypes.ChatMe
 			b := &newBlocks[j]
 			if b.Type == "tool_result" && len(b.Content) > 200 && !strings.HasPrefix(b.Content, "[pruned:") {
 				footer := ""
-				if at := strings.LastIndex(b.Content, "\n\n[TRUNCATED —"); at >= 0 {
+				at := strings.LastIndex(b.Content, "\n\n[TRUNCATED —")
+				if unavailable := strings.LastIndex(b.Content, "\n\n[CACHED RESULT UNAVAILABLE:"); unavailable > at {
+					at = unavailable
+				}
+				if at >= 0 {
 					footer = b.Content[at:]
 				}
 				b.Content = fmt.Sprintf("[pruned: tool result, %d chars]%s", len(b.Content), footer)

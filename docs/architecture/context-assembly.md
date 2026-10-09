@@ -206,3 +206,25 @@ read messages after that cut; transcript browsing, search and export retain the
 full history. A transcript-copying fork carries the cut with its new marker ID.
 Equal-second timestamps are ordered by the retained message rows, and the cut
 is re-resolved from its marker ID after reopening the database.
+
+### Cached result references during replay
+
+A cache footer describes availability when its preview was made. Cached tool
+bodies retain the configured one-hour default TTL and per-result 1 MiB cap;
+the cap is not an aggregate eviction policy. Context assembly and each native
+provider request reconcile references with the session-scoped cache reader.
+Expired, missing/purged or metadata-only bodies become an explicit unavailable
+marker while keeping the preview. An unsuccessful availability check is marked
+unknown, not reported as expiry. Stored transcripts and original results are
+not rewritten, and retention loss does not change the original tool outcome.
+No source call is repeated automatically; a fresh query requires current tool
+permissions. Retrieval itself remains the final availability check if a body
+expires after projection.
+
+CLI recovery packs reconcile replayed references before rendering. Availability
+notices survive bounded history clipping. A resumed provider owns its prior
+history, so Nanite cannot edit those old messages: each turn carries an explicit
+historical-reference correction plus unavailable IDs from the working history
+window. The correction covers older provider-held references too; it does not
+claim that opaque provider history was rewritten. Clear boundaries continue to
+exclude prior working history from both replay and these corrections.

@@ -1310,6 +1310,24 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 			// the runner would have honored.
 			close(ch)
 		}
+		// A subprocess can emit its terminal before SendInput has returned
+		// and released the runtime's turn-in-flight guard. Keep this generation
+		// registered until that exact send returns, so a queued successor cannot
+		// submit into a runtime that is still completing its predecessor.
+		if current != nil {
+			current.turnMu.Lock()
+			binding := current.turn
+			started := binding != nil && binding.sendStarted
+			current.turnMu.Unlock()
+			if started {
+				drainCtx, drainCancel := context.WithTimeout(genCtx, runtimeTurnCancelMaxWait)
+				returned := waitClosed(drainCtx, binding.sendReturned)
+				drainCancel()
+				if !returned {
+					s.requestGenerationCancellation(sessionID, current)
+				}
+			}
+		}
 		s.markGenerationCompleted(current)
 	})
 }

@@ -217,3 +217,96 @@ func TestCodexColdBootStartsAFreshThreadInsteadOfResumingOne(t *testing.T) {
 		t.Fatalf("agent_runtime.provider_session_id = %q, want none for a codex thread no later boot can resume", stored)
 	}
 }
+
+// A provider terminal is visible before its subprocess exits. The host must
+// keep exact ownership during that interval. A bounded cancellation that cannot
+// drain the process must retain an unsafe owner until the exact send returns.
+func TestCodexExecTerminalBeforeProcessExitPreservesExactOwner(t *testing.T) {
+	for _, cancelAfterTerminal := range []bool{true, false} {
+		name := "stalled exit"
+		if cancelAfterTerminal {
+			name = "user cancellation"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			tc := codexSubprocessCase
+			tc.script = fmt.Sprintf(fakeCodexResumeScript, dir) + `while [ ! -f "$dir/release" ]; do sleep 0.02; done
+`
+			f := newNativeCLIFixture(t, tc)
+			owner := lifecycle.NewManager("test.codex-terminal-exit")
+			t.Cleanup(func() { _ = owner.Shutdown(5 * time.Second) })
+			f.svc.lifecycle = owner
+			f.svc.activeGen = make(map[string]*inFlightGen)
+			release := func() error { return os.WriteFile(filepath.Join(dir, "release"), nil, 0o600) }
+			t.Cleanup(func() { _ = release() })
+			msgID, err := f.svc.HandleMessage(context.Background(), f.session, "Remember this: the code word is plum.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			evs := drainTurnStream(t, subscribe(t, f, msgID))
+			if findEvent(evs, "stream_end") == nil || findEvent(evs, "error") != nil {
+				t.Fatalf("provider terminal = %+v", evs)
+			}
+			f.svc.activeGenMu.Lock()
+			gen := f.svc.activeGen[f.session]
+			f.svc.activeGenMu.Unlock()
+			if gen == nil {
+				t.Fatal("terminal released runtime owner before SendInput returned")
+			}
+			gen.turnMu.Lock()
+			binding := gen.turn
+			gen.turnMu.Unlock()
+			if binding == nil {
+				t.Fatal("missing exact runtime binding")
+			}
+			select {
+			case <-binding.sendReturned:
+				t.Fatal("fake process exited before cancellation/timeout")
+			default:
+			}
+			if cancelAfterTerminal && !f.svc.CancelActiveGeneration(f.session) {
+				t.Fatal("user cancellation did not claim terminal-but-still-sending generation")
+			}
+			select {
+			case <-gen.done:
+			case <-time.After(8 * time.Second):
+				t.Fatal("generation did not finish its bounded drain")
+			}
+			select {
+			case <-gen.cancelIssued:
+			case <-time.After(8 * time.Second):
+				t.Fatal("exact runtime cancellation did not finish within bounded cleanup")
+			}
+			select {
+			case <-binding.sendReturned:
+			default:
+				if generationResolvedSafe(gen) {
+					t.Fatal("undrained exact send was marked safe")
+				}
+				f.svc.activeGenMu.Lock()
+				retained := f.svc.activeGen[f.session]
+				f.svc.activeGenMu.Unlock()
+				if retained != gen {
+					t.Fatal("undrained runtime owner was discarded")
+				}
+				if waitForPredecessor(context.Background(), context.Background(), gen) {
+					t.Fatal("successor admitted over undrained runtime owner")
+				}
+			}
+			if err := release(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-binding.sendReturned:
+			case <-time.After(5 * time.Second):
+				t.Fatal("released exact send did not return")
+			}
+			select {
+			case <-gen.safeBoundary:
+			case <-time.After(5 * time.Second):
+				t.Fatal("drained exact owner did not resolve its safe boundary")
+			}
+
+		})
+	}
+}

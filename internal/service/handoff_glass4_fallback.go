@@ -43,15 +43,20 @@ func (s *chatServiceImpl) ensureGlass4HandoffPreCompact(
 	chatMessages []llmtypes.ChatMessage,
 	ch chan chat.StreamEvent,
 ) (string, error) {
-	_ = ctx // ctx reserved for future LLM tiebreaker; deterministic path doesn't need it.
+	_ = ctx // The existing deterministic handoff helpers do not consume a caller context.
 	_ = ch  // SSE not emitted on fallback write; the post-compaction inject emits handoff_loaded.
+	return ensureGlass4Handoff(s.store, sess, chatMessages)
+}
 
+// ensureGlass4Handoff is shared by manual and automatic compaction. A curated
+// handoff wins over the deterministic fallback; neither path invents authority.
+func ensureGlass4Handoff(stash HandoffStashStore, sess *store.Session, chatMessages []llmtypes.ChatMessage) (string, error) {
 	if sess == nil {
 		return "", nil
 	}
 
 	// Skip if a Glass-4 stash already exists — proactive path covered it.
-	if existing, _, err := ReadLatestGlass4Handoff(s.store, sess.ID); err == nil && existing != nil {
+	if existing, _, err := ReadLatestGlass4Handoff(stash, sess.ID); err == nil && existing != nil {
 		return "", nil
 	} else if err != nil && !errors.Is(err, store.ErrHandoffStashNotFound) {
 		slog.Warn("chat-service: glass-4 handoff probe failed (will attempt fallback write)",
@@ -59,7 +64,7 @@ func (s *chatServiceImpl) ensureGlass4HandoffPreCompact(
 	}
 
 	payload := buildFallbackHandoff(chatMessages)
-	stashID, err := WriteGlass4Handoff(s.store, sess.ID, payload)
+	stashID, err := WriteGlass4Handoff(stash, sess.ID, payload)
 	if err != nil {
 		return "", err
 	}

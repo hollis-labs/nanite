@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/brand"
 
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/mcpbridge"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
@@ -64,9 +65,13 @@ func newSelfToolProxy(apiURL, sessionID string, scope SelfToolScope) *selfToolPr
 		client: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 	all, _ := (&selftools.SelfToolsTransport{}).ListTools(context.Background())
+	// The retained operator endpoint does not authenticate an actor binding.
+	// Recursive executors cannot use it as plugin authority. Keep the names
+	// hidden so an explicit call can receive the typed unavailable refusal.
+	p.hidden = map[string]struct{}{"python_run": {}, "workflow_execute_tool_step": {}}
+	all = coreProxyCatalog(all)
 	if scope == ScopeStore {
-		p.catalog = selftools.BareStoreTools()
-		p.hidden = map[string]struct{}{}
+		p.catalog = coreProxyCatalog(selftools.BareStoreTools())
 		for _, t := range all {
 			if !slices.ContainsFunc(p.catalog, func(c condmcp.Tool) bool { return c.Name == t.Name }) {
 				p.hidden[t.Name] = struct{}{}
@@ -84,7 +89,10 @@ func newSelfToolProxy(apiURL, sessionID string, scope SelfToolScope) *selfToolPr
 }
 
 // ListTools returns the static self-tool catalog.
-func (p *selfToolProxy) ListTools(_ context.Context) ([]condmcp.Tool, error) {
+func (p *selfToolProxy) ListTools(ctx context.Context) ([]condmcp.Tool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return p.catalog, nil
 }
 
@@ -107,8 +115,23 @@ func (p *selfToolProxy) HiddenTools() []string {
 
 // CallTool forwards the call to the live API server and decodes the result.
 func (p *selfToolProxy) CallTool(ctx context.Context, name string, args map[string]any) (*condmcp.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if unsupportedProxyExecutor(condmcp.Tool{Name: name}) {
+		return nil, fmt.Errorf("authority_unavailable: %w", mcpbridge.ErrAuthorityUnavailable)
+	}
 	if _, hidden := p.hidden[name]; hidden {
 		return condmcp.ErrorResult(fmt.Sprintf("%s is not available to this launch: it needs a harness service only chat agents are given", name)), nil
+	}
+	// Core metadata uses a local static declaration snapshot. It must never
+	// expose global plugin inventory/schema through an operator bearer plus a
+	// caller-asserted session. Unknown tools cannot fall through to the host.
+	if !p.advertises(name) {
+		return nil, fmt.Errorf("authority_unavailable: %w", mcpbridge.ErrAuthorityUnavailable)
+	}
+	if name == "tool_list" || name == "tool_describe" || name == "tool_validate" {
+		return p.coreMetadata(ctx, name, args)
 	}
 	payload := map[string]any{
 		"session_id": p.sessionID,

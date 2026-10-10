@@ -373,6 +373,10 @@ func (m *Manager) acquireDispatch(ctx context.Context) (*pluginhost.Conn, contex
 	lease, conn := m.grantLease, m.connection
 	running := m.state == StateRunning
 	crashed := m.state == StateCrashed
+	if expected, bound := expectedIncarnation(ctx); bound && expected != m.incarnation {
+		m.mu.Unlock()
+		return nil, nil, nil, ErrStaleBinding
+	}
 	m.mu.Unlock()
 	if crashed {
 		return nil, nil, nil, ErrSubprocessGone
@@ -397,11 +401,20 @@ func (m *Manager) acquireDispatch(ctx context.Context) (*pluginhost.Conn, contex
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if err := validateDispatch(permit); err != nil {
+		release()
+		return nil, nil, nil, err
+	}
 	m.mu.Lock()
 	current := m.state == StateRunning && m.grantLease == lease && m.connection == conn
+	expected, bound := expectedIncarnation(ctx)
+	stale := bound && expected != m.incarnation
 	m.mu.Unlock()
-	if !current {
+	if !current || stale {
 		release()
+		if stale {
+			return nil, nil, nil, ErrStaleBinding
+		}
 		return nil, nil, nil, ErrGrantLeaseEnded
 	}
 	return conn, permit, release, nil

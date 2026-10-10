@@ -7,9 +7,9 @@ type Tool struct {
 	InputSchema map[string]any `json:"inputSchema,omitempty"`
 	// Annotations are the MCP spec's behavior hints — readOnlyHint,
 	// destructiveHint, idempotentHint, openWorldHint. They are how a server
-	// tells a client that a tool changes something, which is what an approval
-	// gate should key off. Inferring it from the tool's name instead works
-	// until it doesn't, and the way it fails is letting a write through.
+	// tells a client that a tool changes something. Manifest-owned plugin tools
+	// preserve these public hints independently of the reviewed effect used
+	// for host approval classification.
 	Annotations map[string]any `json:"annotations,omitempty"`
 }
 

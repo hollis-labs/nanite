@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,7 +19,6 @@ import (
 	gosched "github.com/hollis-labs/libs/util/scheduler"
 	"github.com/hollis-labs/libs/util/worktree"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/agent/builtin"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentimport"
 	"github.com/hollis-labs/nanite/internal/background"
@@ -74,8 +72,9 @@ import (
 // Container holds all service instances and shared subsystems. It is the
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
-	discoverMCP   func(context.Context) (*mcp.DiscoveryDiff, error)
-	PluginQueries *PluginQueryService
+	AgentDefinitions *AgentDefinitions
+	discoverMCP      func(context.Context) (*mcp.DiscoveryDiff, error)
+	PluginQueries    *PluginQueryService
 
 	// HarnessProfiles selects and resolves named harness profiles; used by the
 	// session-create handlers to reject an unknown profile early.
@@ -498,13 +497,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	if cfg.Providers == nil {
 		return nil, fmt.Errorf("service.NewContainer: Providers is required")
 	}
+	if err := installEmbeddedChatDefinition(context.Background(), cfg.Store); err != nil {
+		return nil, err
+	}
 	resolver := cfg.DefinitionResolver
 	if resolver == nil {
-		var err error
-		resolver, err = NewFileDefinitionResolver(os.Getenv("NANITE_AGENTDEF_DIR"))
-		if err != nil {
-			return nil, err
-		}
+		resolver = &StoredDefinitionResolver{Store: cfg.Store}
 	}
 	defaultRef := cfg.DefaultDefinitionRef
 	if defaultRef.DefinitionID == "" {
@@ -544,6 +542,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// --- Domain services (Wave 1) ---
 
 	sessions := NewSessionService(SessionServiceDeps{
+		Native:            cognitiveViews,
 		Sessions:          cfg.Store,
 		Writer:            cfg.Store,
 		Agents:            cfg.Store,
@@ -571,101 +570,15 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// PopulateAllSandboxes / SyncAllProjectRoots (the opposite, export
 	// direction) remain live, and because internal/agentimport drives
 	// Import through it from the CLI and REST triggers.
-	agentDefs, err := agent.Discover(agent.DiscoverOptions{
-		WorkingDir: workingDir,
-	})
-	if err != nil {
-		slog.Warn("service container: agent discovery", "err", err)
-	}
-	// CW-20260512-0111: append all internal agent profiles from
-	// internal/agent/builtin/profiles/*.md. Each definition is stamped
-	// Source="internal" so that the AutoIngestAgents pass writes
-	// agent_profiles rows whose `source` column matches the Wave 2 cleanup
-	// keep-list (agent_profiles WHERE source != 'internal' will be wiped
-	// by CW-20260512-0112). Lower discovery priority than user / project
-	// agents so user overrides by-slug still win.
-	//
-	// Per profiles.go contract: parse failures here are build-level bugs
-	// (the files are embedded at compile time). Fail-fast at boot so an
-	// unparseable internal profile surfaces immediately instead of being
-	// silently absent from the agent registry.
-	internalDefs, err := builtin.InternalProfiles()
-	if err != nil {
-		return nil, fmt.Errorf("service.NewContainer: load internal agent profiles: %w", err)
-	}
-	agentDefs = append(agentDefs, internalDefs...)
-	// POC CW-20260420-0047: mux orchestrator agent profile.
-	// MuxOrchestratorAgent returns (nil, nil) in non-devmode builds; guard
-	// the nil-def case so we don't append a nil pointer to agentDefs.
-	if muxDef, muxErr := builtin.MuxOrchestratorAgent(); muxErr != nil {
-		slog.Warn("service container: built-in mux orchestrator agent", "err", muxErr)
-	} else if muxDef != nil {
-		agentDefs = append(agentDefs, muxDef)
-	}
-	slog.Info("service container: loaded seed agent definitions", "count", len(agentDefs))
-
-	// Editability is provenance-based. Filesystem paths are historical import
-	// metadata only and never participate in ownership or writes.
+	// Catalog synchronization is discovery only. Boot does not re-ingest
+	// mutable profiles, replay role declarations or backfill historical grants.
 	agentClassification := agent.NewClassification()
-
-	// J7 (CW-20260421-0011): auto-ingest discovered agent definitions into DB.
-	// File → parse → DB upsert. H1 trust: user/plugin sources → untrusted tier.
-	// Built-in definitions (Source != "user"/"plugin") retain 'normal' tier.
-	// Errors per-def are logged non-fatal via AutoIngestAgents.
-	//
-	// knownTools (CW-20260815-0013): built from the already-wired
-	// ToolClient (main.go's initMCP + MCP AutoDiscover both run before
-	// NewContainer is called) so AutoIngestAgents can flag a profile's
-	// roleTools:/tools: entries that don't match any registered tool name.
-	// nil when no ToolClient is wired — validation is skipped, not
-	// treated as "nothing is known" (which would flag every entry).
-	var knownTools map[string]bool
 	if cfg.ToolClient != nil {
-		catalog := cfg.ToolClient.GetAllToolsUnfiltered()
-		// request_tools has no registration anywhere in the builtin/MCP
-		// catalog ToolClient.ListTools() draws from — it's a meta-tool
-		// synthesized ad hoc by SelectForAgent (progressive discovery and
-		// the always_included escape hatch, service/tool.go), with its
-		// own dedicated execution path (ToolService.HandleRequestTools),
-		// not routed through MCPManager/Builtins like an ordinary tool.
-		// Append it here so known_tools' live-sync (below) sees it as a
-		// real, permanently-available catalog entry instead of marking
-		// its migration-seeded always_included row 'unavailable' on the
-		// very first boot (TASKS/phase-4/05-wire-select-for-agent-to-
-		// read-agent-tools.md — caught by that task's own zero-grant
-		// escape-hatch test).
-		catalog = append(catalog, toolclient.RequestToolsMetaTool())
-		knownTools = make(map[string]bool, len(catalog))
-		for _, t := range catalog {
-			knownTools[t.Name] = true
+		catalog := append(cfg.ToolClient.GetAllToolsUnfiltered(), toolclient.RequestToolsMetaTool())
+		result := SyncKnownTools(context.Background(), cfg.Store, catalog, cfg.ToolClient.IsBuiltinTool)
+		if result.Err != nil {
+			slog.Warn("service container: incomplete tool discovery sync", "err", result.Err)
 		}
-
-		// Phase 1 item 04 (TASKS/phase-1/04-add-known-tools-and-agent-tools-fk.md):
-		// live-sync the known_tools global catalog against this same
-		// builtins+MCP catalog, before AutoIngestAgents runs below (its
-		// seedRoleToolsFromIngest call needs known_tools rows to already
-		// exist so it can resolve roleTools: names to real grants).
-		syncResult := SyncKnownTools(context.Background(), cfg.Store, catalog, cfg.ToolClient.IsBuiltinTool)
-		if syncResult.Err != nil {
-			slog.Warn("service container: incomplete known_tools catalog sync", "err", syncResult.Err)
-		}
-		slog.Info("service container: synced known_tools catalog",
-			"upserted", syncResult.Upserted, "marked_unavailable", syncResult.MarkedUnavailable)
-	}
-	if n := AutoIngestAgents(cfg.Store, agentDefs, knownTools); n > 0 {
-		slog.Info("service container: auto-ingested agents into DB", "count", n)
-	}
-
-	// Phase 1 item 04: one-time-per-agent carry-over of
-	// tools:/tool_permissions:/role_tools:' CURRENT values into real
-	// agent_tools grants. Runs after AutoIngestAgents so brand-new agents
-	// ingested this same boot are covered too; see
-	// BackfillAgentToolsFromLegacyColumns' doc comment for why this is
-	// guarded to run at most once per agent, ever.
-	if n, err := BackfillAgentToolsFromLegacyColumns(context.Background(), cfg.Store); err != nil {
-		slog.Warn("service container: backfill agent_tools from legacy columns", "err", err)
-	} else if n > 0 {
-		slog.Info("service container: backfilled agent_tools from legacy columns", "grants", n)
 	}
 
 	agents := NewAgentService(AgentServiceConfig{
@@ -1008,7 +921,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			alwaysShip = NewPluginAlwaysShipSources()
 			cfg.Plugins.SetAlwaysShipRegistrar(alwaysShip)
 			cfg.Plugins.SetContextSourceRegistrar(adapter)
-			cfg.Plugins.SetReflexSeedRegistrar(NewPluginReflexSeeds(cfg.Store))
 			sources = append(sources, adapter)
 		}
 		broker := contextbroker.New(contextbroker.DefaultBudget(), sources...)
@@ -1134,42 +1046,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	loopDetector := loopdetect.New()
 	slog.Info("service container: loop detector enabled (I2, fingerprint-based)")
 
-	// FU-30 reflex engine. Built before the chat service so per-turn
-	// generation can evaluate DB-backed agent reflexes and inject just-in-time
-	// reminders / forced tool choices. Plugin hooks (nil-safe) let plugins
-	// rewrite reflex state/actions; the Halt executor marks the session
-	// halted + logs the event when a reflex resolves to halt_session.
-	reflexEngine := reflexes.NewEngine(cfg.Store, slog.Default())
-	if cfg.Plugins != nil {
-		reflexEngine.SetPluginHooks(cfg.Plugins)
-	}
-	reflexEngine.Executor.Halt = func(ctx context.Context, sessionID, reason string, evidence map[string]interface{}) error {
-		// Outcome bookkeeping must survive cancellation of the halt operation it records.
-		persistCtx := context.WithoutCancel(ctx)
-		if err := cfg.Store.MarkSessionHalted(persistCtx, sessionID, reason); err != nil {
-			return err
-		}
-		metaBlob, _ := json.Marshal(map[string]interface{}{
-			"detector": "reflex",
-			"reason":   reason,
-			"evidence": evidence,
-		})
-		cfg.Store.LogEvent(persistCtx, sessionID, "session_halted", "reflex", "reflex-fired halt", string(metaBlob))
-		return nil
-	}
-	// TASKS/scheduling/07-wire-add-schedule-reflex.md: closes
-	// CW-20260819-0006's loop -- a firing action_kind='add_schedule'
-	// reflex now genuinely inserts an agent_schedules row (via
-	// newReflexScheduleHook/buildReflexAgentSchedule, internal/service/
-	// reflex_schedule_hook.go) instead of only being staged in
-	// AppliedActions/event_log. Wired here, alongside Executor.Halt above,
-	// per docs/engineering/architecture/12-scheduling.md's "Producers" #3.
-	reflexEngine.Executor.Schedule = NewReflexScheduleHook(cfg.Store)
-	if n, err := reflexes.SeedBaseReflexes(context.Background(), cfg.Store, slog.Default()); err != nil {
-		slog.Warn("service container: reflex base-seed", "err", err)
-	} else if n > 0 {
-		slog.Info("service container: seeded base reflexes", "count", n)
-	}
+	// Runtime reflex candidates come exclusively from pinned definition bundles.
+	// Mutable profile defaults and plugin seed import are retired.
+	var reflexEngine *reflexes.Engine
 
 	// Phase 4c.1 (CW-20260508-0002): construct *agent.Dependencies +
 	// agentsessions.Manager once, after the core deps (store, pathGrants,
@@ -1555,6 +1434,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		discoverMCP:         discoverMCP,
 		Sessions:            sessions,
 		CognitiveViews:      cognitiveViews,
+		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
 		Agents:              agents,
 		Skills:              skills,
 		SkillVendor:         skillVendor,

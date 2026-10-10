@@ -128,10 +128,10 @@ func TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap(t *testing.T) {
 	}
 
 	agent := &store.AgentProfile{Name: "Orchestrator", Slug: "orchestrator", SystemPrompt: "Test."}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if err := st.GrantAgentTool(ctx, agent.ID, wantedTool.ID, "explicit"); err != nil {
+	if err := grantTestActorTool(ctx, st, agent.ID, wantedTool.ID, "explicit"); err != nil {
 		t.Fatalf("GrantAgentTool: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestSelectForAgent_ProgressiveDiscoverySeesGrantedBuiltinPastCap(t *testing
 	SyncKnownTools(ctx, st, allForSync, isBuiltin)
 
 	agent := &store.AgentProfile{Name: "Orchestrator", Slug: "orchestrator", SystemPrompt: "Test."}
-	if err := st.CreateAgent(ctx, agent); err != nil {
+	if err := persistTestActor(ctx, st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	// Grant the full surface (all builtin + MCP filler) -- matching the
@@ -245,7 +245,7 @@ func TestSelectForAgent_ProgressiveDiscoverySeesGrantedBuiltinPastCap(t *testing
 		if err != nil {
 			t.Fatalf("GetKnownToolByName(%s): %v", def.Name, err)
 		}
-		if err := st.GrantAgentTool(ctx, agent.ID, known.ID, "explicit"); err != nil {
+		if err := grantTestActorTool(ctx, st, agent.ID, known.ID, "explicit"); err != nil {
 			t.Fatalf("GrantAgentTool(%s): %v", def.Name, err)
 		}
 	}
@@ -295,7 +295,7 @@ func TestSelectForAgent_AlwaysIncludedSurvivesZeroGrants(t *testing.T) {
 	SyncKnownTools(ctx, st, append(append([]llmtypes.ToolDefinition{}, catalog...), toolclient.RequestToolsMetaTool()), func(string) bool { return true })
 
 	agent := &store.AgentProfile{Name: "Fresh", Slug: "fresh-agent", SystemPrompt: "Test."}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	// Deliberately NO agent_tools grants and NO legacy backfill run.
@@ -337,14 +337,14 @@ func TestFilterToolsByAgentTools(t *testing.T) {
 	SyncKnownTools(ctx, st, catalog, func(string) bool { return true })
 
 	agent := &store.AgentProfile{Name: "Grants", Slug: "grants-agent", SystemPrompt: "Test."}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	createTool, err := st.GetKnownToolByName(ctx, "engine_task_create")
 	if err != nil {
 		t.Fatalf("GetKnownToolByName: %v", err)
 	}
-	if err := st.GrantAgentTool(ctx, agent.ID, createTool.ID, "explicit"); err != nil {
+	if err := grantTestActorTool(ctx, st, agent.ID, createTool.ID, "explicit"); err != nil {
 		t.Fatalf("GrantAgentTool: %v", err)
 	}
 
@@ -360,7 +360,7 @@ func TestFilterToolsByAgentTools(t *testing.T) {
 
 	// Zero grants -> zero tools (no live "unrestricted" bypass, item 4).
 	other := &store.AgentProfile{Name: "NoGrants", Slug: "no-grants-agent", SystemPrompt: "Test."}
-	if err := st.CreateAgent(context.Background(), other); err != nil {
+	if err := persistTestActor(context.Background(), st, other); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if got := filterToolsByAgentTools(ctx, st, other.ID, catalog); len(got) != 0 {

@@ -2,12 +2,14 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // Glass-5 (CW-20260502-0012) — sanity tests for the catalog-discoverability
@@ -19,7 +21,7 @@ const loadHintMarker = "additional skills are available"
 
 func TestBuildSkillListForSession_LoadHintWithZeroAssigned(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-zero-assigned")
+	agent := priorChatRosterActor(t, s, "agent-zero-assigned")
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog A", Slug: "cat-a", Description: "first"})
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog B", Slug: "cat-b", Description: "second"})
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog C", Slug: "cat-c", Description: "third"})
@@ -39,14 +41,24 @@ func TestBuildSkillListForSession_LoadHintWithZeroAssigned(t *testing.T) {
 
 func TestBuildSkillListForSession_LoadHintWhenCatalogHasMore(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-some-assigned")
+	agent := priorChatRosterActor(t, s, "agent-some-assigned")
 	a := mustCreateSkill(t, s, &store.Skill{Name: "Assigned-1", Slug: "asn-1", Description: "first"})
 	b := mustCreateSkill(t, s, &store.Skill{Name: "Assigned-2", Slug: "asn-2", Description: "second"})
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-1", Slug: "co-1", Description: "x"})
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-2", Slug: "co-2", Description: "y"})
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-Only-3", Slug: "co-3", Description: "z"})
-	mustAssignSkill(t, s, agent.ID, a.ID)
-	mustAssignSkill(t, s, agent.ID, b.ID)
+	// Production assignment cannot issue a skill grant, even for a
+	// private already bound actor. The listing fixture below supplies a
+	// prior roster only after proving that this operation has no effect.
+	if err := s.AssignSkillToAgent(t.Context(), agent.ID, a.ID, ""); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("production assignment = %v, want verified authority refusal", err)
+	}
+	roster, err := s.ListAgentKnownSkills(t.Context(), agent.ID)
+	if err != nil || len(roster) != 0 {
+		t.Fatalf("refused assignment changed roster: %+v,%v", roster, err)
+	}
+	persistPriorChatRosterSkill(t, s, agent.ID, a.ID)
+	persistPriorChatRosterSkill(t, s, agent.ID, b.ID)
 	// rendered=2, catalog=5, discoverable=3.
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
@@ -64,11 +76,11 @@ func TestBuildSkillListForSession_LoadHintWhenCatalogHasMore(t *testing.T) {
 
 func TestBuildSkillListForSession_NoLoadHintWhenCatalogExhausted(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-all-assigned")
+	agent := priorChatRosterActor(t, s, "agent-all-assigned")
 	a := mustCreateSkill(t, s, &store.Skill{Name: "Only-1", Slug: "only-1", Description: "x"})
 	b := mustCreateSkill(t, s, &store.Skill{Name: "Only-2", Slug: "only-2", Description: "y"})
-	mustAssignSkill(t, s, agent.ID, a.ID)
-	mustAssignSkill(t, s, agent.ID, b.ID)
+	persistPriorChatRosterSkill(t, s, agent.ID, a.ID)
+	persistPriorChatRosterSkill(t, s, agent.ID, b.ID)
 	// rendered=2, catalog=2, discoverable=0 → no hint.
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
@@ -79,7 +91,7 @@ func TestBuildSkillListForSession_NoLoadHintWhenCatalogExhausted(t *testing.T) {
 
 func TestBuildSkillListForSession_EssentialCapEnforced(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-overflow")
+	agent := priorChatRosterActor(t, s, "agent-overflow")
 	overflowExtra := 5
 	total := SkillEssentialCap + overflowExtra
 	for i := 0; i < total; i++ {
@@ -87,7 +99,7 @@ func TestBuildSkillListForSession_EssentialCapEnforced(t *testing.T) {
 		// "first SkillEssentialCap rendered" outcome we can assert.
 		name := nameForIdx(i)
 		sk := mustCreateSkill(t, s, &store.Skill{Name: name, Slug: name, Description: "x"})
-		mustAssignSkill(t, s, agent.ID, sk.ID)
+		persistPriorChatRosterSkill(t, s, agent.ID, sk.ID)
 	}
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
@@ -112,7 +124,7 @@ func TestBuildSkillListForSession_EssentialCapEnforced(t *testing.T) {
 
 func TestBuildSkillListForSession_LoadHintTokenBudget(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-token-budget")
+	agent := priorChatRosterActor(t, s, "agent-token-budget")
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-1", Slug: "c-1", Description: "x"})
 	// rendered=0, catalog=1, discoverable=1.
 
@@ -127,7 +139,7 @@ func TestBuildSkillListForSession_LoadHintTokenBudget(t *testing.T) {
 
 func TestBuildSkillListForSession_LoadHintReferencesRealTools(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-real-tools")
+	agent := priorChatRosterActor(t, s, "agent-real-tools")
 	mustCreateSkill(t, s, &store.Skill{Name: "Catalog-X", Slug: "c-x", Description: "x"})
 
 	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
@@ -152,10 +164,10 @@ func nameForIdx(i int) string {
 // collapsed so a skill can't spend the SlotSkills budget on its own.
 func TestBuildSkillListForSession_DescriptionIsOneBoundedLine(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-long-desc")
+	agent := priorChatRosterActor(t, s, "agent-long-desc")
 	long := "Use when writing docs.\n\n## Body\n" + strings.Repeat("word ", 200)
 	sk := mustCreateSkill(t, s, &store.Skill{Name: "Doc Writer", Slug: "doc-writer", Description: long})
-	mustAssignSkill(t, s, agent.ID, sk.ID)
+	persistPriorChatRosterSkill(t, s, agent.ID, sk.ID)
 
 	got := buildSkillsSlotContent(context.Background(), s, agent.ID, "")
 	line := ""
@@ -180,7 +192,7 @@ func TestBuildSkillListForSession_DescriptionIsOneBoundedLine(t *testing.T) {
 
 func TestBuildSkillsSlotContent_EmptyWhenNothingToList(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-no-skills")
+	agent := priorChatRosterActor(t, s, "agent-no-skills")
 	if got := buildSkillsSlotContent(context.Background(), s, agent.ID, ""); got != "" {
 		t.Errorf("want empty slot for agent with no skills and empty catalog, got %q", got)
 	}
@@ -190,10 +202,10 @@ func TestBuildSkillsSlotContent_EmptyWhenNothingToList(t *testing.T) {
 // agent, and that is logged, once per (agent, slug).
 func TestBuildSkillListForSession_WarnsOnceOnDanglingGrant(t *testing.T) {
 	s := newTestStoreForChat(t)
-	agent := mustCreateAgent(t, s, "agent-dangling")
+	agent := priorChatRosterActor(t, s, "agent-dangling")
 	installed := mustCreateSkill(t, s, &store.Skill{Name: "Real", Slug: "real", Description: "d"})
-	mustAssignSkill(t, s, agent.ID, installed.ID)
-	if _, err := s.DB.Exec(`INSERT INTO agent_known_skills (agent_id, skill_name) VALUES (?, 'ghost-skill')`, agent.ID); err != nil {
+	persistPriorChatRosterSkill(t, s, agent.ID, installed.ID)
+	if _, err := s.DB.Exec(`INSERT INTO actor_known_skills (agent_id, skill_name) VALUES (?, 'ghost-skill')`, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -231,4 +243,30 @@ func (b *syncBuf) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// These private prior-binding/read-roster fixtures do not enroll actors or
+// issue executable skill capabilities. Shared legacy setup helpers remain
+// untouched so unrelated tests cannot acquire authority through this change.
+func priorChatRosterActor(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
+	t.Helper()
+	actor := &store.AgentProfile{Name: slug, Slug: slug}
+	if err := storetest.PriorAuthorizedActor(t.Context(), st, actor); err != nil {
+		t.Fatal(err)
+	}
+	return actor
+}
+
+func persistPriorChatRosterSkill(t *testing.T, st *store.Store, actorID, skillID string) {
+	t.Helper()
+	if _, err := st.GetAgentForActor(t.Context(), actorID); err != nil {
+		t.Fatal(err)
+	}
+	skill, err := st.GetSkill(t.Context(), skillID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name) VALUES(?,?)`, actorID, skill.Slug); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -9,11 +9,12 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestProfileRetirementAPIRequiresPersistedExport(t *testing.T) {
 	a, mux := newTestAPI(t)
-	p, err := a.Services.AgentConfig.Create(&store.AgentProfile{Name: "Test", Slug: "api-retirement", SystemPrompt: "private secret fixture"}, nil)
+	p, err := apiHistoricalRetirementFixture(t, a, &store.AgentProfile{Name: "Test", Slug: "api-retirement", SystemPrompt: "private secret fixture"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestProfileRetirementAPIRequiresPersistedExport(t *testing.T) {
 func TestProfileRetirementAPIProtectsBuiltinAndPluginOwnership(t *testing.T) {
 	a, mux := newTestAPI(t)
 	for _, p := range []*store.AgentProfile{{Name: "Builtin", Slug: "builtin-retirement", Source: "builtin", SystemPrompt: "x"}, {Name: "Plugin", Slug: "plugin-retirement", Source: "user", PluginID: "fixture-plugin", SystemPrompt: "x"}} {
-		if err := a.store.CreateAgent(t.Context(), p); err != nil {
+		if err := storetest.HistoricalProfile(t.Context(), a.store, p); err != nil {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
@@ -73,7 +74,7 @@ func TestProfileRetirementAPIProtectsBuiltinAndPluginOwnership(t *testing.T) {
 
 func TestProfileRetirementAPIRejectsStateChangedAfterExport(t *testing.T) {
 	a, mux := newTestAPI(t)
-	created, err := a.Services.AgentConfig.Create(&store.AgentProfile{Name: "Test", Slug: "retirement-cas-public", SystemPrompt: "original"}, nil)
+	created, err := apiHistoricalRetirementFixture(t, a, &store.AgentProfile{Name: "Test", Slug: "retirement-cas-public", SystemPrompt: "original"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +90,14 @@ func TestProfileRetirementAPIRejectsStateChangedAfterExport(t *testing.T) {
 	}
 	changed := httptest.NewRecorder()
 	mux.ServeHTTP(changed, httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(`{"system_prompt":"changed"}`)))
-	if changed.Code != http.StatusOK {
+	if changed.Code != http.StatusGone {
 		t.Fatal(changed.Code, changed.Body.String())
+	}
+	// Simulate an out-of-band historical writer in this private database. The
+	// retired public PUT must remain unavailable, while export CAS must still
+	// detect a historical change made between export and retirement.
+	if _, historicalWriteErr := a.store.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET system_prompt='changed' WHERE id=?`, created.Profile.ID); historicalWriteErr != nil {
+		t.Fatal(historicalWriteErr)
 	}
 	request, err := json.Marshal(map[string]string{"export_id": receipt.ExportID, "digest": receipt.Digest})
 	if err != nil {
@@ -101,9 +108,16 @@ func TestProfileRetirementAPIRejectsStateChangedAfterExport(t *testing.T) {
 	if retired.Code != http.StatusConflict {
 		t.Fatal(retired.Code, retired.Body.String())
 	}
-	retained := httptest.NewRecorder()
-	mux.ServeHTTP(retained, httptest.NewRequest(http.MethodGet, path, nil))
-	if retained.Code != http.StatusOK || !bytes.Contains(retained.Body.Bytes(), []byte("changed")) {
-		t.Fatal(retained.Code, retained.Body.String())
+	retained, err := a.store.GetHistoricalAgentProfile(t.Context(), created.Profile.ID)
+	if err != nil || retained.SystemPrompt != "changed" {
+		t.Fatal(retained, err)
 	}
+}
+
+func apiHistoricalRetirementFixture(t *testing.T, a *testAPI, p *store.AgentProfile, _ any) (*service.AgentConfigResult, error) {
+	t.Helper()
+	if err := storetest.HistoricalProfile(t.Context(), a.store, p); err != nil {
+		return nil, err
+	}
+	return &service.AgentConfigResult{Profile: p, Revision: p.Revision}, nil
 }

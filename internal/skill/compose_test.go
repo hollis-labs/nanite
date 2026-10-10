@@ -21,10 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/substrate/agent/subagent"
@@ -166,6 +168,9 @@ func TestMaterializeSkill_Fork_DelegatesToRealSubagentAndFoldsBackResult(t *test
 
 	parent := parseFixtureDef(t, "compose-fork-parent")
 
+	assertUnavailableHostFork(t, idx, vendor, svc, parent)
+	svc.SetSpawnAuthorizer(pureCompositionAuthorization{bypassApproval: true})
+
 	result, err := MaterializeSkill(context.Background(), MaterializerDeps{
 		Index:    idx,
 		Vendor:   vendor,
@@ -291,6 +296,9 @@ func TestMaterializeSkill_MultiLevelProvenanceChain_CrossesInlineAndFork(t *test
 	svc := subagenthost.NewService(idx.DB, runner, nil, nil, nil)
 	root := parseFixtureDef(t, "compose-multilevel-root")
 
+	assertUnavailableHostFork(t, idx, vendor, svc, root)
+	svc.SetSpawnAuthorizer(pureCompositionAuthorization{bypassApproval: true})
+
 	result, err := MaterializeSkill(context.Background(), MaterializerDeps{
 		Index:    idx,
 		Vendor:   vendor,
@@ -393,6 +401,12 @@ func TestMaterializeSkill_Fork_PendingApproval_ReturnsDistinguishableError(t *te
 
 	parent := parseFixtureDef(t, "compose-fork-parent")
 
+	assertUnavailableHostFork(t, idx, vendor, svc, parent)
+	if emitter.count != 0 {
+		t.Fatalf("unavailable host emitted %d approval envelopes", emitter.count)
+	}
+	svc.SetSpawnAuthorizer(pureCompositionAuthorization{bypassApproval: false})
+
 	_, err := MaterializeSkill(context.Background(), MaterializerDeps{
 		Index:    idx,
 		Vendor:   vendor,
@@ -478,3 +492,27 @@ var (
 	_ SkillIndexStore           = (*store.Store)(nil)
 	_ SubagentDispatcher        = (*subagent.Service)(nil)
 )
+
+// Explicit authority belongs only to standalone composition controls; it never
+// enrolls an actor or overrides the host path being tested immediately before it.
+type pureCompositionAuthorization struct{ bypassApproval bool }
+
+func (a pureCompositionAuthorization) AuthorizeSpawn(context.Context, string) (subagent.SpawnAuthorization, error) {
+	return subagent.SpawnAuthorization{BypassApproval: a.bypassApproval}, nil
+}
+
+func assertUnavailableHostFork(t *testing.T, st *store.Store, vendor *skillvendor.Store, svc *subagent.Service, def Definition) {
+	t.Helper()
+	before := skillBoundarySnapshot(t, st)
+	result, err := MaterializeSkill(t.Context(), MaterializerDeps{Index: st, Vendor: vendor, Subagent: svc}, def, MaterializeInput{ParentSessionID: "claimed-parent-session", ParentAgentID: "claimed-parent-agent", ForkRole: "claimed-role"})
+	if !errors.Is(err, store.ErrVerifiedActorRequired) || result != nil {
+		t.Fatalf("host fork = %+v, %v; want unavailable issuer refusal", result, err)
+	}
+	var pending *ForkPendingApprovalError
+	if errors.As(err, &pending) {
+		t.Fatalf("unavailable authority produced approval workflow: %+v", pending)
+	}
+	if after := skillBoundarySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused host fork changed state: %#v -> %#v", before, after)
+	}
+}

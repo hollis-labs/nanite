@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // CW-20261001-0079: a loopback-granted skill on a host where go-sandbox's
@@ -38,8 +41,10 @@ func TestExecuteGated_LoopbackGrantRefusedClearlyWhereHelperCannotRun(t *testing
 	if runtime.GOOS != "linux" {
 		t.Skip("the loopback helper is linux-only")
 	}
-	injectLoopbackSandboxProbe(t, unavailableLoopbackProbe)
+	probes := 0
+	injectLoopbackSandboxProbe(t, func() error { probes++; return unavailableLoopbackProbe() })
 	g, agentID, skillSlug := newAuthorizedGate(t, `{"network":{"allow_loopback":true}}`)
+	before := skillBoundarySnapshot(t, g.Skills.(*store.Store))
 	_, err := g.ExecuteGated(context.Background(), ExecRequest{
 		SkillSlug: skillSlug, AgentID: agentID,
 		Command: []string{"/bin/true"}, WorkDir: t.TempDir(),
@@ -52,6 +57,12 @@ func TestExecuteGated_LoopbackGrantRefusedClearlyWhereHelperCannotRun(t *testing
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not carry %q", err, want)
 		}
+	}
+	if probes != 1 {
+		t.Fatalf("unavailable helper probed %d times", probes)
+	}
+	if after := skillBoundarySnapshot(t, g.Skills.(*store.Store)); !reflect.DeepEqual(before, after) {
+		t.Fatalf("loopback refusal changed state: %#v -> %#v", before, after)
 	}
 }
 

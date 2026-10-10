@@ -1,247 +1,104 @@
 package service
 
 import (
-	"context"
-	"errors"
 	"testing"
 
+	svcerr "github.com/hollis-labs/libs/util/svcerr"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestAgentRevisionPartialRestorePreservesCurrentAuthorityAndProvenance(t *testing.T) {
+func TestImmutableAgentRevisionRestorePreservesCurrentHistoricalAuthorityAndProvenance(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-	tool, err := st.UpsertKnownTool(ctx, "restore-tool", "builtin", "available", "")
+	p := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Original", Slug: "retained-restore", SystemPrompt: "Historical private prompt", Source: "user"})
+	originalRevision := p.Revision
+	toolID, err := st.UpsertKnownTool(t.Context(), "restore-tool", "builtin", "available", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	role := &store.Role{Slug: "restore-role", Name: "Restore Role"}
-	if err = st.CreateRole(ctx, role); err != nil {
+	if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO roles(id,slug,name,system_prompt,created_at,updated_at) VALUES('retained-role','retained-role','Role','Retained role body','retained-created','retained-updated')`); err != nil {
 		t.Fatal(err)
 	}
-	created, err := svc.CreateWithAssignments(ctx, &store.AgentProfile{Name: "Original", Slug: "partial-restore", SystemPrompt: "Preserve this prompt", RoleTools: `["restore-tool"]`}, nil, AgentAssignments{RoleID: &role.ID})
+	if _, err = st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET role_id='retained-role',role_tools='["restore-tool"]',default_trust_tier='trusted',description='retained provenance',source_ref='/provenance/retained.md',imported_at='2026-10-08',origin_system='host-import',tether_urn='urn:tether:historical',system_prompt='Current retained prompt' WHERE id=?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO agent_dispatch_tool_allowlist(agent_id,tool_id,created_at) VALUES(?,?,'retained-created')`, p.ID, toolID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO agent_known_skills(agent_id,skill_name,pinned,approved_content_hash,granted_by,granted_at) VALUES(?,'retained-skill',1,'retained-content-hash','historical-operator','retained-granted-at')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	p, err = st.GetHistoricalAgentProfile(t.Context(), p.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldRevision := created.Revision
-	if err = st.RevokeAgentTool(ctx, created.Profile.ID, tool); err != nil {
-		t.Fatal(err)
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`, `SELECT * FROM roles ORDER BY id`, `SELECT * FROM agent_tools ORDER BY agent_id,tool_id`, `SELECT * FROM agent_dispatch_tool_allowlist ORDER BY agent_id,tool_id`, `SELECT * FROM agent_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`, `SELECT * FROM actor_granted_tools ORDER BY agent_id,tool_id`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = immutableConfigSnapshot(t, st, q)
 	}
-	if err = st.GrantAgentDispatchTool(ctx, created.Profile.ID, tool); err != nil {
-		t.Fatal(err)
+	for _, revision := range []string{p.Revision, "stale", ""} {
+		result, restoreErr := svc.RestoreRevision(t.Context(), p.ID, originalRevision, revision)
+		requireImmutableConfig(t, result, restoreErr)
 	}
-	if err = st.SetAgentDefaultTrustTier(ctx, created.Profile.ID, "trusted"); err != nil {
-		t.Fatal(err)
+	for i, q := range queries {
+		immutableConfigUnchanged(t, st, q, before[i])
 	}
-	current, err := st.GetAgent(ctx, created.Profile.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current.Description = "current provenance"
-	current.SourceRef = "/provenance/retained.md"
-	current.ImportedAt = "2026-10-08T00:00:00Z"
-	current.OriginSystem = "host-import"
-	current.TetherURN = "urn:tether:current"
-	current.SystemPrompt = "Changed"
-	current.RoleID = ""
-	if err = st.UpdateAgent(ctx, current); err != nil {
-		t.Fatal(err)
-	}
-	// An unrelated edit must not seed the old role declaration back into grants.
-	updated := *current
-	updated.Name = "Edited"
-	result, err := svc.UpdateWithAssignments(ctx, current, &updated, nil, current.Revision, AgentAssignments{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	names, err := st.ListAgentToolNames(ctx, current.ID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("edit re-granted revoked tool: %v, %v", names, err)
-	}
-	restored, err := svc.RestoreRevision(ctx, current.ID, oldRevision, result.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := restored.Profile
-	if p.Name != "Original" || p.SystemPrompt != "Preserve this prompt" || p.RoleID != role.ID {
-		t.Fatalf("editable profile/assignments not restored: %#v", p)
-	}
-	if p.ID != current.ID || p.Source != current.Source || p.SourceRef != current.SourceRef || p.ImportedAt != current.ImportedAt || p.OriginSystem != current.OriginSystem || p.TetherURN != current.TetherURN {
-		t.Fatalf("current identity/provenance lost: %#v", p)
-	}
-	names, err = st.ListAgentToolNames(ctx, p.ID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("restore re-granted revoked tool: %v, %v", names, err)
-	}
-	dispatch, err := st.ListAgentDispatchToolNames(ctx, p.ID)
-	if err != nil || len(dispatch) != 1 || dispatch[0] != "restore-tool" {
-		t.Fatalf("current dispatch grant changed: %v, %v", dispatch, err)
-	}
-	var tier string
-	if err = st.DB.QueryRow(`SELECT default_trust_tier FROM agent_profiles WHERE id = ?`, p.ID).Scan(&tier); err != nil || tier != "trusted" {
-		t.Fatalf("trust = %q, %v", tier, err)
-	}
-	// A later boot must not re-derive grants from the restored declarations.
-	if _, err = BackfillAgentToolsFromLegacyColumns(ctx, st); err != nil {
-		t.Fatal(err)
-	}
-	names, err = st.ListAgentToolNames(ctx, p.ID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("restart backfill changed restored grants: %v, %v", names, err)
-	}
-	latest, err := st.GetAgentRevision(ctx, p.ID, restored.Revision)
-	if err != nil || latest.Operation != "restore_partial" || latest.RestoredFrom != oldRevision || restored.Revision == oldRevision {
-		t.Fatalf("restore is not a new labeled revision: %#v, %v", latest, err)
-	}
-	if _, err := svc.RestoreRevision(ctx, p.ID, oldRevision, result.Revision); !errors.Is(err, store.ErrAgentRevisionConflict) {
-		t.Fatalf("stale restore = %v", err)
+	rows, err := svc.ListRevisions(t.Context(), p.ID, 100, 0)
+	if err != nil || len(rows) != 2 || rows[0].ID != p.Revision || rows[1].ID != originalRevision || rows[1].Profile.SystemPrompt != "Historical private prompt" || rows[0].Profile.SystemPrompt != p.SystemPrompt {
+		t.Fatalf("read-only historical revisions lost data: %+v %v", rows, err)
 	}
 }
 
-func TestAgentRevisionRestoreRejectsOwnedTargetsAndForeignHistory(t *testing.T) {
-	for _, source := range []string{"internal", "builtin", "plugin", "system"} {
-		t.Run(source, func(t *testing.T) {
-			svc, st, _ := newAgentConfigTestService(t)
-			ctx := context.Background()
-			p := &store.AgentProfile{Name: "Owned", Slug: "owned-" + source, SystemPrompt: "Owned prompt", Source: source}
-			if err := st.CreateAgent(ctx, p); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := svc.RestoreRevision(ctx, p.ID, p.Revision, p.Revision); !errors.Is(err, ErrAgentNotManaged) {
-				t.Fatalf("owned restore = %v", err)
-			}
-			current, err := st.GetAgent(ctx, p.ID)
-			if err != nil || current.Revision != p.Revision {
-				t.Fatal("refused restoration mutated target")
-			}
-		})
-	}
+func TestImmutableAgentRevisionRestoreRefusesOwnedForeignAndMissingHistory(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-	first, err := svc.Create(&store.AgentProfile{Name: "First", Slug: "first-history", SystemPrompt: "First"}, nil)
-	if err != nil {
-		t.Fatal(err)
+	first := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "First", Slug: "first-history", SystemPrompt: "First", Source: "user"})
+	for _, source := range []string{"user", "managed_file", "internal", "builtin", "plugin", "system", "import"} {
+		p := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "History", Slug: "history-" + source, SystemPrompt: "Retained", Source: source})
+		const query = `SELECT * FROM agent_profile_revisions ORDER BY sequence`
+		before := immutableConfigSnapshot(t, st, query)
+		for _, historicalID := range []string{p.Revision, first.Revision, "missing-history"} {
+			result, err := svc.RestoreRevision(t.Context(), p.ID, historicalID, p.Revision)
+			requireImmutableConfig(t, result, err)
+		}
+		immutableConfigUnchanged(t, st, query, before)
+		retained, err := st.GetHistoricalAgentProfile(t.Context(), p.ID)
+		if err != nil || retained.Revision != p.Revision || retained.SystemPrompt != p.SystemPrompt {
+			t.Fatalf("refused restore changed owned target: %+v %v", retained, err)
+		}
 	}
-	second, err := svc.Create(&store.AgentProfile{Name: "Second", Slug: "second-history", SystemPrompt: "Second"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.RestoreRevision(ctx, second.Profile.ID, first.Revision, second.Revision); err == nil {
-		t.Fatal("foreign history accepted")
-	}
-	// Source alone cannot override actual plugin ownership.
-	p := &store.AgentProfile{Name: "Plugin", Slug: "plugin-id-owned", SystemPrompt: "Plugin", Source: "user", PluginID: "plugin-owner"}
-	if err := st.CreateAgent(ctx, p); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.RestoreRevision(ctx, p.ID, p.Revision, p.Revision); !errors.Is(err, ErrAgentNotManaged) {
-		t.Fatalf("plugin-id restore = %v", err)
+	result, err := svc.RestoreRevision(t.Context(), "missing-profile", first.Revision, "")
+	requireImmutableConfig(t, result, err)
+	if _, err = svc.ListRevisions(t.Context(), "missing-profile", 50, 0); svcerr.CodeFor(err) != svcerr.CodeNotFound {
+		t.Fatalf("missing historical read=%v", err)
 	}
 }
 
-func TestAgentRevisionRestoreFailureRollsBackHistoryAndProfile(t *testing.T) {
+func TestImmutableAgentRevisionKeepsLostPromptHistoryWithoutRestoringIt(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-	created, err := svc.Create(&store.AgentProfile{Name: "Original", Slug: "restore-rollback", SystemPrompt: "Historical"}, nil)
-	if err != nil {
+	p := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Recover", Slug: "lost-historical-prompt", SystemPrompt: "Historical instructions", Source: "user"})
+	if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET system_prompt='' WHERE id=?`, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	p := *created.Profile
-	p.SystemPrompt = "Current"
-	changed, err := svc.Update(created.Profile, &p, nil, created.Revision)
-	if err != nil {
-		t.Fatal(err)
+	lost, err := st.GetHistoricalAgentProfile(t.Context(), p.ID)
+	if err != nil || lost.SystemPrompt != "" || lost.Revision == p.Revision {
+		t.Fatalf("lost-prompt history fixture=%+v %v", lost, err)
 	}
-	if _, err = st.DB.Exec(`CREATE TRIGGER fail_restore_history BEFORE UPDATE ON agent_profile_revisions
- WHEN NEW.operation = 'restore_partial' BEGIN SELECT RAISE(ABORT,'restore history unavailable'); END`); err != nil {
-		t.Fatal(err)
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = immutableConfigSnapshot(t, st, q)
 	}
-	if _, err = svc.RestoreRevision(ctx, p.ID, created.Revision, changed.Revision); err == nil {
-		t.Fatal("failed history annotation accepted")
+	result, err := svc.RestoreRevision(t.Context(), p.ID, p.Revision, lost.Revision)
+	requireImmutableConfig(t, result, err)
+	for i, q := range queries {
+		immutableConfigUnchanged(t, st, q, before[i])
 	}
-	current, err := st.GetAgent(ctx, p.ID)
-	if err != nil || current.SystemPrompt != "Current" || current.Revision != changed.Revision {
-		t.Fatalf("partial restoration survived: %#v, %v", current, err)
+	original, err := st.GetAgentRevision(t.Context(), p.ID, p.Revision)
+	if err != nil || original.Profile.SystemPrompt != "Historical instructions" {
+		t.Fatalf("original prompt missing from historical export data: %+v %v", original, err)
 	}
-	rows, err := svc.ListRevisions(ctx, p.ID, 100, 0)
-	if err != nil || rows[0].ID != changed.Revision {
-		t.Fatalf("failed restoration left history: %#v, %v", rows, err)
-	}
-}
-
-func TestAgentRevisionRestoreMissingAssignmentRefusesBeforeMutation(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-	role := &store.Role{Name: "Retired", Slug: "retired-history-role"}
-	if err := st.CreateRole(ctx, role); err != nil {
-		t.Fatal(err)
-	}
-	created, err := svc.CreateWithAssignments(ctx, &store.AgentProfile{Name: "Reference", Slug: "reference-history", SystemPrompt: "Reference prompt"}, nil, AgentAssignments{RoleID: &role.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := *created.Profile
-	empty := ""
-	current, err := svc.UpdateWithAssignments(ctx, created.Profile, &p, nil, created.Revision, AgentAssignments{RoleID: &empty})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = st.DeleteRole(ctx, role.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = svc.RestoreRevision(ctx, p.ID, created.Revision, current.Revision); err == nil {
-		t.Fatal("restore recreated or accepted missing assignment")
-	}
-	after, err := st.GetAgent(ctx, p.ID)
-	if err != nil || after.RoleID != "" || after.Revision != current.Revision {
-		t.Fatalf("refused restore changed target: %#v, %v", after, err)
-	}
-}
-
-func TestAgentRevisionRestorePreservesEditableSource(t *testing.T) {
-	for _, source := range []string{"api", "cli", "managed_file", "nanite", "project", "user"} {
-		t.Run(source, func(t *testing.T) {
-			svc, st, _ := newAgentConfigTestService(t)
-			ctx := context.Background()
-			p := &store.AgentProfile{Name: "Managed", Slug: "managed-history", SystemPrompt: "Managed prompt", Source: source, SourceRef: "/provenance/only.md"}
-			if err := st.CreateAgent(ctx, p); err != nil {
-				t.Fatal(err)
-			}
-			res, err := svc.RestoreRevision(ctx, p.ID, p.Revision, p.Revision)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if res.Profile.Source != source || res.Profile.SourceRef != p.SourceRef || !res.Class.Editable() {
-				t.Fatalf("editability/provenance changed: %#v", res)
-			}
-		})
-	}
-}
-func TestAgentRevisionRestoreRecoversPromptLostByDirectWriter(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-	created, err := svc.Create(&store.AgentProfile{Name: "Recover", Slug: "recover-prompt", SystemPrompt: "Historical instructions"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Historical low-level writers could erase a prompt. History must capture
-	// that mutation and allow the operator to recover the earlier instructions.
-	if _, err = st.DB.ExecContext(ctx, `UPDATE agent_profiles SET system_prompt = '' WHERE id = ?`, created.Profile.ID); err != nil {
-		t.Fatal(err)
-	}
-	broken, err := st.GetAgent(ctx, created.Profile.ID)
-	if err != nil || broken.SystemPrompt != "" || broken.Revision == created.Revision {
-		t.Fatalf("lost-prompt fixture = %#v, %v", broken, err)
-	}
-	restored, err := svc.RestoreRevision(ctx, broken.ID, created.Revision, broken.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restored.Profile.SystemPrompt != "Historical instructions" || restored.Revision == broken.Revision || restored.Revision == created.Revision {
-		t.Fatalf("prompt was not recovered as a new revision: %#v", restored)
-	}
-	lost, err := st.GetAgentRevision(ctx, broken.ID, broken.Revision)
-	if err != nil || lost.Profile.SystemPrompt != "" {
-		t.Fatalf("lost-prompt write was not retained: %#v, %v", lost, err)
+	retained, err := st.GetAgentRevision(t.Context(), p.ID, lost.Revision)
+	if err != nil || retained.Profile.SystemPrompt != "" {
+		t.Fatalf("lost-prompt event missing from historical data: %+v %v", retained, err)
 	}
 }

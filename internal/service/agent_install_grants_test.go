@@ -3,111 +3,118 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentimport"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
-func TestAgentInstallGrants_DeclaredToolsAndSyncPreservesRevocation(t *testing.T) {
+func TestImmutableAgentInstallDeclarationsCannotInitializeOrReplayHistoricalGrants(t *testing.T) {
 	st := newKnownToolsTestStore(t)
-	ctx := context.Background()
-	SyncKnownTools(ctx, st, []llmtypes.ToolDefinition{{Name: "torque_task_get"}, {Name: "torque_task_list"}, {Name: "dev_read"}, {Name: "diagnostic_status"}}, nil)
-	path := filepath.Join(t.TempDir(), "agent.md")
-	body := "---\nname: Installed\nslug: installed\ntools: [torque_task_*]\nroleTools: [dev_read]\n---\nPrompt.\n"
-	if operationErr := os.WriteFile(path, []byte(body), 0o600); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	importer := &agentimport.Importer{Store: st, SeedChildren: SeedImportedAgentChildren(st)}
-	result, err := importer.Import(ctx, agentimport.Source{Path: path})
+	p := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Imported history", Slug: "retained-install", SystemPrompt: "Retained prompt", Source: "import"})
+	toolID, err := st.UpsertKnownTool(t.Context(), "declared_tool", "mcp", "available", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := result.Outcomes[0].Profile
-	names, err := st.ListAgentToolNames(ctx, row.ID)
-	if err != nil || !reflect.DeepEqual(names, []string{"dev_read", "torque_task_get", "torque_task_list"}) {
-		t.Fatalf("installed grants %v: %v", names, err)
-	}
-	for _, name := range names {
-		known, lookupErr := st.GetKnownToolByName(ctx, name)
-		if lookupErr != nil {
-			t.Fatal(lookupErr)
-		}
-		if operationErr := st.RevokeAgentTool(ctx, row.ID, known.ID); operationErr != nil {
-			t.Fatal(operationErr)
-		}
-	}
-	if operationErr := os.WriteFile(path, []byte(strings.Replace(body, "Prompt.", "Changed.", 1)), 0o600); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	if _, operationErr := importer.Import(ctx, agentimport.Source{Path: path}); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	if _, operationErr := BackfillAgentToolsFromLegacyColumns(ctx, st); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	names, err = st.ListAgentToolNames(ctx, row.ID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("sync/boot replayed revocations: %v %v", names, err)
-	}
-	after, err := st.GetAgentBySlug(ctx, "installed")
-	if err != nil || after.SystemPrompt != "Changed." {
-		t.Fatalf("content not synced: %+v %v", after, err)
-	}
-}
-
-func TestAgentInstallGrants_EmptyDeclarationsDoNotGrantCatalog(t *testing.T) {
-	st := newKnownToolsTestStore(t)
-	ctx := context.Background()
-	SyncKnownTools(ctx, st, []llmtypes.ToolDefinition{{Name: "powerful_write"}}, nil)
-	row, _ := importFixture(t, st, "---\nname: Empty\nslug: imported-reviewer\n---\nPrompt.\n")
-	if _, operationErr := BackfillAgentToolsFromLegacyColumns(ctx, st); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	names, err := st.ListAgentToolNames(ctx, row.ID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("empty declaration grants %v: %v", names, err)
-	}
-}
-
-func TestInitialAgentToolGrants_RollsBackMarkerWithFailedGrant(t *testing.T) {
-	st := newKnownToolsTestStore(t)
-	ctx := context.Background()
-	row := &store.AgentProfile{Name: "Rollback", Slug: "rollback"}
-	if operationErr := st.CreateAgent(ctx, row); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	if operationErr := st.InitializeAgentToolGrants(ctx, row.ID, []store.InitialAgentToolGrant{{ToolID: "missing", GrantedVia: "explicit"}}); operationErr == nil {
-		t.Fatal("missing FK grant succeeded")
-	}
-	marked, err := st.HasLegacyToolsBackfillRun(ctx, row.ID)
-	if err != nil || marked {
-		t.Fatalf("failed grant committed marker: %v %v", marked, err)
-	}
-	known, err := st.UpsertKnownTool(ctx, "actual_tool", "mcp", "available", "")
-	if err != nil {
+	if _, err = st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET tools='["*"]',role_tools='["declared_tool"]' WHERE id=?`, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if operationErr := st.InitializeAgentToolGrants(ctx, row.ID, []store.InitialAgentToolGrant{{ToolID: known, GrantedVia: "explicit"}}); operationErr != nil {
-		t.Fatal(operationErr)
+	if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO agent_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'explicit','retained-created')`, p.ID, toolID); err != nil {
+		t.Fatal(err)
 	}
-	names, err := st.ListAgentToolNames(ctx, row.ID)
-	if err != nil || !reflect.DeepEqual(names, []string{"actual_tool"}) {
-		t.Fatalf("recovered grants %v: %v", names, err)
+	if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO agent_tools_legacy_backfill(agent_id,created_at) VALUES(?,'retained-created')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`, `SELECT * FROM agent_tools ORDER BY agent_id,tool_id`, `SELECT * FROM agent_tools_legacy_backfill ORDER BY agent_id`, `SELECT * FROM agent_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM agent_procedures ORDER BY agent_id,name`, `SELECT * FROM actor_granted_tools ORDER BY agent_id,tool_id`, `SELECT * FROM actor_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = immutableConfigSnapshot(t, st, q)
+	}
+	def := &agent.Definition{Slug: "retained-install", Tools: []string{"*"}}
+	for _, created := range []bool{true, false} {
+		if err = SeedImportedAgentChildren(st)(t.Context(), p.ID, def, created); !errors.Is(err, store.ErrImmutableAgentProfile) {
+			t.Fatalf("legacy child seeding created=%v: %v", created, err)
+		}
+	}
+	for _, id := range []string{p.ID, "missing-profile"} {
+		for _, grants := range [][]store.InitialAgentToolGrant{nil, {{ToolID: toolID, GrantedVia: "role_seed"}}, {{ToolID: "missing-tool", GrantedVia: "explicit"}}} {
+			if err = st.InitializeAgentToolGrants(t.Context(), id, grants); !errors.Is(err, store.ErrVerifiedActorRequired) {
+				t.Fatalf("unverified initial grants: %v", err)
+			}
+		}
+		if err = st.GrantAgentTool(t.Context(), id, toolID, "explicit"); !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("unverified grant: %v", err)
+		}
+		marked, guardErr := st.HasLegacyToolsBackfillRun(t.Context(), id)
+		if marked || !errors.Is(guardErr, store.ErrVerifiedActorRequired) {
+			t.Fatalf("historical marker became actor authority: %v %v", marked, guardErr)
+		}
+	}
+	// Boot backfill sees the fresh partition only; old declarations and markers
+	// remain data and cannot populate the fresh grant relation.
+	n, err := BackfillAgentToolsFromLegacyColumns(t.Context(), st)
+	if err != nil || n != 0 {
+		t.Fatalf("backfill replayed old declarations: %d %v", n, err)
+	}
+	names, err := st.ListAgentToolNames(t.Context(), p.ID)
+	if err != nil || len(names) != 0 {
+		t.Fatalf("historical grant exposed as fresh authority: %v %v", names, err)
+	}
+	for i, q := range queries {
+		immutableConfigUnchanged(t, st, q, before[i])
 	}
 }
 
+func TestImmutableAgentInstallRealImporterRefusesBeforeChildEffects(t *testing.T) {
+	st := newKnownToolsTestStore(t)
+	immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Imported history", Slug: "retained-real-import", SystemPrompt: "Private retained prompt", Source: "import"})
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`, `SELECT * FROM agent_tools ORDER BY agent_id,tool_id`, `SELECT * FROM agent_tools_legacy_backfill ORDER BY agent_id`, `SELECT * FROM agent_procedures ORDER BY agent_id,name`, `SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`, `SELECT * FROM actor_granted_tools ORDER BY agent_id,tool_id`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = immutableConfigSnapshot(t, st, q)
+	}
+	for _, slug := range []string{"new-real-import", "retained-real-import"} {
+		for _, declarations := range []string{"", "tools: [declared_tool]\nroleTools: [dev_read]\nprocedures:\n  - name: triage\n    body: Never seeded.\n"} {
+			body := "---\nname: Refused install\nslug: " + slug + "\n" + declarations + "---\nNever installed prompt.\n"
+			path := filepath.Join(t.TempDir(), "agent.md")
+			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			seedCalled := false
+			importer := &agentimport.Importer{Store: st, SeedChildren: func(context.Context, string, *agent.Definition, bool) error {
+				seedCalled = true
+				return errors.New("child seeder must not run")
+			}}
+			result, err := importer.Import(t.Context(), agentimport.Source{Path: path})
+			if !errors.Is(err, store.ErrImmutableAgentProfile) || seedCalled || importer.State() != agentimport.StateFailed {
+				t.Fatalf("legacy install did not stop before child effects: %+v %v seeded=%v state=%s", result, err, seedCalled, importer.State())
+			}
+			data, readErr := os.ReadFile(path) //nolint:gosec // private fixture created above
+			if readErr != nil || string(data) != body {
+				t.Fatalf("refused importer changed source: %q %v", data, readErr)
+			}
+			for i, q := range queries {
+				immutableConfigUnchanged(t, st, q, before[i])
+			}
+		}
+	}
+}
+
+// Keep this tool-selection diagnostic control unchanged except for supplying
+// its old profile explicitly as private history rather than creating it live.
 func TestZeroAgentGrants_VisibleAtInfoAndDeniesTools(t *testing.T) {
 	st := newKnownToolsTestStore(t)
 	ctx := context.Background()
 	row := &store.AgentProfile{Name: "Empty", Slug: "empty"}
-	if operationErr := st.CreateAgent(ctx, row); operationErr != nil {
+	if operationErr := storetest.HistoricalProfile(ctx, st, row); operationErr != nil {
 		t.Fatal(operationErr)
 	}
 	var logs bytes.Buffer
@@ -120,44 +127,5 @@ func TestZeroAgentGrants_VisibleAtInfoAndDeniesTools(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "zero agent_tools grants") || !strings.Contains(logs.String(), "level=INFO") {
 		t.Fatalf("missing visible zero grant diagnostic: %s", logs.String())
-	}
-}
-
-func TestAgentInstallGrants_PartialFailureIsVisibleAndSyncDoesNotReplay(t *testing.T) {
-	st := newKnownToolsTestStore(t)
-	ctx := context.Background()
-	SyncKnownTools(ctx, st, []llmtypes.ToolDefinition{{Name: "declared_tool"}}, nil)
-	if _, operationErr := st.DB.ExecContext(ctx, `CREATE TRIGGER fixture_fail_initial_grant BEFORE INSERT ON agent_tools BEGIN SELECT RAISE(ABORT, 'fixture grant failure'); END`); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	path := filepath.Join(t.TempDir(), "partial.md")
-	if operationErr := os.WriteFile(path, []byte("---\nname: Partial\nslug: partial\ntools: [declared_tool]\n---\nPrompt.\n"), 0o600); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	importer := &agentimport.Importer{Store: st, SeedChildren: SeedImportedAgentChildren(st)}
-	if _, operationErr := importer.Import(ctx, agentimport.Source{Path: path}); operationErr == nil || !strings.Contains(operationErr.Error(), "fixture grant failure") {
-		t.Fatalf("install lost grant failure: %v", operationErr)
-	}
-	row, err := st.GetAgentBySlug(ctx, "partial")
-	if err != nil {
-		t.Fatalf("created profile must remain discoverable: %v", err)
-	}
-	marked, err := st.HasLegacyToolsBackfillRun(ctx, row.ID)
-	if err != nil || marked {
-		t.Fatalf("failed grant snapshot committed marker: %v %v", marked, err)
-	}
-	if _, operationErr := st.DB.ExecContext(ctx, `DROP TRIGGER fixture_fail_initial_grant`); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	// A retry is a content sync over the retained row, not renewed authority.
-	if _, operationErr := importer.Import(ctx, agentimport.Source{Path: path}); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	if _, operationErr := BackfillAgentToolsFromLegacyColumns(ctx, st); operationErr != nil {
-		t.Fatal(operationErr)
-	}
-	names, err := st.ListAgentToolNames(ctx, row.ID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("retry/boot silently granted tools: %v %v", names, err)
 	}
 }

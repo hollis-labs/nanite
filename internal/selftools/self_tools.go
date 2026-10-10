@@ -943,15 +943,12 @@ the current turn for subsequent writes.
 		// --- chat_get self-tool (CW-20260519-0063) ---
 		{
 			Name: "chat_get",
-			Description: "Read the messages of a chat by short code (`c248`, `#c248`) or session UUID. " +
-				"Use to pull context from a sibling/earlier chat — for example, a recovered/cold-booted agent " +
-				"reading a crashed session's transcript, or an auditor reviewing another chat.\n\n" +
-				"**When to use:** When the user references another chat by its short code, or when you need raw " +
-				"transcript context that `chat_search`'s snippet view doesn't give you. Pair with `chat_search` " +
-				"(`target: c248`) when you need to FIND a specific point and then this tool to READ around it.\n\n" +
-				"**When NOT to use:** For the CURRENT session's history, prefer `chat_search` (cheaper) or rely on " +
-				"the system prompt's compaction disclosure. Do not use this to read chats you have no contextual " +
-				"reason to inspect — chat content is privileged.\n\n" +
+			Description: "Read the messages of a chat. If target is omitted, reads the current session's history. " +
+				"Use to pull context from a sibling/earlier chat, or to retrieve your own exact prior prose in the current session " +
+				"after it has been compacted into a summary.\n\n" +
+				"**When to use:** When you need raw transcript context that `chat_search`'s snippet view doesn't give you, " +
+				"or when you need to reread exactly what you (or the user) wrote before a compaction event.\n\n" +
+				"**When NOT to use:** Do not use this to read chats you have no contextual reason to inspect — chat content is privileged.\n\n" +
 				"**Scope boundary:** read-only, workspace-scoped. Targets in other workspaces are rejected.\n\n" +
 				"**Output shape:** `{session_id, short_code, title, workspace_id, total, offset, limit, has_more, count, messages: [{id, role, text, is_compacted, created_at}, ...]}`. " +
 				"Messages are chronological (created_at ASC). Use `limit`/`offset` to paginate large chats; default limit 50, max 500.",
@@ -960,7 +957,7 @@ the current turn for subsequent writes.
 				"properties": map[string]any{
 					"target": map[string]any{
 						"type":        "string",
-						"description": "Short code (c248 / #c248) or session UUID. Required. Aliases: `short_code`, `session_id`.",
+						"description": "Short code (c248 / #c248) or session UUID. Optional. If omitted, targets the current session. Aliases: `short_code`, `session_id`.",
 					},
 					"short_code": map[string]any{
 						"type":        "string",

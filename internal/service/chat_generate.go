@@ -1797,7 +1797,40 @@ func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 	for i := range tools {
 		clone := cloneSchemaNode(tools[i].InputSchema)
 		normalizeSchemaNode(clone)
+		injectUXMetadataProperties(clone)
 		tools[i].InputSchema = clone
+	}
+}
+
+func injectUXMetadataProperties(schema map[string]any) {
+	if schema == nil {
+		return
+	}
+	if typ, _ := schema["type"].(string); typ != "object" {
+		return
+	}
+	var props map[string]any
+	if p, ok := schema["properties"]; ok && p != nil {
+		if m, ok := p.(map[string]any); ok {
+			props = m
+		}
+	}
+	if props == nil {
+		props = make(map[string]any)
+		schema["properties"] = props
+	}
+
+	if _, exists := props["toolAction"]; !exists {
+		props["toolAction"] = map[string]any{
+			"type":        "string",
+			"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+		}
+	}
+	if _, exists := props["toolSummary"]; !exists {
+		props["toolSummary"] = map[string]any{
+			"type":        "string",
+			"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
+		}
 	}
 }
 

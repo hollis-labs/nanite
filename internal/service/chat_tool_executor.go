@@ -45,6 +45,7 @@ const (
 // toolPlan describes a single tool invocation after pre-checking.
 type toolPlan struct {
 	tu            llmtypes.ToolUseBlock
+	execInput     map[string]any
 	status        toolPlanStatus
 	denyReason    string
 	concurrent    bool
@@ -367,8 +368,10 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Arg validation: check tool_use Input against the tool's InputSchema.
+		var execInput map[string]any = tu.Input
 		if schema := s.tools.GetToolSchema(tu.Name); len(schema) > 0 {
-			if errMsg := s.argValidator.validate(tu.Name, schema, tu.Input); errMsg != "" {
+			execInput = stripHarnessFields(schema, tu.Input)
+			if errMsg := s.argValidator.validate(tu.Name, schema, execInput); errMsg != "" {
 				ls.recordToolCall(tu.Name, false)
 				// CW-20260417-0485: arg-validation errors are the canonical
 				// trigger for the chat-loop-terminated envelope (see the
@@ -392,6 +395,7 @@ func (s *chatServiceImpl) preCheckTools(
 
 		// Tool passed pre-check — determine concurrency safety.
 		plan.status = toolPlanReady
+		plan.execInput = execInput
 		if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 			plan.concurrent = toolInfo.IsConcurrencySafe
 		}
@@ -475,7 +479,7 @@ func (s *chatServiceImpl) executeToolBatch(
 			if concurrent {
 				presenceMu = &mu
 			}
-			results[i] = s.executeSingleTool(ctx, plans[i].tu, ls, agentID, sessionID, ch, presenceMu)
+			results[i] = s.executeSingleTool(ctx, plans[i].tu, plans[i].execInput, ls, agentID, sessionID, ch, presenceMu)
 		},
 		func(i int) { results[i] = canceledBeforeStartResult(plans[i].tu) },
 		safego.ReportRecovered)
@@ -499,6 +503,37 @@ func (s *chatServiceImpl) toolConcurrencyLimit(ls *loopState) int {
 	return harnessprofile.DefaultMaxConcurrentTools
 }
 
+// stripHarnessFields removes harness-injected UX metadata (toolAction, toolSummary)
+// if the canonical schema doesn't define them. Returns a cloned map to avoid
+// mutating the original LLM message block.
+func stripHarnessFields(schema, input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	var props map[string]any
+	if schema != nil {
+		if p, ok := schema["properties"].(map[string]any); ok {
+			props = p
+		}
+	}
+	if props == nil {
+		delete(out, "toolAction")
+		delete(out, "toolSummary")
+		return out
+	}
+	if _, ok := props["toolAction"]; !ok {
+		delete(out, "toolAction")
+	}
+	if _, ok := props["toolSummary"]; !ok {
+		delete(out, "toolSummary")
+	}
+	return out
+}
+
 // canceledBeforeStartResult is the tool_result for a call that never started
 // because the turn was canceled while it waited for a concurrency slot. It
 // has the same shape as the notify-pause cancellation so the model's
@@ -518,6 +553,7 @@ func canceledBeforeStartResult(tu llmtypes.ToolUseBlock) toolExecResult {
 func (s *chatServiceImpl) executeSingleTool(
 	ctx context.Context,
 	tu llmtypes.ToolUseBlock,
+	execInput map[string]any,
 	ls *loopState,
 	agentID string,
 	sessionID string,
@@ -578,7 +614,7 @@ func (s *chatServiceImpl) executeSingleTool(
 
 	// Execute tool via ToolService.
 	toolCtx, toolSpan := feotel.ToolCallSpan(ctx, tu.Name)
-	result, _ := s.tools.Execute(toolCtx, agentID, tu.Name, tu.Input)
+	result, _ := s.tools.Execute(toolCtx, agentID, tu.Name, execInput)
 	resultText := result.Output
 	toolIsError := result.IsError
 

@@ -313,13 +313,24 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 	if targetArg == "" {
 		targetArg = strArg(args, "session_id", "")
 	}
-	if targetArg == "" {
-		return mcp.ErrorResult("target is required (short_code like c248, or session_id UUID)"), nil
-	}
 
-	sess, errRes := resolveChatTarget(st, targetArg)
-	if errRes != nil {
-		return errRes, nil
+	var sess *store.Session
+	if targetArg == "" {
+		sessionID := mcp.SessionIDFromContext(ctx)
+		if sessionID == "" {
+			return mcp.ErrorResult("target is required (or call from an active session)"), nil
+		}
+		s, err := st.Reads.Sessions.Get(ctx, sessionID)
+		if err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("resolve active session %q: %v", sessionID, err)), nil
+		}
+		sess = s
+	} else {
+		s, errRes := resolveChatTarget(st, targetArg)
+		if errRes != nil {
+			return errRes, nil
+		}
+		sess = s
 	}
 
 	limit := intArgFull(args, "limit", chatGetDefaultLimit)

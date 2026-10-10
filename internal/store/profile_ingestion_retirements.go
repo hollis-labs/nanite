@@ -15,7 +15,7 @@ func (s *Store) ProfileIngestionRetired(ctx context.Context, id, slug string) (b
 
 func profileIngestionRetired(ctx context.Context, db agentConfigDB, id, slug string) (bool, error) {
 	var retired bool
-	err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM profile_ingestion_retirements WHERE profile_id = ? OR slug = ?)`, id, slug).Scan(&retired)
+	err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM retired_agent_profiles WHERE (id = ? AND id <> '') OR (slug = ? AND slug <> ''))`, id, slug).Scan(&retired)
 	return retired, err
 }
 

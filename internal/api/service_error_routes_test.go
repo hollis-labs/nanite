@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,34 +53,36 @@ func serviceErrorRequest(t *testing.T, h http.Handler, method, path, body string
 }
 func TestServiceErrorRoutesClassifyExpectedFailures(t *testing.T) {
 	st, h := serviceErrorRoutes(t)
-	row := &store.AgentProfile{ID: "managed", Name: "Managed", Slug: "managed", SystemPrompt: "fixture", Source: "user"}
-	if err := st.CreateAgent(context.Background(), row); err != nil {
-		t.Fatal(err)
-	}
-	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Duplicate","slug":"managed","system_prompt":"fixture"}`, 409)
-	serviceErrorRequest(t, h, "POST", "/api/agents/managed/copy-to-managed", `{}`, 409)
-	serviceErrorRequest(t, h, "POST", "/api/agents/missing/copy-to-managed", `{}`, 404)
+	a := &testAPI{store: st}
+	row := retiredAgentHistory(t, a, "user")
+	before := retiredAgentState(t, a)
+	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Duplicate","slug":"retained-user","system_prompt":"fixture"}`, 410)
+	serviceErrorRequest(t, h, "POST", "/api/agents/"+row.ID+"/copy-to-managed", `{}`, 410)
+	serviceErrorRequest(t, h, "POST", "/api/agents/missing/copy-to-managed", `{}`, 410)
+	assertRetiredAgentState(t, a, before)
 	serviceErrorRequest(t, h, "GET", "/api/agents/missing/known-tools", "", 404)
 	serviceErrorRequest(t, h, "PATCH", "/api/todos/missing/scope", `{"scope":"session","scope_id":"fixture"}`, 404)
 	serviceErrorRequest(t, h, "PATCH", "/api/todos/missing/scope", `{"scope":"bad"}`, 400)
 	serviceErrorRequest(t, h, "POST", "/api/schedules", `{"agent_id":"missing"}`, 404)
 }
-func TestServiceErrorRoutesAgentWriteCausesStayInLogs(t *testing.T) {
-	for _, op := range []string{"create", "update", "copy"} {
+
+// Retired routes must refuse before any attempted profile mutation, regardless
+// of whether the old writer would have succeeded or exposed a private cause.
+func TestServiceErrorRoutesRetiredAgentWritesNeverReachDatabase(t *testing.T) {
+	for _, op := range []string{"create", "update", "copy", "delete"} {
 		t.Run(op, func(t *testing.T) {
 			st, h := serviceErrorRoutes(t)
-			source := "user"
-			if op == "copy" {
-				source = "plugin"
-			}
-			if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "target", Name: "Target", Slug: "target", SystemPrompt: "fixture", Source: source}); err != nil {
-				t.Fatal(err)
-			}
+			a := &testAPI{store: st}
+			row := retiredAgentHistory(t, a, "plugin")
+			before := retiredAgentState(t, a)
 			statement := "INSERT"
 			if op == "update" {
 				statement = "UPDATE"
 			}
-			if _, err := st.DB.Exec(`CREATE TRIGGER fail_agent_write BEFORE ` + statement + ` ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private query'); END`); err != nil {
+			if op == "delete" {
+				statement = "DELETE"
+			}
+			if _, err := st.DB.Exec(`CREATE TRIGGER fail_agent_write BEFORE ` + statement + ` ON agent_profiles BEGIN SELECT RAISE(ABORT,'write_secret SQLITE_BUSY private query'); END`); err != nil {
 				t.Fatal(err)
 			}
 			var logs bytes.Buffer
@@ -87,16 +90,24 @@ func TestServiceErrorRoutesAgentWriteCausesStayInLogs(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 			t.Cleanup(func() { slog.SetDefault(previous) })
 			method, path, body := "POST", "/api/agents", `{"name":"Fresh","slug":"fresh","system_prompt":"fixture"}`
+			target := "/api/agents/" + row.ID
 			if op == "update" {
-				method, path, body = "PUT", "/api/agents/target", `{"name":"Changed"}`
+				method, path, body = "PUT", target, `{"name":"Changed"}`
 			}
 			if op == "copy" {
-				path, body = "/api/agents/target/copy-to-managed", `{}`
+				path, body = target+"/copy-to-managed", `{}`
 			}
-			serviceErrorRequest(t, h, method, path, body, 500)
-			if !strings.Contains(logs.String(), "write_secret") {
-				t.Fatalf("write cause absent from log: %s", logs.String())
+			if op == "delete" {
+				method, path, body = "DELETE", target, ""
 			}
+			message := serviceErrorRequest(t, h, method, path, body, 410)
+			if !strings.Contains(message, "retired") || !strings.Contains(message, "pinned definition") {
+				t.Fatalf("missing retirement guidance: %s", message)
+			}
+			if strings.Contains(logs.String(), "write_secret") {
+				t.Fatalf("retired route reached writer: %s", logs.String())
+			}
+			assertRetiredAgentState(t, a, before)
 		})
 	}
 }
@@ -107,16 +118,20 @@ func TestServiceErrorRoutesClosedDBIsInternal(t *testing.T) {
 	}
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/api/agents", `{"name":"Fresh","slug":"fresh","system_prompt":"fixture"}`},
+		{"DELETE", "/api/agents/target", ""},
+		{"PUT", "/api/agents/target", `{"name":"Changed"}`},
+		{"POST", "/api/agents/target/copy-to-managed", `{}`},
+	} {
+		serviceErrorRequest(t, h, c.method, c.path, c.body, 410)
+	}
+	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/api/durable-agents", `{"slug":"fixture","profile_id":"target"}`},
 		{"DELETE", "/api/agents/target/projects/project", ""},
 		{"DELETE", "/api/sessions/session/agents/target", ""},
 		{"GET", "/api/agents/target", ""},
 		{"GET", "/api/agents/target/known-tools", ""},
-		{"DELETE", "/api/agents/target", ""},
 		{"POST", "/api/sessions/fixture/agents", `{"agent_id":"target"}`},
 		{"POST", "/api/agents/target/projects", `{"project_id":"fixture"}`},
-		{"PUT", "/api/agents/target", `{"name":"Changed"}`},
-		{"POST", "/api/agents/target/copy-to-managed", `{}`},
 		{"PATCH", "/api/todos/missing/scope", `{"scope":"session","scope_id":"fixture"}`},
 		{"POST", "/api/schedules", `{"agent_id":"target"}`},
 	} {
@@ -126,40 +141,41 @@ func TestServiceErrorRoutesClosedDBIsInternal(t *testing.T) {
 
 func TestServiceErrorRoutesScheduleWriteFailure(t *testing.T) {
 	st, h := serviceErrorRoutes(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "schedule-agent", Slug: "schedule-agent", Name: "Schedule", SystemPrompt: "fixture", Source: "user"}); err != nil {
+	row := &store.AgentProfile{Slug: "schedule-agent", Name: "Schedule", SystemPrompt: "fixture"}
+	if err := storetest.PriorAuthorizedActor(t.Context(), st, row); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB.Exec(`CREATE TRIGGER fail_schedule_write BEFORE INSERT ON agent_schedules BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private schedule query'); END`); err != nil {
+	if _, err := st.DB.Exec(`CREATE TRIGGER fail_schedule_write BEFORE INSERT ON actor_schedules BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private schedule query'); END`); err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
-	serviceErrorRequest(t, h, "POST", "/api/schedules", `{"agent_id":"schedule-agent","name":"Fixture","schedule_kind":"one_shot","schedule_spec":"2099-01-01T00:00:00Z","body":"fixture"}`, 500)
+	serviceErrorRequest(t, h, "POST", "/api/schedules", fmt.Sprintf(`{"agent_id":%q,"name":"Fixture","schedule_kind":"one_shot","schedule_spec":"2099-01-01T00:00:00Z","body":"fixture"}`, row.ID), 500)
 	if !strings.Contains(logs.String(), "write_secret") {
 		t.Fatalf("schedule cause absent from log: %s", logs.String())
 	}
 }
 
-func TestServiceErrorRoutesAssignmentsKeepValidationSeparateFromWriteFailure(t *testing.T) {
+func TestServiceErrorRoutesRetiredAssignmentsDoNotValidateOrWriteProfiles(t *testing.T) {
 	st, h := serviceErrorRoutes(t)
-	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Invalid Role","slug":"invalid-role","system_prompt":"fixture","role_id":"missing"}`, 400)
-	serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Invalid Protocol","slug":"invalid-protocol","system_prompt":"fixture","protocol":"made-up"}`, 400)
-	if _, err := st.DB.Exec(`CREATE TRIGGER fail_assignment_write BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private assignment query'); END`); err != nil {
-		t.Fatal(err)
-	}
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	a := &testAPI{store: st}
 	role := &store.Role{Slug: "assignment-role", Name: "Assignment Role", SystemPrompt: "fixture"}
 	if err := st.CreateRole(t.Context(), role); err != nil {
 		t.Fatal(err)
 	}
-	serviceErrorRequest(t, h, "POST", "/api/agents", fmt.Sprintf(`{"name":"Assignment","slug":"assignment","system_prompt":"fixture","role_id":%q}`, role.ID), 500)
-	if !strings.Contains(logs.String(), "write_secret") {
-		t.Fatalf("assignment cause absent from log: %s", logs.String())
+	before := retiredAgentState(t, a)
+	if _, err := st.DB.Exec(`CREATE TRIGGER fail_assignment_write BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT,'write_secret SQLITE_BUSY private assignment query'); END`); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"name":"Invalid Role","slug":"invalid-role","role_id":"missing"}`,
+		`{"name":"Invalid Protocol","slug":"invalid-protocol","protocol":"made-up"}`,
+		fmt.Sprintf(`{"name":"Assignment","slug":"assignment","role_id":%q}`, role.ID),
+	} {
+		serviceErrorRequest(t, h, "POST", "/api/agents", body, 410)
+		assertRetiredAgentState(t, a, before)
 	}
 }
 
@@ -170,22 +186,20 @@ func TestServiceErrorRoutesDurableAgentMissingProfile(t *testing.T) {
 		t.Fatalf("missing profile guidance: %q", message)
 	}
 }
-func TestServiceErrorRoutesAgentBehaviorValidation(t *testing.T) {
+func TestServiceErrorRoutesRetiredAgentBehaviorHasNoEffects(t *testing.T) {
 	st, h := serviceErrorRoutes(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "target", Slug: "target", Name: "Target", Source: "user"}); err != nil {
-		t.Fatal(err)
-	}
+	a := &testAPI{store: st}
+	row := retiredAgentHistory(t, a, "user")
+	before := retiredAgentState(t, a)
 	for _, field := range []string{"class", "activation_mode", "default_state"} {
 		for _, method := range []string{"POST", "PUT"} {
 			path := "/api/agents"
 			if method == "PUT" {
-				path += "/target"
+				path += "/" + row.ID
 			}
-			body := fmt.Sprintf(`{"name":"Fixture","slug":"fresh","system_prompt":"fixture","%s":"bogus"}`, field)
-			message := serviceErrorRequest(t, h, method, path, body, 400)
-			if !strings.Contains(message, field) {
-				t.Fatalf("missing field in safe message: %s", message)
-			}
+			body := fmt.Sprintf(`{"name":"Fixture","slug":"fresh","%s":"bogus"}`, field)
+			serviceErrorRequest(t, h, method, path, body, 410)
+			assertRetiredAgentState(t, a, before)
 		}
 	}
 }
@@ -195,23 +209,24 @@ func TestServiceErrorRoutesMembershipRemoval(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			st, h := serviceErrorRoutes(t)
 			ctx := context.Background()
-			if err := st.CreateAgent(ctx, &store.AgentProfile{ID: "member", Name: "Member", Slug: "member", Source: "user"}); err != nil {
+			row := &store.AgentProfile{Name: "Member", Slug: "member"}
+			if err := storetest.PriorAuthorizedActor(ctx, st, row); err != nil {
 				t.Fatal(err)
 			}
-			path, table := "/api/agents/member/projects/project", "agent_projects"
+			path, table := "/api/agents/"+url.PathEscape(row.ID)+"/projects/project", "actor_projects"
 			if kind == "project" {
 				if err := st.CreateProject(ctx, &store.Project{ID: "project", Name: "Project"}); err != nil {
 					t.Fatal(err)
 				}
-				if err := st.AddAgentProject(ctx, "member", "project"); err != nil {
+				if err := st.AddAgentProject(ctx, row.ID, "project"); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				path, table = "/api/sessions/session/agents/member", "session_agents"
+				path, table = "/api/sessions/session/agents/"+url.PathEscape(row.ID), "session_actor_bindings"
 				if err := st.CreateSession(ctx, &store.Session{ID: "session", Title: "Session"}); err != nil {
 					t.Fatal(err)
 				}
-				if err := st.EnsureSessionAgent(ctx, "session", "member", "collaborate", false); err != nil {
+				if err := st.EnsureSessionAgent(ctx, "session", row.ID, "collaborate", false); err != nil {
 					t.Fatal(err)
 				}
 			}

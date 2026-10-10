@@ -100,7 +100,7 @@ func (s *Store) InsertTeamRunMember(ctx context.Context, m TeamRunMember) (*Team
 		// then read it back so the returned struct reflects the row that
 		// actually landed rather than a Go-side approximation of "now".
 		_, err := s.DB.ExecContext(ctx,
-			`INSERT INTO team_run_members (id, workflow_run_id, slot_name, agent_id, session_id, status)
+			`INSERT INTO actor_team_run_members (id, workflow_run_id, slot_name, agent_id, session_id, status)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			m.ID, m.WorkflowRunID, m.SlotName, m.AgentID, m.SessionID, m.Status,
 		)
@@ -108,7 +108,7 @@ func (s *Store) InsertTeamRunMember(ctx context.Context, m TeamRunMember) (*Team
 			return nil, fmt.Errorf("insert team_run_members: %w", err)
 		}
 		row := s.DB.QueryRowContext(ctx,
-			`SELECT `+teamRunMemberColumns+` FROM team_run_members WHERE id = ?`, m.ID,
+			`SELECT `+teamRunMemberColumns+` FROM actor_team_run_members WHERE id = ?`, m.ID,
 		)
 		if err := scanTeamRunMember(row, &m); err != nil {
 			return nil, fmt.Errorf("read back inserted team_run_members row: %w", err)
@@ -117,7 +117,7 @@ func (s *Store) InsertTeamRunMember(ctx context.Context, m TeamRunMember) (*Team
 	}
 
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO team_run_members (id, workflow_run_id, slot_name, agent_id, session_id, resolved_at, status)
+		`INSERT INTO actor_team_run_members (id, workflow_run_id, slot_name, agent_id, session_id, resolved_at, status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.WorkflowRunID, m.SlotName, m.AgentID, m.SessionID, m.ResolvedAt, m.Status,
 	)
@@ -132,7 +132,7 @@ func (s *Store) InsertTeamRunMember(ctx context.Context, m TeamRunMember) (*Team
 // order across calls.
 func (s *Store) ListTeamRunMembersByRun(ctx context.Context, runID string) ([]TeamRunMember, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+teamRunMemberColumns+` FROM team_run_members
+		`SELECT `+teamRunMemberColumns+` FROM actor_team_run_members
 		  WHERE workflow_run_id = ?
 		  ORDER BY resolved_at, id`,
 		runID,
@@ -166,7 +166,7 @@ func (s *Store) ListTeamRunMembersByRun(ctx context.Context, runID string) ([]Te
 // rows in the same run by the slot_name filter.
 func (s *Store) ListTeamRunMembersBySlot(ctx context.Context, runID, slotName string) ([]TeamRunMember, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+teamRunMemberColumns+` FROM team_run_members
+		`SELECT `+teamRunMemberColumns+` FROM actor_team_run_members
 		  WHERE workflow_run_id = ? AND slot_name = ?
 		  ORDER BY resolved_at, id`,
 		runID, slotName,
@@ -199,7 +199,7 @@ func (s *Store) UpdateTeamRunMemberStatus(ctx context.Context, id, status string
 		return fmt.Errorf("update team_run_members status: invalid status %q", status)
 	}
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE team_run_members SET status = ? WHERE id = ?`,
+		`UPDATE actor_team_run_members SET status = ? WHERE id = ?`,
 		status, id,
 	)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *Store) UpdateTeamRunMemberStatus(ctx context.Context, id, status string
 func (s *Store) GetTeamRunMember(ctx context.Context, id string) (*TeamRunMember, error) {
 	var m TeamRunMember
 	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+teamRunMemberColumns+` FROM team_run_members WHERE id = ?`, id,
+		`SELECT `+teamRunMemberColumns+` FROM actor_team_run_members WHERE id = ?`, id,
 	)
 	if err := scanTeamRunMember(row, &m); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

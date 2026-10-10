@@ -368,7 +368,7 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Arg validation: check tool_use Input against the tool's InputSchema.
-		var execInput map[string]any = tu.Input
+		execInput := tu.Input
 		if schema := s.tools.GetToolSchema(tu.Name); len(schema) > 0 {
 			execInput = stripHarnessFields(schema, tu.Input)
 			if errMsg := s.argValidator.validate(tu.Name, schema, execInput); errMsg != "" {
@@ -561,6 +561,10 @@ func (s *chatServiceImpl) executeSingleTool(
 	mu *sync.Mutex, // nil for serial execution
 ) toolExecResult {
 	start := time.Now()
+
+	if execInput == nil {
+		execInput = tu.Input
+	}
 
 	// Handle result-cache meta-tools locally (no MCP routing).
 	if isResultCacheTool(tu.Name) {

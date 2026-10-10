@@ -575,7 +575,7 @@ func (at *AgentProfileTools) callListAgents(args map[string]any) (*mcp.ToolResul
 }
 
 func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResult, error) {
-	return mcp.ServiceErrorResult(svcerr.Wrap(store.ErrImmutableAgentProfile, svcerr.CodeUnavailable, store.ErrImmutableAgentProfile.Error()), "tool", "agent_update"), nil
+	return mcp.ServiceErrorResult(svcerr.Wrap(store.ErrImmutableAgentProfile, svcerr.CodeUnavailable, store.ErrImmutableAgentProfile.Error()), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 }
 
 func (st *SelfToolsTransport) callStartBuilder(args map[string]any) (*mcp.ToolResult, error) {

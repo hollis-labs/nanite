@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +35,8 @@ func newAdapterTestStore(t *testing.T) *store.Store {
 	return s
 }
 
+// Each fixture simulates a binding already authorized by the host, with a
+// real private immutable pin. No production actor enrollment is available.
 func makeAdapterTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	a := &store.AgentProfile{
@@ -41,23 +44,32 @@ func makeAdapterTestAgent(t *testing.T, s *store.Store, slug string) *store.Agen
 		Slug:         slug,
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), s, a); err != nil {
+		t.Fatalf("private prior host-authorized actor fixture: %v", err)
 	}
 	return a
 }
 
+// This is a private journal for an already host-authorized actor. It never
+// calls the production instance issuer or promotes a retained profile.
 func makeAdapterTestInstance(t *testing.T, s *store.Store, profileID, slug string) *store.DurableAgentInstance {
 	t.Helper()
+	if _, err := s.GetAgentForActor(t.Context(), profileID); err != nil {
+		t.Fatalf("prior instance requires verified actor: %v", err)
+	}
 	inst := &store.DurableAgentInstance{
-		Name:      "Instance " + slug,
-		Slug:      slug,
-		ProfileID: profileID,
+		ID: "private-instance-" + slug, Name: "Instance " + slug, Slug: slug, ProfileID: profileID,
+		LifecycleClass: store.DurableAgentClassAdvisor, RuntimeKind: "api", LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
+		Status: store.DurableAgentStatusSleeping, MetadataJSON: `{"private_already_authorized":true}`, URN: profileID,
 	}
-	if err := s.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if _, err := s.DB.ExecContext(t.Context(), `INSERT INTO actor_instances(id,name,slug,profile_id,lifecycle_class,runtime_kind,launch_source_type,status,metadata_json,urn) VALUES(?,?,?,?,?,?,?,?,?,?)`, inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass, inst.RuntimeKind, inst.LaunchSourceType, inst.Status, inst.MetadataJSON, inst.URN); err != nil {
+		t.Fatalf("private prior instance journal: %v", err)
 	}
-	return inst
+	saved, err := s.GetDurableAgentInstance(t.Context(), inst.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return saved
 }
 
 func mustInsertSchedule(t *testing.T, s *store.Store, row store.AgentSchedule) {
@@ -186,7 +198,7 @@ func TestStoreAdapter_ListDueSchedules_DurableAgentWake_NoMatchingInstance_Skipp
 	ctx := context.Background()
 	s := newAdapterTestStore(t)
 	agent := makeAdapterTestAgent(t, s, "wake-no-instance")
-	// Deliberately no durable_agent_instances row for this profile.
+	// Deliberately no prior actor_instances journal for this verified actor.
 
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	mustInsertSchedule(t, s, store.AgentSchedule{
@@ -694,7 +706,7 @@ func TestStoreAdapter_NextRunRoundTrip_OneShotAndCron(t *testing.T) {
 	if !claimed {
 		t.Fatalf("CreateFire (one_shot): created=false, want true")
 	}
-	if err := adapter.DisableSchedule(ctx, oneShot.ID); err != nil {
+	if err = adapter.DisableSchedule(ctx, oneShot.ID); err != nil {
 		t.Fatalf("DisableSchedule: %v", err)
 	}
 	gotOneShot, err := s.GetAgentSchedule(ctx, "oneshot-rt")
@@ -759,3 +771,94 @@ func TestStoreAdapter_NextRunRoundTrip_OneShotAndCron(t *testing.T) {
 // own precedent, so a future edit that breaks interface satisfaction fails
 // this package's own tests, not just the build.
 var _ gosched.Store = (*StoreAdapter)(nil)
+
+// Identical labels in retained tables are history, never runtime aliases.
+func TestStoreAdapter_HistoricalScheduleAndFireIDsDoNotBecomeAuthority(t *testing.T) {
+	ctx := t.Context()
+	s := newAdapterTestStore(t)
+	actor := makeAdapterTestAgent(t, s, "partition-schedule")
+	historical := &store.AgentProfile{ID: "retained-scheduler-profile", Slug: actor.Slug, Name: "Retained namesake", SystemPrompt: "Private retained instructions"}
+	if err := storetest.HistoricalProfile(ctx, s, historical); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	expectedNext := now.Add(-time.Minute)
+	for _, id := range []string{"partition-schedule", "historical-only"} {
+		if _, err := s.DB.ExecContext(ctx, `INSERT INTO agent_schedules(id,agent_id,name,schedule_kind,body,status,next_run,job_type,job_payload) VALUES(?,?,'Private retained schedule','one_shot','Private edited schedule body','active',?,'command_run','{"command":"retained-command"}')`, id, historical.ID, expectedNext.Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schedule_runs(id,schedule_id,run_id,scheduled_at,fired_at,status,job_type,job_payload) VALUES(?,?,?,?,?,'pending','command_run','{"command":"retained-command"}')`, "retained-row-"+id, id, "fire-"+id, expectedNext.Format(time.RFC3339), expectedNext.Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := func() [][][]any {
+		t.Helper()
+		var out [][][]any
+		for _, query := range []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_schedules ORDER BY id`, `SELECT * FROM schedule_runs ORDER BY id`} {
+			rows, err := s.DB.QueryContext(ctx, query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cols, err := rows.Columns()
+			if err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			var data [][]any
+			for rows.Next() {
+				cells := make([]any, len(cols))
+				targets := make([]any, len(cols))
+				for i := range cells {
+					targets[i] = &cells[i]
+				}
+				if err = rows.Scan(targets...); err != nil {
+					_ = rows.Close()
+					t.Fatal(err)
+				}
+				data = append(data, cells)
+			}
+			if err = rows.Err(); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			if err = rows.Close(); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, data)
+		}
+		return out
+	}
+	before := snapshot()
+	mustInsertSchedule(t, s, store.AgentSchedule{ID: "partition-schedule", AgentID: actor.ID, Name: "Prior actor schedule", ScheduleKind: store.ScheduleKindOneShot, Body: "Private prior actor body", JobType: store.ScheduleJobTypeCommandRun, JobPayload: `{"command":"prior-command"}`, NextRun: expectedNext.Format(time.RFC3339)})
+	adapter := &StoreAdapter{Store: s, Logger: slog.Default()}
+	due, err := adapter.ListDueSchedules(ctx, now, 10)
+	if err != nil || len(due) != 1 || due[0].ID != "partition-schedule" || string(due[0].Payload) != `{"command":"prior-command"}` {
+		t.Fatalf("partition due schedules=%+v,%v", due, err)
+	}
+	pending, err := adapter.ListDueFires(ctx, now, 10)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("historical pending fires surfaced=%+v,%v", pending, err)
+	}
+	if claimed, won, claimErr := adapter.ClaimFire(ctx, gosched.FireClaim{FireID: "fire-historical-only", ExpectedStatus: gosched.FirePending, ExpectedAttempt: 0, ExpectedFiredAt: expectedNext, ClaimedAt: now, ClaimExpiresAt: now.Add(time.Minute)}); claimErr != nil || won || claimed.ID != "" {
+		t.Fatalf("historical-only fire claimed=%+v,%v,%v", claimed, won, claimErr)
+	}
+	// The old matching fire cannot suppress creation of the fresh fire or
+	// acquire its CAS effects; neither record is converted into the other.
+	creation := gosched.FireCreation{ScheduleID: "partition-schedule", ExpectedNext: expectedNext, NextRun: now.Add(time.Minute), Fire: gosched.Fire{ID: "fire-partition-schedule", ScheduleID: "partition-schedule", ScheduledAt: expectedNext, Status: gosched.FirePending, NextAttemptAt: expectedNext, JobType: JobTypeCommandRun, Payload: []byte(`{"command":"prior-command"}`)}}
+	if created, createErr := adapter.CreateFire(ctx, creation); createErr != nil || !created {
+		t.Fatalf("fresh fire creation=%v,%v", created, createErr)
+	}
+	creation.ScheduleID = "historical-only"
+	creation.Fire.ID = "fresh-attempt-on-historical"
+	creation.Fire.ScheduleID = "historical-only"
+	if created, createErr := adapter.CreateFire(ctx, creation); createErr != nil || created {
+		t.Fatalf("historical-only schedule created fresh fire=%v,%v", created, createErr)
+	}
+	pending, err = adapter.ListDueFires(ctx, now, 10)
+	if err != nil || len(pending) != 1 || pending[0].ID != "fire-partition-schedule" || string(pending[0].Payload) != `{"command":"prior-command"}` {
+		t.Fatalf("fresh fire projection=%+v,%v", pending, err)
+	}
+	if after := snapshot(); !reflect.DeepEqual(before, after) {
+		t.Fatal("adapter changed retained profile/schedule/fire history")
+	}
+}

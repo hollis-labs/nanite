@@ -20,12 +20,14 @@ func TestCognitiveProviderEOFDoesNotCompleteTurn(t *testing.T) {
 		t.Fatal("missing accepted stream")
 	}
 	events := drainStream(consumer)
-	if findEvent(events, "stream_end") != nil {
-		t.Fatalf("upstream truncation became success: %v", eventTypes(events))
-	}
+	assertMessageStreamOutcome(t, events, "error")
 	failure := findEvent(events, "error")
 	if failure == nil || failure.StructuredError == nil || failure.StructuredError.Code != "upstream_truncated" {
 		t.Fatalf("failure=%+v events=%v", failure, eventTypes(events))
+	}
+	snapshot, snapshotErr := f.svc.streams.CognitiveTurns().Get(f.session, messageID)
+	if snapshotErr != nil || snapshot.State != "failed" {
+		t.Fatalf("truncation became canonical success: snapshot=%+v err=%v", snapshot, snapshotErr)
 	}
 	message, err := f.st.GetMessage(t.Context(), messageID)
 	if err != nil || message == nil || !strings.Contains(message.Content, "partial answer") {

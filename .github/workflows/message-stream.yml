@@ -1,0 +1,54 @@
+name: Message stream
+
+on:
+  pull_request:
+    paths:
+      - 'internal/chat/engine.go'
+      - 'internal/service/stream*.go'
+      - 'internal/service/message_stream*.go'
+      - 'internal/service/chat_generate*.go'
+      - 'internal/service/chat_generation_actions.go'
+      - 'internal/service/cognitive_truncation_test.go'
+      - 'internal/service/harness_recording_test.go'
+      - 'internal/api/messages.go'
+      - 'internal/api/message_stream*.go'
+      - 'internal/api/sse_transport_test.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/message-stream.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Isolated fixture files
+        shell: bash
+        run: |
+          fixture_root=$(mktemp -d)
+          chmod 700 "$fixture_root"
+          echo "TMPDIR=$fixture_root" >> "$GITHUB_ENV"
+          echo "GOTMPDIR=$fixture_root" >> "$GITHUB_ENV"
+      - name: Vet stream host packages
+        run: go vet ./internal/service ./internal/api
+      - name: Exercise observer recovery and producer outcomes
+        run: >-
+          go test -race -count=20 -timeout=5m
+          ./internal/service ./internal/api
+          -run '^(TestMessageStream|TestChatSSE|TestChatReconnect|TestChatStream|TestCognitiveProviderEOF|TestPrepareTurn_BadHarnessProfile|TestGenerateResponseCharacterization_(PersistenceFailure|ProviderError|DisabledAgent))'

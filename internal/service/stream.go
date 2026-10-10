@@ -42,8 +42,8 @@ type StreamManager struct {
 // SSE reconnect. 256 covers a typical tool-heavy turn (many short deltas +
 // tool_call/tool_result pairs) without unbounded memory growth. Older events
 // are evicted first — a client that disconnects, sleeps past 256 events of
-// activity, and then reconnects will miss the oldest events but still pick
-// up from wherever in the buffer its cursor lands.
+// activity receives an explicit gap before the retained replay suffix on
+// the HTTP transport. The missing range requires durable message recovery.
 // CW-20260418-0100.
 const ringBufferCapacity = 256
 
@@ -76,6 +76,7 @@ type messageStream struct {
 	// event to a nil subscriber, the event stays only in the buffer — the
 	// client will replay it when (or if) they connect via Subscribe.
 	subscriber chan chat.StreamEvent
+	closure    chan chat.StreamTermination
 
 	// closed is set by the pump when produce closes and it has drained all
 	// remaining events. Subscribers connecting after closed=true receive a
@@ -110,8 +111,13 @@ func newMessageStream(messageID, sessionID string, cognitive ...*cognitiveRun) *
 // the overflow path and drop the slow subscriber under the same lock.
 func (ms *messageStream) pump() {
 	for evt := range ms.produce {
-		if ms.cognitive != nil {
+		// Explicit fallback markers belong to the retained wire. The native
+		// service finalizes from its committed message and Ending intent instead.
+		if ms.cognitive != nil && !evt.RetainedTerminal {
 			ms.cognitive.consume(evt)
+		}
+		if evt.Type == "stream_end" && evt.Termination == nil {
+			evt.Termination = &chat.StreamTermination{Reason: "completed", Outcome: "success"}
 		}
 		ms.mu.Lock()
 		evt.EventID = ms.nextID
@@ -128,23 +134,16 @@ func (ms *messageStream) pump() {
 		// buffer still holds the event and replay will cover the gap.
 		// Silently dropping would lose events to an actively-connected
 		// client with no recovery path (PR #66 review #5).
-		var slowSub chan chat.StreamEvent
 		if sub != nil {
 			select {
 			case sub <- evt:
 			default:
 				if ms.subscriber == sub {
-					ms.subscriber = nil
-					slowSub = sub
+					ms.closeSubscriberLocked(chat.StreamTermination{Reason: "slow_consumer", Retryable: true})
 				}
 			}
 		}
 		ms.mu.Unlock()
-		if slowSub != nil {
-			slog.Debug("stream: closing slow subscriber to force cursor-replay",
-				"message_id", ms.messageID, "event_id", evt.EventID, "type", evt.Type)
-			close(slowSub)
-		}
 	}
 	if ms.cognitive != nil {
 		ms.cognitive.end()
@@ -156,12 +155,22 @@ func (ms *messageStream) pump() {
 	// pump-end close.
 	ms.mu.Lock()
 	ms.closed = true
-	sub := ms.subscriber
-	ms.subscriber = nil
-	if sub != nil {
-		close(sub)
-	}
+	ms.closeSubscriberLocked(chat.StreamTermination{Reason: "producer_closed"})
 	ms.mu.Unlock()
+}
+
+// closeSubscriberLocked publishes the reason before EOF. Both channel closure
+// and pump delivery are serialized by mu, including cancellation and takeover.
+func (ms *messageStream) closeSubscriberLocked(end chat.StreamTermination) {
+	if ms.subscriber == nil {
+		return
+	}
+	if ms.closure != nil {
+		ms.closure <- end
+		close(ms.closure)
+	}
+	close(ms.subscriber)
+	ms.subscriber, ms.closure = nil, nil
 }
 
 // subscribe replays buffered events with EventID > fromEventID then registers
@@ -175,6 +184,11 @@ func (ms *messageStream) pump() {
 // whether the stream has already closed. When closed=true the caller
 // receives the replay events and the channel is closed.
 func (ms *messageStream) subscribe(fromEventID uint64) (<-chan chat.StreamEvent, bool) {
+	ch, _, closed := ms.subscribeTransport(fromEventID, false)
+	return ch, closed
+}
+
+func (ms *messageStream) subscribeTransport(fromEventID uint64, reportGap bool) (<-chan chat.StreamEvent, <-chan chat.StreamTermination, bool) {
 	ms.mu.Lock()
 	// Size out to fit every possible replay event plus a normal live-event
 	// headroom. The buffer can hold up to ringBufferCapacity entries;
@@ -186,7 +200,16 @@ func (ms *messageStream) subscribe(fromEventID uint64) (<-chan chat.StreamEvent,
 	if len(ms.buf) > outCap {
 		outCap = len(ms.buf)
 	}
-	out := make(chan chat.StreamEvent, outCap)
+	out := make(chan chat.StreamEvent, outCap+1)
+	closure := make(chan chat.StreamTermination, 1)
+	if reportGap {
+		latest := ms.nextID - 1
+		if fromEventID > latest {
+			out <- chat.StreamEvent{Type: "gap", Gap: &chat.StreamGap{From: latest + 1, To: fromEventID, Reason: "cursor_ahead"}}
+		} else if len(ms.buf) > 0 && fromEventID < ms.buf[0].EventID-1 {
+			out <- chat.StreamEvent{Type: "gap", Gap: &chat.StreamGap{From: fromEventID + 1, To: ms.buf[0].EventID - 1, Reason: "retention"}}
+		}
+	}
 
 	// Pre-fill out with buffered events the caller hasn't seen yet. This
 	// is now a plain send (not a select-with-default) because outCap is
@@ -205,20 +228,27 @@ func (ms *messageStream) subscribe(fromEventID uint64) (<-chan chat.StreamEvent,
 	// this, a write to prev in the pump and close(prev) here could interleave
 	// on the same channel, which the race detector flags as a data race
 	// (CW-20260510-0002).
-	prev := ms.subscriber
 	if ms.closed {
-		// Pump already closed prev (or it was nil); nothing to do here.
+		closure <- chat.StreamTermination{Reason: "producer_closed"}
+		close(closure)
 		ms.mu.Unlock()
-		_ = prev
 		close(out)
-		return out, true
+		return out, closure, true
 	}
+	ms.closeSubscriberLocked(chat.StreamTermination{Reason: "session_takeover"})
 	ms.subscriber = out
-	if prev != nil {
-		close(prev)
-	}
+	ms.closure = closure
 	ms.mu.Unlock()
-	return out, false
+	return out, closure, false
+}
+
+// MessageStreamSubscription carries observer-local termination independently
+// from producer events. Cancel detaches exactly this observer, never execution.
+type MessageStreamSubscription struct {
+	Events   <-chan chat.StreamEvent
+	Closure  <-chan chat.StreamTermination
+	Takeover <-chan struct{}
+	Cancel   func()
 }
 
 // sessionStreams tracks the set of active message streams for a session so
@@ -358,16 +388,30 @@ func (sm *StreamManager) Subscribe(messageID string, fromEventID uint64) (<-chan
 // coexist — a turn queued behind a running one (CW-20261001-0072) must not cut
 // the running turn's stream off when its own stream is opened.
 func (sm *StreamManager) SubscribeSSE(messageID string, fromEventID uint64) (<-chan chat.StreamEvent, <-chan struct{}, bool) {
+	sub, ok := sm.SubscribeSSETransport(messageID, fromEventID)
+	return sub.Events, sub.Takeover, ok
+}
+
+// SubscribeSSETransport reports cursor gaps and connection closure without
+// conflating them with the producer's stream_end.
+func (sm *StreamManager) SubscribeSSETransport(messageID string, fromEventID uint64) (MessageStreamSubscription, bool) {
 	sm.sseMu.Lock()
 	defer sm.sseMu.Unlock()
 	val, ok := sm.streams.Load(messageID)
 	if !ok {
-		return nil, nil, false
+		return MessageStreamSubscription{}, false
 	}
 	ms := val.(*messageStream)
 	done := sm.RegisterSSE(messageID)
-	ch, _ := ms.subscribe(fromEventID)
-	return ch, done, true
+	ch, closure, _ := ms.subscribeTransport(fromEventID, true)
+	return MessageStreamSubscription{Events: ch, Closure: closure, Takeover: done, Cancel: func() {
+		ms.mu.Lock()
+		if ms.subscriber == ch {
+			ms.closeSubscriberLocked(chat.StreamTermination{Reason: "observer_detached", Retryable: true})
+		}
+		ms.mu.Unlock()
+		sm.UnregisterSSE(messageID, done)
+	}}, true
 }
 
 // DetachFromSession takes messageID out of its session's set of live streams

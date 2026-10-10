@@ -218,9 +218,7 @@ func TestNativeCLITurn_ProcessExitMidTurnEndsStreamWithError(t *testing.T) {
 	if raw := errEvent.StructuredError.Details["raw"]; raw != "wrapper: process exited before the turn completed" {
 		t.Fatalf("error raw = %v, want the wrapper's process_exited failure", raw)
 	}
-	if findEvent(events, "stream_end") != nil {
-		t.Fatalf("stream_end after a failed turn; events %v", eventTypes(events))
-	}
+	assertMessageStreamOutcome(t, events, "error")
 }
 
 const nativeCLIMessageID = "assistant-native-cli"

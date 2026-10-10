@@ -34,6 +34,37 @@ Provider SDKs own their upstream wire protocols, and the MCP SDK owns MCP
 Streamable HTTP. These protocol adapters are separate from application event
 reduction; CLI JSONL and ACP JSON-RPC are not SSE parsers.
 
+## Retained message observer recovery
+
+The retained `/api/stream/{messageID}` endpoint sends a `keepalive` SSE comment
+while idle. Comments have no event ID and never change the replay cursor.
+Resume keeps the older endpoint's `from` query and `Last-Event-ID` compatibility;
+the newer of the two cursors wins. A replay that cannot cover the requested
+cursor begins with `gap` and an inclusive `gap.from` / `gap.to` range plus
+`retention` or `cursor_ahead`. This observer-local frame has no sequence ID.
+Clients must reconcile missing content with stored messages instead of silently
+joining the retained suffix to a partial prefix.
+
+`stream_end.termination.outcome` distinguishes `success`, `error`, `canceled`
+and `unknown`. The generation producer emits an explicit failed or canceled
+terminal before closing its channel when it did not persist a successful
+response. An unclassified producer EOF is `unknown`, never inferred success.
+Existing error/status events retain their details. A wire terminal does not
+prove persistence; durable outcome and content remain host-owned.
+
+A slow observer drains its queued events and receives `stream_closed` with
+`termination.reason: slow_consumer`, `retryable: true` and `resume_after` set
+to the last numbered event successfully written to that connection. This ends
+only the observer; the producer keeps running. Takeover retains
+`session_takeover` and closes the displaced observer with a non-retryable
+`stream_closed`. Broken writes and disconnected requests cannot receive a
+guaranteed final frame and do not cancel generation. Clients retain their last
+cursor and recover through replay or status lookup; EOF alone is not success.
+
+The native per-turn canonical transport keeps its published substrate agent
+contract: header-only cursors, canonical run outcomes and snapshot recovery.
+Retained producer-exit fallback markers do not enter its canonical reduction.
+
 ## Tool result outcome
 
 `chat.StreamEvent.IsError` is the authoritative tool outcome. Denials, blocks,
@@ -175,7 +206,7 @@ The CLI runtime-to-loop path sends non-blocking and drops events when its buffer
 2. `HandleMessage` writes the user message row; `CreateStream` allocates `produce` and starts the pump goroutine; `launchGeneration` starts the generation goroutine on a context detached from the HTTP request and cancels any earlier generation on the session.
 3. Generation emits `stream_start`, then loops: provider iteration → consume → tool settle.
 4. `finalizeRun`: output filters, envelope parse, one `CreateMessage` INSERT, a shared best-effort usage write, metrics rows, then `stream_end`.
-5. Deferred on return or panic unwind: provider-call accounting finishes, then a guarded usage-write fallback retains calls if finalization did not attempt the write. That attempt has a three-second deadline. Next: `close(produce)`, `ScheduleCleanup` (60 s), presence `stream_end`.
+5. Deferred on return or panic unwind: provider-call accounting finishes, then a guarded usage-write fallback retains calls if finalization did not attempt the write. That attempt has a three-second deadline. Next: an explicit `stream_end` error/canceled fallback if finalization did not emit its terminal; `close(produce)`, `ScheduleCleanup`, presence `stream_end`. The fallback does not establish canonical success.
 
 ### 3.2 Channels and buffers
 
@@ -183,8 +214,8 @@ The CLI runtime-to-loop path sends non-blocking and drops events when its buffer
 |---|---|---|---|---|
 | provider adapter → loop | Anthropic 64, OpenAI 16 | adapter | loop | adapter blocks |
 | `produce` | 128 | generation goroutine (blocking); broadcast helpers (non-blocking) | pump | generation blocks; broadcast dropped |
-| ring buffer | `ringBufferCapacity` = 256 events | pump | `subscribe` (replay) | oldest evicted, no marker |
-| subscriber | max(128, ring length at subscribe) | pump (non-blocking) | SSE handler | subscriber closed (§3.7) |
+| ring buffer | `ringBufferCapacity` = 256 events | pump | `subscribe` (replay) | oldest evicted; HTTP replay begins with an explicit gap |
+| subscriber | max(128, ring length at subscribe) + 1 | pump (non-blocking) | SSE handler | queued events drain, then recoverable observer closure (§3.7) |
 
 ### 3.3 Event vocabulary (`chat.StreamEvent`)
 
@@ -206,8 +237,10 @@ No `StreamEvent` is persisted.
 | `status` | stop and cancel notices, `max_tokens` notice, pacing heartbeat | `content` or `detail` |
 | `circuit_open`, `rate_budget_pause`, `slot_changed`, `handoff_loaded` | breaker open at tool settle; rate-budget refusal; context-slot change; handoff load | `content` / `data` / `envelope` |
 | `plugin_envelope`, `panel_signal`, `message_received`, `subagent_run_status_changed` | plugin, reflex, route, card and messaging sinks | `envelope`, `plugin_id` |
-| `error` | provider, stall, and save failures; terminal for the generation loop (no `stream_end` follows); CLI `error` events are not terminal | `error`, `structured_error{code, message, details, timestamp}` |
-| `stream_end` | success path only, after the assistant row is written; one emit site | `message_id`, `agent_id`, `usage` (summed over iterations; `stop_reason` = last non-empty), `envelope` |
+| `error` | provider, stall, and save failure detail; producer exit supplies an error-outcome `stream_end` | `error`, `structured_error{code, message, details, timestamp}` |
+| `stream_end` | successful/interrupted persistence or producer-exit fallback; unclassified EOF is unknown | `message_id`, `agent_id`, `usage`, `envelope`, `termination{reason,outcome,retryable}` |
+| `gap` | observer replay cursor falls outside retention or ahead of the head; no `id:` | `gap{from,to,reason}` |
+| `stream_closed` | observer eviction or takeover, without ending generation; no `id:` | `termination{reason,retryable,resume_after}` |
 | `session_takeover` | written by the SSE handler when another subscriber replaces this one; no `id:`, not in the ring | `content` |
 
 Declared or advertised with no emitter: `mode_suggestion`, `subordinate_delta`, `subordinate_tool_use`, `subordinate_done`.
@@ -245,18 +278,18 @@ Promissory-preamble nudge (iteration 0, once, non-CLI: synthetic assistant and u
 - The pump assigns `EventID` (from 1, per message), appends to the ring, and does a non-blocking send to the single subscriber. If the subscriber channel is full, the subscriber is cleared and its channel closed: the SSE handler sees EOF and the client is expected to reconnect with its cursor; the ring keeps the events.
 - One subscriber per message; one SSE connection per message (a second connection to the same message closes the first with `session_takeover`). Connections to different messages of one session coexist, so a turn queued behind a running one can be watched without cutting off the running turn's stream.
 - A queued turn's stream is detached from the session's live set until its turn starts: session broadcasts (CLI `tool_call`/`tool_result`, `status`) reach only the running turn's stream, and the active-message lookup returns the running turn.
-- Replay: cursor = larger of `?from` and `Last-Event-ID` (malformed `?from` → 400; malformed header ignored). `subscribe` replays ring events with `EventID` > cursor, then goes live. Evicted events leave no gap marker.
+- Replay: cursor = larger of `?from` and `Last-Event-ID` (malformed `?from` → 400; malformed header ignored). `subscribe` replays ring events with `EventID` > cursor, then goes live. A cursor behind retention receives a gap marker before the retained suffix; a cursor ahead of the head also receives an explicit gap.
 - Completed stream: `subscribe` returns replay plus a closed channel, but `SubscribeSSE` still registers that message's SSE connection, so replaying a finished message takes over another connection to the same message.
 - Cleanup: `ScheduleCleanup` removes the stream 60 s (`defaultPostCompletionGrace`) after the producer closes; afterwards the events routes return 404 `stream not found`.
-- There is no unsubscribe: after a client disconnect the subscriber stays registered until its channel fills and the pump closes it.
+- The HTTP handler detaches exactly its own subscription on exit; it cannot remove a replacement observer or cancel the producer.
 
 ### 3.8 SSE framing (`streamMessageEvents`)
 
 - Headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`; `newSSEWriter` in `internal/api/sse.go` delegates framing and flushing to go-ssekit and clears both read and write deadlines for the long-lived response. The helper overrides the library cache default to preserve `no-cache` and retains each endpoint's buffering hint.
 - Frame: `id: N` (omitted when `EventID` is 0), `event: <type>`, `data: <StreamEvent JSON>` (the JSON also carries `event_id`), blank line. Flush per event; a write or flush failure ends the handler without cancelling generation, so the retained ring remains available for reconnect.
-- No `retry:` field, no comment lines, no heartbeat: the stream is silent during approvals (up to 5 minutes), rate-budget waits and tool runs.
-- JSON marshaling remains at the transport boundary, where marshal errors are still ignored. Write and flush errors end the handler immediately; request cancellation also ends it. Neither path cancels the generation producer.
-- On channel close the handler returns with no terminal marker.
+- No `retry:` field. Idle `keepalive` comment lines keep approvals, rate-budget waits and tool runs observable without advancing the content cursor.
+- JSON marshaling remains at the transport boundary; marshal, write and flush errors end the handler. Request cancellation also ends it. Neither path cancels the generation producer.
+- On producer EOF without a declared terminal, the handler emits `stream_end` with error or unknown outcome. Subscriber eviction emits a recoverable `stream_closed`, not a run outcome.
 
 ### 3.9 Native per-run transport
 
@@ -433,9 +466,9 @@ Specifications compared: [Anthropic Messages streaming](https://platform.claude.
 | Topic | Provider specs | Nanite | Δ |
 |---|---|---|---|
 | Framing | SSE. Anthropic and Responses: `event:` + JSON `type`. Chat: `data:` only + `[DONE]`. Responses adds `sequence_number` | `id:` + `event:` + `data:` (JSON with `type` and `event_id`); no `retry:` | neutral |
-| Terminal marker | Anthropic `message_stop`; Chat `[DONE]`; Responses `response.completed` / `failed` / `incomplete` | `stream_end` on the success path only; error, cancel, save failure and subscriber eviction end without it | regression |
-| Keepalive | Anthropic `ping`; SSE spec advises a comment line about every 15 s; Chat and Responses: none documented | none on the chat stream | regression |
-| Resume | SSE defines `Last-Event-ID`, replay left to the server; Anthropic and Chat: none documented; Responses: `starting_after` cursor, background mode | `id:` per event, `?from` / `Last-Event-ID`, 256-event ring for 60 s after completion | improvement (bounded; no gap marker) |
+| Terminal marker | Anthropic `message_stop`; Chat `[DONE]`; Responses `response.completed` / `failed` / `incomplete` | retained `stream_end` includes producer outcome; observer eviction uses recoverable `stream_closed`; dead sockets require recovery | neutral (different boundaries) |
+| Keepalive | Anthropic `ping`; SSE spec advises a comment line about every 15 s; Chat and Responses: none documented | idle SSE comments on retained and canonical chat streams | neutral |
+| Resume | SSE defines `Last-Event-ID`, replay left to the server; Anthropic and Chat: none documented; Responses: `starting_after` cursor, background mode | retained `id:` per event, `?from` / `Last-Event-ID`, bounded ring and explicit gaps; canonical header cursor plus snapshot recovery | improvement (bounded) |
 | Text timing | streamed as generated | phased default: per iteration; live: as generated | regression (phased) / neutral (live) |
 | Tool-call arguments | streamed as partial JSON (Anthropic `input_json_delta`; Chat and Responses argument deltas) | assembled in the adapter; subscribers get `tool_call` with a `detail` label; full input only in `approval_request` | regression for clients needing arguments |
 | Tool results | supplied by the client (server tools aside) | executed server-side; streamed as `tool_result` summary | neutral (different layer) |
@@ -451,7 +484,7 @@ Specifications compared: [Anthropic Messages streaming](https://platform.claude.
 ## Verify
 
 ```
-grep -rn 'Type: "stream_end"' internal/service/                    # one emit site (success path)
+grep -rn 'Type: "stream_end"' internal/service/                    # success and producer-exit paths
 grep -n 'ringBufferCapacity\|defaultPostCompletionGrace' internal/service/stream.go
 grep -n 'func harnessV1EventTypes' internal/api/harness_v1.go      # advertised set
 grep -rn 'OnCircuitOpen' internal/ | grep -v _test                 # declared and assigned, not called

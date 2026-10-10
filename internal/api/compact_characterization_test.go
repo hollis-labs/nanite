@@ -49,6 +49,7 @@ func seedCompactSession(t *testing.T, a *testAPI, id string, messages int) {
 	if err := a.store.CreateSession(ctx, &store.Session{ID: id, Title: "Compact characterization"}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
+	bindFixtureSessionActor(t, a.store, id)
 	for i := 0; i < messages; i++ {
 		role := "user"
 		if i%2 == 1 {

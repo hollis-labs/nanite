@@ -36,7 +36,7 @@ func (s *AgentMembershipService) GetSessionPrimaryAgent(ctx context.Context, ses
 // SetSessionAgent binds an agent to a session in the given mode. A session
 // has at most one primary agent: setting a new primary first demotes the
 // current one (keeping its mode), then upserts the new binding. The two
-// writes are separate statements, not one transaction.
+// store writer verifies the target and demotes/upserts in one transaction.
 //
 // previousPrimaryID is the agent that was primary before the call, or ""
 // when primary is false or the session had none. Callers compare it with
@@ -45,7 +45,6 @@ func (s *AgentMembershipService) SetSessionAgent(ctx context.Context, sessionID,
 	if primary {
 		if cur, err := s.agents.GetSessionPrimaryAgent(ctx, sessionID); err == nil {
 			previousPrimaryID = cur.AgentID
-			_ = s.writers.EnsureSessionAgent(ctx, sessionID, cur.AgentID, cur.Mode, false)
 		}
 	}
 	if err := s.writers.EnsureSessionAgent(ctx, sessionID, agentID, mode, primary); err != nil {

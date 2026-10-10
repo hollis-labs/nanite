@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"log/slog"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // enforceExecutionRules re-checks a subset of selection-broker rules at
@@ -31,27 +33,27 @@ import (
 // Returns (allowed bool, reason string). If allowed is false, reason describes
 // the denial for the LLM.
 func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, toolName string) (bool, string) {
+	if isCognitiveTurn(ctx) {
+		if s.resultCache != nil && (toolName == "fetch_tool_result" || toolName == "search_tool_result") {
+			return true, ""
+		}
+		return false, "verified actor tool grants are unavailable for this native view"
+	}
 	if s.tools == nil {
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 
-	// Look up agent config via the agents service. Every agent (including
-	// the compiled-in builtin profiles) is a real agent_profiles row as of
-	// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md -- a lookup
-	// failure here means agentID itself doesn't resolve to a known agent,
-	// so fail open (allow) rather than reject a legitimate call over a
-	// stale/unresolvable ID, matching this function's pre-existing
-	// missing-wiring precedent below.
-	if s.agents == nil {
-		return true, ""
+	// Tool grants and catalog exceptions are operational actor authority, never
+	// authority of a host settings UUID or a caller-asserted profile.
+	bindingReader, ok := s.store.(interface {
+		GetAgentForActor(context.Context, string) (*store.AgentProfile, error)
+	})
+	if !ok {
+		return false, "verified tool authorization unavailable"
 	}
-	if _, err := s.agents.Get(ctx, agentID); err != nil {
-		slog.Warn("tool-execution-rules: agent lookup failed — allowing",
-			"agent", agentID, "err", err)
-		return true, ""
-	}
-	if s.store == nil {
-		return true, ""
+	if _, err := bindingReader.GetAgentForActor(ctx, agentID); err != nil {
+		slog.Warn("tool-execution-rules: actor binding refused", "agent", agentID, "err", err)
+		return false, "verified tool authorization unavailable"
 	}
 
 	return s.enforceExecutionRulesViaAgentTools(ctx, agentID, toolName)
@@ -68,9 +70,9 @@ func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, to
 func (s *chatServiceImpl) enforceExecutionRulesViaAgentTools(ctx context.Context, agentID, toolName string) (bool, string) {
 	granted, err := s.store.ListAgentToolNames(ctx, agentID)
 	if err != nil {
-		slog.Warn("tool-execution-rules: list agent_tools failed — allowing",
+		slog.Warn("tool-execution-rules: list agent_tools failed — refusing",
 			"agent", agentID, "err", err)
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 	for _, name := range granted {
 		if name == toolName {
@@ -85,9 +87,9 @@ func (s *chatServiceImpl) enforceExecutionRulesViaAgentTools(ctx context.Context
 	// tools.
 	always, err := s.store.ListAlwaysIncludedKnownTools(ctx)
 	if err != nil {
-		slog.Warn("tool-execution-rules: list always_included known_tools failed — allowing",
+		slog.Warn("tool-execution-rules: list always_included known_tools failed — refusing",
 			"agent", agentID, "err", err)
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 	for _, t := range always {
 		if t.Name == toolName && t.Status == "available" {

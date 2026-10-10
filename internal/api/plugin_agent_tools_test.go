@@ -71,14 +71,14 @@ func TestPluginAgentToolsRealReviewedChildAndPermissions(t *testing.T) {
 	}
 	client := toolclient.New(manager, st, toolclient.DefaultConfig())
 	agent := &store.AgentProfile{Name: "Tool caller", Slug: "tool-caller", SystemPrompt: "test"}
-	if checkErr := st.CreateAgent(ctx, agent); checkErr != nil {
+	if checkErr := storetest.PriorAuthorizedActor(ctx, st, agent); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	anchor, err := st.UpsertKnownTool(ctx, "anchor", "builtin", "available", "anchor")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checkErr := st.GrantAgentTool(ctx, agent.ID, anchor, "explicit"); checkErr != nil {
+	if _, checkErr := st.DB.ExecContext(ctx, `INSERT INTO actor_granted_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'prior-host',datetime('now'))`, agent.ID, anchor); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	manager.SetToolLoadPreferences(map[string]string{"declared_echo": "auto"})
@@ -89,7 +89,7 @@ func TestPluginAgentToolsRealReviewedChildAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if checkErr := st.GrantAgentTool(ctx, agent.ID, known.ID, "explicit"); checkErr != nil {
+	if _, checkErr := st.DB.ExecContext(ctx, `INSERT INTO actor_granted_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'prior-host',datetime('now'))`, agent.ID, known.ID); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	output, err := client.CallTool(mcp.WithSessionID(ctx, "host-session"), agent.ID, "declared_echo", map[string]any{"session_id": "argument-session"})

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestConsumersCRUD_EndToEnd is the integration test required by
@@ -142,25 +143,14 @@ func TestHandleDeleteConsumer_RejectsWhileReferenced(t *testing.T) {
 		t.Fatalf("decode consumer: %v", err)
 	}
 
-	agentBody, _ := json.Marshal(map[string]any{
-		"name":          "Referencing Agent",
-		"slug":          "referencing-agent",
-		"system_prompt": "test",
-		"consumer_id":   consumer.ID,
-	})
-	req = httptest.NewRequest("POST", "/api/agents", bytes.NewReader(agentBody))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST /api/agents: expected 201, got %d; body: %s", w.Code, w.Body.String())
+	// The retained profile FK remains a history/export constraint, not a
+	// runtime profile-authoring route.
+	agent := &store.AgentProfile{Name: "Retained consumer child", Slug: "retained-consumer-child"}
+	if err := storetest.HistoricalProfile(t.Context(), a.store, agent); err != nil {
+		t.Fatal(err)
 	}
-	var agentResp store.AgentProfile
-	if err := json.NewDecoder(w.Body).Decode(&agentResp); err != nil {
-		t.Fatalf("decode agent: %v", err)
-	}
-	if agentResp.ConsumerID != consumer.ID {
-		t.Fatalf("setup: agent.ConsumerID = %q, want %q", agentResp.ConsumerID, consumer.ID)
+	if _, err := a.store.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET consumer_id=? WHERE id=?`, consumer.ID, agent.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	req = httptest.NewRequest("DELETE", "/api/consumers/"+consumer.ID, nil)

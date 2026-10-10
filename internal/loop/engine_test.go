@@ -57,7 +57,7 @@ func newLoopEngineTestFixtures(t *testing.T, exec agentworkflow.StepExecutor) (*
 	if err != nil {
 		t.Fatalf("workflowhost.NewEngine: %v", err)
 	}
-	durable := service.NewDurableAgentService(st)
+	durable := newPriorLoopLifecycleFixture(st)
 	launcher := service.NewWorkflowLauncher(registry, host, exec, durable)
 	engine := NewLoopEngine(st, registry, launcher)
 	host.WithLoopStepHost(workflowbridge.LoopAdapter{Launcher: engine, Runs: st})
@@ -67,7 +67,7 @@ func newLoopEngineTestFixtures(t *testing.T, exec agentworkflow.StepExecutor) (*
 func createTestLoopAgentProfile(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	p := &store.AgentProfile{Name: slug, Slug: slug, SystemPrompt: "you are " + slug}
-	if err := st.CreateAgent(context.Background(), p); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), st, p); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", slug, err)
 	}
 	return p

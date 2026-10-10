@@ -1,170 +1,114 @@
 package store
 
-// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md).
-
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 )
 
-func TestAgentContextResolverCRUD(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "context-resolver-crud")
-
-	row := AgentContextResolver{
-		AgentID:  agent.ID,
-		SlotName: "weather",
-		Kind:     "cmd",
-		Run:      "echo hello",
-		Timeout:  "5s",
-		// Enabled is a plain bool, not a pointer -- the store layer
-		// persists whatever the caller supplies (matching
-		// AgentReflex.OptOutAllowed's established precedent); the
-		// friendly "default true unless the API request says
-		// otherwise" behavior lives at the API layer
-		// (handleCreateAgentContextResolver), not here.
-		Enabled: true,
-	}
-	id, err := s.InsertAgentContextResolver(ctx, row)
-	if err != nil {
-		t.Fatalf("InsertAgentContextResolver: %v", err)
-	}
-	if id == "" {
-		t.Fatal("InsertAgentContextResolver did not return an id")
-	}
-
-	got, err := s.GetAgentContextResolver(ctx, id)
-	if err != nil {
-		t.Fatalf("GetAgentContextResolver: %v", err)
-	}
-	if got.AgentID != agent.ID || got.SlotName != "weather" || got.Kind != "cmd" || got.Run != "echo hello" {
-		t.Errorf("GetAgentContextResolver mismatch: got %+v", got)
-	}
-	if !got.Enabled {
-		t.Error("expected Enabled to round-trip as true")
-	}
-	if got.HeadersJSON != "{}" {
-		t.Errorf("expected HeadersJSON default '{}', got %q", got.HeadersJSON)
-	}
-	if got.ResponseFormat != "text" {
-		t.Errorf("expected ResponseFormat default 'text', got %q", got.ResponseFormat)
-	}
-	if got.CreatedAt == "" || got.UpdatedAt == "" {
-		t.Error("InsertAgentContextResolver did not stamp timestamps")
-	}
-
-	list, err := s.ListAgentContextResolvers(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentContextResolvers: %v", err)
-	}
-	if len(list) != 1 || list[0].ID != id {
-		t.Fatalf("ListAgentContextResolvers: got %+v, want one row with id %q", list, id)
-	}
-
-	enabled, err := s.ListEnabledAgentContextResolvers(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListEnabledAgentContextResolvers: %v", err)
-	}
-	if len(enabled) != 1 {
-		t.Fatalf("ListEnabledAgentContextResolvers: got %d rows, want 1", len(enabled))
-	}
-
-	got.Run = "echo updated"
-	got.Enabled = false
-	if err := s.UpdateAgentContextResolver(ctx, *got); err != nil {
-		t.Fatalf("UpdateAgentContextResolver: %v", err)
-	}
-	updated, err := s.GetAgentContextResolver(ctx, id)
-	if err != nil {
-		t.Fatalf("GetAgentContextResolver after update: %v", err)
-	}
-	if updated.Run != "echo updated" || updated.Enabled {
-		t.Errorf("UpdateAgentContextResolver did not persist: got %+v", updated)
-	}
-
-	// Disabling must remove the row from the boot-time enabled read path
-	// without deleting it.
-	enabledAfterDisable, err := s.ListEnabledAgentContextResolvers(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListEnabledAgentContextResolvers after disable: %v", err)
-	}
-	if len(enabledAfterDisable) != 0 {
-		t.Fatalf("ListEnabledAgentContextResolvers after disable: got %+v, want none", enabledAfterDisable)
-	}
-
-	if err := s.DeleteAgentContextResolver(ctx, id); err != nil {
-		t.Fatalf("DeleteAgentContextResolver: %v", err)
-	}
-	if _, err := s.GetAgentContextResolver(ctx, id); !errors.Is(err, ErrAgentContextResolverNotFound) {
-		t.Fatalf("GetAgentContextResolver after delete: got err %v, want ErrAgentContextResolverNotFound", err)
+// These are private historical rows, not fresh actors or mutable authoring.
+func retiredBehaviorHistoricalProfile(t *testing.T, s *Store, id string) {
+	t.Helper()
+	if _, err := s.DB.ExecContext(context.Background(), `INSERT INTO agent_profiles(id,name,slug,system_prompt,source) VALUES(?,?,?,?,?)`, id, "Historical fixture", id, "Retained historical body", "user"); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestAgentContextResolver_SlotNameUniquePerAgent(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "context-resolver-unique-slot")
-
-	first := AgentContextResolver{AgentID: agent.ID, SlotName: "weather", Kind: "cmd", Run: "echo one"}
-	if _, err := s.InsertAgentContextResolver(ctx, first); err != nil {
-		t.Fatalf("InsertAgentContextResolver first: %v", err)
+// Scan raw SQLite cells so refusals cannot silently change retained data,
+// including NULL, timestamps, JSON text and the original historical identity.
+func retiredBehaviorSnapshot(t *testing.T, s *Store, query string) [][]any {
+	t.Helper()
+	rows, err := s.DB.QueryContext(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
 	}
-	second := AgentContextResolver{AgentID: agent.ID, SlotName: "weather", Kind: "cmd", Run: "echo two"}
-	if _, err := s.InsertAgentContextResolver(ctx, second); err == nil {
-		t.Fatal("expected InsertAgentContextResolver to reject a duplicate (agent_id, slot_name), got nil error")
+	defer closeRows(rows)
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestAgentContextResolver_ValidationRejectsBadRows(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "context-resolver-validation")
-
-	cases := []struct {
-		name string
-		row  AgentContextResolver
-	}{
-		{"missing kind", AgentContextResolver{AgentID: agent.ID, SlotName: "s1", Kind: "role_summary"}},
-		{"cmd without run", AgentContextResolver{AgentID: agent.ID, SlotName: "s2", Kind: "cmd"}},
-		{"http without url", AgentContextResolver{AgentID: agent.ID, SlotName: "s3", Kind: "http"}},
-		{"http bad response_format", AgentContextResolver{AgentID: agent.ID, SlotName: "s4", Kind: "http", URL: "https://example.com", ResponseFormat: "xml"}},
-		{"missing agent_id", AgentContextResolver{SlotName: "s5", Kind: "cmd", Run: "echo hi"}},
-		{"missing slot_name", AgentContextResolver{AgentID: agent.ID, Kind: "cmd", Run: "echo hi"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := s.InsertAgentContextResolver(ctx, tc.row); err == nil {
-				t.Fatalf("InsertAgentContextResolver(%+v): expected validation error, got nil", tc.row)
+	var snapshot [][]any
+	for rows.Next() {
+		cells := make([]any, len(columns))
+		targets := make([]any, len(columns))
+		for i := range cells {
+			targets[i] = &cells[i]
+		}
+		if err = rows.Scan(targets...); err != nil {
+			t.Fatal(err)
+		}
+		for i, cell := range cells {
+			if b, ok := cell.([]byte); ok {
+				cells[i] = append([]byte(nil), b...)
 			}
-		})
+		}
+		snapshot = append(snapshot, cells)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func requireRetiredBehavior(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, ErrImmutableAgentProfile) {
+		t.Fatalf("retired mutable behavior returned %v, want ErrImmutableAgentProfile", err)
 	}
 }
 
-// TestDeleteAgent_CascadesAgentContextResolvers mirrors
-// TestDeleteAgent_CascadesAgentToolsAndDispatchAllowlist (agent_tools_test.go)
-// for the new table's ON DELETE CASCADE FK.
-func TestDeleteAgent_CascadesAgentContextResolvers(t *testing.T) {
+func TestImmutableAgentContextResolversRefuseRuntimeAndMutation(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	agent := makeTestAgent(t, s, "context-resolver-delete-cascade")
-
-	if _, err := s.InsertAgentContextResolver(ctx, AgentContextResolver{
-		AgentID: agent.ID, SlotName: "weather", Kind: "cmd", Run: "echo hi",
-	}); err != nil {
-		t.Fatalf("InsertAgentContextResolver: %v", err)
+	const agentID = "historical-resolver"
+	retiredBehaviorHistoricalProfile(t, s, agentID)
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO agent_context_resolvers(id,agent_id,slot_name,kind,run,url,headers_json,response_format,enabled,created_at,updated_at) VALUES('retained-cmd',?,'command','cmd','echo retained','','{}','text',1,'created-fixture','updated-fixture'),('retained-http',?,'remote','http','','https://example.invalid/retained','{"X-Fixture":"retained"}','json',0,'created-fixture','updated-fixture')`, agentID, agentID); err != nil {
+		t.Fatal(err)
 	}
-
-	if err := s.DeleteAgent(context.Background(), agent.Slug); err != nil {
-		t.Fatalf("DeleteAgent: %v", err)
+	const query = `SELECT * FROM agent_context_resolvers ORDER BY id`
+	before := retiredBehaviorSnapshot(t, s, query)
+	if len(before) != 2 {
+		t.Fatal("historical resolver controls not installed")
 	}
-
-	var n int
-	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_context_resolvers WHERE agent_id = ?`, agent.ID).Scan(&n); err != nil {
-		t.Fatalf("count agent_context_resolvers: %v", err)
+	for _, row := range []AgentContextResolver{
+		{AgentID: agentID, SlotName: "new", Kind: "cmd", Run: "echo new", Enabled: true},
+		{AgentID: agentID, SlotName: "command", Kind: "cmd", Run: "echo replacement"},
+		{AgentID: agentID, SlotName: "invalid", Kind: "http", ResponseFormat: "xml"},
+		{},
+	} {
+		id, err := s.InsertAgentContextResolver(ctx, row)
+		requireRetiredBehavior(t, err)
+		if id != "" {
+			t.Fatalf("refusal returned created resolver identity %q", id)
+		}
 	}
-	if n != 0 {
-		t.Fatalf("DeleteAgent left %d orphaned agent_context_resolvers rows", n)
+	got, err := s.GetAgentContextResolver(ctx, "retained-cmd")
+	requireRetiredBehavior(t, err)
+	if got != nil {
+		t.Fatal("historical resolver exposed as current behavior")
+	}
+	listed, err := s.ListAgentContextResolvers(ctx, agentID)
+	requireRetiredBehavior(t, err)
+	if len(listed) != 0 {
+		t.Fatal("historical resolvers exposed to mutable catalog")
+	}
+	enabled, err := s.ListEnabledAgentContextResolvers(ctx, agentID)
+	requireRetiredBehavior(t, err)
+	if len(enabled) != 0 {
+		t.Fatal("historical command exposed to boot execution")
+	}
+	requireRetiredBehavior(t, s.UpdateAgentContextResolver(ctx, AgentContextResolver{ID: "retained-cmd", AgentID: agentID, SlotName: "command", Kind: "cmd", Run: "echo changed", Enabled: false}))
+	for _, id := range []string{"retained-cmd", "missing"} {
+		requireRetiredBehavior(t, s.DeleteAgentContextResolver(ctx, id))
+	}
+	// Ordinary profile deletion cannot cascade away audited resolver history.
+	requireRetiredBehavior(t, s.DeleteAgent(ctx, agentID))
+	if after := retiredBehaviorSnapshot(t, s, query); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused resolver operation changed history: before=%v after=%v", before, after)
+	}
+	retained, err := s.GetHistoricalAgentProfile(ctx, agentID)
+	if err != nil || retained.SystemPrompt != "Retained historical body" {
+		t.Fatalf("historical parent changed: %+v, %v", retained, err)
 	}
 }

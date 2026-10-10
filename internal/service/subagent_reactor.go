@@ -83,6 +83,12 @@ func (r *subagentCompletionReactor) ReactToCompletion(ctx context.Context, run *
 // "auto_summarize" doesn't silently disable the intended behavior with no
 // diagnostic trail (PR #247 review).
 func (s *chatServiceImpl) resolveSubagentCompletionPolicy(ctx context.Context, sessionID string) string {
+	if p, defined := s.definitionNativePolicy(ctx, sessionID); defined {
+		if p != nil {
+			return p.SubagentCompletionPolicy
+		}
+		return chat.SubagentPolicyRenderAndWait
+	}
 	var taskLayer *override.OverrideConfig
 	if session, err := s.sessions.Get(ctx, sessionID); err == nil && session != nil && session.Metadata != "" {
 		var meta map[string]any

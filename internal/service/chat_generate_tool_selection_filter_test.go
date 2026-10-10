@@ -27,8 +27,8 @@ import (
 
 // toolSelectionFilterAgentReader satisfies AgentReader for
 // TestFilterToolSelection_PluginAddsRemovesReshapesOfferedTools. Only
-// GetAgent is exercised by SelectForAgent's dbAgent-resolution and
-// discoverAgentMCPTools fallback paths (internal/service/tool.go) — every
+// GetAgentForActor represents a private prior verified binding for operational
+// selection; it does not issue an actor or revive a host-ID fallback. Every
 // other embedded *store.Store method stays nil and would panic if called.
 // Same intentionally-narrow test-double pattern as e2eStore in
 // chat_path_grants_e2e_test.go.
@@ -37,7 +37,7 @@ type toolSelectionFilterAgentReader struct {
 	agent *store.AgentProfile
 }
 
-func (f *toolSelectionFilterAgentReader) GetAgent(ctx context.Context, id string) (*store.AgentProfile, error) {
+func (f *toolSelectionFilterAgentReader) GetAgentForActor(ctx context.Context, id string) (*store.AgentProfile, error) {
 	if f.agent != nil && id == f.agent.ID {
 		return f.agent, nil
 	}
@@ -61,9 +61,9 @@ func TestFilterToolSelection_PluginAddsRemovesReshapesOfferedTools(t *testing.T)
 	}
 
 	agent := &store.AgentProfile{
-		ID:   "agent-tsf-1",
+		ID:   "msg://agent/private-filter/tsf-1",
 		Slug: "tsf-test-agent", // deliberately not "default" — bypasses the chat-role surface filter so it doesn't interfere with this test.
-		// dbAgent != nil once GetAgent resolves this row, so SelectForAgent
+		// The private prior binding resolves this projection, so SelectForAgent
 		// tries filterToolsByAgentTools — but s.toolClient is nil here
 		// (see NewToolService call below), so agentToolsStore() returns
 		// nil and that filter is a documented no-op pass-through.

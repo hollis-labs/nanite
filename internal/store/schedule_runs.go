@@ -102,14 +102,14 @@ func (s *Store) CreateScheduleFire(ctx context.Context, creation ScheduleFireCre
 	defer func() { _ = tx.Rollback() }()
 
 	var exists int
-	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_runs WHERE run_id = ?)`, creation.Fire.RunID).Scan(&exists); queryErr != nil {
+	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM actor_schedule_runs WHERE run_id = ?)`, creation.Fire.RunID).Scan(&exists); queryErr != nil {
 		return false, fmt.Errorf("create schedule fire: check identity: %w", queryErr)
 	}
 	if exists != 0 {
 		return false, nil
 	}
 	res, err := tx.ExecContext(ctx,
-		`UPDATE agent_schedules
+		`UPDATE actor_schedules
 		    SET last_fired_at = ?, next_run = ?, fired_count = fired_count + 1
 		  WHERE id = ? AND status = ? AND next_run = ?`,
 		creation.Fire.ScheduledAt, nullableFireTime(creation.NextRun),
@@ -126,7 +126,7 @@ func (s *Store) CreateScheduleFire(ctx context.Context, creation ScheduleFireCre
 		return false, nil
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO schedule_runs (
+		`INSERT INTO actor_schedule_runs (
 		    id, schedule_id, run_id, scheduled_at, fired_at, claim_expires_at, dispatch_accepted_at,
 		    status, attempt_count, last_error, next_attempt_at,
 		    retry_max_attempts, retry_backoff_strategy, retry_initial_delay_ns,
@@ -156,7 +156,7 @@ func (s *Store) ListDueScheduleFires(ctx context.Context, now time.Time, limit i
 		limit = 100
 	}
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+scheduleFireColumns+` FROM schedule_runs
+		`SELECT `+scheduleFireColumns+` FROM actor_schedule_runs
 		  WHERE (
 		      status IN (?, ?) AND julianday(COALESCE(next_attempt_at, scheduled_at)) <= julianday(?)
 		  ) OR (
@@ -207,7 +207,7 @@ func (s *Store) ClaimScheduleFire(ctx context.Context, claim ScheduleFireClaim) 
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx,
-		`UPDATE schedule_runs
+		`UPDATE actor_schedule_runs
 		    SET status = ?, attempt_count = ?, fired_at = ?, claim_expires_at = ?, next_attempt_at = NULL
 		  WHERE run_id = ? AND status = ? AND attempt_count = ? AND fired_at = ?`+recoveryClause,
 		append([]any{ScheduleFireStatusClaimed}, args...)...,
@@ -224,7 +224,7 @@ func (s *Store) ClaimScheduleFire(ctx context.Context, claim ScheduleFireClaim) 
 	}
 	var fire ScheduleFire
 	if err := scanScheduleFire(tx.QueryRowContext(ctx,
-		`SELECT `+scheduleFireColumns+` FROM schedule_runs WHERE run_id = ?`, claim.FireID), &fire); err != nil {
+		`SELECT `+scheduleFireColumns+` FROM actor_schedule_runs WHERE run_id = ?`, claim.FireID), &fire); err != nil {
 		return ScheduleFire{}, false, fmt.Errorf("claim schedule fire: read result: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -236,7 +236,7 @@ func (s *Store) ClaimScheduleFire(ctx context.Context, claim ScheduleFireClaim) 
 // TransitionScheduleFire applies an attempt result with a fenced CAS.
 func (s *Store) TransitionScheduleFire(ctx context.Context, transition ScheduleFireTransition) (bool, error) {
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE schedule_runs
+		`UPDATE actor_schedule_runs
 		    SET status = ?, claim_expires_at = NULL, next_attempt_at = ?, last_error = ?
 		  WHERE run_id = ? AND status = ? AND attempt_count = ? AND fired_at = ?`,
 		transition.To, nullableFireTime(transition.NextAttemptAt), nullIfEmpty(transition.LastError),
@@ -255,7 +255,7 @@ func (s *Store) TransitionScheduleFire(ctx context.Context, transition ScheduleF
 func (s *Store) GetScheduleFire(ctx context.Context, fireID string) (*ScheduleFire, error) {
 	var fire ScheduleFire
 	err := scanScheduleFire(s.DB.QueryRowContext(ctx,
-		`SELECT `+scheduleFireColumns+` FROM schedule_runs WHERE run_id = ?`, fireID), &fire)
+		`SELECT `+scheduleFireColumns+` FROM actor_schedule_runs WHERE run_id = ?`, fireID), &fire)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrScheduleFireNotFound
 	}
@@ -270,7 +270,7 @@ func (s *Store) GetScheduleFire(ctx context.Context, fireID string) (*ScheduleFi
 func (s *Store) IsScheduleFireDispatchAccepted(ctx context.Context, fireID string) (bool, error) {
 	var accepted int
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT dispatch_accepted_at IS NOT NULL FROM schedule_runs WHERE run_id = ?`, fireID,
+		`SELECT dispatch_accepted_at IS NOT NULL FROM actor_schedule_runs WHERE run_id = ?`, fireID,
 	).Scan(&accepted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.IsWorkflowActivationDispatchAccepted(ctx, fireID)
@@ -296,7 +296,7 @@ func (s *Store) MarkScheduleFireDispatchAccepted(
 		return false, err
 	}
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE schedule_runs
+		`UPDATE actor_schedule_runs
 		    SET dispatch_accepted_at = COALESCE(dispatch_accepted_at, ?)
 		  WHERE run_id = ? AND status = ? AND attempt_count = ? AND fired_at = ?`,
 		formatFireTime(acceptedAt), fireID, ScheduleFireStatusClaimed, attempt, formatFireTime(claimedAt),

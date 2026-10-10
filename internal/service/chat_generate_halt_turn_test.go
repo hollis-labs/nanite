@@ -26,16 +26,16 @@ package service
 
 import (
 	"context"
-	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 // haltTestSessions is a minimal SessionService fake. generateResponse only
@@ -145,231 +145,52 @@ func (haltTestTools) GetToolMeta(context.Context, string) (ToolMetaInfo, bool) {
 }
 func (haltTestTools) GetToolSchema(string) map[string]any { return nil }
 
-// TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall is the
-// task's own Done-means test: seed a real halt_session reflex whose
-// trigger is guaranteed to fire on the test turn, invoke generateResponse
-// for real, and confirm BOTH halves of the fix — no LLM provider call for
-// that turn, AND the session row shows halted_at/halted_reason set.
-// Testing only one half would not actually prove the fix (a halt that
-// merely stamps the DB without aborting the turn would pass a
-// halted-row-only test; a turn that aborts for some unrelated reason
-// without ever going through MarkSessionHalted would pass a
-// no-LLM-call-only test).
-func TestGenerateResponse_HaltSessionReflex_AbortsTurnBeforeLLMCall(t *testing.T) {
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "halt-turn-sync.db")
-	st, err := storetest.New(t, ctx, dbPath)
-	if err != nil {
-		t.Fatalf("store.New: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close(context.Background()) })
-
-	sessionID := "sess-halt-turn-sync-1"
-	agentID := "agent-halt-turn-sync-1"
-
-	sess := &store.Session{
-		ID: sessionID,
-		// Model set so generateResponse's model resolution short-circuits
-		// before s.store.ResolveProviderAndModel — irrelevant to this
-		// task, not something this test needs to exercise.
-		Model: "mock-model",
-	}
-	if err := st.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	agent := &store.AgentProfile{
-		ID:     agentID,
-		Name:   "HaltTurnSyncAgent",
-		Slug:   "halt-turn-sync-agent",
-		Status: "active",
-		Class:  "advisor",
-		// Non-CLI-shaped (chat.IsCLIProvider — no "pty-"/"sub-" prefix) so
-		// resolveProvider resolves it via the registry below rather than
-		// routing to the CLI/PTY branch.
-		DefaultProvider: "mock-provider",
-		Tags:            "[]",
-		Tools:           "[]",
-	}
-
-	// A real, DB-backed, class-scoped reflex (matches agent.Class="advisor"
-	// above via agent_id IS NULL AND class_tag = ?, same as every seeded
-	// base reflex in seeds.go). Trigger is mail_unread_count >= 0, which is
-	// unconditionally true (MailUnreadCount is a non-negative count) — this
-	// deliberately isn't one of the three production halt_session seeds
-	// (drift_detector_echo / task_complete_self_terminate / task_timeout);
-	// it's an author-controlled trigger chosen so this test doesn't depend
-	// on reproducing any of those seeds' own multi-turn window state, only
-	// on proving the turn-abort wiring this task adds.
-	if _, err := st.InsertAgentReflex(ctx, store.AgentReflex{
-		ClassTag:    "advisor",
-		Name:        "test_halt_reflex_taxonomy_04",
-		TriggerKind: store.ReflexTriggerPredicate,
-		TriggerSpec: `{"kind":"mail_unread_count","op":">=","value":0}`,
-		ActionKind:  store.ReflexActionHaltSession,
-		ActionSpec:  `{"reason":"test halt: reflex-taxonomy/04 coverage"}`,
-		Status:      store.ReflexStatusActive,
-		CreatedBy:   "operator",
-	}); err != nil {
-		t.Fatalf("InsertAgentReflex: %v", err)
-	}
-
-	reflexEngine := reflexes.NewEngine(st, nil)
-	// Mirrors container.go:918-922's real HaltHook wiring exactly (same
-	// call, same store method) — this task does not change that wiring;
-	// this test proves it stays intact end to end, not just that a
-	// test-local reimplementation of it does.
-	reflexEngine.Executor.Halt = func(_ context.Context, sid, reason string, _ map[string]interface{}) error {
-		return st.MarkSessionHalted(context.Background(), sid, reason)
-	}
-
-	mockProv := &mockStreamProvider{
-		events: []llmtypes.StreamEvent{
-			{Type: "delta", Content: "should never be streamed — the turn must abort before this"},
-			{Type: "done"},
-		},
-	}
-	registry := provider.NewRegistry()
-	registry.Register("mock-provider", mockProv)
-
-	svc := &chatServiceImpl{
-		sessions:     &haltTestSessions{st: st},
-		agents:       &haltTestAgents{agent: agent},
-		tools:        haltTestTools{},
-		streams:      NewStreamManager(),
-		context:      NewContextService(ContextServiceConfig{Client: chat.NewContextClient(st)}),
-		store:        st,
-		providers:    registry,
-		reflexEngine: reflexEngine,
-	}
-
-	ch := make(chan chat.StreamEvent, 32)
-	svc.generateResponse(ctx, sessionID, "msg-halt-turn-sync-1", "trigger the halt reflex", ch)
-
-	var sawErrorEvent bool
-	var errMsg string
-	for ev := range ch {
-		if ev.Type == "error" {
-			sawErrorEvent = true
-			errMsg = ev.Error
-		}
-	}
-
-	// --- Half 1: no LLM provider call happened for this turn. ---
-	if mockProv.callCount != 0 {
-		t.Errorf("mock provider StreamChat called %d times, want 0 — the turn must abort before reaching the LLM call", mockProv.callCount)
-	}
-
-	// --- Half 2: the session row is marked halted by THIS turn, not a
-	// later request — MarkSessionHalted already ran synchronously inside
-	// evaluateAndInjectReflexes, before generateResponse returned above. ---
-	halt, err := st.GetSessionHalt(context.Background(), sessionID)
-	if err != nil {
-		t.Fatalf("GetSessionHalt: %v", err)
-	}
-	if !halt.IsHalted() {
-		t.Fatal("session halt status: IsHalted() = false, want true")
-	}
-	if halt.HaltedReason == nil || *halt.HaltedReason == "" {
-		t.Error("session halt status: HaltedReason is empty, want the reflex's reason")
-	}
-
-	if !sawErrorEvent {
-		t.Error("expected an error stream event surfacing the halt to the caller, got none")
-	}
-	if errMsg == "" {
-		t.Error("expected a non-empty halt message on the error stream event")
-	}
-}
-
-// TestGenerateResponse_NonHaltReflex_DoesNotAbortTurn is the control case:
-// a fired reflex whose action_kind is NOT halt_session (inject_reminder)
-// must not trip the new abort path. Guards against a check that's too
-// broad (e.g. aborting on ANY fired reflex action instead of specifically
-// ActionKind == store.ReflexActionHaltSession).
-func TestGenerateResponse_NonHaltReflex_DoesNotAbortTurn(t *testing.T) {
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "halt-turn-sync-control.db")
-	st, err := storetest.New(t, ctx, dbPath)
-	if err != nil {
-		t.Fatalf("store.New: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close(context.Background()) })
-
-	sessionID := "sess-halt-turn-sync-control-1"
-	agentID := "agent-halt-turn-sync-control-1"
-
-	sess := &store.Session{ID: sessionID, Model: "mock-model"}
-	if err := st.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	agent := &store.AgentProfile{
-		ID:              agentID,
-		Name:            "HaltTurnSyncControlAgent",
-		Slug:            "halt-turn-sync-control-agent",
-		Status:          "active",
-		Class:           "advisor",
-		DefaultProvider: "mock-provider",
-		Tags:            "[]",
-		Tools:           "[]",
-	}
-
-	if _, err := st.InsertAgentReflex(ctx, store.AgentReflex{
-		ClassTag:    "advisor",
-		Name:        "test_inject_reminder_control",
-		TriggerKind: store.ReflexTriggerPredicate,
-		TriggerSpec: `{"kind":"mail_unread_count","op":">=","value":0}`,
-		ActionKind:  store.ReflexActionInjectReminder,
-		ActionSpec:  `{"body":"control reflex — should not abort the turn"}`,
-		Status:      store.ReflexStatusActive,
-		CreatedBy:   "operator",
-	}); err != nil {
-		t.Fatalf("InsertAgentReflex: %v", err)
-	}
-
-	reflexEngine := reflexes.NewEngine(st, nil)
-	reflexEngine.Executor.Halt = func(_ context.Context, sid, reason string, _ map[string]interface{}) error {
-		return st.MarkSessionHalted(context.Background(), sid, reason)
-	}
-
-	mockProv := &mockStreamProvider{
-		events: []llmtypes.StreamEvent{
-			{Type: "delta", Content: "answer"},
-			{Type: "done"},
-		},
-	}
-	registry := provider.NewRegistry()
-	registry.Register("mock-provider", mockProv)
-
-	svc := &chatServiceImpl{
-		sessions:     &haltTestSessions{st: st},
-		agents:       &haltTestAgents{agent: agent},
-		tools:        haltTestTools{},
-		streams:      NewStreamManager(),
-		context:      NewContextService(ContextServiceConfig{Client: chat.NewContextClient(st)}),
-		store:        st,
-		providers:    registry,
-		reflexEngine: reflexEngine,
-	}
-
-	ch := make(chan chat.StreamEvent, 32)
-	svc.generateResponse(ctx, sessionID, "msg-halt-turn-sync-control-1", "no halt here", ch)
-
-	for range ch {
-		// Drain — this test only cares about the provider call count and
-		// halt status below, not the specific event sequence.
-	}
-
-	if mockProv.callCount != 1 {
-		t.Errorf("mock provider StreamChat called %d times, want 1 — a non-halt reflex must not abort the turn", mockProv.callCount)
-	}
-
-	halt, err := st.GetSessionHalt(context.Background(), sessionID)
-	if err != nil {
-		t.Fatalf("GetSessionHalt: %v", err)
-	}
-	if halt.IsHalted() {
-		t.Error("session halt status: IsHalted() = true, want false — no halt_session reflex fired")
+// The synchronous halt and non-halt control are exercised from verified,
+// digest-pinned content. No retained profile or mutable class rule is consulted.
+func TestGenerateResponse_PinnedReflexHaltAndReminder(t *testing.T) {
+	for _, halt := range []bool{true, false} {
+		t.Run(map[bool]string{true: "halt", false: "reminder"}[halt], func(t *testing.T) {
+			ctx := context.WithValue(t.Context(), cognitiveTurnContextKey{}, true)
+			st := newTestStore(t)
+			action := `{"kind":"inject_reminder","body":"Pinned reminder"}`
+			if halt {
+				action = `{"kind":"halt_session","reason":"Pinned synchronous halt"}`
+			}
+			body := []byte(`{"version":"1","rules":[{"id":"owned-rule","name":"Owned rule","priority":1,"trigger":{"kind":"predicate","spec":{"kind":"mail_unread_count","op":">=","value":0}},"action":` + action + `}]}`)
+			source := strings.Replace(string(embeddedChatDefinition), "def:nanite-default", "def:pinned-synchronous", 1)
+			extension := "extensions:\n  " + agentpolicy.ReflexNamespace + ":\n    version: \"1\"\n    area: behavior\n    mandatory: true\n    data:\n      bundle:\n        uri: resource:owned\n        digest: " + agentdef.ArtifactDigest(body) + "\n"
+			source = strings.Replace(source, "continuity:\n", extension+"continuity:\n", 1)
+			pin, err := st.InstallAgentDefinition(ctx, []byte(source), []store.DefinitionResource{{URI: "resource:owned", Content: body}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			views := &CognitiveViews{Store: st, Resolver: &StoredDefinitionResolver{Store: st}, Models: ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
+				return ModelSelection{"mock-provider", "mock-model"}, nil
+			})}
+			view, err := views.Create(ctx, CreateDefinedView{DefinitionRef: DefinitionRefFromMesh(pin)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			prov := &mockStreamProvider{events: doneEvents("Pinned answer")}
+			registry := provider.NewRegistry()
+			registry.Register("mock-provider", prov)
+			svc := &chatServiceImpl{sessions: &haltTestSessions{st: st}, store: st, providers: registry, streams: NewStreamManager(), context: NewContextService(ContextServiceConfig{Client: chat.NewContextClient(st)})}
+			out := make(chan chat.StreamEvent, 128)
+			svc.generateResponse(ctx, view.ID, "pinned-synchronous-output", "private input", out)
+			events := drainStream(out)
+			state, err := st.GetSessionHalt(ctx, view.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if halt {
+				if prov.callCount != 0 || !state.IsHalted() || state.HaltedReason == nil || *state.HaltedReason != "Pinned synchronous halt" || findEvent(events, "error") == nil {
+					t.Fatalf("halt did not stop synchronously: calls=%d state=%+v events=%v", prov.callCount, state, eventTypes(events))
+				}
+			} else {
+				if prov.callCount != 1 || state.IsHalted() || findEvent(events, "delta") == nil {
+					t.Fatalf("reminder aborted turn: calls=%d state=%+v events=%v", prov.callCount, state, eventTypes(events))
+				}
+			}
+		})
 	}
 }

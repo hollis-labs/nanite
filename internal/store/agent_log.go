@@ -35,7 +35,7 @@ func (s *Store) AppendLog(ctx context.Context, row AgentLogEntry) error {
 		return fmt.Errorf("append agent_log: agent_id is required")
 	}
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO agent_log (id, agent_id, session_id, ts, kind, entry)
+		`INSERT INTO actor_log (id, agent_id, session_id, ts, kind, entry)
 		 VALUES (?, ?, ?,
 		         COALESCE(NULLIF(?, ''), datetime('now')),
 		         ?, ?)`,
@@ -58,7 +58,7 @@ func (s *Store) ListLog(ctx context.Context, agentID string, limit int) ([]Agent
 	if limit > 0 {
 		rows, err = s.DB.QueryContext(ctx,
 			`SELECT `+agentLogColumns+`
-			 FROM agent_log
+			 FROM actor_log
 			 WHERE agent_id = ?
 			 ORDER BY ts DESC, id DESC
 			 LIMIT ?`,
@@ -67,7 +67,7 @@ func (s *Store) ListLog(ctx context.Context, agentID string, limit int) ([]Agent
 	} else {
 		rows, err = s.DB.QueryContext(ctx,
 			`SELECT `+agentLogColumns+`
-			 FROM agent_log
+			 FROM actor_log
 			 WHERE agent_id = ?
 			 ORDER BY ts DESC, id DESC`,
 			agentID,

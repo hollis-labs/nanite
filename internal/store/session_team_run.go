@@ -52,7 +52,7 @@ func (s *Store) ResolveWorkflowRunIDForSession(ctx context.Context, sessionID st
 		return "", false, nil
 	}
 	row := s.DB.QueryRowContext(ctx,
-		`SELECT workflow_run_id FROM team_run_members WHERE session_id = ? LIMIT 1`,
+		`SELECT workflow_run_id FROM actor_team_run_members WHERE session_id = ? LIMIT 1`,
 		sessionID,
 	)
 	if scanErr := row.Scan(&runID); scanErr != nil {

@@ -70,22 +70,25 @@ func TestSelectForAgent_PopulatesDispatchAllowlistFromAgentProfile(t *testing.T)
 	// non-chat slug keeps the assertion focused on that path. The
 	// DispatchAllowlist field is what matters here, not the slug.
 	reader.addAgent(&store.AgentProfile{
-		ID:                      "trusted-parent",
+		ID:                      "msg://agent/private-trusted-parent",
 		Slug:                    "trusted-parent",
 		Status:                  "active",
 		ParentDispatchAllowlist: `["researcher","planner","worker"]`,
 	})
 	reader.addAgent(&store.AgentProfile{
-		ID:                      "restricted-parent",
+		ID:                      "msg://agent/private-restricted-parent",
 		Slug:                    "restricted-parent",
 		Status:                  "active",
 		ParentDispatchAllowlist: `["worker"]`,
 	})
 
+	for actor := range reader.agents {
+		reader.verifiedBindings[actor] = true // Explicit prior private host-port decision.
+	}
 	svc := NewToolService(tc, nil, reader).(*toolServiceImpl)
 
-	descTrusted := taskExecuteDescriptionFor(t, svc, "trusted-parent")
-	descRestricted := taskExecuteDescriptionFor(t, svc, "restricted-parent")
+	descTrusted := taskExecuteDescriptionFor(t, svc, "msg://agent/private-trusted-parent")
+	descRestricted := taskExecuteDescriptionFor(t, svc, "msg://agent/private-restricted-parent")
 
 	if descTrusted == descRestricted {
 		t.Fatalf("descTrusted == descRestricted — DispatchAllowlist did not propagate from AgentProfile -> Describer")
@@ -114,15 +117,18 @@ func TestSelectForAgent_EmptyAllowlistFallsBackToBaseline(t *testing.T) {
 
 	reader := newStubReader()
 	reader.addAgent(&store.AgentProfile{
-		ID:                      "legacy-parent",
+		ID:                      "msg://agent/private-legacy-parent",
 		Slug:                    "legacy-parent",
 		Status:                  "active",
 		ParentDispatchAllowlist: "[]",
 	})
 
+	for actor := range reader.agents {
+		reader.verifiedBindings[actor] = true // Explicit prior private host-port decision.
+	}
 	svc := NewToolService(tc, nil, reader).(*toolServiceImpl)
 
-	got := taskExecuteDescriptionFor(t, svc, "legacy-parent")
+	got := taskExecuteDescriptionFor(t, svc, "msg://agent/private-legacy-parent")
 
 	// Baseline body must be present; no "Dispatchable roles" section.
 	if !strings.Contains(got, "Dispatch a task to a Worker or Planner role agent.") {

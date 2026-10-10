@@ -10,37 +10,14 @@ import (
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
-func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) []reflexes.AppliedAction {
-	if s.reflexEngine == nil || session == nil || agent == nil || slotResult == nil || slotResult.Window == nil {
-		return nil
+func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) ([]reflexes.AppliedAction, error) {
+	if session == nil || agent == nil || slotResult == nil || slotResult.Window == nil {
+		return nil, nil
 	}
-	class := agent.Class
-	if class == "" {
-		class = "advisor"
+	if agent.DefinitionPolicy == nil {
+		return nil, store.ErrImmutableAgentProfile
 	}
-	applied, err := s.reflexEngine.Evaluate(ctx, session.ID, agent.ID, class)
-	if err != nil {
-		if s.store != nil {
-			// Outcome bookkeeping must survive cancellation of the reflex evaluation it records.
-			s.store.LogEvent(context.WithoutCancel(ctx), session.ID, "reflex_eval_error", "reflex", err.Error(), "{}")
-		}
-		return nil
-	}
-	if len(applied.Actions) == 0 {
-		return nil
-	}
-	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: the per-action
-	// event_log write that used to live here (one layer above the engine)
-	// is now done centrally, inside Engine.EvaluateState itself, via
-	// reflexes.EmitFirings — s.reflexEngine.Evaluate above already
-	// triggered it. Writing it here too would double the event_log rows
-	// for every firing this pass.
-	injection := formatReflexReminder(applied.Actions)
-	if injection == "" {
-		return applied.Actions
-	}
-	appendUserContext(slotResult, injection)
-	return applied.Actions
+	return s.evaluateDefinitionReflexes(ctx, session, agent, slotResult)
 }
 
 func formatReflexReminder(actions []reflexes.AppliedAction) string {

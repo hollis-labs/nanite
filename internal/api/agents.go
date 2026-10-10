@@ -85,8 +85,8 @@ func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 	}
 	return agentProfileToView(&p, agentViewMeta{
 		ManageClass:   string(class),
-		Editable:      class.Editable(),
-		CopyToManaged: class.CopyToManagedAllowed(),
+		Editable:      false,
+		CopyToManaged: false,
 		Revision:      revision,
 		Persisted:     persisted,
 	})
@@ -584,4 +584,10 @@ func (a *API) handleListProjectAgents(w http.ResponseWriter, r *http.Request) {
 		views = append(views, a.agentView(agents[i]))
 	}
 	a.jsonResp(w, http.StatusOK, views)
+}
+
+// Historical mutable profile authoring is retired. Explicit historical export
+// and audited retirement remain separate supported handlers.
+func (a *API) handleRetiredAgentMutation(w http.ResponseWriter, r *http.Request) {
+	a.errorResp(w, http.StatusGone, "Mutable profile operations are retired; author a pinned definition and configure host settings")
 }

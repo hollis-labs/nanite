@@ -36,6 +36,7 @@ func newToolCallTestAPI(t *testing.T) (*testAPI, *store.Store) {
 	svc, err := service.NewContainer(service.ContainerConfig{
 		ModelCatalogOptions: modelsdevtest.Options(t),
 		Store:               s,
+		ModelAuthorizer:     fixtureNativeModels(),
 		Providers:           provider.NewRegistry(),
 	})
 	if err != nil {

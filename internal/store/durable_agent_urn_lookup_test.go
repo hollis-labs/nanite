@@ -16,13 +16,8 @@ func TestGetDurableAgentInstanceByURN(t *testing.T) {
 	s := newTestStore(t)
 	agent := makeTestAgent(t, s, "urn-lookup-real")
 
-	inst := &DurableAgentInstance{Name: "Lookup", Slug: "urn-lookup-real", ProfileID: agent.ID}
-	if err := s.CreateDurableAgentInstance(ctx, inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
-	if inst.URN == "" {
-		t.Fatal("no URN minted; every assertion below would be vacuous")
-	}
+	// A PRIVATE prior-authorized instance, not the refused production issuer.
+	inst := makeTestActorInstance(t, s, agent.ID, "urn-lookup-real")
 
 	got, err := s.GetDurableAgentInstanceByURN(ctx, inst.URN)
 	if err != nil {
@@ -46,10 +41,10 @@ func TestGetDurableAgentInstanceByURN_EmptyNeverMatches(t *testing.T) {
 	s := newTestStore(t)
 	agent := makeTestAgent(t, s, "urn-empty-guard")
 
-	// Write an empty-URN row directly; CreateDurableAgentInstance mints one,
-	// so the only way to produce this state is to bypass it.
+	// Supply an invalid old journal value privately to prove empty input never
+	// becomes a wildcard. Production creation cannot mint an actor.
 	if _, err := s.DB.ExecContext(ctx,
-		`INSERT INTO durable_agent_instances
+		`INSERT INTO actor_instances
 		     (id, name, slug, profile_id, lifecycle_class, provider, model,
 		      runtime_kind, launch_source_type, launch_source_id, work_root,
 		      status, current_session_id, failure_reason, metadata_json, urn,
@@ -76,7 +71,7 @@ func TestCountInstancesSharingMailboxSlot(t *testing.T) {
 	mk := func(slug, status, session string) {
 		t.Helper()
 		if _, err := s.DB.ExecContext(ctx,
-			`INSERT INTO durable_agent_instances
+			`INSERT INTO actor_instances
 			     (id, name, slug, profile_id, lifecycle_class, provider, model,
 			      runtime_kind, launch_source_type, launch_source_id, work_root,
 			      status, current_session_id, failure_reason, metadata_json, urn,

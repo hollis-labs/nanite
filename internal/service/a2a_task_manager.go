@@ -752,51 +752,8 @@ func (tm *TaskManager) resumeWorkflowRun(ctx context.Context, task *store.A2ATas
 	return nil
 }
 
+// resolveA2AWorkflowProfile cannot enroll an actor from host settings, a slug,
+// a workflow claim or historical defaults. The fabric issuer port is not adopted.
 func (tm *TaskManager) resolveA2AWorkflowProfile(ctx context.Context, workflowName string) (string, error) {
-	if tm == nil || tm.store == nil || tm.registry == nil {
-		return "", fmt.Errorf("a2a workflow profile resolution is not configured")
-	}
-	definition, ok := tm.registry.Get(workflowName)
-	if !ok {
-		return "", fmt.Errorf("unknown workflow skill: %s", workflowName)
-	}
-
-	var candidates []string
-	settings, err := tm.store.GetUserSettings(ctx)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("resolve A2A workflow profile settings: %w", err)
-	}
-	if settings != nil && strings.TrimSpace(settings.DefaultAgent) != "" {
-		candidates = append(candidates, strings.TrimSpace(settings.DefaultAgent))
-	}
-	for _, step := range definition.Steps {
-		if configured, ok := step.Config["agent_id"].(string); ok && strings.TrimSpace(configured) != "" {
-			candidates = append(candidates, strings.TrimSpace(configured))
-		}
-	}
-
-	seen := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		if _, duplicate := seen[candidate]; duplicate {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		if profile, loadErr := tm.store.GetAgent(ctx, candidate); loadErr == nil && profile.Status != "disabled" {
-			return profile.ID, nil
-		}
-		if profile, loadErr := tm.store.GetAgentBySlug(ctx, candidate); loadErr == nil && profile.Status != "disabled" {
-			return profile.ID, nil
-		}
-	}
-
-	profiles, err := tm.store.ListAgents(ctx)
-	if err != nil {
-		return "", fmt.Errorf("resolve A2A workflow profile fallback: %w", err)
-	}
-	for _, profile := range profiles {
-		if profile.Status != "disabled" {
-			return profile.ID, nil
-		}
-	}
-	return "", fmt.Errorf("workflow %q has no persisted active agent profile for A2A launch", workflowName)
+	return "", store.ErrVerifiedActorRequired
 }

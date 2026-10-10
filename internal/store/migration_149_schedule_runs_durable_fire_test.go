@@ -55,7 +55,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 		DurableAgentStatusSleeping); err != nil {
 		t.Fatalf("insert durable_agent_instances fixture at schema 148: %v", err)
 	}
-	if err := s.InsertAgentSchedule(ctx, AgentSchedule{
+	if err := migrationInsertHistoricalSchedule(s, ctx, AgentSchedule{
 		ID: "migration-149-wake", AgentID: agent.ID, Name: "wake", Body: "hello",
 		ScheduleKind: ScheduleKindCron, ScheduleSpec: "* * * * *",
 		MaxRetries: 4, OnFail: ScheduleOnFailNotify,
@@ -64,7 +64,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 	}); err != nil {
 		t.Fatalf("InsertAgentSchedule wake: %v", err)
 	}
-	if err := s.InsertAgentSchedule(ctx, AgentSchedule{
+	if err := migrationInsertHistoricalSchedule(s, ctx, AgentSchedule{
 		ID: "migration-149-command", AgentID: agent.ID, Name: "command", Body: "run",
 		ScheduleKind: ScheduleKindCron, ScheduleSpec: "* * * * *",
 		MaxRetries: 2, OnFail: ScheduleOnFailDisable,
@@ -73,7 +73,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 	}); err != nil {
 		t.Fatalf("InsertAgentSchedule command: %v", err)
 	}
-	if err := s.InsertAgentSchedule(ctx, AgentSchedule{
+	if err := migrationInsertHistoricalSchedule(s, ctx, AgentSchedule{
 		ID: "migration-149-once", AgentID: agent.ID, Name: "once", Body: "run once",
 		ScheduleKind: ScheduleKindOneShot,
 		MaxRetries:   2, OnFail: ScheduleOnFailNotify,
@@ -96,7 +96,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 		t.Fatalf("Up migration 149: %v", err)
 	}
 
-	pending, err := s.GetScheduleFire(ctx, "legacy-fire-pending")
+	pending, err := migrationHistoricalFire(s, ctx, "legacy-fire-pending")
 	if err != nil {
 		t.Fatalf("get migrated pending: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 	if wakePayload.InstanceID != instance.ID || wakePayload.Prompt != "hello" {
 		t.Fatalf("migrated wake payload = %+v", wakePayload)
 	}
-	wakeSchedule, err := s.GetAgentSchedule(ctx, "migration-149-wake")
+	wakeSchedule, err := migrationHistoricalSchedule(s, ctx, "migration-149-wake")
 	if err != nil {
 		t.Fatalf("get migrated wake schedule: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 		t.Fatalf("migrated wake schedule before backfill = %+v", wakeSchedule)
 	}
 
-	failed, err := s.GetScheduleFire(ctx, "legacy-fire-failed")
+	failed, err := migrationHistoricalFire(s, ctx, "legacy-fire-failed")
 	if err != nil {
 		t.Fatalf("get migrated failed: %v", err)
 	}
@@ -135,35 +135,32 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 		failed.JobPayload != `{"command":"lint"}` {
 		t.Fatalf("migrated failed = %+v", failed)
 	}
-	commandSchedule, err := s.GetAgentSchedule(ctx, "migration-149-command")
+	commandSchedule, err := migrationHistoricalSchedule(s, ctx, "migration-149-command")
 	if err != nil {
 		t.Fatalf("get migrated command schedule: %v", err)
 	}
 	if commandSchedule.NextRun != "" || commandSchedule.FiredCount != 1 {
 		t.Fatalf("migrated command schedule before backfill = %+v", commandSchedule)
 	}
-	oneShot, err := s.GetAgentSchedule(ctx, "migration-149-once")
+	oneShot, err := migrationHistoricalSchedule(s, ctx, "migration-149-once")
 	if err != nil {
 		t.Fatalf("get migrated one-shot schedule: %v", err)
 	}
 	if oneShot.Status != ScheduleStatusExpired || oneShot.FiredCount != 1 {
 		t.Fatalf("migrated one-shot schedule = %+v", oneShot)
 	}
-	if oneShotFire, fireErr := s.GetScheduleFire(ctx, "legacy-fire-once"); fireErr != nil || oneShotFire.Status != ScheduleFireStatusPending {
+	if oneShotFire, fireErr := migrationHistoricalFire(s, ctx, "legacy-fire-once"); fireErr != nil || oneShotFire.Status != ScheduleFireStatusPending {
 		t.Fatalf("migrated one-shot fire = (%+v, %v)", oneShotFire, fireErr)
 	}
 	backfillAt := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	if backfillErr := s.backfillScheduleNextRun(ctx, backfillAt); backfillErr != nil {
 		t.Fatalf("post-migration backfill: %v", backfillErr)
 	}
+	// Fresh scheduling must never backfill the retained historical graph.
 	for _, id := range []string{"migration-149-wake", "migration-149-command"} {
-		schedule, getErr := s.GetAgentSchedule(ctx, id)
-		if getErr != nil {
-			t.Fatalf("get backfilled schedule %s: %v", id, getErr)
-		}
-		next, parseErr := time.Parse(time.RFC3339Nano, schedule.NextRun)
-		if parseErr != nil || !next.After(backfillAt) {
-			t.Fatalf("schedule %s rematerializes legacy occurrence: next=%q err=%v", id, schedule.NextRun, parseErr)
+		schedule, getErr := migrationHistoricalSchedule(s, ctx, id)
+		if getErr != nil || schedule.NextRun != "" {
+			t.Fatalf("runtime backfill mutated retained schedule: %+v %v", schedule, getErr)
 		}
 	}
 	assertGooseHasNothingPending(t, s)

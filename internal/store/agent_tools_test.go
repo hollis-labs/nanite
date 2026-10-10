@@ -1,187 +1,63 @@
 package store
 
 import (
-	"context"
+	"errors"
 	"testing"
 )
 
-func TestGrantAgentTool_RoundTripAndIdempotent(t *testing.T) {
+func TestActorGrantReadsAndRevocationRequireCurrentBinding(t *testing.T) {
 	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "agent-tools-rt")
-
-	toolID, err := s.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
-	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
+	a := makeTestAgent(t, s, "grant-reader")
+	ctx := t.Context()
+	tool := &KnownTool{Name: "private-tool", Source: "builtin", Status: "available"}
+	id, catalogErr := s.UpsertKnownTool(ctx, tool.Name, tool.Source, tool.Status, "private test fixture")
+	tool.ID = id
+	if catalogErr != nil {
+		t.Fatal(catalogErr)
 	}
-
-	if err := s.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
+	// Private fixture simulates prior issuer decisions. These are never obtained
+	// from a declaration, profile, request metadata, or a new application issuer.
+	for _, query := range []string{`INSERT INTO actor_granted_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'verified-private-fixture','fixture-time')`, `INSERT INTO actor_dispatch_tool_allowlist(agent_id,tool_id,created_at) VALUES(?,?,'fixture-time')`} {
+		if _, err := s.DB.ExecContext(ctx, query, a.ID, tool.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// Re-granting the same pair is a no-op, not an error.
-	if err := s.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool (repeat): %v", err)
+	for _, read := range []func() ([]string, error){func() ([]string, error) { return s.ListAgentToolNames(ctx, a.ID) }, func() ([]string, error) { return s.ListAgentDispatchToolNames(ctx, a.ID) }} {
+		names, err := read()
+		if err != nil || len(names) != 1 || names[0] != tool.Name {
+			t.Fatal(names, err)
+		}
 	}
-
-	names, err := s.ListAgentToolNames(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentToolNames: %v", err)
+	if err := s.GrantAgentTool(ctx, a.ID, tool.ID, "role_seed"); !errors.Is(err, ErrVerifiedActorRequired) {
+		t.Fatal("declaration issued authority", err)
 	}
-	if len(names) != 1 || names[0] != "dev_read" {
-		t.Fatalf("ListAgentToolNames: got %v, want [dev_read]", names)
+	if err := s.GrantAgentDispatchTool(ctx, a.ID, tool.ID); !errors.Is(err, ErrVerifiedActorRequired) {
+		t.Fatal("dispatch authority invented", err)
 	}
-
-	n, err := s.CountAgentTools(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("CountAgentTools: %v", err)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE agent_actor_bindings SET enabled=0 WHERE actor_uri=?`, a.ID); err != nil {
+		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("CountAgentTools: got %d, want 1", n)
+	for _, read := range []func() ([]string, error){func() ([]string, error) { return s.ListAgentToolNames(ctx, a.ID) }, func() ([]string, error) { return s.ListAgentDispatchToolNames(ctx, a.ID) }} {
+		names, err := read()
+		if err != nil || len(names) != 0 {
+			t.Fatal("disabled actor retained usable authority", names, err)
+		}
 	}
-
-	if err := s.RevokeAgentTool(ctx, agent.ID, toolID); err != nil {
-		t.Fatalf("RevokeAgentTool: %v", err)
+	if err := s.RevokeAgentTool(ctx, a.ID, tool.ID); err != nil {
+		t.Fatal(err)
 	}
-	names2, err := s.ListAgentToolNames(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentToolNames (after revoke): %v", err)
+	if err := s.RevokeAgentDispatchTool(ctx, a.ID, tool.ID); err != nil {
+		t.Fatal(err)
 	}
-	if len(names2) != 0 {
-		t.Fatalf("ListAgentToolNames (after revoke): got %v, want []", names2)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE agent_actor_bindings SET enabled=1 WHERE actor_uri=?`, a.ID); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestGrantAgentTool_PreservesOriginalProvenance(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "agent-tools-provenance")
-
-	toolID, err := s.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
-	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
+	names, err := s.ListAgentToolNames(ctx, a.ID)
+	if err != nil || len(names) != 0 {
+		t.Fatal("revoked grant replayed", names, err)
 	}
-
-	if err := s.GrantAgentTool(ctx, agent.ID, toolID, "legacy_backfill"); err != nil {
-		t.Fatalf("GrantAgentTool (legacy_backfill): %v", err)
-	}
-	// A later "explicit" grant attempt for the same pair must not overwrite
-	// the original provenance tag (ON CONFLICT DO NOTHING).
-	if err := s.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool (explicit, same pair): %v", err)
-	}
-
-	has, err := s.HasAgentToolGrantedVia(ctx, agent.ID, "legacy_backfill")
-	if err != nil {
-		t.Fatalf("HasAgentToolGrantedVia(legacy_backfill): %v", err)
-	}
-	if !has {
-		t.Fatal("expected legacy_backfill provenance to survive a later explicit grant attempt")
-	}
-	hasExplicit, err := s.HasAgentToolGrantedVia(ctx, agent.ID, "explicit")
-	if err != nil {
-		t.Fatalf("HasAgentToolGrantedVia(explicit): %v", err)
-	}
-	if hasExplicit {
-		t.Fatal("expected no explicit-provenance row -- the conflicting insert should have been a no-op")
-	}
-}
-
-func TestAgentDispatchToolAllowlist_RoundTrip(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "agent-dispatch-tool-allowlist-rt")
-
-	toolID, err := s.UpsertKnownTool(ctx, "dev_bash", "builtin", "available", "")
-	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
-	}
-
-	if err := s.GrantAgentDispatchTool(ctx, agent.ID, toolID); err != nil {
-		t.Fatalf("GrantAgentDispatchTool: %v", err)
-	}
-	names, err := s.ListAgentDispatchToolNames(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentDispatchToolNames: %v", err)
-	}
-	if len(names) != 1 || names[0] != "dev_bash" {
-		t.Fatalf("ListAgentDispatchToolNames: got %v, want [dev_bash]", names)
-	}
-
-	if err := s.RevokeAgentDispatchTool(ctx, agent.ID, toolID); err != nil {
-		t.Fatalf("RevokeAgentDispatchTool: %v", err)
-	}
-	names2, err := s.ListAgentDispatchToolNames(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentDispatchToolNames (after revoke): %v", err)
-	}
-	if len(names2) != 0 {
-		t.Fatalf("ListAgentDispatchToolNames (after revoke): got %v, want []", names2)
-	}
-}
-
-// TestAgentTools_DoesNotTouchAgentKnownTools is the regression check this
-// task's Done-means bullet asks for explicitly: granting agent_tools rows
-// must never write into, or otherwise disturb, the separate
-// agent_known_tools roster table.
-func TestAgentTools_DoesNotTouchAgentKnownTools(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "agent-tools-vs-known-tools")
-
-	toolID, err := s.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
-	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
-	}
-	if err := s.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
-	}
-
-	known, err := s.ListAgentKnownTools(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentKnownTools: %v", err)
-	}
-	if len(known) != 0 {
-		t.Fatalf("GrantAgentTool leaked into agent_known_tools: %+v", known)
-	}
-}
-
-func TestDeleteAgent_CascadesAgentToolsAndDispatchAllowlist(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	agent := makeTestAgent(t, s, "agent-tools-delete-cascade")
-
-	toolID, err := s.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
-	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
-	}
-	if err := s.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
-	}
-	if err := s.GrantAgentDispatchTool(ctx, agent.ID, toolID); err != nil {
-		t.Fatalf("GrantAgentDispatchTool: %v", err)
-	}
-
-	if err := s.DeleteAgent(context.Background(), agent.Slug); err != nil {
-		t.Fatalf("DeleteAgent: %v", err)
-	}
-
-	var n int
-	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_tools WHERE agent_id = ?`, agent.ID).Scan(&n); err != nil {
-		t.Fatalf("count agent_tools: %v", err)
-	}
-	if n != 0 {
-		t.Fatalf("DeleteAgent left %d orphaned agent_tools rows", n)
-	}
-	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_dispatch_tool_allowlist WHERE agent_id = ?`, agent.ID).Scan(&n); err != nil {
-		t.Fatalf("count agent_dispatch_tool_allowlist: %v", err)
-	}
-	if n != 0 {
-		t.Fatalf("DeleteAgent left %d orphaned agent_dispatch_tool_allowlist rows", n)
-	}
-
-	// The known_tools catalog row itself must survive -- it's global, not
-	// scoped to this agent.
-	if _, err := s.GetKnownToolByName(ctx, "dev_read"); err != nil {
-		t.Fatalf("GetKnownToolByName(dev_read) after DeleteAgent: %v", err)
+	known, err := s.ListAgentKnownTools(ctx, a.ID)
+	if err != nil || len(known) != 0 {
+		t.Fatal("grant mutated familiar-tool state", known, err)
 	}
 }

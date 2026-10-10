@@ -290,6 +290,9 @@ func (e *LoopEngine) Run(ctx context.Context, def LoopDefinition, input LoopInpu
 	if input.AgentProfileID == "" {
 		return LoopResult{}, fmt.Errorf("loop: run: agent_profile_id is required")
 	}
+	if err := e.launcher.CheckInstanceCreation(ctx, input.AgentProfileID); err != nil {
+		return LoopResult{}, err
+	}
 	loopRunID := ""
 	if input.IdempotencyKey != "" {
 		loopRunID = deterministicLoopIdentity(input.IdempotencyKey)
@@ -375,6 +378,14 @@ func (e *LoopEngine) Resume(ctx context.Context, loopRunID string) (LoopResult, 
 	cfg, err := decodeLoopRunPersistentConfig(lr.ContinuationPolicyJSON)
 	if err != nil {
 		return LoopResult{}, fmt.Errorf("loop: resume %s: %w", loopRunID, err)
+	}
+	if _, err := e.store.GetAgentForActor(ctx, cfg.AgentProfileID); err != nil {
+		return LoopResult{}, err
+	}
+	if lr.Status == store.LoopRunStatusWaitingOnEscalation {
+		if err := e.launcher.CheckInstanceCreation(ctx, cfg.AgentProfileID); err != nil {
+			return LoopResult{}, err
+		}
 	}
 	history, err := e.store.ListLoopRunIterations(ctx, lr.ID)
 	if err != nil {

@@ -354,50 +354,9 @@ func (a *API) handleListGoalEvidence(w http.ResponseWriter, r *http.Request) {
 //
 // POST /api/loops
 func (a *API) handleLaunchLoop(w http.ResponseWriter, r *http.Request) {
-	if a.loopLauncher == nil {
-		a.errorResp(w, http.StatusServiceUnavailable, "loop launcher not available")
-		return
-	}
-
-	var req loopLaunchRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-
-	launchReq := loop.LoopLaunchRequest{
-		GoalID:          req.GoalID,
-		DefinitionName:  req.DefinitionName,
-		BudgetOverrides: req.Budget.toStore(),
-		WorkflowParams:  req.WorkflowParams,
-		AgentProfileID:  req.AgentProfileID,
-		ProjectID:       req.ProjectID,
-		ParentSessionID: req.ParentSessionID,
-		TimeoutSeconds:  req.TimeoutSeconds,
-	}
-	if req.InlineGoal != nil {
-		launchReq.InlineGoal = req.InlineGoal.toGoalSpec()
-	}
-	if req.ContinuationPolicy != nil {
-		launchReq.ContinuationPolicy = *req.ContinuationPolicy
-	}
-
-	result, err := a.loopLauncher.Launch(r.Context(), launchReq)
-	if err != nil {
-		if errors.Is(err, loop.ErrLoopRunAlreadyActive) {
-			a.errorResp(w, http.StatusConflict, err.Error())
-			return
-		}
-		// Every other Launch failure this batch's own tests exercise
-		// (missing definition_name/agent_profile_id, an invalid
-		// GoalID/InlineGoal union, an unknown workflow name) is
-		// caller-correctable request-shape input, not an unexpected server
-		// fault -- a 400, matching team_runs.go's own handleLaunchTeam
-		// posture for the identical kind of launcher-error surface.
-		a.errorResp(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, toLoopResultResponse(result))
+	// A loop launch creates a workflow owner/instance. Its issuer port is
+	// held; refuse before creating an inline goal or durable run.
+	a.errorResp(w, http.StatusServiceUnavailable, store.ErrVerifiedActorRequired.Error())
 }
 
 // handleGetLoop fetches one loop_runs row by id.

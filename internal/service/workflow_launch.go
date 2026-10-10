@@ -107,6 +107,22 @@ func NewWorkflowLauncher(registry *agentworkflow.Registry, host DurableWorkflowH
 	return &WorkflowLauncher{registry: registry, host: host, exec: exec, durable: durable}
 }
 
+// CheckInstanceCreation lets an enclosing producer refuse before it writes its
+// own journal. Admission is supplied by the lifecycle owner, never inferred
+// from a profile, pin or existing run. A missing owner port refuses.
+func (l *WorkflowLauncher) CheckInstanceCreation(ctx context.Context, actor string) error {
+	if l == nil {
+		return store.ErrVerifiedActorRequired
+	}
+	owner, ok := l.durable.(interface {
+		CheckInstanceCreation(context.Context, string) error
+	})
+	if !ok {
+		return store.ErrVerifiedActorRequired
+	}
+	return owner.CheckInstanceCreation(ctx, actor)
+}
+
 // GetStepExecutor returns the StepExecutor the launcher uses for workflow runs.
 // CW-20260814-0017: exposed for TaskManager to use when resuming workflows.
 func (l *WorkflowLauncher) GetStepExecutor() agentworkflow.StepExecutor {

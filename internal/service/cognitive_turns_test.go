@@ -53,6 +53,7 @@ func TestCognitiveTurnStatusAndIndependentReplay(t *testing.T) {
 	release := sync.OnceFunc(func() { close(hold) })
 	t.Cleanup(release)
 	f := newHandleMessageFixture(t, []characterizationProviderStep{{events: doneEvents("answer"), hold: hold}})
+	bindTestDefinedConfiguration(t, f)
 	id, err := f.svc.SubmitCognitiveTurn(chat.WithDeltaMode(t.Context(), chat.DeltaModeLive), f.session, "question")
 	if err != nil {
 		t.Fatal(err)

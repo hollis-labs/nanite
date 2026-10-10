@@ -2,52 +2,22 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-// TestAgentProjectScope_EndToEnd is the "Done means" manual verification
-// for Phase 0 item 20
-// (TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md): a real,
-// permanent regression test (no prior test in this package covered the
-// route at all) proving agent_projects — the live Agent Construction
-// scope mechanism (docs/engineering/architecture/01-agent-construction.md)
-// — still works end-to-end over the real HTTP mux after this task's
-// disambiguation finding: `projects` is kept (only its workspace_id
-// column/FK is dropped), and `agent_projects` + its REST routes are
-// completely untouched.
-//
-// Exercises, in order, against the real mux (no store-layer shortcuts):
-//  1. POST /api/projects — the flat, workspace-less create route this
-//     task's step 2 resolved to (verified against the real frontend
-//     callers: ScopeSelector.tsx, NewProjectDialog.tsx,
-//     WorkspaceProjectManager.tsx/ProjectManager.tsx, CreateProjectModal.tsx).
-//  2. POST /api/agents/{id}/projects — assign.
-//  3. GET /api/agents/{id}/projects — list from the agent side.
-//  4. DELETE /api/agents/{id}/projects/{projectId} — unassign.
-//  5. GET /api/agents/{id}/projects again — confirm the unassignment took.
-//
-// NOTE: the reverse route, GET /api/projects/{id}/agents (handleListProjectAgents
-// -> store.ListProjectAgents), is NOT exercised here. It has a pre-existing,
-// unrelated bug — "ambiguous column name: created_at" — because
-// store.agentColumns (internal/store/agents.go) selects bare `created_at`/
-// `updated_at` and ListProjectAgents's query JOINs agent_profiles with
-// agent_projects, which also has its own created_at column (migration
-// 001_schema.sql). This function and agentColumns are both untouched by
-// this task's diff (confirmed via `git diff HEAD -- internal/store/agent_projects.go`,
-// which only touches ListAgentProjects) and this task's brief requires
-// `agent_projects` be kept fully intact, so the pre-existing bug is left
-// as-is and reported separately rather than fixed here.
+// Project membership exercises a private prior-authorized actor, never a host UUID.
 func TestAgentProjectScope_EndToEnd(t *testing.T) {
 	a, mux := newTestAPI(t)
 
 	agent := &store.AgentProfile{Name: "Scope Agent", Slug: "scope-agent", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -73,7 +43,7 @@ func TestAgentProjectScope_EndToEnd(t *testing.T) {
 
 	// 2. Assign the project to the agent.
 	assignBody, _ := json.Marshal(map[string]string{"project_id": project.ID})
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/projects", bytes.NewReader(assignBody))
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+url.PathEscape(agent.ID)+"/projects", bytes.NewReader(assignBody))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -82,7 +52,7 @@ func TestAgentProjectScope_EndToEnd(t *testing.T) {
 	}
 
 	// 3. List from the agent side.
-	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/projects", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+url.PathEscape(agent.ID)+"/projects", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -97,7 +67,7 @@ func TestAgentProjectScope_EndToEnd(t *testing.T) {
 	}
 
 	// 4. Unassign.
-	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+agent.ID+"/projects/"+project.ID, nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+url.PathEscape(agent.ID)+"/projects/"+project.ID, nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -105,7 +75,7 @@ func TestAgentProjectScope_EndToEnd(t *testing.T) {
 	}
 
 	// 5. Confirm the unassignment took.
-	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/projects", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+url.PathEscape(agent.ID)+"/projects", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

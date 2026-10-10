@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -189,7 +190,7 @@ func TestClearConversation_PreservesAgentAssignmentHistoryAndGrants(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
+	if _, err = s.DB.ExecContext(ctx, `INSERT INTO actor_granted_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'explicit','private-fixture-time')`, agent.ID, toolID); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.CreateSession(ctx, &Session{ID: "authority"}); err != nil {
@@ -198,15 +199,15 @@ func TestClearConversation_PreservesAgentAssignmentHistoryAndGrants(t *testing.T
 	if err = s.EnsureSessionAgent(ctx, "authority", agent.ID, "", true); err != nil {
 		t.Fatal(err)
 	}
-	before, err := s.GetAgent(ctx, agent.ID)
+	before, err := s.GetAgentForActor(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.ClearConversation(ctx, "authority", false); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.GetAgent(ctx, agent.ID)
-	if err != nil || *before != *after {
+	after, err := s.GetAgentForActor(ctx, agent.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("profile changed: before=%+v after=%+v err=%v", before, after, err)
 	}
 	binding, err := s.GetSessionPrimaryAgent(ctx, "authority")

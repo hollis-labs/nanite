@@ -8,6 +8,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext exercises the full
@@ -23,7 +24,7 @@ func TestEnvelopeRespond_E2E_TranscriptThreadedIntoContext(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "e", Slug: "e", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), a.store, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -70,7 +71,7 @@ func TestEnvelopeRespond_E2E_SilentHandlerNotInContext(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "s", Slug: "s", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), a.store, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 

@@ -9,7 +9,7 @@ import (
 // Project represents a project. Projects were formerly nested under the
 // in-app `workspaces` table (retired — Phase 0 item 20,
 // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md); the table
-// is flat now. `projects` is also the FK target of `agent_projects` (see
+// is flat now. `projects` is also the FK target of `actor_projects` (see
 // internal/store/agent_projects.go) — the live Agent Construction scope
 // mechanism (docs/engineering/architecture/01-agent-construction.md) — so
 // the table itself and its CRUD stay, only the workspace nesting is gone.
@@ -160,7 +160,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		return &ProjectInUseError{ProjectID: id, Sessions: live}
 	}
 
-	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_projects WHERE project_id = ?`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM actor_projects WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("delete project %s: remove agent links: %w", id, err)
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id); err != nil {

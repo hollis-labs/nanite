@@ -99,6 +99,8 @@ func TestSpawn_TimeoutResolution(t *testing.T) {
 			t.Setenv(defaultTimeoutEnvVar, c.envValue)
 			db, _ := newTestDB(t)
 			svc := NewService(db, core.EchoRunner{}, &stubPoster{}, nil, stubSettings{})
+			// Private core host policy isolates timeout behavior from unavailable app issuance.
+			svc.SetSpawnAuthorizer(priorTimeoutAuthorization{})
 
 			id, err := svc.Spawn(context.Background(), core.SpawnRequest{
 				ParentSessionID: "sess-1",
@@ -121,4 +123,12 @@ func TestSpawn_TimeoutResolution(t *testing.T) {
 			}
 		})
 	}
+}
+
+// This explicit private test host decision exercises the core timeout adapter;
+// it is never wired into Nanite's production authorizer.
+type priorTimeoutAuthorization struct{}
+
+func (priorTimeoutAuthorization) AuthorizeSpawn(context.Context, string) (core.SpawnAuthorization, error) {
+	return core.SpawnAuthorization{BypassApproval: true}, nil
 }

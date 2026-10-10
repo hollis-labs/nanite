@@ -788,7 +788,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	// Copy session agents inside the tx.
 	for _, sa := range agents {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
+			`INSERT INTO session_actor_bindings (session_id, agent_id, mode, joined_at, is_primary)
 			 VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(session_id, agent_id) DO UPDATE SET mode = excluded.mode, is_primary = excluded.is_primary`,
 			newSess.ID, sa.AgentID, sa.Mode, now, sa.IsPrimary,

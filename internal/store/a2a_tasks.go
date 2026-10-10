@@ -58,169 +58,42 @@ type A2APushDelivery struct {
 
 // CreateA2APushDelivery inserts a new push delivery record.
 func (s *Store) CreateA2APushDelivery(ctx context.Context, delivery *A2APushDelivery) error {
-	const q = `
-		INSERT INTO a2a_push_deliveries (
-			id, task_id, target_state, attempt_count,
-			last_error, next_retry, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err := s.DB.ExecContext(ctx, q,
-		delivery.ID, delivery.TaskID, delivery.TargetState, delivery.AttemptCount,
-		delivery.LastError, delivery.NextRetry, delivery.CreatedAt, delivery.UpdatedAt,
-	)
-	return err
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return ErrVerifiedActorRequired
 }
 
 // GetPendingPushDeliveries retrieves push deliveries ready for retry.
 func (s *Store) GetPendingPushDeliveries(ctx context.Context, now time.Time) ([]*A2APushDelivery, error) {
-	const q = `
-		SELECT id, task_id, target_state, attempt_count,
-			   last_error, next_retry, created_at, updated_at
-		FROM a2a_push_deliveries
-		WHERE next_retry <= ?
-		ORDER BY next_retry ASC
-		LIMIT 100
-	`
-	rows, err := s.DB.QueryContext(ctx, q, now)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRows(rows)
-
-	var deliveries []*A2APushDelivery
-	for rows.Next() {
-		var d A2APushDelivery
-		if err := rows.Scan(
-			&d.ID, &d.TaskID, &d.TargetState, &d.AttemptCount,
-			&d.LastError, &d.NextRetry, &d.CreatedAt, &d.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		deliveries = append(deliveries, &d)
-	}
-	return deliveries, rows.Err()
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return nil, ErrVerifiedActorRequired
 }
 
 // UpdateA2APushDelivery updates an existing push delivery record.
 func (s *Store) UpdateA2APushDelivery(ctx context.Context, delivery *A2APushDelivery) error {
-	const q = `
-		UPDATE a2a_push_deliveries SET
-			attempt_count = ?,
-			last_error = ?,
-			next_retry = ?,
-			updated_at = ?
-		WHERE id = ?
-	`
-	_, err := s.DB.ExecContext(ctx, q,
-		delivery.AttemptCount, delivery.LastError, delivery.NextRetry,
-		delivery.UpdatedAt, delivery.ID,
-	)
-	return err
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return ErrVerifiedActorRequired
 }
 
 // DeleteA2APushDelivery deletes a push delivery record by ID.
 func (s *Store) DeleteA2APushDelivery(ctx context.Context, id string) error {
-	const q = `DELETE FROM a2a_push_deliveries WHERE id = ?`
-	_, err := s.DB.ExecContext(ctx, q, id)
-	return err
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return ErrVerifiedActorRequired
 }
 
 // CreateA2ATask inserts a new A2A task record.
 func (s *Store) CreateA2ATask(ctx context.Context, task *A2ATask) error {
-	now := time.Now()
-	task.CreatedAt = now
-	task.UpdatedAt = now
-
-	query := `
-		INSERT INTO a2a_tasks (
-			id, target_kind, target_ref, message,
-			durable_agent_instance_id, workflow_run_id,
-			state, result, error, push_notification_config,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err := s.DB.ExecContext(ctx, query,
-		task.ID,
-		task.TargetKind,
-		task.TargetRef,
-		task.Message,
-		task.DurableAgentInstanceID,
-		task.WorkflowRunID,
-		task.State,
-		task.Result,
-		task.Error,
-		task.PushNotificationConfig,
-		task.CreatedAt,
-		task.UpdatedAt,
-	)
-	return err
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return ErrVerifiedActorRequired
 }
 
 // GetA2ATask retrieves an A2A task by ID.
 func (s *Store) GetA2ATask(ctx context.Context, id string) (*A2ATask, error) {
-	query := `
-		SELECT
-			id, target_kind, target_ref, message,
-			durable_agent_instance_id, workflow_run_id,
-			state, result, error, push_notification_config,
-			created_at, updated_at
-		FROM a2a_tasks
-		WHERE id = ?
-	`
-	task := &A2ATask{}
-	err := s.DB.QueryRowContext(ctx, query, id).Scan(
-		&task.ID,
-		&task.TargetKind,
-		&task.TargetRef,
-		&task.Message,
-		&task.DurableAgentInstanceID,
-		&task.WorkflowRunID,
-		&task.State,
-		&task.Result,
-		&task.Error,
-		&task.PushNotificationConfig,
-		&task.CreatedAt,
-		&task.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return task, nil
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return nil, ErrVerifiedActorRequired
 }
 
 // UpdateA2ATask updates an existing A2A task record.
 func (s *Store) UpdateA2ATask(ctx context.Context, task *A2ATask) error {
-	task.UpdatedAt = time.Now()
-
-	query := `
-		UPDATE a2a_tasks SET
-			target_kind = ?,
-			target_ref = ?,
-			message = ?,
-			durable_agent_instance_id = ?,
-			workflow_run_id = ?,
-			state = ?,
-			result = ?,
-			error = ?,
-			push_notification_config = ?,
-			updated_at = ?
-		WHERE id = ?
-	`
-	_, err := s.DB.ExecContext(ctx, query,
-		task.TargetKind,
-		task.TargetRef,
-		task.Message,
-		task.DurableAgentInstanceID,
-		task.WorkflowRunID,
-		task.State,
-		task.Result,
-		task.Error,
-		task.PushNotificationConfig,
-		task.UpdatedAt,
-		task.ID,
-	)
-	return err
+	// Fabric/A2A adoption is held; old target references are historical only.
+	return ErrVerifiedActorRequired
 }

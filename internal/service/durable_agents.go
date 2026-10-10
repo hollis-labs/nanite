@@ -154,39 +154,10 @@ func NewDurableAgentServiceWithRuntime(st DurableAgentStore, runtime DurableAgen
 	return &durableAgentService{store: st, runtime: runtime}
 }
 
-func (s *durableAgentService) Create(ctx context.Context, inst *store.DurableAgentInstance) error {
-	createErr := s.store.CreateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst)
-	if createErr != nil {
-		// A previous attempt may have committed the Loom instance and then
-		// failed while provisioning its builtin schedule. Let an exact retry
-		// complete that operation; for a concurrent different-ID creator, repair
-		// the winner's schedule but preserve the original duplicate error.
-		if inst == nil || inst.Slug != loomCuratorDurableSlug {
-			return createErr
-		}
-		existing, getErr := s.store.GetDurableAgentInstanceBySlug(context.TODO(), inst.Slug)
-		if getErr != nil || existing.ProfileID != inst.ProfileID {
-			return createErr
-		}
-		if err := s.provisionBuiltinDurableSchedules(ctx, existing); err != nil {
-			return errors.Join(createErr, fmt.Errorf("repair builtin schedules: %w", err))
-		}
-		if sameDurableAgentCreateState(existing, inst) {
-			return nil
-		}
-		return createErr
-	}
-	if err := s.provisionBuiltinDurableSchedules(ctx, inst); err != nil {
-		return err
-	}
-	s.recordEvent(&store.DurableAgentEvent{
-		InstanceID:   inst.ID,
-		EventType:    store.DurableAgentEventCreated,
-		StatusAfter:  inst.Status,
-		SessionID:    inst.CurrentSessionID,
-		MetadataJSON: durableAgentEventMetadata(map[string]string{"profile_id": inst.ProfileID}),
-	})
-	return nil
+func (s *durableAgentService) Create(_ context.Context, _ *store.DurableAgentInstance) error {
+	// A profile, definition or caller request cannot issue an actor. No adopted
+	// issuer is available; exact retries must not repair or replay authority.
+	return store.ErrVerifiedActorRequired
 }
 
 // sameDurableAgentCreateState distinguishes an exact retry of a partially
@@ -221,71 +192,10 @@ func (s *durableAgentService) GetBySlug(ctx context.Context, slug string) (*stor
 	return s.store.GetDurableAgentInstanceBySlug(ctx, slug)
 }
 
-func (s *durableAgentService) List(_ context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
-	if err := s.reconcileProfileBackedInstances(); err != nil {
-		return nil, err
-	}
-	return s.store.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, includeArchived)
-}
-
-func (s *durableAgentService) reconcileProfileBackedInstances() error {
-	profiles, err := s.store.ListAgents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
-	if err != nil {
-		return err
-	}
-	instances, err := s.store.ListDurableAgentInstances(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, true)
-	if err != nil {
-		return err
-	}
-
-	byProfileID := make(map[string]store.DurableAgentInstance, len(instances))
-	bySlug := make(map[string]store.DurableAgentInstance, len(instances))
-	for _, inst := range instances {
-		// ListDurableAgentInstances is newest-first; retain the same winner as
-		// the singular store lookups when legacy data contains multiple rows
-		// for one profile.
-		if _, ok := byProfileID[inst.ProfileID]; !ok {
-			byProfileID[inst.ProfileID] = inst
-		}
-		if _, ok := bySlug[inst.Slug]; !ok {
-			bySlug[inst.Slug] = inst
-		}
-	}
-
-	for _, profile := range profiles {
-		if !profileIsDurableCandidate(profile) {
-			continue
-		}
-		if existing, ok := byProfileID[profile.ID]; ok {
-			if err := s.provisionBuiltinDurableSchedules(context.TODO(), &existing); err != nil {
-				return fmt.Errorf("reconcile durable agent schedules for profile %s: %w", profile.ID, err)
-			}
-			continue
-		}
-		if existing, ok := bySlug[profile.Slug]; ok {
-			if err := s.provisionBuiltinDurableSchedules(context.TODO(), &existing); err != nil {
-				return fmt.Errorf("reconcile durable agent schedules for profile %s: %w", profile.ID, err)
-			}
-			continue
-		}
-		inst := durableAgentInstanceFromProfile(profile)
-		if err := s.store.CreateDurableAgentInstance(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst); err != nil {
-			// Another creator may have won after the snapshots above. Repair its
-			// schedule instead of returning while a canceled/transient winner has
-			// left the shared instance incomplete.
-			existing, getErr := s.store.GetDurableAgentInstanceBySlug(context.TODO(), profile.Slug)
-			if getErr != nil || existing.ProfileID != profile.ID {
-				return fmt.Errorf("reconcile durable agent instance for profile %s: %w", profile.ID, err)
-			}
-			inst = existing
-		}
-		if err := s.provisionBuiltinDurableSchedules(context.TODO(), inst); err != nil {
-			return fmt.Errorf("reconcile durable agent schedules for profile %s: %w", profile.ID, err)
-		}
-		byProfileID[profile.ID] = *inst
-		bySlug[profile.Slug] = *inst
-	}
-	return nil
+func (s *durableAgentService) List(ctx context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
+	// Listing never promotes immutable host projections or historical profiles
+	// into instances, nor provisions schedules from former tags/slugs.
+	return s.store.ListDurableAgentInstances(ctx, includeArchived)
 }
 
 func profileIsDurableCandidate(profile store.AgentProfile) bool {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
@@ -22,22 +23,13 @@ import (
 // fix pattern.
 func seedMessageInbox(t *testing.T, a *testAPI) {
 	t.Helper()
-	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:   "test-file-backend",
-		Slug: "test-file-backend",
-		Name: "Backend",
-		Kind: "external",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	for _, slug := range []string{"test-file-backend", "test-file-frontend"} {
+		p := &store.AgentProfile{Name: slug, Slug: slug}
+		if err := storetest.PriorAuthorizedActor(t.Context(), a.store, p); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:   "test-file-frontend",
-		Slug: "test-file-frontend",
-		Name: "Frontend",
-		Kind: "external",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
+
 	// Seed via direct store so we don't need to stand up the sender's
 	// auto-register path — the row is the only thing these tests read.
 	sqlStore := messaging.NewSQLiteStore(a.store.DB)
@@ -45,7 +37,7 @@ func seedMessageInbox(t *testing.T, a *testAPI) {
 		FromSessionID: "sess-other",
 		FromAgentID:   a2a.UserSentinel,
 		ToSessionID:   "sess-1",
-		ToAgentID:     "test-file-backend",
+		ToAgentID:     "msg://agent/private-fixture/test-file-backend",
 		Body:          "hi",
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -59,13 +51,13 @@ func TestHandleMessageUnreadCount_MatchingCallerHeadersPass(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=test-file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=msg%3A%2F%2Fagent%2Fprivate-fixture%2Ftest-file-backend", nil)
 	// In production the middleware stamps these headers onto ctx. This
 	// test exercises the handler-level contract, so we stamp the
 	// CallerIdentity manually via request ctx.
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "test-file-backend",
+		AgentID:   "msg://agent/private-fixture/test-file-backend",
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -91,10 +83,10 @@ func TestHandleMessageUnreadCount_MismatchedCallerHeadersReject(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=test-file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=msg%3A%2F%2Fagent%2Fprivate-fixture%2Ftest-file-backend", nil)
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "test-file-frontend", // caller is NOT the target inbox owner
+		AgentID:   "msg://agent/private-fixture/test-file-frontend", // caller is NOT the target inbox owner
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -112,7 +104,7 @@ func TestHandleMessageUnreadCount_NoHeadersFallsOpen(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=test-file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/unread?session_id=sess-1&agent_id=msg%3A%2F%2Fagent%2Fprivate-fixture%2Ftest-file-backend", nil)
 	// No WithCaller — simulates a client that has not adopted the header contract.
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -138,10 +130,10 @@ func TestHandleMessageInbox_MismatchedCallerHeadersReject(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=test-file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=msg%3A%2F%2Fagent%2Fprivate-fixture%2Ftest-file-backend", nil)
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "test-file-frontend", // wrong agent
+		AgentID:   "msg://agent/private-fixture/test-file-frontend", // wrong agent
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -157,10 +149,10 @@ func TestHandleMessageInbox_MatchingCallerHeadersPass(t *testing.T) {
 	a, mux := newTestAPI(t)
 	seedMessageInbox(t, a)
 
-	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=test-file-backend", nil)
+	req := httptest.NewRequest("GET", "/api/messaging/inbox?session_id=sess-1&agent_id=msg%3A%2F%2Fagent%2Fprivate-fixture%2Ftest-file-backend", nil)
 	req = req.WithContext(messaging.WithCaller(req.Context(), messaging.CallerIdentity{
 		SessionID: "sess-1",
-		AgentID:   "test-file-backend",
+		AgentID:   "msg://agent/private-fixture/test-file-backend",
 	}))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

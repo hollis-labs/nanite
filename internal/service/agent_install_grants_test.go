@@ -61,7 +61,7 @@ func TestImmutableAgentInstallDeclarationsCannotInitializeOrReplayHistoricalGran
 	// Boot backfill sees the fresh partition only; old declarations and markers
 	// remain data and cannot populate the fresh grant relation.
 	n, err := BackfillAgentToolsFromLegacyColumns(t.Context(), st)
-	if err != nil || n != 0 {
+	if !errors.Is(err, store.ErrVerifiedActorRequired) || n != 0 {
 		t.Fatalf("backfill replayed old declarations: %d %v", n, err)
 	}
 	names, err := st.ListAgentToolNames(t.Context(), p.ID)

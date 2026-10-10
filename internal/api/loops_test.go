@@ -26,14 +26,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/loop"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 // newTestAPIWithLoopLauncher builds on newTestAPI's real store/container,
@@ -66,7 +69,7 @@ func newTestAPIWithLoopLauncher(t *testing.T) (*testAPI, *http.ServeMux, *store.
 func createLoopsAPITestAgentProfile(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	p := &store.AgentProfile{Name: slug, Slug: slug, SystemPrompt: "you are " + slug}
-	if err := st.CreateAgent(context.Background(), p); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), st, p); err != nil {
 		t.Fatalf("CreateAgent(%s): %v", slug, err)
 	}
 	return p
@@ -282,201 +285,6 @@ func TestLoopsAPI_LaunchLoop_NotWired503s(t *testing.T) {
 	}
 }
 
-func TestLoopsAPI_LaunchLoop_InlineGoal_CreatesGoalAndLoopRun(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-inline-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-inline-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	resp := launchLoopViaAPI(t, mux, loopLaunchRequest{
-		InlineGoal:     &loopGoalSpecRequest{Intent: "ship via api", AcceptanceCriteria: []string{"tests pass"}},
-		DefinitionName: wf.Name,
-		AgentProfileID: profile.ID,
-		// Bounded on purpose: no goal evidence is ever recorded in this
-		// test, so goal_met never fires -- an unbounded (zero-value)
-		// Budget would make Decide return CONTINUE forever (see
-		// internal/loop's own budgetExhausted doc comment). This test
-		// only cares that Launch produced a real Goal+LoopRun.
-		Budget: &loopBudgetRequest{MaxIterations: 1},
-	})
-	if resp.LoopRunID == "" {
-		t.Fatalf("empty loop_run_id in launch response")
-	}
-
-	lr, err := st.GetLoopRun(context.Background(), resp.LoopRunID)
-	if err != nil {
-		t.Fatalf("GetLoopRun: %v", err)
-	}
-	goal, err := st.GetGoal(context.Background(), lr.GoalID)
-	if err != nil {
-		t.Fatalf("GetGoal: %v", err)
-	}
-	if goal.Intent != "ship via api" {
-		t.Fatalf("goal.Intent = %q, want %q", goal.Intent, "ship via api")
-	}
-}
-
-func TestLoopsAPI_LaunchLoop_ExistingGoalID_ReusesGoal(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-existing-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-existing-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	goal := store.Goal{Intent: "pre-existing api goal"}
-	if err := st.CreateGoal(context.Background(), &goal); err != nil {
-		t.Fatalf("CreateGoal: %v", err)
-	}
-
-	goalID := goal.ID
-	resp := launchLoopViaAPI(t, mux, loopLaunchRequest{
-		GoalID:         &goalID,
-		DefinitionName: wf.Name,
-		AgentProfileID: profile.ID,
-		// Bounded on purpose -- see the identical comment on
-		// TestLoopsAPI_LaunchLoop_InlineGoal_CreatesGoalAndLoopRun above.
-		Budget: &loopBudgetRequest{MaxIterations: 1},
-	})
-
-	lr, err := st.GetLoopRun(context.Background(), resp.LoopRunID)
-	if err != nil {
-		t.Fatalf("GetLoopRun: %v", err)
-	}
-	if lr.GoalID != goal.ID {
-		t.Fatalf("lr.GoalID = %q, want %q", lr.GoalID, goal.ID)
-	}
-}
-
-func TestLoopsAPI_LaunchLoop_ConflictOnActiveGoal409s(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-conflict-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-conflict-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	goal := store.Goal{Intent: "conflict api goal"}
-	if err := st.CreateGoal(context.Background(), &goal); err != nil {
-		t.Fatalf("CreateGoal: %v", err)
-	}
-	goalID := goal.ID
-
-	// First launch escalates after one iteration -- waiting_on_escalation
-	// is still an "active" status for the one-active-LoopRun-per-goal_id
-	// check.
-	launchLoopViaAPI(t, mux, loopLaunchRequest{
-		GoalID:         &goalID,
-		DefinitionName: wf.Name,
-		AgentProfileID: profile.ID,
-		Budget:         &loopBudgetRequest{MaxIterations: 1},
-	})
-
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops", loopLaunchRequest{
-		GoalID:         &goalID,
-		DefinitionName: wf.Name,
-		AgentProfileID: profile.ID,
-	})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("second launch status = %d, want 409, body = %s", w.Code, w.Body.String())
-	}
-}
-
-func TestLoopsAPI_LaunchLoop_InvalidJSONBody400s(t *testing.T) {
-	_, mux, _, _ := newTestAPIWithLoopLauncher(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/loops", bytes.NewBufferString("{not json"))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
-	}
-}
-
-// --- Get/List loops, iterations ---
-
-func TestLoopsAPI_GetAndListLoops(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-list-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-list-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	resp := launchLoopViaAPI(t, mux, loopLaunchRequest{
-		InlineGoal:     &loopGoalSpecRequest{Intent: "list me"},
-		DefinitionName: wf.Name,
-		AgentProfileID: profile.ID,
-		Budget:         &loopBudgetRequest{MaxIterations: 1},
-	})
-
-	w := doJSONRequest(t, mux, http.MethodGet, "/api/loops/"+resp.LoopRunID, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var lr store.LoopRun
-	if err := json.Unmarshal(w.Body.Bytes(), &lr); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if lr.ID != resp.LoopRunID {
-		t.Fatalf("lr.ID = %q, want %q", lr.ID, resp.LoopRunID)
-	}
-
-	w = doJSONRequest(t, mux, http.MethodGet, "/api/loops?goal_id="+lr.GoalID, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("list status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var list []store.LoopRun
-	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
-		t.Fatalf("unmarshal list: %v", err)
-	}
-	if len(list) != 1 || list[0].ID != resp.LoopRunID {
-		t.Fatalf("list = %+v, want exactly one row matching %s", list, resp.LoopRunID)
-	}
-
-	w = doJSONRequest(t, mux, http.MethodGet, "/api/loops/"+resp.LoopRunID+"/iterations", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("iterations status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var iterations []store.LoopRunIteration
-	if err := json.Unmarshal(w.Body.Bytes(), &iterations); err != nil {
-		t.Fatalf("unmarshal iterations: %v", err)
-	}
-	if len(iterations) != 1 {
-		t.Fatalf("iterations = %+v, want exactly one row", iterations)
-	}
-
-	w = doJSONRequest(t, mux, http.MethodGet, "/api/loops/does-not-exist/iterations", nil)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("iterations for unknown loop run status = %d, want 404", w.Code)
-	}
-}
-
-// --- Cancel ---
-
-func TestLoopsAPI_CancelLoop(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-cancel-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-cancel-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	loopRunID := forceEscalationViaAPI(t, mux, wf.Name, profile.ID)
-
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/"+loopRunID+"/cancel", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("cancel status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var lr store.LoopRun
-	if err := json.Unmarshal(w.Body.Bytes(), &lr); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if lr.Status != store.LoopRunStatusCanceled {
-		t.Fatalf("Status = %q, want canceled", lr.Status)
-	}
-}
-
 func TestLoopsAPI_CancelLoop_UnknownID404s(t *testing.T) {
 	_, mux, _, _ := newTestAPIWithLoopLauncher(t)
 	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/does-not-exist/cancel", nil)
@@ -487,149 +295,31 @@ func TestLoopsAPI_CancelLoop_UnknownID404s(t *testing.T) {
 
 // --- ResolveEscalation ---
 
-func TestLoopsAPI_ResolveEscalation_NoBody_ResumesNormally(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-resolve-noop-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-resolve-noop-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	loopRunID := forceEscalationViaAPI(t, mux, wf.Name, profile.ID)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/loops/"+loopRunID+"/resolve", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("resolve status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var resp loopResultResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.CurrentIteration != 2 {
-		t.Fatalf("CurrentIteration = %d, want 2 (resume should have launched a second iteration)", resp.CurrentIteration)
-	}
-}
-
-func TestLoopsAPI_ResolveEscalation_ForceComplete(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-resolve-complete-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-resolve-complete-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	loopRunID := forceEscalationViaAPI(t, mux, wf.Name, profile.ID)
-
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/"+loopRunID+"/resolve", loop.EscalationOverride{ForceComplete: true})
-	if w.Code != http.StatusOK {
-		t.Fatalf("resolve status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var resp loopResultResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.Status != store.LoopRunStatusCompleted {
-		t.Fatalf("Status = %q, want completed", resp.Status)
-	}
-}
-
-func TestLoopsAPI_ResolveEscalation_ForceCancel(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-resolve-cancel-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-resolve-cancel-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	loopRunID := forceEscalationViaAPI(t, mux, wf.Name, profile.ID)
-
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/"+loopRunID+"/resolve", loop.EscalationOverride{ForceCancel: true})
-	if w.Code != http.StatusOK {
-		t.Fatalf("resolve status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var resp loopResultResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.Status != store.LoopRunStatusCanceled {
-		t.Fatalf("Status = %q, want canceled", resp.Status)
-	}
-}
-
-func TestLoopsAPI_ResolveEscalation_Replan(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-resolve-replan-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-resolve-replan-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	revisedWF := oneStepLoopIterationDefinition("loops-api-resolve-replan-revised-def")
-	if err := registry.Register(revisedWF); err != nil {
-		t.Fatalf("Register (revised): %v", err)
-	}
-	loopRunID := forceEscalationViaAPI(t, mux, wf.Name, profile.ID)
-
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/"+loopRunID+"/resolve", loop.EscalationOverride{
-		Replan: &loop.ReplanOverride{
-			DefinitionName: revisedWF.Name,
-			DesiredState:   []string{"revised via api"},
-		},
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("resolve status = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	lr, err := st.GetLoopRun(context.Background(), loopRunID)
-	if err != nil {
-		t.Fatalf("GetLoopRun: %v", err)
-	}
-	if lr.DefinitionName != revisedWF.Name {
-		t.Fatalf("DefinitionName = %q, want %q", lr.DefinitionName, revisedWF.Name)
-	}
-}
-
-func TestLoopsAPI_ResolveEscalation_NotWaitingOnEscalation409s(t *testing.T) {
-	_, mux, st, registry := newTestAPIWithLoopLauncher(t)
-	profile := createLoopsAPITestAgentProfile(t, st, "loops-api-resolve-notwaiting-agent")
-	wf := oneStepLoopIterationDefinition("loops-api-resolve-notwaiting-def")
-	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	goal := store.Goal{Intent: "already satisfied api goal"}
-	if err := goal.SetAcceptanceCriteria([]string{"done"}); err != nil {
-		t.Fatalf("SetAcceptanceCriteria: %v", err)
-	}
-	if err := st.CreateGoal(context.Background(), &goal); err != nil {
-		t.Fatalf("CreateGoal: %v", err)
-	}
-	if err := st.RecordGoalEvidence(context.Background(), &store.GoalEvidence{
-		GoalID: goal.ID, EvidenceType: store.GoalEvidenceTypeTestSuite,
-		RefTable: "workflow_run_steps", RefID: "step-1", Summary: "done",
-	}); err != nil {
-		t.Fatalf("RecordGoalEvidence: %v", err)
-	}
-
-	goalID := goal.ID
-	resp := launchLoopViaAPI(t, mux, loopLaunchRequest{
-		GoalID:         &goalID,
-		DefinitionName: wf.Name,
-		AgentProfileID: profile.ID,
-		Budget:         &loopBudgetRequest{MaxIterations: 10},
-	})
-	if resp.Status != store.LoopRunStatusCompleted {
-		t.Fatalf("Status = %q, want completed", resp.Status)
-	}
-
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/"+resp.LoopRunID+"/resolve", nil)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409, body = %s", w.Code, w.Body.String())
-	}
-}
-
 func TestLoopsAPI_ResolveEscalation_UnknownID404s(t *testing.T) {
 	_, mux, _, _ := newTestAPIWithLoopLauncher(t)
 	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops/does-not-exist/resolve", nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestLoopsAPI_LaunchRefusesMissingIssuerBeforeGoalOrRunEffects(t *testing.T) {
+	a, mux, _, registry := newTestAPIWithLoopLauncher(t)
+	registry.Register(oneStepLoopIterationDefinition("private-held-loop"))
+	actor := createLoopsAPITestAgentProfile(t, a.store, "held-loop")
+	for _, body := range []string{`{`, fmt.Sprintf(`{"inline_goal":{"intent":"never committed"},"definition_name":"private-held-loop","agent_profile_id":%q}`, actor.ID), `{"agent_profile_id":"claimed-host"}`} {
+		before := retiredAgentState(t, a)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/loops", strings.NewReader(body)))
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "verified actor") {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		assertRetiredAgentState(t, a, before)
+		for _, table := range []string{"goals", "loop_runs", "workflow_runs", "durable_agent_instances", "actor_instances"} {
+			var count int
+			if err := a.store.DB.QueryRowContext(t.Context(), "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("partial %s effects: %d %v", table, count, err)
+			}
+		}
 	}
 }

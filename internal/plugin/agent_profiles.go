@@ -272,60 +272,7 @@ func validateOptionalClass(class string) error {
 // the case where a plugin-owned role was reused (read-only, see
 // resolveOrCreatePluginRole above) by an agent this plugin doesn't own.
 func (h *Host) SweepPluginAgentProfiles(pluginID string) {
-	h.mu.RLock()
-	st := h.store
-	h.mu.RUnlock()
-	if st == nil {
-		return
-	}
-
-	agents, err := st.ListAgentsByPluginID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, pluginID)
-	if err != nil {
-		h.logger.Warn("plugin agent_profiles sweep: list plugin-owned agents failed", "plugin", pluginID, "error", err)
-	} else {
-		removed := 0
-		for _, a := range agents {
-			if err := st.DeleteAgentByID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a.ID); err != nil {
-				h.logger.Warn("plugin agent_profiles sweep: delete plugin-owned agent failed",
-					"plugin", pluginID, "agent", a.Slug, "error", err)
-				continue
-			}
-			removed++
-		}
-		if removed > 0 {
-			h.logger.Debug("plugin agent_profiles sweep: removed agent profiles", "plugin", pluginID, "count", removed)
-		}
-	}
-
-	roles, err := st.ListRolesByPluginID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, pluginID)
-	if err != nil {
-		h.logger.Warn("plugin agent_profiles sweep: list plugin-owned roles failed", "plugin", pluginID, "error", err)
-		return
-	}
-	removed := 0
-	for _, r := range roles {
-		n, err := st.CountAgentsByRoleID(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.ID)
-		if err != nil {
-			h.logger.Warn("plugin agent_profiles sweep: count agents by role failed",
-				"plugin", pluginID, "role", r.Slug, "error", err)
-			continue
-		}
-		if n > 0 {
-			// Still referenced by an agent outside this plugin's own sweep
-			// above (e.g. an operator or a different plugin bound to a
-			// reused, shared role) -- leave it in place.
-			continue
-		}
-		if err := st.DeleteRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.ID); err != nil {
-			h.logger.Warn("plugin agent_profiles sweep: delete plugin-owned role failed",
-				"plugin", pluginID, "role", r.Slug, "error", err)
-			continue
-		}
-		removed++
-	}
-	if removed > 0 {
-		h.logger.Debug("plugin agent_profiles sweep: removed roles", "plugin", pluginID, "count", removed)
-	}
+	// Historical profile graphs are retained for explicit audited retirement.
 }
 
 // registerManifestAgentProfiles implements the registers.agent_profiles[]
@@ -420,114 +367,16 @@ func registerManifestAgentProfiles(host *Host, pluginID string, entries []AgentP
 // describes. See registerManifestAgentProfiles for the entrypoint and this
 // file's package doc comment for the overall design.
 func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, pluginID string, doc *PluginAgentProfileDocument) error {
-	role, err := resolveOrCreatePluginRole(st, pluginID, doc.Role)
+	retired, err := st.ProfileIngestionRetired(ctx, "", doc.Agent.Slug)
 	if err != nil {
-		return fmt.Errorf("role %q: %w", doc.Role.Slug, err)
+		return err
 	}
-
-	consumerSlug := doc.Agent.ConsumerSlug
-	if consumerSlug == "" {
-		consumerSlug = pluginID
+	if retired {
+		host.logger.Info("plugin profile ingestion suppressed", "plugin", pluginID, "slug", doc.Agent.Slug)
+		return nil
 	}
-	consumer, err := resolveOrCreateConsumer(st, consumerSlug)
-	if err != nil {
-		return fmt.Errorf("consumer %q: %w", consumerSlug, err)
-	}
-
-	// GetAgentBySlug wraps sql.ErrNoRows into a generic error rather than
-	// returning (nil, nil) on a miss (unlike GetRoleBySlug/GetConsumerBySlug/
-	// GetSkillBySlug above) -- mirror UpsertAgentBySlug's own established
-	// handling (internal/store/agents.go) of treating any lookup error here
-	// as "no existing row," since UpsertAgentBySlug below re-derives the
-	// same lookup internally and would otherwise mask a real DB error as a
-	// silent create anyway.
-	existing, lookupErr := st.GetAgentBySlug(ctx, doc.Agent.Slug)
-	if lookupErr != nil {
-		existing = nil
-	}
-	if existing != nil && existing.PluginID != pluginID {
-		owner := existing.PluginID
-		if owner == "" {
-			owner = "operator (not plugin-owned)"
-		}
-		return fmt.Errorf(
-			"agent slug %q already exists, owned by %q -- refusing to overwrite a non-plugin-owned or different-plugin-owned agent",
-			doc.Agent.Slug, owner,
-		)
-	}
-
-	// Start from the existing row (when one exists) rather than a blank
-	// struct, then overwrite only the fields this registration is
-	// authoritative for. UpdateAgent (unlike CreateAgent) does not default
-	// empty-string fields back to their column defaults ("[]"/"{}"/"active"/
-	// etc.) -- it writes exactly what the struct holds. A freshly-zeroed
-	// struct passed through UpsertAgentBySlug's UPDATE path would therefore
-	// blank out every field this registration doesn't set (modes, tools
-	// legacy column, tags, status, capabilities_json, icon, ...) on the
-	// SECOND and every subsequent load. Copying existing first preserves
-	// all of that -- mirroring, and generalizing, UpsertAgentBySlug's own
-	// existing precedent of selectively preserving ID/AgentHash/Version/URN
-	// across a resync.
-	var agentRow store.AgentProfile
-	if existing != nil {
-		agentRow = *existing
-	}
-	agentRow.Name = doc.Agent.Name
-	agentRow.Slug = doc.Agent.Slug
-	agentRow.Description = doc.Agent.Description
-	agentRow.SystemPrompt = doc.Agent.SystemPromptOverride
-	agentRow.Class = doc.Agent.Class
-	agentRow.ActivationMode = doc.Agent.ActivationMode
-	agentRow.RuntimeKind = doc.Agent.RuntimeKind
-	agentRow.Protocol = doc.Agent.Protocol
-	agentRow.Transport = doc.Agent.Transport
-	agentRow.DefaultModel = doc.Agent.DefaultModel
-	agentRow.DefaultProvider = doc.Agent.DefaultProvider
-	agentRow.RoleID = role.ID
-	agentRow.ConsumerID = consumer.ID
-	agentRow.PluginID = pluginID
-	agentRow.Source = "plugin"
-	if agentRow.Status == "" {
-		// Only true on first create (existing == nil) -- CreateAgent
-		// would default this anyway, but set it explicitly for clarity
-		// and so a direct struct inspection before insert is never blank.
-		agentRow.Status = "active"
-	}
-	if err := st.UpsertAgentBySlug(ctx, &agentRow); err != nil {
-		return fmt.Errorf("upsert agent %q: %w", doc.Agent.Slug, err)
-	}
-
-	for _, toolName := range doc.Agent.Tools {
-		kt, err := st.GetKnownToolByName(ctx, toolName)
-		if err != nil {
-			if errors.Is(err, store.ErrKnownToolNotFound) {
-				host.logger.Warn("plugin agent_profiles: declared tool not found in known_tools -- skipping grant",
-					"plugin", pluginID, "agent", agentRow.Slug, "tool", toolName)
-				continue
-			}
-			return fmt.Errorf("look up known tool %q: %w", toolName, err)
-		}
-		if err := st.GrantAgentTool(ctx, agentRow.ID, kt.ID, "plugin"); err != nil {
-			return fmt.Errorf("grant tool %q to agent %q: %w", toolName, agentRow.Slug, err)
-		}
-	}
-
-	for _, skillSlug := range doc.Agent.Skills {
-		sk, err := st.GetSkillBySlug(ctx, skillSlug)
-		if err != nil {
-			return fmt.Errorf("look up skill %q: %w", skillSlug, err)
-		}
-		if sk == nil {
-			host.logger.Warn("plugin agent_profiles: declared skill not found -- skipping grant",
-				"plugin", pluginID, "agent", agentRow.Slug, "skill", skillSlug)
-			continue
-		}
-		if err := st.AssignSkillToAgent(ctx, agentRow.ID, sk.ID, "{}"); err != nil {
-			return fmt.Errorf("assign skill %q to agent %q: %w", skillSlug, agentRow.Slug, err)
-		}
-	}
-
-	return nil
+	// Old plugin profile documents must not create role/consumer rows or grants.
+	return store.ErrImmutableAgentProfile
 }
 
 // resolveOrCreatePluginRole resolves doc's role by slug. Three cases:

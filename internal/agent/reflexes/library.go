@@ -90,3 +90,7 @@ func libraryExecutor(e *Executor, state State) *shared.Executor {
 	}
 	return x
 }
+
+// CollectedState exposes a detached library signal snapshot. It carries no
+// candidate rows, grants or authority and does not consult legacy behavior.
+func CollectedState(s State) shared.State { return libraryState(s) }

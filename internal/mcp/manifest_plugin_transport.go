@@ -21,6 +21,7 @@ type manifestPluginTransport struct {
 	caller       manifestToolCaller
 	declarations []Tool
 	names        map[string]bool
+	effects      map[string]string
 	consumer     subprocess.EnvelopeConsumer
 }
 
@@ -31,27 +32,35 @@ func newManifestPluginTransport(caller manifestToolCaller, declarations []manife
 	if err := pluginapi.ValidateAgentTools(declarations); err != nil {
 		return nil, err
 	}
-	transport := &manifestPluginTransport{caller: caller, names: make(map[string]bool), consumer: consumer}
+	transport := &manifestPluginTransport{caller: caller, names: make(map[string]bool), effects: make(map[string]string), consumer: consumer}
 	for _, declaration := range declarations {
 		if transport.names[declaration.Name] {
 			return nil, fmt.Errorf("duplicate declared tool %q", declaration.Name)
-		}
-		read, destructive, err := pluginapi.ToolEffectHints(declaration.Effect)
-		if err != nil {
-			return nil, err
 		}
 		var schema map[string]any
 		if schemaErr := json.Unmarshal(declaration.InputSchema, &schema); schemaErr != nil || schema["type"] != "object" {
 			return nil, fmt.Errorf("tool %q requires an object input schema", declaration.Name)
 		}
-		tool := Tool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema, Annotations: map[string]any{"readOnlyHint": read, "destructiveHint": destructive}}
+		annotations, err := manifestAnnotations(declaration.Annotations)
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: %w", declaration.Name, err)
+		}
+		tool := Tool{Name: declaration.Name, Description: declaration.Description, InputSchema: schema, Annotations: annotations}
 		if problems := ValidateToolMeta(TierPluginStdio, tool); len(problems) != 0 {
 			return nil, fmt.Errorf("tool %q has invalid metadata: %v", declaration.Name, problems)
 		}
 		transport.names[declaration.Name] = true
+		transport.effects[declaration.Name] = declaration.Effect
 		transport.declarations = append(transport.declarations, tool)
 	}
 	return transport, nil
+}
+
+// ReviewedToolEffect is host policy metadata. Public MCP hints never override
+// the effect accepted in the manifest and do not acquire defaults from it.
+func (p *manifestPluginTransport) ReviewedToolEffect(name string) (string, bool) {
+	effect, ok := p.effects[name]
+	return effect, ok
 }
 
 func (p *manifestPluginTransport) ListTools(ctx context.Context) ([]Tool, error) {

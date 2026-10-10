@@ -45,15 +45,16 @@ type Server struct {
 type SelfToolScope int
 
 const (
-	// ScopeHarness advertises every self tool, plus the harness's cache
-	// navigation tools: a chat launch's surface.
+	// ScopeHarness advertises retained core tools and cache navigation,
+	// excluding recursive executors without verified bridge authority.
 	ScopeHarness SelfToolScope = iota
 	// ScopeStore advertises only selftools.BareStoreTools, the set a launch
 	// had when its `nanite mcp` dispatched locally against a bare store.
 	// Subagent, background and one-shot launches get it (CW-20261001-0188),
 	// so forwarding their calls to the live harness gives them no tool they
-	// did not already have. It keeps their tool surface, not isolation: the
-	// harness's /api/tools/call takes no credentials from a loopback caller.
+	// did not already have. Recursive executors require verified bridge
+	// authority and are unavailable here. Retained core forwarding uses the
+	// HTTP host's operator authentication, not actor enrollment.
 	ScopeStore
 )
 
@@ -93,13 +94,16 @@ func New(s *store.Store, sessionID string, allowedPaths []string, artifactsRoot 
 	return srv
 }
 
-// NewForwarding creates a Nanite MCP server that forwards self-tool calls
+// NewForwarding creates a Nanite MCP server that forwards retained core calls
 // to the live nanite API server at apiURL (POST /api/tools/call), so a
 // CLI-launched agent dispatches through the fully-wired in-process harness.
 // It opens no store, and takes none: an agent's `nanite mcp` runs inside
 // the agent's sandbox, where Nanite write-protects the database's directory
 // (CW-20261001-0188, CW-20261001-0143). scope picks the self tools it
-// advertises. The dev filesystem tools run locally, except the
+// advertises. Metadata stays core-only; recursive/plugin dispatch refuses until
+// genuine verified bridge authority exists. The operator bearer and session
+// scope of retained core calls never become a verified actor binding.
+// The dev filesystem tools run locally, except the
 // `dev_read(artifact_id=...)` lookup, which needs the store and answers
 // that it is not available here.
 //

@@ -101,12 +101,14 @@ func (s *chatServiceImpl) settleToolTurn(
 	var regularTools []llmtypes.ToolUseBlock
 	for _, tu := range turn.toolUseBlocks {
 		if tu.Name == "request_tools" && !isCognitiveTurn(ctx) {
+			input, display := splitToolDisplayInput(run.tools, tu)
+			tu.Input = input
 			resultBlocks, run.loop.toolCallRefs, run.tools = s.handleRequestTools(
 				ctx, agentID, tu, ch, run.tools, run.loop.loadedTools,
 				&run.loop.consecutiveEmptyRequests, &run.loop.totalRequestToolsCalls, run.loop.maxRequestToolsCalls,
 				resultBlocks, run.loop.toolCallRefs,
 				sessionID, &run.loop.reflectionFired,
-				run.loop.inspectorTurnID,
+				run.loop.inspectorTurnID, display,
 			)
 		} else {
 			regularTools = append(regularTools, tu)

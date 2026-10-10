@@ -83,7 +83,7 @@ func runTool(svc *chatServiceImpl, sessionID, turnID, toolName, argsJSON string)
 	ls.inspectorTurnID = turnID
 
 	ch := make(chan chat.StreamEvent, 32)
-	svc.executeSingleTool(context.Background(), tu, ls, "agent1", sessionID, ch, nil)
+	svc.executeSingleTool(context.Background(), tu, tu.Input, ls, "agent1", sessionID, ch, nil)
 	for {
 		select {
 		case <-ch:

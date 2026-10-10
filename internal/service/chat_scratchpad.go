@@ -27,11 +27,12 @@ func handleScratchpadTool(
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex,
 	start time.Time,
+	labels ...toolDisplayLabels,
 ) toolExecResult {
 	if mu != nil {
 		mu.Lock()
 	}
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+	ch <- toolCallDisplayEvent(tu, labels...)
 	if mu != nil {
 		mu.Unlock()
 	}

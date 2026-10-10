@@ -1051,8 +1051,9 @@ func (s *chatServiceImpl) handleRequestTools(
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
+	labels ...toolDisplayLabels,
 ) ([]llmtypes.ContentBlock, []chat.ToolCallRef, []llmtypes.ToolDefinition) {
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+	ch <- toolCallDisplayEvent(tu, labels...)
 	*totalCalls++
 
 	// Pull the LLM-supplied intent up front so it ends up in every
@@ -1138,6 +1139,7 @@ func (s *chatServiceImpl) handleRequestTools(
 		return resultBlocks, toolCallRefs, tools
 	}
 
+	normalizeToolInputSchemas(newTools)
 	var loaded []string
 	for _, nt := range newTools {
 		if !loadedTools[nt.Name] {
@@ -1797,6 +1799,7 @@ func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 	for i := range tools {
 		clone := cloneSchemaNode(tools[i].InputSchema)
 		normalizeSchemaNode(clone)
+		injectUXMetadataProperties(clone)
 		tools[i].InputSchema = clone
 	}
 }

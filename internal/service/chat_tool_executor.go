@@ -45,6 +45,8 @@ const (
 // toolPlan describes a single tool invocation after pre-checking.
 type toolPlan struct {
 	tu            llmtypes.ToolUseBlock
+	execInput     map[string]any
+	display       toolDisplayLabels
 	status        toolPlanStatus
 	denyReason    string
 	concurrent    bool
@@ -89,7 +91,11 @@ func (s *chatServiceImpl) preCheckTools(
 	plans := make([]toolPlan, 0, len(toolUseBlocks))
 
 	for i, tu := range toolUseBlocks {
+		input, display := splitToolDisplayInput(tools, tu)
+		tu.Input = input
 		plan := toolPlan{
+			display:       display,
+			execInput:     input,
 			tu:            tu,
 			originalIndex: i,
 		}
@@ -103,7 +109,7 @@ func (s *chatServiceImpl) preCheckTools(
 				block := llmtypes.ContentBlock{Type: "tool_result", ToolUseID: tu.ID, Content: deny, IsError: true}
 				plan.status, plan.denyReason, plan.resultBlock = toolPlanDenied, reason, &block
 				plan.ref = &chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: deny}
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- toolCallDisplayEvent(tu, display)
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: deny, IsError: true}
 				plans = append(plans, plan)
 				continue
@@ -172,7 +178,7 @@ func (s *chatServiceImpl) preCheckTools(
 				)
 				slog.Warn("chat-service: tool SKIPPED (stuck-loop detector)", "tool", tu.Name)
 			}
-			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+			ch <- toolCallDisplayEvent(tu, display)
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockedResult, IsError: true}
 			block := llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: blockedResult,
@@ -228,7 +234,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, permResult.Reason)
 				slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", permResult.Reason)
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- toolCallDisplayEvent(tu, display)
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
@@ -271,7 +277,7 @@ func (s *chatServiceImpl) preCheckTools(
 					}
 					denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — %s", tu.Name, denyReason)
 					slog.Warn("chat-service: tool denied", "tool", tu.Name, "reason", denyReason, "scope", resp.Scope)
-					ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+					ch <- toolCallDisplayEvent(tu, display)
 					ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 					// Warn user when consecutive failures approach the stop threshold.
 					if ls.consecutiveFailures >= ls.limits.consecutiveFailCap-1 {
@@ -305,7 +311,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.recordToolCall(tu.Name, false)
 				denyMsg := fmt.Sprintf("PERMISSION DENIED: %s — unknown permission decision %q", tu.Name, permResult.Decision)
 				slog.Warn("chat-service: tool denied, unknown permission decision", "tool", tu.Name, "decision", permResult.Decision)
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- toolCallDisplayEvent(tu, display)
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg,
@@ -333,7 +339,7 @@ func (s *chatServiceImpl) preCheckTools(
 				ls.recordToolCall(tu.Name, false)
 				blockMsg := fmt.Sprintf("Tool %q was refused by a policy plugin for this input. Retrying with the same arguments will be refused again — adjust the arguments, pick a different tool, or explain to the user that this action is gated.", tu.Name)
 				slog.Info("chat-service: tool blocked by plugin pre-hook", "tool", tu.Name)
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- toolCallDisplayEvent(tu, display)
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: blockMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: blockMsg,
@@ -352,7 +358,7 @@ func (s *chatServiceImpl) preCheckTools(
 			ls.recordToolCall(tu.Name, false)
 			denyMsg := fmt.Sprintf("EXECUTION_RULES_DENIED: %s — %s", tu.Name, reason)
 			slog.Warn("chat-service: tool denied by execution rules", "tool", tu.Name, "reason", reason)
-			ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+			ch <- toolCallDisplayEvent(tu, display)
 			ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: denyMsg, IsError: true}
 			block := llmtypes.ContentBlock{
 				Type: "tool_result", ToolUseID: tu.ID, Content: denyMsg, IsError: true,
@@ -367,8 +373,9 @@ func (s *chatServiceImpl) preCheckTools(
 		}
 
 		// Arg validation: check tool_use Input against the tool's InputSchema.
+		execInput := tu.Input
 		if schema := s.tools.GetToolSchema(tu.Name); len(schema) > 0 {
-			if errMsg := s.argValidator.validate(tu.Name, schema, tu.Input); errMsg != "" {
+			if errMsg := s.argValidator.validate(tu.Name, schema, execInput); errMsg != "" {
 				ls.recordToolCall(tu.Name, false)
 				// CW-20260417-0485: arg-validation errors are the canonical
 				// trigger for the chat-loop-terminated envelope (see the
@@ -376,7 +383,7 @@ func (s *chatServiceImpl) preCheckTools(
 				// the envelope can surface it to the user.
 				ls.recordLastError(tu.Name, errMsg)
 				slog.Warn("chat-service: tool arg validation failed", "tool", tu.Name, "err", errMsg)
-				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- toolCallDisplayEvent(tu, display)
 				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: errMsg, IsError: true}
 				block := llmtypes.ContentBlock{
 					Type: "tool_result", ToolUseID: tu.ID, Content: errMsg, IsError: true,
@@ -392,6 +399,7 @@ func (s *chatServiceImpl) preCheckTools(
 
 		// Tool passed pre-check — determine concurrency safety.
 		plan.status = toolPlanReady
+		plan.execInput = execInput
 		if toolInfo, ok := s.tools.GetToolMeta(ctx, tu.Name); ok {
 			plan.concurrent = toolInfo.IsConcurrencySafe
 		}
@@ -475,7 +483,7 @@ func (s *chatServiceImpl) executeToolBatch(
 			if concurrent {
 				presenceMu = &mu
 			}
-			results[i] = s.executeSingleTool(ctx, plans[i].tu, ls, agentID, sessionID, ch, presenceMu)
+			results[i] = s.executeSingleTool(ctx, plans[i].tu, plans[i].execInput, ls, agentID, sessionID, ch, presenceMu, plans[i].display)
 		},
 		func(i int) { results[i] = canceledBeforeStartResult(plans[i].tu) },
 		safego.ReportRecovered)
@@ -518,13 +526,19 @@ func canceledBeforeStartResult(tu llmtypes.ToolUseBlock) toolExecResult {
 func (s *chatServiceImpl) executeSingleTool(
 	ctx context.Context,
 	tu llmtypes.ToolUseBlock,
+	execInput map[string]any,
 	ls *loopState,
 	agentID string,
 	sessionID string,
 	ch chan chat.StreamEvent,
 	mu *sync.Mutex, // nil for serial execution
+	labels ...toolDisplayLabels,
 ) toolExecResult {
 	start := time.Now()
+
+	if execInput == nil {
+		execInput = tu.Input
+	}
 
 	// Handle result-cache meta-tools locally (no MCP routing).
 	if isResultCacheTool(tu.Name) {
@@ -532,12 +546,12 @@ func (s *chatServiceImpl) executeSingleTool(
 		if ls != nil && ls.resultBudget > 0 {
 			budget = ls.resultBudget
 		}
-		return s.handleResultCacheMetaTool(ctx, tu, sessionID, ch, mu, start, budget)
+		return s.handleResultCacheMetaTool(ctx, tu, sessionID, ch, mu, start, budget, labels...)
 	}
 
 	// Handle P4 scratchpad tools locally (pure loopState access — no MCP routing).
 	if isScratchpadTool(tu.Name) {
-		return handleScratchpadTool(tu, ls, ch, mu, start)
+		return handleScratchpadTool(tu, ls, ch, mu, start, labels...)
 	}
 
 	// Broadcast tool pending.
@@ -548,7 +562,7 @@ func (s *chatServiceImpl) executeSingleTool(
 		Type: "tool_pending", SessionID: sessionID, AgentID: agentID,
 		ToolName: tu.Name, Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+	ch <- toolCallDisplayEvent(tu, labels...)
 	if mu != nil {
 		mu.Unlock()
 	}
@@ -578,7 +592,7 @@ func (s *chatServiceImpl) executeSingleTool(
 
 	// Execute tool via ToolService.
 	toolCtx, toolSpan := feotel.ToolCallSpan(ctx, tu.Name)
-	result, _ := s.tools.Execute(toolCtx, agentID, tu.Name, tu.Input)
+	result, _ := s.tools.Execute(toolCtx, agentID, tu.Name, execInput)
 	resultText := result.Output
 	toolIsError := result.IsError
 
@@ -1017,12 +1031,13 @@ func (s *chatServiceImpl) handleResultCacheMetaTool(
 	mu *sync.Mutex,
 	start time.Time,
 	budget int,
+	labels ...toolDisplayLabels,
 ) toolExecResult {
 	// Broadcast tool pending.
 	if mu != nil {
 		mu.Lock()
 	}
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+	ch <- toolCallDisplayEvent(tu, labels...)
 	if mu != nil {
 		mu.Unlock()
 	}

@@ -195,13 +195,15 @@ type StreamEvent struct {
 	Usage           *Usage     `json:"usage,omitempty"`
 	Error           string     `json:"error,omitempty"`
 	StructuredError *ChatError `json:"structured_error,omitempty"`
-	Tool            string     `json:"tool,omitempty"`      // tool name for tool_call/tool_result
-	ToolID          string     `json:"tool_id,omitempty"`   // tool_use_id
-	Summary         string     `json:"summary,omitempty"`   // tool result summary
-	Envelope        string     `json:"envelope,omitempty"`  // JSON envelope data for stream_end and plugin_envelope
-	PluginID        string     `json:"plugin_id,omitempty"` // emitting plugin id for plugin_envelope
-	Data            string     `json:"data,omitempty"`      // JSON payload for tool_warning events
-	Detail          string     `json:"detail,omitempty"`    // Short label for tool_call (e.g., command, path)
+	Tool            string     `json:"tool,omitempty"`         // tool name for tool_call/tool_result
+	ToolID          string     `json:"tool_id,omitempty"`      // tool_use_id
+	Summary         string     `json:"summary,omitempty"`      // tool result summary
+	Envelope        string     `json:"envelope,omitempty"`     // JSON envelope data for stream_end and plugin_envelope
+	PluginID        string     `json:"plugin_id,omitempty"`    // emitting plugin id for plugin_envelope
+	Data            string     `json:"data,omitempty"`         // JSON payload for tool_warning events
+	Detail          string     `json:"detail,omitempty"`       // Short label for tool_call (e.g., command, path)
+	ToolAction      string     `json:"tool_action,omitempty"`  // UX intent metadata from tool_call
+	ToolSummary     string     `json:"tool_summary,omitempty"` // UX intent metadata from tool_call
 
 	// IsError flags a tool_result event whose underlying tool call did not
 	// succeed (errors, denials, blocks, validation failures, cancellations).

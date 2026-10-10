@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -289,21 +290,27 @@ func (st *SelfToolsTransport) callChatSearch(ctx context.Context, args map[strin
 }
 
 // callChatGet implements chat_get — fetch the messages of a target chat by
-// short_code or session_id, paginated. Workspace-scoped, read-only.
+// short_code or session_id, paginated through the retained host-owned reader.
 //
 // Args:
 //
-//	target      string  (required) — short code (`c248`, `#c248`) or session UUID
+//	target      string  (optional, defaults to current host call session) — short code (`c248`, `#c248`) or session UUID
 //	limit       int     (optional, default 50, max 500)
 //	offset      int     (optional, default 0)
 //	include_compacted bool (optional, default true) — include summary blobs
 //
-// Return shape: { session_id, short_code, title, workspace_id, total,
+// Return shape: { session_id, short_code, title, total,
 //
 //	has_more, messages: [{id, role, text, is_compacted, created_at}, ...] }
 //
 // CW-20260519-0063.
 func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
+	// This retained host-owned read surface uses the same injected reader and
+	// outer tool permission boundary for explicit and implicit targets. Context
+	// session IDs select history; they do not mint actor bindings or grants.
+	if st == nil || st.Reads.Sessions == nil {
+		return mcp.ErrorResult("transcript reader unavailable"), nil
+	}
 	targetArg := strArg(args, "target", "")
 	if targetArg == "" {
 		// Accept `short_code` and `session_id` as aliases — the spec calls out
@@ -313,13 +320,27 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 	if targetArg == "" {
 		targetArg = strArg(args, "session_id", "")
 	}
-	if targetArg == "" {
-		return mcp.ErrorResult("target is required (short_code like c248, or session_id UUID)"), nil
-	}
 
-	sess, errRes := resolveChatTarget(st, targetArg)
-	if errRes != nil {
-		return errRes, nil
+	var sess *store.Session
+	if targetArg == "" {
+		sessionID := mcp.SessionIDFromContext(ctx)
+		if sessionID == "" {
+			return mcp.ErrorResult("target is required (or call from an active session)"), nil
+		}
+		s, err := st.Reads.Sessions.Get(ctx, sessionID)
+		if err != nil {
+			return chatGetReadFailure(err, "active session transcript unavailable"), nil
+		}
+		if s == nil {
+			return mcp.ErrorResult("active session transcript unavailable"), nil
+		}
+		sess = s
+	} else {
+		s, errRes := resolveChatGetTarget(ctx, st, targetArg)
+		if errRes != nil {
+			return errRes, nil
+		}
+		sess = s
 	}
 
 	limit := intArgFull(args, "limit", chatGetDefaultLimit)
@@ -343,7 +364,7 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 
 	page, err := st.Reads.Sessions.ListMessagesPage(ctx, sess.ID, limit, offset)
 	if err != nil {
-		return mcp.ErrorResult(fmt.Sprintf("list messages for %s: %v", sess.ShortCode, err)), nil
+		return chatGetReadFailure(err, "session transcript unavailable"), nil
 	}
 
 	views := make([]ChatMessageView, 0, len(page.Messages))
@@ -378,6 +399,38 @@ func (st *SelfToolsTransport) callChatGet(ctx context.Context, args map[string]a
 	return mcp.TextResult(string(out)), nil
 }
 
+// Read failures are semantic tool errors. Keep the cause in host logs, rather
+// than exposing SQL, paths or other internal details through the tool result.
+func chatGetReadFailure(err error, message string) *mcp.ToolResult {
+	slog.Warn("chat_get transcript read failed", "error", err)
+	return mcp.ErrorResult(message)
+}
+
+func resolveChatGetTarget(ctx context.Context, st *SelfToolsTransport, raw string) (*store.Session, *mcp.ToolResult) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, mcp.ErrorResult("chat target is required (short_code like c248, or session_id UUID)")
+	}
+	candidate := strings.ToLower(strings.TrimPrefix(raw, "#"))
+	var sess *store.Session
+	var err error
+	if isShortCode(candidate) {
+		sess, err = st.Reads.Sessions.GetByShortCode(ctx, candidate)
+	} else {
+		sess, err = st.Reads.Sessions.Get(ctx, raw)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, mcp.ErrorResult("no chat found for the requested target")
+	}
+	if err != nil {
+		return nil, chatGetReadFailure(err, "session transcript unavailable")
+	}
+	if sess == nil {
+		return nil, mcp.ErrorResult("session transcript unavailable")
+	}
+	return sess, nil
+}
+
 // extractMessageText pulls the searchable text from a stored message Content
 // field. Content may be a bare string or a JSON envelope like {"text":"..."}.
 func extractMessageText(content string) string {
@@ -387,15 +440,15 @@ func extractMessageText(content string) string {
 	// Try JSON object with a "text" key (assistant messages stored as
 	// {"v":1,"text":"...","tier":"..."}).
 	var payload struct {
-		Text    string `json:"text"`
-		Content string `json:"content"`
+		Text    *string `json:"text"`
+		Content *string `json:"content"`
 	}
 	if err := json.Unmarshal([]byte(content), &payload); err == nil {
-		if payload.Text != "" {
-			return payload.Text
+		if payload.Text != nil {
+			return *payload.Text
 		}
-		if payload.Content != "" {
-			return payload.Content
+		if payload.Content != nil {
+			return *payload.Content
 		}
 	}
 	// Fall back to bare string.

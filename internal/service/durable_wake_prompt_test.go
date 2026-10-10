@@ -16,8 +16,8 @@ import (
 func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Wake Prompt Agent", Slug: "wake-prompt-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
@@ -31,8 +31,8 @@ func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 
 	result, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{
@@ -55,8 +55,8 @@ func TestDurableAgentStartDeliversWakePromptAsUserTurn(t *testing.T) {
 func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "No Prompt Agent", Slug: "no-prompt-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
@@ -70,8 +70,8 @@ func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 
 	if _, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{}); err != nil {
@@ -89,8 +89,8 @@ func TestDurableAgentStartWithEmptyPromptDoesNotDeliverMessage(t *testing.T) {
 func TestDurableAgentResumeDeliversWakePromptAsUserTurn(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Prompt Agent", Slug: "resume-prompt-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
@@ -104,8 +104,8 @@ func TestDurableAgentResumeDeliversWakePromptAsUserTurn(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
@@ -189,8 +189,8 @@ func (f *fakeWakePromptChatService) Shutdown() error { return nil }
 func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "E2E Wake Agent", Slug: "e2e-wake-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 
 	runtime := NewChatDurableAgentRuntimeController(&fakeWakePromptChatService{store: st})
@@ -214,8 +214,8 @@ func TestDurableAgentWakeEndToEndPersistsPromptAsSessionMessage(t *testing.T) {
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 		CurrentSessionID: seedSession.ID,
 	}
-	if err := durableSvc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, seedSession.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)

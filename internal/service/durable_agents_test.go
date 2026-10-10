@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -59,333 +59,148 @@ func newDurableAgentServiceTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func newLoomDurableFixture(t *testing.T, st *store.Store) (*store.AgentProfile, *store.DurableAgentInstance) {
+// These private retained rows are audit history, never issuer inputs.
+func durableHistoricalFixture(t *testing.T, st *store.Store, slug, class, tags string) *store.AgentProfile {
 	t.Helper()
-	profile := &store.AgentProfile{
-		Name: "Loom Curator", Slug: loomCuratorDurableSlug, SystemPrompt: "Curate Loom fragments.", Durable: true,
+	p := &store.AgentProfile{Name: "Retained " + slug, Slug: slug, SystemPrompt: "Private retained body"}
+	if err := storetest.HistoricalProfile(t.Context(), st, p); err != nil {
+		t.Fatal(err)
 	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET class=?,tags=?,durable=1,activation_mode='fresh-per-wake' WHERE id=?`, class, tags, p.ID); err != nil {
+		t.Fatal(err)
 	}
-	return profile, &store.DurableAgentInstance{
-		Name: "Loom Curator", Slug: loomCuratorDurableSlug, ProfileID: profile.ID,
-		LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick,
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO durable_agent_instances(id,name,slug,profile_id,lifecycle_class,metadata_json,urn) VALUES(?,?,?,?,?,'{"historical":true}',?)`, "historical-"+slug, p.Name, slug, p.ID, class, "msg://agent/retained/"+slug); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_schedules(id,agent_id,name,schedule_kind,body,status,next_run) VALUES(?,?,'custom retained schedule','cron','Private customized schedule','paused','2026-10-11T00:00:00Z')`, "historical-schedule-"+slug, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
-type failOnceBuiltinScheduleStore struct {
-	DurableAgentStore
-	mu       sync.Mutex
-	attempts int
-	err      error
-}
-
-func (s *failOnceBuiltinScheduleStore) InsertAgentScheduleIfNameMissing(ctx context.Context, row store.AgentSchedule) (bool, error) {
-	s.mu.Lock()
-	s.attempts++
-	attempt := s.attempts
-	s.mu.Unlock()
-	if attempt == 1 {
-		return false, s.err
-	}
-	return s.DurableAgentStore.InsertAgentScheduleIfNameMissing(ctx, row)
-}
-
-type pauseAfterInstanceCreateStore struct {
-	DurableAgentStore
-	once     sync.Once
-	inserted chan struct{}
-	release  chan struct{}
-}
-
-type pauseAfterInstanceListStore struct {
-	DurableAgentStore
-	once    sync.Once
-	listed  chan struct{}
-	proceed chan struct{}
-}
-
-func (s *pauseAfterInstanceListStore) ListDurableAgentInstances(ctx context.Context, includeArchived bool) ([]store.DurableAgentInstance, error) {
-	instances, err := s.DurableAgentStore.ListDurableAgentInstances(ctx, includeArchived)
-	if err != nil {
-		return nil, err
-	}
-	wait := false
-	s.once.Do(func() {
-		wait = true
-		close(s.listed)
-	})
-	if wait {
-		<-s.proceed
-	}
-	return instances, nil
-}
-
-func (s *pauseAfterInstanceCreateStore) CreateDurableAgentInstance(ctx context.Context, inst *store.DurableAgentInstance) error {
-	if err := s.DurableAgentStore.CreateDurableAgentInstance(ctx, inst); err != nil {
-		return err
-	}
-	wait := false
-	s.once.Do(func() {
-		wait = true
-		close(s.inserted)
-	})
-	if wait {
-		<-s.release
-	}
-	return nil
-}
-
-func TestDurableAgentCreateProvisionsLoomCuratorBuiltinSchedule(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	profile := &store.AgentProfile{
-		Name: "Loom Curator", Slug: "loom-curator", SystemPrompt: "Curate Loom fragments.", Durable: true,
-	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	inst := &store.DurableAgentInstance{
-		Name: "Loom Curator", Slug: "loom-curator", ProfileID: profile.ID,
-		LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick,
-	}
-	svc := NewDurableAgentService(st)
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	schedules, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil {
-		t.Fatalf("ListAgentSchedules: %v", err)
-	}
-	if len(schedules) != 1 {
-		t.Fatalf("schedules = %d, want one builtin Loom schedule: %+v", len(schedules), schedules)
-	}
-	got := schedules[0]
-	if got.Name != "lint-and-export" || got.ScheduleKind != store.ScheduleKindCron || got.ScheduleSpec != "0 3 * * *" {
-		t.Fatalf("builtin schedule = %+v", got)
-	}
-	if wantID := builtinDurableAgentScheduleID(profile.ID, loomLintExportName); got.ID != wantID {
-		t.Fatalf("builtin schedule ID = %q, want stable legacy ID %q", got.ID, wantID)
-	}
-	if got.NextRun == "" || got.CreatedBy != "builtin" {
-		t.Fatalf("builtin schedule missing live next_run/provenance: %+v", got)
-	}
-	for _, want := range []string{"loom_bundle_conformance", "message_*", "loom_export_bundle"} {
-		if !strings.Contains(got.Body, want) {
-			t.Errorf("builtin schedule body missing %q: %q", want, got.Body)
-		}
-	}
-	before := got
-	if provisionErr := svc.(*durableAgentService).provisionBuiltinDurableSchedules(context.Background(), inst); provisionErr != nil {
-		t.Fatalf("repeat provisioning: %v", provisionErr)
-	}
-	after, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(after) != 1 || after[0] != before {
-		t.Fatalf("repeat provisioning was not idempotent: before=%+v after=%+v err=%v", before, after, err)
-	}
-}
-
-func TestDurableAgentCreatePreservesCustomizedLoomCuratorSchedule(t *testing.T) {
-	ctx := context.Background()
-	st := newDurableAgentServiceTestStore(t)
-	profile := &store.AgentProfile{
-		Name: "Loom Curator", Slug: "loom-curator", SystemPrompt: "Curate Loom fragments.", Durable: true,
-	}
-	if err := st.CreateAgent(ctx, profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	custom := store.AgentSchedule{
-		ID: "operator-custom-loom-schedule", AgentID: profile.ID, Name: "lint-and-export",
-		ScheduleKind: store.ScheduleKindCron, ScheduleSpec: "15 4 * * 1", Body: "Operator-customized body.",
-		Priority: 42, Status: store.ScheduleStatusPaused, CreatedBy: "operator", NextRun: "2030-01-07T04:15:00Z",
-		MaxRetries: 9, OnFail: store.ScheduleOnFailNotify, JobType: store.ScheduleJobTypeDurableAgentWake,
-		JobPayload: `{"custom":true}`,
-	}
-	if err := st.InsertAgentSchedule(ctx, custom); err != nil {
-		t.Fatalf("InsertAgentSchedule: %v", err)
-	}
-	before, err := st.GetAgentSchedule(ctx, custom.ID)
-	if err != nil {
-		t.Fatalf("GetAgentSchedule before: %v", err)
-	}
-
-	inst := &store.DurableAgentInstance{
-		Name: "Loom Curator", Slug: "loom-curator", ProfileID: profile.ID,
-		LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick,
-	}
-	svc := NewDurableAgentService(st)
-	if createErr := svc.Create(ctx, inst); createErr != nil {
-		t.Fatalf("Create: %v", createErr)
-	}
-	if _, listErr := svc.List(ctx, false); listErr != nil {
-		t.Fatalf("List reconciliation: %v", listErr)
-	}
-	after, err := st.GetAgentSchedule(ctx, custom.ID)
-	if err != nil {
-		t.Fatalf("GetAgentSchedule after: %v", err)
-	}
-	if *after != *before {
-		t.Fatalf("builtin provisioning overwrote customized schedule:\n before=%+v\n  after=%+v", before, after)
-	}
-	schedules, err := st.ListAgentSchedules(ctx, profile.ID)
-	if err != nil || len(schedules) != 1 {
-		t.Fatalf("schedules after create = %+v, %v; want only customized row", schedules, err)
-	}
-}
-
-func TestDurableAgentCanceledCreateRepairsMissingBuiltinScheduleDuringReconcile(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	profile, inst := newLoomDurableFixture(t, st)
-	svc := NewDurableAgentService(st)
-
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := svc.Create(canceled, inst); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Create error = %v, want context.Canceled after instance commit", err)
-	}
-	instances, err := st.ListDurableAgentInstances(context.Background(), true)
-	if err != nil || len(instances) != 1 {
-		t.Fatalf("committed instances = %+v, %v; want one positive-control partial instance", instances, err)
-	}
-	before, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(before) != 0 {
-		t.Fatalf("schedules before recovery = %+v, %v; want deterministic missing-schedule case", before, err)
-	}
-
-	if _, listErr := svc.List(context.Background(), false); listErr != nil {
-		t.Fatalf("List reconciliation: %v", listErr)
-	}
-	after, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(after) != 1 || after[0].Name != loomLintExportName {
-		t.Fatalf("schedules after reconciliation = %+v, %v; want repaired builtin", after, err)
-	}
-}
-
-func TestDurableAgentCreateRetryRepairsTransientBuiltinScheduleFailure(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	profile, inst := newLoomDurableFixture(t, st)
-	injected := errors.New("injected transient schedule write failure")
-	faults := &failOnceBuiltinScheduleStore{DurableAgentStore: st, err: injected}
-	svc := NewDurableAgentService(faults)
-
-	if err := svc.Create(context.Background(), inst); !errors.Is(err, injected) {
-		t.Fatalf("first Create error = %v, want injected schedule failure", err)
-	}
-	before, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(before) != 0 {
-		t.Fatalf("schedules before retry = %+v, %v; want committed partial state", before, err)
-	}
-	if retryErr := svc.Create(context.Background(), inst); retryErr != nil {
-		t.Fatalf("idempotent Create retry: %v", retryErr)
-	}
-	after, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(after) != 1 || after[0].Name != loomLintExportName {
-		t.Fatalf("schedules after retry = %+v, %v; want repaired builtin", after, err)
-	}
-	invalid := *inst
-	invalid.LifecycleClass = "not-a-lifecycle-class"
-	if err := svc.Create(context.Background(), &invalid); err == nil {
-		t.Fatal("different invalid Create request was masked as an idempotent retry")
-	}
-}
-
-func TestDurableAgentConcurrentCreateAndReconcileProvisionOneBuiltinSchedule(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	profile, inst := newLoomDurableFixture(t, st)
-	paused := &pauseAfterInstanceCreateStore{
-		DurableAgentStore: st,
-		inserted:          make(chan struct{}),
-		release:           make(chan struct{}),
-	}
-	svc := NewDurableAgentService(paused)
-	var releaseOnce sync.Once
-	releaseCreate := func() { releaseOnce.Do(func() { close(paused.release) }) }
-	defer releaseCreate()
-	createDone := make(chan error, 1)
-	go func() {
-		createDone <- svc.Create(context.Background(), inst)
-	}()
-	<-paused.inserted
-
-	const reconcilers = 24
-	reconcileErrs := make(chan error, reconcilers)
-	var reconcileWG sync.WaitGroup
-	for i := 0; i < reconcilers; i++ {
-		reconcileWG.Add(1)
-		go func() {
-			defer reconcileWG.Done()
-			_, err := svc.List(context.Background(), false)
-			reconcileErrs <- err
-		}()
-	}
-	reconcileWG.Wait()
-	close(reconcileErrs)
-	for err := range reconcileErrs {
+func durableAuthoritySnapshot(t *testing.T, st *store.Store) map[string][][]any {
+	t.Helper()
+	out := make(map[string][][]any)
+	for _, query := range []string{
+		`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM durable_agent_instances ORDER BY id`, `SELECT * FROM agent_schedules ORDER BY id`,
+		`SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`,
+		`SELECT * FROM actor_instances ORDER BY id`, `SELECT * FROM actor_schedules ORDER BY id`, `SELECT * FROM actor_instance_events ORDER BY id`, `SELECT * FROM actor_instance_sessions ORDER BY instance_id,session_id`, `SELECT * FROM session_actor_bindings ORDER BY session_id,agent_id`,
+	} {
+		rows, err := st.DB.QueryContext(t.Context(), query)
 		if err != nil {
-			t.Fatalf("concurrent reconciliation: %v", err)
+			t.Fatal(err)
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		var data [][]any
+		for rows.Next() {
+			cells := make([]any, len(cols))
+			dest := make([]any, len(cols))
+			for i := range cells {
+				dest[i] = &cells[i]
+			}
+			if err = rows.Scan(dest...); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			for i, c := range cells {
+				if b, ok := c.([]byte); ok {
+					cells[i] = append([]byte(nil), b...)
+				}
+			}
+			data = append(data, cells)
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[query] = data
+	}
+	return out
+}
+
+func TestDurableAgentCreateAndSyncRefuseUnissuedIdentitiesWithoutEffects(t *testing.T) {
+	st := newDurableAgentServiceTestStore(t)
+	historical := durableHistoricalFixture(t, st, loomCuratorDurableSlug, store.DurableAgentClassProcess, `["durable-agent","process"]`)
+	prior := &store.AgentProfile{Name: "Prior", Slug: "prior-create", SystemPrompt: "Private pin"}
+	if err := persistTestActor(t.Context(), st, prior); err != nil {
+		t.Fatal(err)
+	}
+	var hostID string
+	if err := st.DB.QueryRowContext(t.Context(), `SELECT host_settings_id FROM agent_actor_bindings WHERE actor_uri=?`, prior.ID).Scan(&hostID); err != nil {
+		t.Fatal(err)
+	}
+	before := durableAuthoritySnapshot(t, st)
+	svc := NewDurableAgentService(st)
+	for _, profileID := range []string{historical.ID, hostID, "msg://agent/claimed/unissued", "missing", prior.ID} {
+		inst := &store.DurableAgentInstance{Name: "Refused", Slug: loomCuratorDurableSlug, ProfileID: profileID, LifecycleClass: store.DurableAgentClassProcess, URN: profileID}
+		if err := svc.Create(t.Context(), inst); !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("service Create(%s): %v", profileID, err)
+		}
+		if err := st.CreateDurableAgentInstance(t.Context(), inst); !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("store Create(%s): %v", profileID, err)
+		}
+		got, err := st.SyncDurableAgentInstanceConfig(t.Context(), inst)
+		if got != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("Sync(%s): result=%+v err=%v", profileID, got, err)
 		}
 	}
-	releaseCreate()
-	if err := <-createDone; err != nil {
-		t.Fatalf("concurrent Create: %v", err)
+	if err := svc.Create(t.Context(), nil); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("nil Create: %v", err)
 	}
-
-	schedules, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(schedules) != 1 || schedules[0].Name != loomLintExportName {
-		t.Fatalf("schedules after concurrent create/reconcile = %+v, %v; want exactly one builtin", schedules, err)
+	if after := durableAuthoritySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused creation changed history/authority: before=%v after=%v", before, after)
 	}
 }
 
-func TestDurableAgentReconcileRepairsCanceledConcurrentCreateAfterStaleSnapshot(t *testing.T) {
+func TestDurableAgentCreateRetryDoesNotRepairPriorJournalOrSeedSchedules(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
-	profile, inst := newLoomDurableFixture(t, st)
-	paused := &pauseAfterInstanceListStore{
-		DurableAgentStore: st,
-		listed:            make(chan struct{}),
-		proceed:           make(chan struct{}),
+	durableHistoricalFixture(t, st, loomCuratorDurableSlug, store.DurableAgentClassProcess, `["durable-agent","process"]`)
+	p := &store.AgentProfile{Name: "Prior Loom", Slug: "prior-loom", SystemPrompt: "Private pin"}
+	if err := persistTestActor(t.Context(), st, p); err != nil {
+		t.Fatal(err)
 	}
-	reconcileSvc := NewDurableAgentService(paused)
-	reconcileDone := make(chan error, 1)
-	go func() {
-		_, err := reconcileSvc.List(context.Background(), false)
-		reconcileDone <- err
-	}()
-	<-paused.listed
-
-	canceled, cancel := context.WithCancel(context.Background())
+	inst := &store.DurableAgentInstance{Name: "Prior instance", Slug: loomCuratorDurableSlug, ProfileID: p.ID, LifecycleClass: store.DurableAgentClassProcess, LaunchSourceType: store.DurableAgentLaunchProcessTick, MetadataJSON: `{"prior":true}`}
+	if err := persistTestDurableInstance(t.Context(), st, inst); err != nil {
+		t.Fatal(err)
+	}
+	before := durableAuthoritySnapshot(t, st)
+	svc := NewDurableAgentService(st)
+	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := NewDurableAgentService(st).Create(canceled, inst); !errors.Is(err, context.Canceled) {
-		close(paused.proceed)
-		t.Fatalf("concurrent Create error = %v, want context.Canceled", err)
+	for _, ctx := range []context.Context{t.Context(), canceled} {
+		for _, change := range []bool{false, true} {
+			retry := *inst
+			if change {
+				retry.Name = "replacement"
+				retry.MetadataJSON = `{"repair":true}`
+			}
+			if err := svc.Create(ctx, &retry); !errors.Is(err, store.ErrVerifiedActorRequired) {
+				t.Fatalf("retry change=%v: %v", change, err)
+			}
+			got, err := st.SyncDurableAgentInstanceConfig(ctx, &retry)
+			if got != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+				t.Fatalf("sync retry: result=%+v err=%v", got, err)
+			}
+		}
 	}
-	before, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(before) != 0 {
-		close(paused.proceed)
-		t.Fatalf("schedules before stale reconciliation resumes = %+v, %v; want missing", before, err)
+	if _, err := svc.List(t.Context(), false); err != nil {
+		t.Fatal(err)
 	}
-	close(paused.proceed)
-	if reconcileErr := <-reconcileDone; reconcileErr != nil {
-		t.Fatalf("stale-snapshot reconciliation: %v", reconcileErr)
-	}
-
-	schedules, err := st.ListAgentSchedules(context.Background(), profile.ID)
-	if err != nil || len(schedules) != 1 || schedules[0].Name != loomLintExportName {
-		t.Fatalf("schedules after stale-snapshot recovery = %+v, %v; want exactly one builtin", schedules, err)
+	if after := durableAuthoritySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("retry/list replayed history or repaired authority: before=%v after=%v", before, after)
 	}
 }
 
-// TestDurableAgentServiceLifecycleRequests is a Phase 0 item 2
-// (RequestStart fix) regression test: RequestStart used to be a no-op
-// status flip to start_requested with nothing downstream ever driving it
-// further. It now calls straight through to Start (mirroring
-// RequestResume's call-through-to-Resume shape), so a sleeping instance
-// with an already-attached, reusable session actually launches and reaches
-// active status with that session attached — not stuck at start_requested.
 func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Svc Agent", Slug: "svc-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
@@ -394,8 +209,8 @@ func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchAPIChat,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	// RequestStart calls through to Start with an empty
 	// DurableAgentStartRequest{} (no workspace_id, same as
@@ -438,95 +253,65 @@ func TestDurableAgentServiceLifecycleRequests(t *testing.T) {
 	}
 }
 
-func TestDurableAgentList_ReconcilesTaggedProfilesIntoInstances(t *testing.T) {
+func TestDurableAgentListDoesNotPromoteHistoricalTagsOrFreshHosts(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
-	profile := &store.AgentProfile{
-		Name:         "Tagged Durable Agent",
-		Slug:         "tagged-durable-agent",
-		SystemPrompt: "x",
-		Tags:         `["durable-agent","advisor"]`,
-		Class:        store.DurableAgentClassAdvisor,
-		DefaultState: store.DurableAgentStatusSleeping,
+	for _, class := range []string{store.DurableAgentClassAdvisor, store.DurableAgentClassProcess, store.DurableAgentClassTemplate, store.DurableAgentClassHarness} {
+		durableHistoricalFixture(t, st, "retained-"+class, class, `["durable-agent","`+class+`"]`)
 	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	p := &store.AgentProfile{Name: "Prior", Slug: "list-prior", SystemPrompt: "Private pin"}
+	if err := persistTestActor(t.Context(), st, p); err != nil {
+		t.Fatal(err)
 	}
-
+	// A verified actor and its host settings still do not issue an instance.
+	before := durableAuthoritySnapshot(t, st)
 	svc := NewDurableAgentService(st)
-	instances, err := svc.List(context.Background(), false)
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	for _, archived := range []bool{false, true} {
+		instances, err := svc.List(t.Context(), archived)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(instances) != 0 {
+			t.Fatalf("List promoted historical tags/host projection: %+v", instances)
+		}
 	}
-	if len(instances) != 1 {
-		t.Fatalf("instances len = %d, want 1: %+v", len(instances), instances)
-	}
-	if instances[0].ProfileID != profile.ID || instances[0].Slug != profile.Slug {
-		t.Fatalf("instance = %+v, want profile_id=%s slug=%s", instances[0], profile.ID, profile.Slug)
-	}
-	if instances[0].LaunchSourceType != store.DurableAgentLaunchDurableAdvisor {
-		t.Fatalf("launch_source_type = %q, want %q", instances[0].LaunchSourceType, store.DurableAgentLaunchDurableAdvisor)
+	if after := durableAuthoritySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("List changed history or issued an instance/schedule: before=%v after=%v", before, after)
 	}
 }
 
-// TestDurableAgentList_ReconcilesHarnessProfileWithCorrectLifecycleClass is
-// a CW-20260815-0009 follow-up (Copilot review on PR #241): before that
-// ticket, class="harness" could never reach agent_profiles at all, so
-// durableAgentInstanceFromProfile's class switch never saw it and its
-// default-to-advisor branch was unreachable for harness profiles. Once
-// harness started ingesting, a harness-tagged durable candidate reconciled
-// here (e.g. via GET /api/durable-agents before its recipe is ever applied)
-// would silently downgrade to lifecycle_class="advisor". Assert it stays
-// "harness" with the api_chat launch source, not the advisor default.
-func TestDurableAgentList_ReconcilesHarnessProfileWithCorrectLifecycleClass(t *testing.T) {
+func TestDurableAgentListReturnsOnlyPriorFreshInstancesWithArchiveFilter(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
-	profile := &store.AgentProfile{
-		Name:         "Harness Durable Agent",
-		Slug:         "harness-durable-agent",
-		SystemPrompt: "x",
-		Tags:         `["durable-agent","harness"]`,
-		Class:        store.DurableAgentClassHarness,
-		DefaultState: store.DurableAgentStatusSleeping,
+	durableHistoricalFixture(t, st, "retained-list", store.DurableAgentClassAdvisor, `["durable-agent"]`)
+	p := &store.AgentProfile{Name: "Prior", Slug: "fresh-list", SystemPrompt: "Private pin"}
+	if err := persistTestActor(t.Context(), st, p); err != nil {
+		t.Fatal(err)
 	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	inst := &store.DurableAgentInstance{Name: "Prior instance", Slug: "fresh-list", ProfileID: p.ID, URN: p.ID}
+	if err := persistTestDurableInstance(t.Context(), st, inst); err != nil {
+		t.Fatal(err)
 	}
-
 	svc := NewDurableAgentService(st)
-	instances, err := svc.List(context.Background(), false)
+	instances, err := svc.List(t.Context(), false)
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatal(err)
 	}
-	if len(instances) != 1 {
-		t.Fatalf("instances len = %d, want 1: %+v", len(instances), instances)
+	if len(instances) != 1 || instances[0].ID != inst.ID || instances[0].ProfileID != p.ID || instances[0].URN != p.ID {
+		t.Fatalf("fresh-only list=%+v", instances)
 	}
-	if instances[0].LifecycleClass != store.DurableAgentClassHarness {
-		t.Fatalf("lifecycle_class = %q, want %q (must not silently downgrade to advisor)", instances[0].LifecycleClass, store.DurableAgentClassHarness)
+	if _, err = st.ArchiveDurableAgentInstance(t.Context(), inst.ID); err != nil {
+		t.Fatal(err)
 	}
-	if instances[0].LaunchSourceType != store.DurableAgentLaunchAPIChat {
-		t.Fatalf("launch_source_type = %q, want %q", instances[0].LaunchSourceType, store.DurableAgentLaunchAPIChat)
+	before := durableAuthoritySnapshot(t, st)
+	instances, err = svc.List(t.Context(), false)
+	if err != nil || len(instances) != 0 {
+		t.Fatalf("archived filtered: %+v %v", instances, err)
 	}
-}
-
-func TestDurableAgentList_DoesNotPromoteNonDurableProfiles(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	profile := &store.AgentProfile{
-		Name:         "Regular Agent",
-		Slug:         "regular-agent",
-		SystemPrompt: "x",
-		Tags:         `["advisor"]`,
-		Class:        store.DurableAgentClassAdvisor,
+	instances, err = svc.List(t.Context(), true)
+	if err != nil || len(instances) != 1 || instances[0].ArchivedAt == nil {
+		t.Fatalf("archived included: %+v %v", instances, err)
 	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	svc := NewDurableAgentService(st)
-	instances, err := svc.List(context.Background(), false)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(instances) != 0 {
-		t.Fatalf("instances = %+v, want empty", instances)
+	if after := durableAuthoritySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatal("List replayed archived history")
 	}
 }
 
@@ -556,8 +341,8 @@ func TestDurableAgentLaunchPolicyByLifecycleClass(t *testing.T) {
 func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Start Agent", Slug: "start-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
@@ -570,8 +355,8 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 
 	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
@@ -617,8 +402,8 @@ func TestDurableAgentStartCreatesOrReusesSession(t *testing.T) {
 func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Process Agent", Slug: "process-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
@@ -631,8 +416,8 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchProcessTick,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	first, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
@@ -653,8 +438,8 @@ func TestDurableAgentProcessStartCreatesFreshWakeSession(t *testing.T) {
 func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Agent", Slug: "resume-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
@@ -663,8 +448,8 @@ func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	if _, err := svc.Resume(context.Background(), inst.ID, DurableAgentStartRequest{}); !errors.Is(err, ErrDurableAgentNoResumableSession) {
 		t.Fatalf("Resume error = %v, want ErrDurableAgentNoResumableSession", err)
@@ -692,8 +477,8 @@ func TestDurableAgentResumeNoResumableSession(t *testing.T) {
 func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Resume Recover Agent", Slug: "resume-recover-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
@@ -707,8 +492,8 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	started, err := svc.Start(context.Background(), inst.ID, DurableAgentStartRequest{})
 	if err != nil {
@@ -748,8 +533,8 @@ func TestDurableAgentResumeArmsRecovery(t *testing.T) {
 func TestDurableAgentStopCallsRuntimeAndMarksStopped(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Stop Agent", Slug: "stop-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	sess := &store.Session{Title: "current", Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(context.Background(), sess); err != nil {
@@ -763,8 +548,8 @@ func TestDurableAgentStopCallsRuntimeAndMarksStopped(t *testing.T) {
 		CurrentSessionID: sess.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
@@ -791,8 +576,8 @@ func TestDurableAgentStopCallsRuntimeAndMarksStopped(t *testing.T) {
 func TestDurableAgentStopWithoutCurrentSessionMarksStopped(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "No Current Agent", Slug: "no-current-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:             "No Current Instance",
@@ -801,8 +586,8 @@ func TestDurableAgentStopWithoutCurrentSessionMarksStopped(t *testing.T) {
 		Status:           store.DurableAgentStatusPaused,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	runtime := &fakeDurableRuntimeController{}
 	svc := NewDurableAgentServiceWithRuntime(st, runtime)
@@ -821,8 +606,8 @@ func TestDurableAgentStopWithoutCurrentSessionMarksStopped(t *testing.T) {
 func TestDurableAgentStopRuntimeErrorMarksFailed(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Fail Stop Agent", Slug: "fail-stop-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	sess := &store.Session{Title: "current", Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(context.Background(), sess); err != nil {
@@ -836,8 +621,8 @@ func TestDurableAgentStopRuntimeErrorMarksFailed(t *testing.T) {
 		CurrentSessionID: sess.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	runtimeErr := errors.New("runtime stop failed")
 	svc := NewDurableAgentServiceWithRuntime(st, &fakeDurableRuntimeController{err: runtimeErr})
@@ -869,8 +654,8 @@ func durableAgentEventsContain(events []store.DurableAgentEvent, eventType strin
 func TestDurableAgentPausePreservesCurrentSession(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Pause Agent", Slug: "pause-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	sess := &store.Session{Title: "current", Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(context.Background(), sess); err != nil {
@@ -884,8 +669,8 @@ func TestDurableAgentPausePreservesCurrentSession(t *testing.T) {
 		CurrentSessionID: sess.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)

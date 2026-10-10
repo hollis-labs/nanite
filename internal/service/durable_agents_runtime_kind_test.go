@@ -9,16 +9,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// CW-20260930-0113: agentkit v0.12.0 renamed the runtime modes and dropped
-// the old spellings. Rows keep whatever token they were written with, so a
-// durable instance persisted as runtime_kind 'subprocess' (or any other
-// pre-v0.12.0 spelling) must still launch, as its current kind.
-func TestDurableAgentStart_LegacySubprocessRowStillBoots(t *testing.T) {
+// A prior authorized fresh journal may retain an older runtime token. This
+// does not promote a historical profile or issue an actor.
+func TestDurableAgentStart_PriorAuthorizedJournalWithLegacyRuntimeToken(t *testing.T) {
 	ctx := context.Background()
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Legacy Agent", Slug: "legacy-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(ctx, profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(ctx, st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	svc := NewDurableAgentService(st)
 	inst := &store.DurableAgentInstance{
@@ -30,11 +28,11 @@ func TestDurableAgentStart_LegacySubprocessRowStillBoots(t *testing.T) {
 		RuntimeKind:      string(runtimekind.SubprocessPerTurn),
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := svc.Create(ctx, inst); err != nil {
-		t.Fatalf("Create: %v", err)
+	if err := persistTestDurableInstance(ctx, st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
-	// The row as a pre-v0.12.0 Nanite wrote it.
-	if _, err := st.DB.ExecContext(ctx, `UPDATE durable_agent_instances SET runtime_kind = 'subprocess' WHERE id = ?`, inst.ID); err != nil {
+	// Private prior journal with an older runtime spelling.
+	if _, err := st.DB.ExecContext(ctx, `UPDATE actor_instances SET runtime_kind = 'subprocess' WHERE id = ?`, inst.ID); err != nil {
 		t.Fatalf("write legacy runtime_kind: %v", err)
 	}
 

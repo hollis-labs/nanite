@@ -71,12 +71,25 @@ func TestPrepareTurn_BadHarnessProfileTerminatesWithReason(t *testing.T) {
 		if e.Type == "error" && strings.Contains(e.Error, "unknown harness profile") {
 			sawError = true
 		}
-		if e.Type == "stream_end" || e.Type == "delta" {
+		if e.Type == "delta" {
 			t.Errorf("turn proceeded past a bad profile: %+v", e)
 		}
 	}
 	if !sawError {
 		t.Fatalf("no error event naming the profile; events: %+v", events)
+	}
+	assertMessageStreamOutcome(t, events, "error")
+	if requests := f.provider.requestsSnapshot(); len(requests) != 0 {
+		t.Fatalf("provider called for a refused profile: %+v", requests)
+	}
+	messages, err := f.st.ListMessages(ctx, f.session, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range messages {
+		if message.ID == "bad-profile-turn" {
+			t.Errorf("assistant row persisted for a refused profile: %+v", message)
+		}
 	}
 	if rows, err := f.st.GetSessionExecutionMetrics(ctx, f.session); err != nil || len(rows) != 0 {
 		t.Errorf("metrics recorded for a refused turn: %v %d", err, len(rows))

@@ -467,7 +467,7 @@ func TestGenerateResponseCharacterization_PlainNoToolTurn(t *testing.T) {
 	}
 }
 
-func TestGenerateResponseCharacterization_PersistenceFailureSuppressesStreamEnd(t *testing.T) {
+func TestGenerateResponseCharacterization_PersistenceFailureEndsWithErrorOutcome(t *testing.T) {
 	f := newCharacterizationFixture(t, nil)
 	f.provider.steps = []characterizationProviderStep{{
 		events: doneEvents("cannot persist"),
@@ -482,9 +482,7 @@ func TestGenerateResponseCharacterization_PersistenceFailureSuppressesStreamEnd(
 	if findEvent(events, "error") == nil {
 		t.Fatalf("events = %v, want persistence error", eventTypes(events))
 	}
-	if findEvent(events, "stream_end") != nil {
-		t.Fatalf("events = %v, stream_end must follow successful persistence", eventTypes(events))
-	}
+	assertMessageStreamOutcome(t, events, "error")
 }
 
 func TestGenerateResponseCharacterization_DisabledAgentTerminatesBeforeStreamStart(t *testing.T) {
@@ -495,9 +493,10 @@ func TestGenerateResponseCharacterization_DisabledAgentTerminatesBeforeStreamSta
 	if got := f.provider.callCount(); got != 0 {
 		t.Fatalf("provider calls = %d, want 0", got)
 	}
-	if got := eventTypes(events); !reflect.DeepEqual(got, []string{"error"}) {
-		t.Fatalf("event sequence = %v, want early error only", got)
+	if got := eventTypes(events); !reflect.DeepEqual(got, []string{"error", "stream_end"}) {
+		t.Fatalf("event sequence = %v, want early error then terminal", got)
 	}
+	assertMessageStreamOutcome(t, events, "error")
 }
 
 func TestGenerateResponseCharacterization_SingleToolTurn(t *testing.T) {
@@ -568,9 +567,7 @@ func TestGenerateResponseCharacterization_ProviderErrorMidStream(t *testing.T) {
 	if findEvent(events, "error") == nil {
 		t.Fatalf("events = %v, want structured error", eventTypes(events))
 	}
-	if findEvent(events, "stream_end") != nil {
-		t.Fatalf("events = %v, did not expect stream_end after provider EventError", eventTypes(events))
-	}
+	assertMessageStreamOutcome(t, events, "error")
 	for _, event := range events {
 		if event.Type == "delta" && event.Content == "partial-but-buffered" {
 			t.Fatal("mid-stream partial delta was unexpectedly flushed before provider error")
@@ -631,9 +628,7 @@ func TestGenerateResponseCharacterization_RefusedOverflowRecoveryTerminates(t *t
 	if got := errEvent.StructuredError.Details["recovery"]; got != "refused" {
 		t.Fatalf("recovery detail = %#v, want refused", got)
 	}
-	if findEvent(events, "stream_end") != nil {
-		t.Fatalf("refused recovery unexpectedly emitted stream_end: %v", eventTypes(events))
-	}
+	assertMessageStreamOutcome(t, events, "error")
 }
 
 func TestGenerateResponseCharacterization_ContextOverflowCompactionTrigger(t *testing.T) {

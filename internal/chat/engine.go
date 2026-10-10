@@ -230,6 +230,32 @@ type StreamEvent struct {
 	// surfaced outside the ring-buffer path).
 	// CW-20260418-0100.
 	EventID uint64 `json:"event_id,omitempty"`
+
+	// Gap and Termination describe retained message transport recovery. Observer
+	// closure never establishes a tracked run outcome or changes its cursor.
+	Gap         *StreamGap         `json:"gap,omitempty"`
+	Termination *StreamTermination `json:"termination,omitempty"`
+	// RetainedTerminal marks a producer-exit fallback for the legacy wire.
+	// Native canonical finalization reads committed host state instead.
+	RetainedTerminal bool `json:"-"`
+}
+
+// StreamGap identifies the inclusive missing range before a replay.
+type StreamGap struct {
+	From   uint64 `json:"from"`
+	To     uint64 `json:"to"`
+	Reason string `json:"reason"`
+}
+
+// StreamTermination distinguishes producer completion from observer closure.
+// Outcome is success, error, canceled or unknown only on stream_end. A
+// stream_closed has no outcome; ResumeAfter is the last event written to that
+// observer, not the newest event queued by the producer.
+type StreamTermination struct {
+	Reason      string `json:"reason"`
+	Outcome     string `json:"outcome,omitempty"`
+	Retryable   bool   `json:"retryable"`
+	ResumeAfter uint64 `json:"resume_after,omitempty"`
 }
 
 // Subordinate event type constants for mux-orchestrated agents.

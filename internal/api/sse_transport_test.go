@@ -111,6 +111,9 @@ func TestChatSSEEnvelopeAndTerminalWire(t *testing.T) {
 	var want strings.Builder
 	for i, event := range events {
 		event.EventID = uint64(i + 1)
+		if event.Type == "stream_end" {
+			event.Termination = &chat.StreamTermination{Reason: "completed", Outcome: "success"}
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			t.Fatal(err)

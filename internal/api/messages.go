@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	ssekit "github.com/hollis-labs/libs/ui-go/ssekit"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -130,6 +131,12 @@ func (a *API) handleStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messageID, expectedSessionID string) {
+	a.streamMessageEventsWithKeepalive(w, r, messageID, expectedSessionID, 15*time.Second)
+}
+
+// The interval is local to this observer; tests can exercise the actual HTTP
+// heartbeat without a mutable global or changing production cadence.
+func (a *API) streamMessageEventsWithKeepalive(w http.ResponseWriter, r *http.Request, messageID, expectedSessionID string, interval time.Duration) {
 	// CW-20260418-0100 / CW-20260419-0014: resume cursor has two sources:
 	//   1. ?from=<uint64> query param — explicit, app-controlled.
 	//   2. Last-Event-ID header — sent automatically by browser EventSource
@@ -200,12 +207,12 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 			}
 		}
 	}
-	ch, sseDone, ok := a.Services.Streams.SubscribeSSE(messageID, fromEventID)
+	sub, ok := a.Services.Streams.SubscribeSSETransport(messageID, fromEventID)
 	if !ok {
 		a.errorResp(w, http.StatusNotFound, "stream not found")
 		return
 	}
-	defer a.Services.Streams.UnregisterSSE(messageID, sseDone)
+	defer sub.Cancel()
 
 	_, ok = w.(http.Flusher)
 	if !ok {
@@ -218,43 +225,87 @@ func (a *API) streamMessageEvents(w http.ResponseWriter, r *http.Request, messag
 		return
 	}
 
+	lastWritten := uint64(0)
+	send := func(evt chat.StreamEvent) error {
+		data, marshalErr := json.Marshal(evt)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		id := ""
+		if evt.EventID > 0 {
+			id = strconv.FormatUint(evt.EventID, 10)
+		}
+		if sendErr := stream.Send(ssekit.Event{ID: id, Name: evt.Type, Data: data}); sendErr != nil {
+			return sendErr
+		}
+		if evt.EventID > 0 {
+			lastWritten = evt.EventID
+		}
+		return nil
+	}
+	writeClosure := func(end chat.StreamTermination) {
+		end.ResumeAfter = lastWritten
+		_ = send(chat.StreamEvent{Type: "stream_closed", Termination: &end})
+	}
 	writeTakeover := func() {
 		evt := chat.StreamEvent{Type: "session_takeover", Content: "This session is now active in another tab"}
-		data, _ := json.Marshal(evt)
-		_ = stream.Send(ssekit.Event{Name: evt.Type, Data: data})
+		if send(evt) == nil {
+			writeClosure(chat.StreamTermination{Reason: "session_takeover"})
+		}
 	}
 
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	heartbeat := time.NewTicker(interval)
+	defer heartbeat.Stop()
+	failed := false
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-sseDone:
+		case <-heartbeat.C:
+			if err := stream.Comment("keepalive"); err != nil {
+				return
+			}
+		case <-sub.Takeover:
 			// Another tab opened an SSE connection for this message — send takeover event and close.
 			writeTakeover()
 			return
-		case evt, ok := <-ch:
+		case evt, ok := <-sub.Events:
 			if !ok {
 				// Both channels may be ready after replacement. A takeover
 				// must reach the old browser even when select chooses EOF.
 				select {
-				case <-sseDone:
+				case <-sub.Takeover:
 					writeTakeover()
 				default:
+					end := <-sub.Closure
+					if end.Reason == "producer_closed" {
+						end.Outcome = "unknown"
+						if failed {
+							end.Outcome = "error"
+						}
+						_ = send(chat.StreamEvent{Type: "stream_end", MessageID: messageID, Termination: &end})
+					} else {
+						writeClosure(end)
+					}
 				}
 				return
 			}
-			data, _ := json.Marshal(evt)
 			// Emit an SSE `id:` line so browser EventSource auto-reconnect
 			// can send Last-Event-ID and resume via the ring buffer.
 			// CW-20260419-0014. Zero-EventID events (synthetic, pre-pump)
 			// are emitted without an id: line so they don't clobber the
 			// browser's stored id.
-			id := ""
-			if evt.EventID > 0 {
-				id = strconv.FormatUint(evt.EventID, 10)
+			if err := send(evt); err != nil {
+				return
 			}
-			if err := stream.Send(ssekit.Event{ID: id, Name: evt.Type, Data: data}); err != nil {
+			if evt.Type == "error" {
+				failed = true
+			}
+			if evt.Type == "stream_end" {
 				return
 			}
 		}

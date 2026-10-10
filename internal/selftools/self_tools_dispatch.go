@@ -21,24 +21,9 @@ import (
 // relays it to the frontend. Raw worker output never enters the Chat
 // agent's context window — only the structured envelope does.
 //
-// E1 integration (CW-20260419-0027; migrated off internal/promptrouter by
-// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): before calling
-// dispatch.ExecuteTask this function runs matchDispatchToAgentReflex
-// (below) against the live DB-backed dispatch_to_agent agent_reflexes
-// rows for the caller's agent class. A matched reflex injects
-// ReflexHints.AgentSlug into ExecuteTaskArgs so the dispatch layer uses
-// the reflex's target agent slug instead of AssignRole's tier/pattern
-// default. On a miss the dispatch path is unchanged.
-//
-// This is a second, DELIBERATELY INDEPENDENT evaluation of the same
-// dispatch_to_agent reflex rows internal/service/chat_reflex_dispatch.go's
-// attemptReflexDispatch evaluates upstream (before task_execute is ever
-// invoked) — this file's evaluation runs downstream, INSIDE the
-// task_execute call itself, once the LLM has already decided to
-// dispatch. Both layers run; neither is collapsed into the other (the
-// retired internal/service/chat_broker_dispatch.go's own header comment
-// stated this design instruction for the pre-migration broker/promptrouter
-// pair, and it still applies conceptually to this pair post-migration).
+// Retained mutable dispatch rules are inert. Dispatch still reaches the
+// configured lifecycle port, whose real host adapter refuses missing verified
+// ownership before spawning; test ports can exercise envelope behavior.
 func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	if st.Dispatch == nil {
 		return mcp.ErrorResult("dispatch is not configured (subagent service unavailable)"), nil
@@ -91,10 +76,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// required — existing safe default).
 	apID := mcp.CallerProfileFromContext(ctx)
 
-	// E1: DB-backed dispatch_to_agent reflex match — see
-	// matchDispatchToAgentReflex's doc comment for the full design
-	// (migrated off internal/promptrouter by TASKS/phase-4/
-	// 03-migrate-promptrouter-to-reflexes.md).
+	// Mutable retained dispatch rules cannot supply a target or firing.
 	reflexHints := st.matchDispatchToAgentReflex(ctx, sessionID, apID, message)
 
 	// CW-20260502-0005: agent-broker consultation (no-op scaffold).
@@ -228,50 +210,8 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 	return isChild, nil
 }
 
-// matchDispatchToAgentReflex is callExecuteTask's own, deliberately
-// independent evaluation of the DB-backed dispatch_to_agent
-// agent_reflexes rows (see callExecuteTask's header comment for why this
-// is a second layer, not a call into
-// internal/service/chat_reflex_dispatch.go's upstream
-// attemptReflexDispatch).
-//
-// It lists active dispatch_to_agent rows for the caller's class via
-// Store.ListAgentReflexesForAgent (already ordered priority DESC,
-// created_at ASC), then — as of TASKS/reflex-taxonomy/
-// 03-shared-decision-engine.md — decides which one (if any) actually wins
-// via the SAME shared reflexes.Resolve() primitive Engine.EvaluateState
-// and attemptReflexDispatch call, rather than a hand-rolled loop of its
-// own. This function still can't call into internal/service directly
-// (internal/mcp cannot import internal/service — service already imports
-// mcp, that would be a cycle), so it builds its own State/candidate list
-// and Resolve() call rather than calling attemptReflexDispatch itself —
-// but the actual combining-algorithm decision logic is no longer
-// duplicated, only the State-building and store access are (a legitimate,
-// permanent difference per the architecture doc's "One shared decision
-// engine, multiple legitimate invocation points" section, not the
-// duplicated-decision-logic problem task 03 fixes).
-//
-// Returns nil on any of: no store wired, no candidate rows, no firing
-// trigger, or a fired trigger whose action_spec has an empty agent_slug
-// (defensive — internal/api/reflexes.go's validateReflexDefinition
-// rejects that at write time for anything created through the CRUD
-// path). nil means "no override" — dispatch.ExecuteTask falls through to
-// AssignRole's own tier/pattern default, exactly as a promptrouter miss
-// used to.
-//
-// Design note: unlike attemptReflexDispatch, this function does NOT
-// carry HintTier/HintPattern/Mode/WorkflowName into the returned
-// ReflexHints — the dispatch_to_agent action_spec shape task 02 settled
-// on ({"agent_slug","confidence","reason"}) has no fields for them. This
-// is a real, deliberate behavior narrowing from the old promptrouter-fed
-// hints, documented in the migration task's Work Log: AgentSlug is the
-// only field that ever had an observable effect at THIS call site
-// anyway (dispatch.ExecuteTask forces mode to sync regardless of Mode;
-// Role — derived from tier/pattern, not from AgentSlug — only feeds a
-// cosmetic title fallback string when the spawned agent's own envelope
-// output is absent). WorkflowName-via-implicit-phrase-match is retired
-// outright — the workflow_run self-tool remains the direct, supported
-// way to invoke a named workflow.
+// matchDispatchToAgentReflex deliberately returns no mutable-history override.
+// Native behavior belongs to the pinned definition handler.
 func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, sessionID, agentProfileID, message string) *dispatch.ReflexHints {
 	// Retained mutable behavior cannot select a dispatch target, supply authority
 	// or emit a firing. Native policy is read from the pinned definition by its

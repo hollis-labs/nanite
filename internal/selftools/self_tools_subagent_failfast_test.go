@@ -2,10 +2,10 @@ package selftools
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
-	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
@@ -21,10 +21,9 @@ import (
 // the same turn. No orphan row, no timer, no 60s wait.
 func TestCallSpawnSubagent_FailFast_NoProfile_EmitsConfigEnvelope(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	// Wire the gate against the real test store — its migrations seed
-	// the canonical internal slugs (worker, planner, hint-selector,
-	// default). "system-architect" is deliberately unregistered.
-	st.Subagent.SetProfileResolver(subagenthost.ProfileAdapter{Reader: fixtureStore(st)})
+	// Wire an explicit private profile reader. The host no longer seeds
+	// historical profiles; "system-architect" is deliberately unregistered.
+	st.Subagent.SetProfileResolver(privateFailFastProfiles{})
 
 	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
 		"parent_session_id": "sess-1",
@@ -76,7 +75,7 @@ func TestCallSpawnSubagent_FailFast_NoProfile_EmitsConfigEnvelope(t *testing.T) 
 // canonical "fail fast instead of stall" the ticket retires.
 func TestCallSpawnSubagent_FailFast_NotExecutable_EmitsConfigEnvelope(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetProfileResolver(subagenthost.ProfileAdapter{Reader: fixtureStore(st)})
+	st.Subagent.SetProfileResolver(privateFailFastProfiles{})
 
 	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
 		"parent_session_id": "sess-1",
@@ -117,7 +116,7 @@ func TestCallSpawnSubagent_FailFast_NotExecutable_EmitsConfigEnvelope(t *testing
 // sync path doesn't trip ErrorKindEmptyReply for unrelated reasons.
 func TestCallSpawnSubagent_FailFast_TextOnlyWhitelist_Admitted(t *testing.T) {
 	st := newSubagentTestTransport(t, subagent.EchoRunner{})
-	st.Subagent.SetProfileResolver(subagenthost.ProfileAdapter{Reader: fixtureStore(st)})
+	st.Subagent.SetProfileResolver(privateFailFastProfiles{})
 
 	res, err := st.callSpawnSubagent(context.Background(), map[string]any{
 		"parent_session_id": "sess-hint",
@@ -135,5 +134,18 @@ func TestCallSpawnSubagent_FailFast_TextOnlyWhitelist_Admitted(t *testing.T) {
 	// the assertion here is the negative one: NOT a config rejection.
 	if env.Error != nil && env.Error.Kind == subagent.ErrorKindConfig {
 		t.Fatalf("hint-selector rejected by config gate despite text-only whitelist: %+v", env.Error)
+	}
+}
+
+// privateFailFastProfiles exercises the standalone profile gate without
+// seeding historical profiles or claiming host actor admission.
+type privateFailFastProfiles struct{}
+
+func (privateFailFastProfiles) GetAgentBySlug(_ context.Context, slug string) (*subagent.Profile, error) {
+	switch slug {
+	case "planner", "hint-selector":
+		return &subagent.Profile{ID: "private-" + slug, Slug: slug, CanExecute: false}, nil
+	default:
+		return nil, sql.ErrNoRows
 	}
 }

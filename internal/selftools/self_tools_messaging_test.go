@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
@@ -140,8 +141,8 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 	t.Run("handoff uses context session and supports approve reject", func(t *testing.T) {
 		st := newSelfTools(t)
 		st.MessagingTools.Service = mailboxadapter.New(fixtureStore(st)).Service
-		fromAgent := seedAgent(t, fixtureStore(st), "From Agent", "handoff-from", "", "")
-		toAgent := seedAgent(t, fixtureStore(st), "To Agent", "handoff-to", "", "")
+		fromAgent := priorMessagingActor(t, fixtureStore(st), "handoff-from")
+		toAgent := priorMessagingActor(t, fixtureStore(st), "handoff-to")
 		sessionID := createMessagingSession(t, fixtureStore(st))
 		if err := fixtureStore(st).EnsureSessionAgent(t.Context(), sessionID, fromAgent.ID, "default", true); err != nil {
 			t.Fatalf("EnsureSessionAgent: %v", err)
@@ -206,4 +207,13 @@ func TestSelfToolsTransport_MessagingCharacterization(t *testing.T) {
 			})
 		}
 	})
+}
+
+func priorMessagingActor(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
+	t.Helper()
+	p := &store.AgentProfile{Name: slug, Slug: slug}
+	if err := storetest.PriorAuthorizedActor(t.Context(), st, p); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

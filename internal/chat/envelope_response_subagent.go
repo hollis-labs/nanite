@@ -10,11 +10,9 @@ import (
 	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
-// SubagentApprovalHandler dispatches a typed envelope-response submission to
-// subagent.Service.Approve / Reject. Run ID is read from the SERVER-persisted
-// envelope payload (env.EnvelopeJSON), NOT from the client response, so a
-// buggy or hostile client cannot approve a different run than the one they
-// were shown.
+// SubagentApprovalHandler validates the server-persisted approval presentation.
+// Continuation refuses until a verified host approval-owner port is adopted;
+// a run ID alone does not authorize changing a retained run.
 type SubagentApprovalHandler struct {
 	svc *subagent.Service
 }

@@ -96,8 +96,8 @@ func TestForwardingProxyMetadataIsCoreOnlyAndCoreCallsStillForward(t *testing.T)
 		{"tool_validate", map[string]any{"tool_name": "todo_create", "args": map[string]any{"title": "fixture"}}},
 		{"tool_list", map[string]any{"filter": "owned_plugin_tool"}},
 	} {
-		if _, err := proxy.CallTool(context.Background(), request.name, request.args); err != nil {
-			t.Fatal(request.name, err)
+		if _, callErr := proxy.CallTool(context.Background(), request.name, request.args); callErr != nil {
+			t.Fatal(request.name, callErr)
 		}
 	}
 	if hostCalls.Load() != 0 {

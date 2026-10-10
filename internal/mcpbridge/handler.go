@@ -109,7 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.write(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
-	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+	if r.URL.RawQuery != "" || r.URL.ForceQuery || r.URL.Fragment != "" {
 		h.write(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
 		return
 	}

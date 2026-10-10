@@ -186,20 +186,20 @@ func (c *PluginCatalog) List(ctx context.Context) (*AcceptedPluginCatalog, error
 	}
 	out := &AcceptedPluginCatalog{Revision: revision, Tools: make([]AcceptedPluginTool, 0)}
 	for _, selected := range selections {
-		detached, err := cloneCatalogValue(selected.entry)
-		if err != nil {
-			return nil, err
+		detached, snapshotErr := cloneCatalogValue(selected.entry)
+		if snapshotErr != nil {
+			return nil, snapshotErr
 		}
-		visible, err := c.policy.Visible(ctx, detached)
-		if err != nil {
-			return nil, err
+		visible, policyErr := c.policy.Visible(ctx, detached)
+		if policyErr != nil {
+			return nil, policyErr
 		}
 		if visible {
 			out.Tools = append(out.Tools, selected.entry)
 		}
 	}
-	if err := c.verify(ctx); err != nil {
-		return nil, err
+	if verifyErr := c.verify(ctx); verifyErr != nil {
+		return nil, verifyErr
 	}
 	current, _, err := c.snapshot()
 	if err != nil {

@@ -127,8 +127,8 @@ func (c *Credentials) Issue(ctx context.Context, binding []byte, ttl time.Durati
 	if err != nil || verified.Caller.ActorID == "" || verified.Caller.SessionID == "" || verified.Claims.Subject.Kind != credentialhost.MCPProxyClient {
 		return IssuedCredential{}, ErrUnauthenticated
 	}
-	if err := ctx.Err(); err != nil {
-		return IssuedCredential{}, err
+	if callerErr := ctx.Err(); callerErr != nil {
+		return IssuedCredential{}, callerErr
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -221,8 +221,8 @@ func (c *Credentials) Acquire(ctx context.Context, token string) (VerifiedCaller
 			return credentialhost.CredentialLease{}, err
 		}
 		defer done()
-		if err := current.Err(); err != nil {
-			return credentialhost.CredentialLease{}, err
+		if currentErr := current.Err(); currentErr != nil {
+			return credentialhost.CredentialLease{}, currentErr
 		}
 		snapshot, err := c.store.Verify(token, claims.Subject, claims.Owner, claims.Audience)
 		if err != nil {

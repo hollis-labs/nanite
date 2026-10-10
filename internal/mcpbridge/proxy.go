@@ -31,7 +31,7 @@ func (Proxy) Format(s fmt.State, _ rune) { _, _ = fmt.Fprint(s, "[MCP proxy cred
 
 func NewProxy(endpoint, credential string, limits TransportLimits) (*Proxy, error) {
 	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Opaque != "" {
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(endpoint, "#") || (parsed.Path != "" && parsed.Path != "/") || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Opaque != "" {
 		return nil, errors.New("invalid MCP proxy loopback endpoint")
 	}
 	ip := net.ParseIP(parsed.Hostname())
@@ -156,7 +156,7 @@ func (p *Proxy) request(ctx context.Context, method string, input, output any) e
 		}
 		return ErrTargetUnavailable
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(p.limits.MaxResponseBytes)+1))
 	if err != nil || len(raw) > p.limits.MaxResponseBytes {
 		return errors.New("MCP proxy response limit exceeded")

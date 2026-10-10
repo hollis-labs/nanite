@@ -69,7 +69,7 @@ func TestProxyCredentialCannotFollowRedirectOrUnintendedDestination(t *testing.T
 	credentials, _, _ := fixtureCredentials(t, 1)
 	token := issueFixture(t, credentials, "one")
 	limits := TransportLimits{MaxRequestBytes: 1024, MaxResponseBytes: 128, MaxCallDuration: time.Second}
-	for _, endpoint := range []string{"http://example.com:80", "http://localhost:80", "http://user@127.0.0.1:80", "http://127.0.0.1:80/other", "http://127.0.0.1:80/?query=yes", "http://127.0.0.1:80/#fragment"} {
+	for _, endpoint := range []string{"http://example.com:80", "http://localhost:80", "http://user@127.0.0.1:80", "http://127.0.0.1:80/other", "http://127.0.0.1:80/?query=yes", "http://127.0.0.1:80/?", "http://127.0.0.1:80/#fragment", "http://127.0.0.1:80/#"} {
 		if _, err := NewProxy(endpoint, token, limits); err == nil {
 			t.Fatal("unintended credential destination accepted")
 		}
@@ -86,7 +86,7 @@ func TestProxyCredentialCannotFollowRedirectOrUnintendedDestination(t *testing.T
 		t.Fatal(err)
 	}
 	defer proxy.Close()
-	if _, err := proxy.List(context.Background()); err == nil {
+	if _, listErr := proxy.List(context.Background()); listErr == nil {
 		t.Fatal("redirect accepted as an authoritative catalog")
 	}
 	if escaped.Load() != 0 {

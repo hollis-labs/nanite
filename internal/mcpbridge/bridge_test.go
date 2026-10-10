@@ -44,8 +44,8 @@ func fixtureCredentials(t *testing.T, capacity int) (*Credentials, *trustedFixtu
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	if err := store.ActivateOwner(owner); err != nil {
-		t.Fatal(err)
+	if activateErr := store.ActivateOwner(owner); activateErr != nil {
+		t.Fatal(activateErr)
 	}
 	fixture := &trustedFixture{bindings: map[string]VerifiedBinding{}}
 	for _, id := range []string{"one", "two"} {
@@ -72,7 +72,7 @@ func issueFixture(t *testing.T, c *Credentials, id string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issued.Reveal(); err == nil {
+	if _, revealErr := issued.Reveal(); revealErr == nil {
 		t.Fatal("credential revealed twice")
 	}
 	if strings.Contains(fmt.Sprintf("%v %#v", issued, issued), token) {
@@ -94,11 +94,11 @@ func TestCredentialRequiresActualTrustedPortAndReviewedClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := missing.Issue(context.Background(), []byte("proof-one"), time.Minute); !errors.Is(err, ErrAuthorityUnavailable) {
+	if _, issueErr := missing.Issue(context.Background(), []byte("proof-one"), time.Minute); !errors.Is(issueErr, ErrAuthorityUnavailable) {
 		t.Fatal("missing trusted issuer did not refuse")
 	}
 	token := issueFixture(t, c, "one")
-	if _, err := c.Issue(context.Background(), []byte("proof-two"), time.Minute); !errors.Is(err, ErrCapacity) {
+	if _, issueErr := c.Issue(context.Background(), []byte("proof-two"), time.Minute); !errors.Is(issueErr, ErrCapacity) {
 		t.Fatal("capacity bound ignored")
 	}
 	caller, permit, done, err := c.Acquire(context.Background(), token)
@@ -257,6 +257,11 @@ func TestBridgeRejectsRawBypassesBeforeExecution(t *testing.T) {
 		return Catalog{}, nil
 	}}
 	h := fixtureHandler(t, c, owner)
+	for _, path := range []string{"/api/mcp/v1/list?", "/api/mcp/v1/list?claimed=actor"} {
+		if w := request(h, token, path, `{"version":1}`); w.Code != http.StatusBadRequest {
+			t.Fatalf("query alias admitted: %d", w.Code)
+		}
+	}
 	for _, body := range []string{`{"version":1,"actor_id":"claimed"}`, `{"version":1}{"version":1}`, `{"version":2}`, `{"version":1,"padding":"` + strings.Repeat("x", 1100) + `"}`} {
 		if w := request(h, token, "/api/mcp/v1/list", body); w.Code != http.StatusBadRequest {
 			t.Fatalf("invalid body admitted: %d", w.Code)

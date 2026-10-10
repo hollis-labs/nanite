@@ -68,8 +68,8 @@ func (p *selfToolProxy) coreMetadata(ctx context.Context, name string, args map[
 		return nil, err
 	}
 	var declarations proxyCoreDeclarations
-	if err := json.Unmarshal(raw, &declarations); err != nil {
-		return nil, err
+	if decodeErr := json.Unmarshal(raw, &declarations); decodeErr != nil {
+		return nil, decodeErr
 	}
 	local := &selftools.SelfToolsTransport{Inventory: declarations, SchemaLookup: declarations}
 	if name != "tool_list" {

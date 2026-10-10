@@ -88,6 +88,43 @@ func TestProfileRetirementRefusesProtectedSources(t *testing.T) {
 	}
 }
 
+func TestProtectedProfileRetirementExportsAuditsAndSuppressesBootReingest(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	ctx := t.Context()
+	p := &store.AgentProfile{Name: "Protected", Slug: "protected-retire", SystemPrompt: "x", Source: "builtin", Class: "process"}
+	if err := st.CreateAgent(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExportEditableProfile(ctx, p.ID); !errors.Is(err, store.ErrProfileRetirementProtected) {
+		t.Fatal("editable export accepted protected profile", err)
+	}
+	receipt, err := svc.ExportProtectedProfile(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.RetireProtectedProfile(ctx, p.ID, receipt.ExportID, receipt.Digest, ProtectedProfileRetirementRequest{Actor: "test", Reason: "clean break"})
+	if err != nil || !result.Retired {
+		t.Fatal(result, err)
+	}
+	if _, err = st.GetAgent(ctx, p.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("protected retirement did not delete profile", err)
+	}
+	retired, err := st.GetRetiredAgentProfileBySlug(ctx, p.Slug)
+	if err != nil || retired == nil {
+		t.Fatal("protected retirement did not write tombstone", retired, err)
+	}
+	if retired.ID != p.ID || retired.ExportID != receipt.ExportID || retired.Digest != receipt.Digest || retired.Actor != "test" || retired.Reason != "clean break" {
+		t.Fatalf("unexpected tombstone: %+v", retired)
+	}
+	err = upsertAgentDef(st, &agent.Definition{Name: "Protected", Slug: p.Slug, SystemPrompt: "resurrect", Source: "internal"})
+	if !errors.Is(err, store.ErrAgentProfileRetired) {
+		t.Fatal("boot reingest was not suppressed", err)
+	}
+	if _, err = st.GetAgentBySlug(ctx, p.Slug); err == nil {
+		t.Fatal("boot reingest resurrected retired profile")
+	}
+}
+
 func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *testing.T) {
 	for _, mutation := range []string{"profile", "grant", "procedure", "protected"} {
 		t.Run(mutation, func(t *testing.T) {

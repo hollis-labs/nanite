@@ -398,6 +398,13 @@ func registerManifestAgentProfiles(host *Host, pluginID string, entries []AgentP
 			return fmt.Errorf("plugin %q: duplicate agent slug %q across agent_profiles entries", pluginID, doc.Agent.Slug)
 		}
 		seenSlug[doc.Agent.Slug] = true
+		if retired, err := st.IsAgentProfileRetired(ctx, "", doc.Agent.Slug); err != nil {
+			return fmt.Errorf("plugin %q: agent_profiles[%d] (%s): %w", pluginID, i, entry.ID, err)
+		} else if retired {
+			host.logger.Info("manifest agent_profiles: retired agent slug suppressed",
+				"plugin", pluginID, "registration_id", entry.ID, "agent_slug", doc.Agent.Slug)
+			continue
+		}
 
 		if err := applyPluginAgentProfile(ctx, host, st, pluginID, doc); err != nil {
 			return fmt.Errorf("plugin %q: agent_profiles[%d] (%s): %w", pluginID, i, entry.ID, err)

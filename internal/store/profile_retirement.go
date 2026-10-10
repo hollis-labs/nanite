@@ -87,12 +87,22 @@ func (e ProfileRetirementExport) Digest() (string, error) {
 
 // ExportProfileRetirement snapshots one explicitly selected editable profile.
 func (s *Store) ExportProfileRetirement(ctx context.Context, id string) (ProfileRetirementExport, error) {
+	return s.exportProfileRetirement(ctx, id, false)
+}
+
+// ExportProtectedProfileRetirement snapshots an explicitly selected profile,
+// including Nanite/plugin-owned classes, before an audited retirement request.
+func (s *Store) ExportProtectedProfileRetirement(ctx context.Context, id string) (ProfileRetirementExport, error) {
+	return s.exportProfileRetirement(ctx, id, true)
+}
+
+func (s *Store) exportProfileRetirement(ctx context.Context, id string, includeProtected bool) (ProfileRetirementExport, error) {
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return ProfileRetirementExport{}, err
 	}
 	defer rollbackUnlessCommitted(tx)
-	snapshot, err := profileRetirementSnapshot(ctx, tx, id)
+	snapshot, err := profileRetirementSnapshot(ctx, tx, id, includeProtected)
 	if err != nil {
 		return ProfileRetirementExport{}, err
 	}
@@ -103,6 +113,12 @@ func (s *Store) ExportProfileRetirement(ctx context.Context, id string) (Profile
 // cleanup in the same write transaction. Profile revisions alone do not cover
 // mutable grants, schedules and other children.
 func (s *Store) RetireExportedProfile(ctx context.Context, id, digest string) error {
+	return s.RetireExportedProfileWithAudit(ctx, id, digest, RetireAgentProfileAudit{})
+}
+
+// RetireExportedProfileWithAudit compares the exported state, records a
+// durable tombstone, and deletes the profile in one write transaction.
+func (s *Store) RetireExportedProfileWithAudit(ctx context.Context, id, digest string, audit RetireAgentProfileAudit) error {
 	if id == "" || digest == "" {
 		return ErrProfileRetirementConflict
 	}
@@ -111,7 +127,8 @@ func (s *Store) RetireExportedProfile(ctx context.Context, id, digest string) er
 		return err
 	}
 	defer rollbackUnlessCommitted(tx)
-	snapshot, err := profileRetirementSnapshot(ctx, tx, id)
+	includeProtected := audit.ExportID != ""
+	snapshot, err := profileRetirementSnapshot(ctx, tx, id, includeProtected)
 	if err != nil {
 		return err
 	}
@@ -125,6 +142,12 @@ func (s *Store) RetireExportedProfile(ctx context.Context, id, digest string) er
 	profile, err := getAgent(ctx, tx, id)
 	if err != nil {
 		return err
+	}
+	if audit.ExportID != "" {
+		audit.Digest = digest
+		if err := insertRetiredAgentProfileTx(ctx, tx, profile, audit); err != nil {
+			return err
+		}
 	}
 	if err := deleteAgentTx(ctx, tx, profile); err != nil {
 		return err
@@ -151,12 +174,12 @@ type retirementLink struct {
 
 func quoteRetirementName(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 
-func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string) (ProfileRetirementExport, error) {
+func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string, includeProtected bool) (ProfileRetirementExport, error) {
 	profile, err := getAgent(ctx, tx, id)
 	if err != nil {
 		return ProfileRetirementExport{}, err
 	}
-	if !retirementEditable(profile) {
+	if !includeProtected && !retirementEditable(profile) {
 		return ProfileRetirementExport{}, ErrProfileRetirementProtected
 	}
 	out := ProfileRetirementExport{SchemaVersion: profileExportSchemaVersion, ProfileID: profile.ID, Slug: profile.Slug, Revision: profile.Revision, Tables: map[string]ProfileExportTable{}}

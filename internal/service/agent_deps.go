@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -530,21 +532,21 @@ type agentProfileResolver struct {
 	store *store.Store
 }
 
+// GetOrDefault requires an explicit authored host selection. An absent or
+// unknown selection cannot create a synthetic runtime identity or provider.
 func (r *agentProfileResolver) GetOrDefault(name string) (*store.AgentProfile, error) {
-	if name != "" {
-		if p, err := r.store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, name); err == nil && p != nil {
-			return p, nil
-		}
-		if p, err := r.store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, name); err == nil && p != nil {
-			return p, nil
-		}
+	if strings.TrimSpace(name) == "" {
+		return nil, store.ErrVerifiedActorRequired
 	}
-	return &store.AgentProfile{
-		ID:              "agent-runtime-default",
-		Name:            "default",
-		Slug:            "default",
-		DefaultProvider: "claude",
-	}, nil
+	ctx := context.TODO()
+	if strings.HasPrefix(name, "msg://") {
+		return r.store.GetAgentForActor(ctx, name)
+	}
+	p, err := r.store.GetAgent(ctx, name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r.store.GetAgentBySlug(ctx, name)
+	}
+	return p, err
 }
 
 // --- RuntimeStore adapter ---

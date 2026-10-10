@@ -340,6 +340,11 @@ func (tb *ToolClient) developerModeEnabled() bool {
 // developer_mode is false in user_settings. This prevents the LLM from ever
 // seeing or requesting those tools in non-developer sessions.
 func (tb *ToolClient) SelectToolsAsProvider(ctx context.Context, intent string, hints []string, workspaceID, agentID string) (*SelectResult, error) {
+	if tb.Store != nil {
+		if _, err := tb.Store.GetAgentForActor(ctx, agentID); err != nil {
+			return nil, err
+		}
+	}
 	tools, _, err := tb.selectToolsUncapped(ctx, intent, hints, workspaceID, agentID)
 	if err != nil {
 		return nil, err
@@ -469,6 +474,11 @@ func (tb *ToolClient) CallToolWithPolicyCheck(ctx context.Context, agentID, tool
 // Policies today do not expose arg-level predicates per tool, so the arg
 // check is a conservative global safety net rather than per-tool policy.
 func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID string, input map[string]any) ([]llmtypes.ToolDefinition, string) {
+	if tb.Store != nil {
+		if _, err := tb.Store.GetAgentForActor(ctx, agentID); err != nil {
+			return nil, "permission denied: verified actor binding required"
+		}
+	}
 	if ArgsContainEscalationPattern(input) {
 		return nil, fmt.Sprintf("permission denied: request_tools arguments contain escalation pattern (\"..\") for agent %q", agentID)
 	}
@@ -551,6 +561,9 @@ func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID st
 func (tb *ToolClient) isToolGrantedToAgent(ctx context.Context, agentID, toolName string) bool {
 	if tb.Store == nil {
 		return true
+	}
+	if _, err := tb.Store.GetAgentForActor(ctx, agentID); err != nil {
+		return false
 	}
 
 	granted, err := tb.Store.ListAgentToolNames(ctx, agentID)

@@ -58,7 +58,7 @@ func TestStepKindLoop_OuterWorkflowRun_ResolvesViaRealPush_NotManualResume(t *te
 	if err != nil {
 		t.Fatalf("workflowhost.NewEngine: %v", err)
 	}
-	durable := service.NewDurableAgentService(st)
+	durable := newPriorLoopLifecycleFixture(st)
 	launcher := service.NewWorkflowLauncher(registry, host, exec, durable)
 
 	loopEngine := NewLoopEngine(st, registry, launcher)

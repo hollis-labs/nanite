@@ -14,7 +14,7 @@ func newReflexTestService(t *testing.T) (*ReflexService, *store.Store, string) {
 	t.Helper()
 	st := newConfigTestStore(t)
 	agent := &store.AgentProfile{Name: "Reflexes", Slug: "reflexes-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return NewReflexService(st), st, agent.ID
@@ -101,43 +101,28 @@ func TestReflexCreateRejectsInvalidDefinition(t *testing.T) {
 	}
 }
 
-func TestReflexPatchOwnershipAndRecurrenceClear(t *testing.T) {
-	ctx := context.Background()
-	svc, st, agentID := newReflexTestService(t)
-
-	row := validReflexRow(agentID)
-	override := int64(600)
-	row.RecurrenceOverrideSeconds = &override
-	created, err := svc.Create(ctx, row)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
+func TestMutableReflexWritesRefuseAndPreserveHistory(t *testing.T) {
+	svc, st, actor := newReflexTestService(t)
+	ctx := t.Context()
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO agent_reflexes(id,name,class_tag,trigger_kind,trigger_spec,action_kind,action_spec,created_by) VALUES('retained','retained','advisor','event','{"name":"ready"}','inject_reminder','{"text":"retained body"}','system')`); err != nil {
+		t.Fatal(err)
 	}
-
-	other := &store.AgentProfile{Name: "Other", Slug: "other-agent", SystemPrompt: "x"}
-	if err = st.CreateAgent(ctx, other); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	const query = `SELECT * FROM agent_reflexes ORDER BY id`
+	before := immutableConfigSnapshot(t, st, query)
+	valid := validReflexRow(actor)
+	_, err := svc.Create(ctx, valid)
+	if !errors.Is(err, store.ErrImmutableAgentProfile) {
+		t.Fatalf("mutable create: %v", err)
 	}
-	if _, err = svc.GetOwned(ctx, other.ID, created.ID); !errors.Is(err, ErrReflexNotOwned) {
-		t.Fatalf("GetOwned by other agent err = %v, want ErrReflexNotOwned", err)
+	name := "changed"
+	_, err = svc.Patch(ctx, actor, "retained", ReflexPatch{Name: &name})
+	if !errors.Is(err, store.ErrImmutableAgentProfile) {
+		t.Fatalf("mutable patch: %v", err)
 	}
-	if err = svc.DeleteOwned(ctx, other.ID, created.ID); !errors.Is(err, ErrReflexNotOwned) {
-		t.Fatalf("DeleteOwned by other agent err = %v, want ErrReflexNotOwned", err)
+	for _, err := range []error{svc.DeleteOwned(ctx, actor, "retained"), svc.SetOptOut(ctx, actor, "retained"), svc.ClearOptOut(ctx, actor, "retained")} {
+		if !errors.Is(err, store.ErrImmutableAgentProfile) {
+			t.Fatalf("mutable authority: %v", err)
+		}
 	}
-
-	zero := int64(0)
-	name := "renamed"
-	got, err := svc.Patch(ctx, agentID, created.ID, ReflexPatch{Name: &name, RecurrenceOverrideSeconds: &zero})
-	if err != nil {
-		t.Fatalf("Patch: %v", err)
-	}
-	if got.Name != "renamed" || got.RecurrenceOverrideSeconds != nil {
-		t.Fatalf("patched = %+v, want renamed with override cleared", got)
-	}
-	if got.ActionSpec != created.ActionSpec || got.TriggerSpec != created.TriggerSpec {
-		t.Fatalf("unpatched columns changed: %+v", got)
-	}
-
-	if _, err := svc.GetOwned(ctx, agentID, "missing"); !errors.Is(err, store.ErrAgentReflexNotFound) {
-		t.Fatalf("GetOwned missing err = %v, want store.ErrAgentReflexNotFound", err)
-	}
+	immutableConfigUnchanged(t, st, query, before)
 }

@@ -190,20 +190,17 @@ func TestBootRunner_ResolveRoleFails(t *testing.T) {
 	}
 }
 
-// TestBootRunner_ResolveRoleFallsBackToWorker verifies the BootRunner
-// path also picks up the worker fallback. CW-20260512-0002 subtodo (a).
-func TestBootRunner_ResolveRoleFallsBackToWorker(t *testing.T) {
+// A missing explicit role cannot borrow the worker profile's identity.
+func TestBootRunner_ResolveRoleRefusesImplicitWorkerFallback(t *testing.T) {
 	worker := &store.AgentProfile{ID: "ag-worker", Slug: "worker", DefaultProvider: "anthropic"}
-	r := &BootRunner{
-		deps:   &runtimeagent.Dependencies{},
-		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{"worker": worker}},
-	}
+	r := &BootRunner{deps: &runtimeagent.Dependencies{}, agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{"worker": worker}}}
 	agent, err := r.resolveRole("nanite-planner")
-	if err != nil {
-		t.Fatalf("resolveRole(\"nanite-planner\"): expected fallback, got %v", err)
+	if agent != nil || !errors.Is(err, errRoleResolveFailed) {
+		t.Fatalf("agent=%v err=%v", agent, err)
 	}
-	if agent == nil || agent.Slug != "worker" {
-		t.Errorf("resolveRole(\"nanite-planner\") returned slug=%q, want \"worker\"", agentSlugOrEmpty(agent))
+	explicit, err := r.resolveRole("worker")
+	if err != nil || explicit != worker {
+		t.Fatalf("explicit=%v err=%v", explicit, err)
 	}
 }
 

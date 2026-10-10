@@ -3,8 +3,10 @@ package subagent
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -106,156 +108,79 @@ func (l *stubEventLogger) LogEvent(ctx context.Context, sessionID, eventType, ca
 	l.calls = append(l.calls, eventLogCall{sessionID, eventType, category, detail, metadata})
 }
 
-func TestSpawn_ReplyDelivery_ExistingRoleSlug_NoAutoRegisterCollision(t *testing.T) {
+// Missing issuer cannot be replaced by a role slug, host UUID, retained trust
+// tier, prior actor or an interactive approval. The real mailbox stays untouched.
+func TestSpawnCannotEnrollOrDeliverWithoutIssuer(t *testing.T) {
 	db, st := newTestDB(t)
-
-	// newTestDB runs the full migration set, which already seeds the
-	// real internal "worker" profile at id="blt-worker-001" (migration
-	// 060) — the exact real-world shape this bug depends on: a role
-	// whose agent_profiles.id is never equal to its slug. No manual seed
-	// needed/possible here (it would collide with the migration's row).
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:     "parent-1",
-		Slug:   "parent-1",
-		Name:   "Parent",
-		Kind:   "internal",
-		Status: "active",
-	}); err != nil {
-		t.Fatalf("seed parent profile: %v", err)
+	ctx := t.Context()
+	prior := &store.AgentProfile{Name: "Private prior parent", Slug: "hint-selector"}
+	if err := storetest.PriorAuthorizedActor(ctx, st, prior); err != nil {
+		t.Fatal(err)
 	}
-
-	messagingSvc := mailboxadapter.New(st).Service
-
-	svc := NewService(db, core.EchoRunner{}, messagingSvc, nil, stubSettings{})
+	historical := &store.AgentProfile{ID: "historical-parent", Slug: "old-parent", Name: "Retained parent"}
+	if err := storetest.HistoricalProfile(ctx, st, historical); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE agent_profiles SET default_trust_tier='trusted' WHERE id=?`, historical.ID); err != nil {
+		t.Fatal(err)
+	}
+	host, err := st.GetAgentBySlug(ctx, prior.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poster := mailboxadapter.New(st).Service
+	emitter := &stubEmitter{}
+	svc := NewService(db, &notCalledRunner{t: t}, poster, emitter, st)
+	svc.SetSpawnAuthorizer(Authorizer{st})
 	svc.SetProfileResolver(ProfileAdapter{st})
-
-	for i := 0; i < 2; i++ {
-		id, err := svc.Spawn(context.Background(), core.SpawnRequest{
-			ParentSessionID: "sess-1",
-			ParentAgentID:   "parent-1",
-			Role:            "worker",
-			Prompt:          "do work",
-			Mode:            core.ModeSync,
-		})
-		if err != nil {
-			t.Fatalf("Spawn #%d: %v", i, err)
-		}
-		run, err := svc.Status(context.Background(), id)
-		if err != nil {
-			t.Fatalf("Status #%d: %v", i, err)
-		}
-		if run.Status != core.StatusCompleted {
-			t.Fatalf("run #%d Status = %q, want %q (Error=%q)", i, run.Status, core.StatusCompleted, run.Error)
-		}
-
-		// The run completing does NOT prove the parent learned about it —
-		// reply-delivery failures are only slog.Warn'd, never surfaced back
-		// onto run.Status (that's the actual failure mode this ticket is
-		// about: "parent may never learn a dispatched child completed").
-		// So assert directly on delivery: the parent session must have
-		// exactly i+1 reply messages by now.
-		msgs, err := messagingSvc.RecentForSession(context.Background(), "sess-1", 10)
-		if err != nil {
-			t.Fatalf("RecentForSession #%d: %v", i, err)
-		}
-		// CW-20260512-0019: completion replies now carry
-		// Kind=subagent_result, not the generic KindReply.
-		replies := 0
-		for _, m := range msgs {
-			if m.Kind == core.ResultMessageKind {
-				replies++
+	queries := []string{"SELECT * FROM agent_profiles ORDER BY id", "SELECT * FROM agent_actor_bindings ORDER BY actor_uri", "SELECT * FROM subagent_runs ORDER BY id", "SELECT * FROM messages ORDER BY id"}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = subagentSnapshot(t, st, q)
+	}
+	for _, id := range []string{"", prior.ID, prior.Slug, host.ID, historical.ID} {
+		for _, mode := range []string{core.ModeInteractive, core.ModeAsync, core.ModeSync} {
+			runID, err := svc.Spawn(ctx, core.SpawnRequest{ParentSessionID: "private-parent", ParentAgentID: id, AgentProfileID: id, Role: prior.Slug, Prompt: "claimed child", Mode: mode})
+			if runID != "" || !errors.Is(err, store.ErrVerifiedActorRequired) {
+				t.Fatalf("id=%q mode=%q run=%q err=%v", id, mode, runID, err)
+			}
+			for i, q := range queries {
+				if after := subagentSnapshot(t, st, q); !reflect.DeepEqual(before[i], after) {
+					t.Fatalf("%s changed", q)
+				}
 			}
 		}
-		if replies != i+1 {
-			t.Fatalf("reply #%d: parent has %d subagent_result message(s) in sess-1, want %d — reply delivery failed (likely the agent_profiles.slug constraint)", i, replies, i+1)
-		}
 	}
-
-	// No phantom row with id="worker" should ever have been created by a
-	// (would-be) failed auto-register attempt.
-	if _, err := st.GetAgent(context.Background(), "worker"); err == nil {
-		t.Error(`a spurious agent_profiles row with id="worker" was created — auto-register should never have been attempted for an already-known role`)
-	}
-	profile, err := st.GetAgent(context.Background(), "blt-worker-001")
-	if err != nil {
-		t.Fatalf("real worker profile missing: %v", err)
-	}
-	if profile.Slug != "worker" {
-		t.Errorf("real worker profile slug = %q, want %q", profile.Slug, "worker")
+	if emitter.Count() != 0 {
+		t.Fatalf("approval emissions=%d", emitter.Count())
 	}
 }
-func TestSpawn_ReplyDelivery_ParentSlug_ToAgentIDResolution(t *testing.T) {
-	db, st := newTestDB(t)
 
-	// Create an "operator" profile where ID != slug. This mirrors the
-	// real-world pattern where agent_profiles.ID is a generated UUID
-	// or prefixed ID (e.g. "agt-operator-001") but slug is the bare
-	// role name ("operator").
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:     "agt-operator-001",
-		Slug:   "operator",
-		Name:   "Operator",
-		Kind:   "internal",
-		Status: "active",
-	}); err != nil {
-		t.Fatalf("seed operator profile: %v", err)
-	}
-
-	// newTestDB already seeds the "worker" profile at id="blt-worker-001"
-	// (migration 060) for the child role.
-
-	messagingSvc := mailboxadapter.New(st).Service
-
-	svc := NewService(db, core.EchoRunner{}, messagingSvc, nil, stubSettings{})
-	svc.SetProfileResolver(ProfileAdapter{st})
-
-	// Spawn with ParentAgentID="operator" (the slug) instead of
-	// "agt-operator-001" (the real ID). Before CW-20260815-0027 this
-	// caused ValidateAgentID to fail on ToAgentID, silently dropping
-	// the reply.
-	id, err := svc.Spawn(context.Background(), core.SpawnRequest{
-		ParentSessionID: "sess-parent",
-		ParentAgentID:   "operator", // slug, not the real ID
-		Role:            "worker",
-		Prompt:          "do work",
-		Mode:            core.ModeSync,
-	})
+func subagentSnapshot(t *testing.T, st *store.Store, query string) [][]any {
+	t.Helper()
+	rows, err := st.DB.QueryContext(t.Context(), query)
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatal(err)
 	}
-
-	run, err := svc.Status(context.Background(), id)
+	defer rows.Close()
+	columns, err := rows.Columns()
 	if err != nil {
-		t.Fatalf("Status: %v", err)
+		t.Fatal(err)
 	}
-	if run.Status != core.StatusCompleted {
-		t.Fatalf("Status = %q, want %q (Error=%q)", run.Status, core.StatusCompleted, run.Error)
-	}
-
-	// Assert that the reply was delivered successfully to the parent
-	// session. Before the fix, ValidateAgentID would reject
-	// ToAgentID="operator" (no row with ID=operator), causing
-	// SendMessage to fail and the parent to never see the result.
-	msgs, err := messagingSvc.RecentForSession(context.Background(), "sess-parent", 10)
-	if err != nil {
-		t.Fatalf("RecentForSession: %v", err)
-	}
-
-	replies := 0
-	for _, m := range msgs {
-		if m.Kind == core.ResultMessageKind {
-			// Additional verification: the message should be TO the
-			// resolved ID, not the slug.
-			if m.ToAgentID != "agt-operator-001" {
-				t.Errorf("reply ToAgentID = %q, want %q (should be resolved ID, not slug)",
-					m.ToAgentID, "agt-operator-001")
-			}
-			replies++
+	var out [][]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		dest := make([]any, len(columns))
+		for i := range values {
+			dest[i] = &values[i]
 		}
+		if err := rows.Scan(dest...); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, values)
 	}
-
-	if replies != 1 {
-		t.Fatalf("parent session has %d subagent_result message(s), want 1 — reply delivery failed (likely ToAgentID validation failed on slug)", replies)
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
-
+	return out
 }

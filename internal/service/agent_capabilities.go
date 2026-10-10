@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -238,15 +237,7 @@ func (s *AgentCapabilitiesService) CreateKnownSkill(ctx context.Context, agentID
 // can never silently revoke a grant. It returns
 // store.ErrAgentKnownSkillNotFound when absent.
 func (s *AgentCapabilitiesService) UpdateKnownSkill(ctx context.Context, agentID, skillName string, in KnownSkillInput) (*store.AgentKnownSkill, error) {
-	current, err := s.store.GetAgentKnownSkill(ctx, agentID, skillName)
-	if err != nil {
-		return nil, err
-	}
-	row := *current
-	row.Pinned = in.Pinned
-	row.TTLSeconds = in.TTLSeconds
-	row.Reason = in.Reason
-	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
+	if err := s.store.UpdateAgentSkillFamiliarity(ctx, agentID, skillName, in.Pinned, in.TTLSeconds, in.Reason); err != nil {
 		return nil, &CapabilityWriteError{Err: err}
 	}
 	return s.store.GetAgentKnownSkill(ctx, agentID, skillName)
@@ -273,8 +264,8 @@ func (s *AgentCapabilitiesService) ListAssignedSkills(ctx context.Context, agent
 // carries a real foreign key to agent_profiles(id), so the existence check
 // must match what that key enforces, independent of AgentService.
 func (s *AgentCapabilitiesService) AssignSkill(ctx context.Context, agentID, skillID, config string) ([]store.Skill, error) {
-	if _, err := s.store.GetAgent(ctx, agentID); err != nil {
-		return nil, ErrAgentNotFound
+	if _, err := s.store.GetAgentForActor(ctx, agentID); err != nil {
+		return nil, err
 	}
 	if sk, err := s.store.GetSkill(ctx, skillID); err != nil || sk == nil {
 		return nil, ErrSkillNotFound
@@ -304,46 +295,19 @@ type SkillGrant struct {
 // overwrites only the grant state (with GrantedAt set to now), so the row's
 // pin, usage and every other column survive.
 func (s *AgentCapabilitiesService) GrantSkill(ctx context.Context, agentID, skillSlug string, g SkillGrant) (*store.AgentKnownSkill, error) {
-	current, err := s.store.GetAgentKnownSkill(ctx, agentID, skillSlug)
-	if err != nil && !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-		return nil, err
-	}
-	row := store.AgentKnownSkill{AgentID: agentID, SkillName: skillSlug}
-	if current != nil {
-		row = *current
-	}
-	row.ApprovedContentHash = g.ApprovedContentHash
-	row.GrantedAt = time.Now().UTC().Format(time.RFC3339)
-	row.GrantedBy = g.GrantedBy
-	row.CapabilitiesGranted = g.CapabilitiesGranted
-	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
-		return nil, &CapabilityWriteError{Err: err}
-	}
-	return s.store.GetAgentKnownSkill(ctx, agentID, skillSlug)
+	return nil, store.ErrVerifiedActorRequired
 }
 
 // RevokeSkillGrant clears only the grant state on the agent's known-skill
 // row; revoking a grant is not a reason to forget the row's pin or usage. It
 // returns ErrNoSkillGrant when there is no row or the row has no grant.
 func (s *AgentCapabilitiesService) RevokeSkillGrant(ctx context.Context, agentID, skillSlug string) error {
-	current, err := s.store.GetAgentKnownSkill(ctx, agentID, skillSlug)
+	revoked, err := s.store.RevokeAgentSkillGrant(ctx, agentID, skillSlug)
 	if err != nil {
-		if errors.Is(err, store.ErrAgentKnownSkillNotFound) {
-			return ErrNoSkillGrant
-		}
-		return err
-	}
-	if current.ApprovedContentHash == "" && current.GrantedAt == "" &&
-		current.GrantedBy == "" && current.CapabilitiesGranted == "" {
-		return ErrNoSkillGrant
-	}
-	row := *current
-	row.ApprovedContentHash = ""
-	row.GrantedAt = ""
-	row.GrantedBy = ""
-	row.CapabilitiesGranted = ""
-	if err := s.store.InsertAgentKnownSkill(ctx, row); err != nil {
 		return &CapabilityWriteError{Err: err}
+	}
+	if !revoked {
+		return ErrNoSkillGrant
 	}
 	return nil
 }

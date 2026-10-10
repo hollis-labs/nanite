@@ -114,14 +114,21 @@ func (s *Session) Stop(ctx context.Context) error {
 // can still classify abnormal exits without taking lifecycle ownership back
 // from Wrapper.
 //
-// Safe to call from any number of goroutines concurrently — see runDone's
-// doc comment on Session for the happens-before argument.
+// Wait also observes Boot's internal cleanup and exact binding retirement.
+// ExternalLifecycleObserver retirement remains the caller's responsibility
+// after Wait returns. Safe for concurrent callers: runErr is published before
+// both completion channels close.
 func (s *Session) Wait(ctx context.Context) error {
 	if s == nil || s.runDone == nil {
 		return errors.New("agent.Session.Wait: session not initialized")
 	}
+	done := s.runCleanupDone
+	if done == nil {
+		// Lightweight handles constructed outside Boot have no cleanup tail.
+		done = s.runDone
+	}
 	select {
-	case <-s.runDone:
+	case <-done:
 		return s.runErr
 	case <-ctx.Done():
 		return ctx.Err()

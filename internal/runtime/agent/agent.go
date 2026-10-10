@@ -258,6 +258,12 @@ type Session struct {
 	// runErr without further synchronization.
 	runDone chan struct{}
 	runErr  error
+	// runCleanupDone closes after Boot's internal Run tail has canceled its
+	// context, discarded pending admission and (unless externally owned)
+	// retired this exact binding. Wait observes this stronger completion
+	// boundary; runDone remains the terminal signal used for binding custody.
+	// An external recovery observer still retires its binding after Wait.
+	runCleanupDone chan struct{}
 	// runCancel is reserved for SessionManager's pre-ready/adoption shutdown
 	// boundary. Ordinary Stop deliberately does not cancel it; see manager.go.
 	runCancel context.CancelFunc
@@ -600,19 +606,20 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	sess := &Session{
-		ID:           sessID,
-		Mode:         opts.Mode,
-		Provider:     providerName,
-		BootDir:      bootDir,
-		WorkspaceDir: ws.Root,
-		deps:         deps,
-		startedAt:    time.Now(),
-		hadLineage:   hadLineage,
-		wr:           wr,
-		isACP:        isACP,
-		eventSink:    canonicalSink,
-		runDone:      make(chan struct{}),
-		runCancel:    runCancel,
+		ID:             sessID,
+		Mode:           opts.Mode,
+		Provider:       providerName,
+		BootDir:        bootDir,
+		WorkspaceDir:   ws.Root,
+		deps:           deps,
+		startedAt:      time.Now(),
+		hadLineage:     hadLineage,
+		wr:             wr,
+		isACP:          isACP,
+		eventSink:      canonicalSink,
+		runDone:        make(chan struct{}),
+		runCleanupDone: make(chan struct{}),
+		runCancel:      runCancel,
 	}
 	if err := deps.Manager.AdmitLaunch(sess); err != nil {
 		runCancel()
@@ -652,6 +659,9 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// already the correct, sufficient interrupt mechanism — see
 	// manager.go's Stop.
 	go func() {
+		// Registered first so this closes after every internal cleanup defer.
+		// It must not wait for caller-owned recovery retirement after Wait.
+		defer close(sess.runCleanupDone)
 		// Non-chat owners do not install the recovery observer. Keep the exact
 		// binding through runDone closure so a concurrent Shutdown either sees
 		// and reaps it or observes it already fully terminal before retirement.

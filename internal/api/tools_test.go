@@ -12,70 +12,48 @@ import (
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
-// TestHandleListAgentTools_DBBackedAgentUsesAgentTools is the Done-means
-// regression test for TASKS/phase-5/10-fix-list-agent-tools-endpoint-stale-
-// permissions-view.md: a real agent_profiles-backed agent with exactly one
-// agent_tools grant must see that tool as allowed:true and every other
-// catalog tool as allowed:false -- reproducing and closing the live-verified
-// gap in that task's Context (the endpoint used to read the legacy
-// tool_permissions path, which reports "everything allowed" for an agent
-// with no tool_permissions configured, independent of agent_tools).
-func TestHandleListAgentTools_DBBackedAgentUsesAgentTools(t *testing.T) {
+// Historical raw grants remain visible to export but cannot grant current
+// catalog membership. The read-only catalog still reports all live tool names.
+func TestHandleListAgentTools_HistoricalGrantDoesNotAuthorizeCatalog(t *testing.T) {
 	a, mux := newTestAPI(t)
-	ctx := context.Background()
-
-	// Wire a ToolClient with a small builtin catalog -- newTestAPI's
-	// container doesn't wire one by default (no MCP/config in this
-	// lightweight harness).
 	tc := toolclient.New(mcp.NewManager(), a.store, nil)
-	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{
-		{Name: "dev_read", Description: "Read a file"},
-		{Name: "dev_write", Description: "Write a file"},
-		{Name: "dev_bash", Description: "Run a shell command"},
-	})
+	tc.Builtins.RegisterBuiltins("dev", []llmtypes.ToolDefinition{{Name: "dev_read", Description: "Read a file"}, {Name: "dev_write", Description: "Write a file"}, {Name: "dev_bash", Description: "Run a shell command"}})
 	a.Services.ToolClient = tc
-
-	agent := createTestAgentForGrant(t, mux, "list-tools-db-agent", nil)
-
-	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
+	p := historicalToolGrantFixture(t, a, "list-tools-db-agent")
+	toolID, err := a.store.UpsertKnownTool(t.Context(), "dev_read", "builtin", "available", "")
 	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
+		t.Fatal(err)
 	}
-	if err := a.store.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
+	if _, err = a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'explicit','retained-created')`, p.ID, toolID); err != nil {
+		t.Fatal(err)
 	}
-
-	req := httptest.NewRequest("GET", "/api/agents/"+agent.ID+"/tools", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	const query = `SELECT * FROM agent_tools ORDER BY agent_id,tool_id`
+	before := retiredAPISnapshot(t, a, query)
+	w := retiredAPIRequest(t, mux, "GET", "/api/agents/"+p.ID+"/tools", "")
 	if w.Code != http.StatusOK {
-		t.Fatalf("GET /api/agents/{id}/tools: expected 200, got %d; body: %s", w.Code, w.Body.String())
+		t.Fatalf("read-only tool catalog: %d %s", w.Code, w.Body.String())
 	}
-
 	var items []struct {
 		Name    string `json:"name"`
 		Allowed bool   `json:"allowed"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
-		t.Fatalf("decode response: %v", err)
+	if err = json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
 	}
 	if len(items) != 3 {
-		t.Fatalf("expected 3 tools in catalog, got %d: %+v", len(items), items)
+		t.Fatalf("live tool catalog lost entries: %+v", items)
 	}
-
 	got := make(map[string]bool, len(items))
-	for _, it := range items {
-		got[it.Name] = it.Allowed
+	for _, item := range items {
+		got[item.Name] = item.Allowed
 	}
-	if !got["dev_read"] {
-		t.Errorf("expected dev_read (the sole agent_tools grant) to be allowed:true, got %v", got)
+	for _, name := range []string{"dev_read", "dev_write", "dev_bash"} {
+		allowed, ok := got[name]
+		if !ok || allowed {
+			t.Fatalf("historical grant authorized %s or catalog lost it: %v", name, got)
+		}
 	}
-	if got["dev_write"] {
-		t.Errorf("expected dev_write (no agent_tools grant) to be allowed:false, got %v", got)
-	}
-	if got["dev_bash"] {
-		t.Errorf("expected dev_bash (no agent_tools grant) to be allowed:false, got %v", got)
-	}
+	retiredAPIHistoryUnchanged(t, a, query, before)
 }
 
 // TestHandleListAgentTools_UnknownAgentDeniesAll is the regression check
@@ -134,7 +112,7 @@ func TestHandleListAgentTools_ResolvesKnownToolID(t *testing.T) {
 	})
 	a.Services.ToolClient = tc
 
-	agent := createTestAgentForGrant(t, mux, "list-tools-id-agent", nil)
+	agent := historicalToolGrantFixture(t, a, "list-tools-id-agent")
 
 	toolID, err := a.store.UpsertKnownTool(ctx, "dev_read", "builtin", "available", "")
 	if err != nil {
@@ -210,7 +188,7 @@ func TestHandleListAgentTools_ReportsMCPServerOrigin(t *testing.T) {
 	a.Services.ToolClient = tc
 	a.Services.MCP = mgr
 
-	agent := createTestAgentForGrant(t, mux, "list-tools-origin-agent", nil)
+	agent := historicalToolGrantFixture(t, a, "list-tools-origin-agent")
 
 	req := httptest.NewRequest("GET", "/api/agents/"+agent.ID+"/tools", nil)
 	w := httptest.NewRecorder()

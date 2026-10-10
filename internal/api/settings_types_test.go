@@ -219,50 +219,29 @@ func TestToolLoadPreferences_EmptyDeletes(t *testing.T) {
 	}
 }
 
-func TestHandleGrantAgentTool_Precedence(t *testing.T) {
+func TestHandleGrantAgentTool_RetirementPrecedesLegacyLookupAndBodyValidation(t *testing.T) {
 	a, mux := newTestAPI(t)
-	agent := createTestAgentForGrant(t, mux, "grant-precedence-agent", nil)
-	toolID, err := a.store.UpsertKnownTool(context.Background(), "zz_precedence_tool", "builtin", "available", "")
+	p := historicalToolGrantFixture(t, a, "grant-precedence-agent")
+	toolID, err := a.store.UpsertKnownTool(t.Context(), "zz_precedence_tool", "builtin", "available", "")
 	if err != nil {
-		t.Fatalf("UpsertKnownTool: %v", err)
+		t.Fatal(err)
 	}
-
-	// Unknown agent beats a bad body.
-	w := doJSON(mux, "POST", "/api/agents/no-such-agent/tools", `not json`)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("unknown agent + bad body: status = %d, want 404; body: %s", w.Code, w.Body.String())
+	if _, err = a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,'retained-explicit','retained-created')`, p.ID, toolID); err != nil {
+		t.Fatal(err)
 	}
-	// Bad body beats a missing tool_id.
-	w = doJSON(mux, "POST", "/api/agents/"+agent.ID+"/tools", `not json`)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid JSON: ") {
-		t.Fatalf("bad body: %d %s, want 400 invalid JSON", w.Code, w.Body.String())
+	queries := []string{`SELECT * FROM agent_tools ORDER BY agent_id,tool_id`, `SELECT * FROM actor_granted_tools ORDER BY agent_id,tool_id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = retiredAPISnapshot(t, a, q)
 	}
-	w = doJSON(mux, "POST", "/api/agents/"+agent.ID+"/tools", `{}`)
-	assertErrorBody(t, w, http.StatusBadRequest, "tool_id is required")
-	w = doJSON(mux, "POST", "/api/agents/"+agent.ID+"/tools", `{"tool_id":"no-such-tool"}`)
-	assertErrorBody(t, w, http.StatusNotFound, "known tool not found")
-
-	// A grant with no granted_via is recorded as explicit.
-	w = doJSON(mux, "POST", "/api/agents/"+agent.ID+"/tools", `{"tool_id":"`+toolID+`"}`)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("grant: %d %s", w.Code, w.Body.String())
+	for _, id := range []string{p.ID, "no-such-agent"} {
+		for _, body := range []string{"not json", `{}`, `{"tool_id":"no-such-tool"}`, `{"tool_id":"` + toolID + `"}`} {
+			requireRetiredAPI(t, doJSON(mux, "POST", "/api/agents/"+id+"/tools", body))
+		}
+		requireRetiredAPI(t, doJSON(mux, "DELETE", "/api/agents/"+id+"/tools/"+toolID, ""))
 	}
-	var via string
-	if err := a.store.DB.QueryRow(`SELECT granted_via FROM agent_tools WHERE agent_id = ? AND tool_id = ?`, agent.ID, toolID).Scan(&via); err != nil {
-		t.Fatalf("read grant: %v", err)
-	}
-	if via != "explicit" {
-		t.Fatalf("granted_via = %q, want explicit", via)
-	}
-
-	// Revoke: unknown agent is 404, then the grant goes.
-	w = doJSON(mux, "DELETE", "/api/agents/no-such-agent/tools/"+toolID, "")
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("revoke unknown agent: %d %s", w.Code, w.Body.String())
-	}
-	w = doJSON(mux, "DELETE", "/api/agents/"+agent.ID+"/tools/"+toolID, "")
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"status":"revoked"}` {
-		t.Fatalf("revoke: %d %s", w.Code, w.Body.String())
+	for i, q := range queries {
+		retiredAPIHistoryUnchanged(t, a, q, before[i])
 	}
 }
 

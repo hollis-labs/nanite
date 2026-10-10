@@ -359,23 +359,35 @@ func TestSQLStoreProjectionFailureRollsBackFire(t *testing.T) {
 	if err := a.InsertAgentSchedule(ctx, row); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := host.DB.ExecContext(ctx, `CREATE TRIGGER fail_counter BEFORE UPDATE OF fired_count ON agent_schedules BEGIN SELECT RAISE(ABORT,'injected projection failure'); END`); err != nil {
+	if _, err := host.DB.ExecContext(ctx, `CREATE TRIGGER fail_counter BEFORE UPDATE OF fired_count ON actor_schedules BEGIN SELECT RAISE(ABORT,'injected projection failure'); END`); err != nil {
 		t.Fatal(err)
+	}
+	beforeMetadata, metadataErr := a.GetAgentSchedule(ctx, row.ID)
+	if metadataErr != nil {
+		t.Fatal(metadataErr)
 	}
 	sch, _, err := a.GetSchedule(ctx, row.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := gosched.Fire{ID: "failed-fire", ScheduleID: row.ID, ScheduledAt: sch.NextRun, Status: gosched.FirePending}
-	if ok, operationErr := a.CreateFire(ctx, gosched.FireCreation{ScheduleID: row.ID, ExpectedNext: sch.NextRun, NextRun: sch.NextRun.Add(time.Minute), Fire: f}); operationErr == nil || ok {
+	if ok, operationErr := a.CreateFire(ctx, gosched.FireCreation{ScheduleID: row.ID, ExpectedNext: sch.NextRun, NextRun: sch.NextRun.Add(time.Minute), Fire: f}); operationErr == nil || ok || !strings.Contains(operationErr.Error(), "injected projection failure") {
 		t.Fatalf("projection error: %v %v", ok, operationErr)
 	}
 	if _, found, operationErr := a.GetFire(ctx, f.ID); operationErr != nil || found {
 		t.Fatalf("partial fire committed: %v %v", found, operationErr)
 	}
 	persisted, _, err := a.GetSchedule(ctx, row.ID)
-	if err != nil || !persisted.NextRun.Equal(sch.NextRun) {
-		t.Fatalf("CAS advanced after rollback: %+v %v", persisted, err)
+	if err != nil || !reflect.DeepEqual(persisted, sch) {
+		t.Fatalf("shared lifecycle changed after rollback: %+v %v", persisted, err)
+	}
+	afterMetadata, metadataErr := a.GetAgentSchedule(ctx, row.ID)
+	if metadataErr != nil || *afterMetadata != *beforeMetadata {
+		t.Fatalf("projection metadata changed after rollback: %+v %v", afterMetadata, metadataErr)
+	}
+	var identityRows int
+	if identityErr := host.DB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_fire_identity WHERE fire_id=?`, f.ID).Scan(&identityRows); identityErr != nil || identityRows != 0 {
+		t.Fatalf("failed projection retained fire identity: %d %v", identityRows, identityErr)
 	}
 }
 
@@ -578,8 +590,14 @@ func TestSQLStoreMissingMetadataDoesNotBlockDispatchOrRecovery(t *testing.T) {
 	if err := a.InsertAgentSchedule(ctx, orphan); err != nil {
 		t.Fatal(err)
 	}
-	if err := host.DeleteAgentByID(ctx, orphan.AgentID); err != nil {
+	// Simulate optional metadata loss in the private fresh partition. The
+	// binding stays authorized; deleting a legacy profile is neither a fixture
+	// for this loss nor a supported production operation.
+	if _, err := host.DB.ExecContext(ctx, `DELETE FROM actor_schedules WHERE id=?`, orphan.ID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := host.GetAgentForActor(ctx, orphan.AgentID); err != nil {
+		t.Fatalf("optional metadata loss removed prior authority: %v", err)
 	}
 	valid := sqlAgentSchedule(t, host, "valid")
 	if err := a.InsertAgentSchedule(ctx, valid); err != nil {
@@ -640,20 +658,28 @@ func TestSQLStoreManualFireCount(t *testing.T) {
 		t.Fatalf("projection double-counted manual bump: %+v %v", got, err)
 	}
 	before := *got
-	if _, stepErr := host.DB.ExecContext(ctx, `CREATE TRIGGER fail_manual_count BEFORE UPDATE OF fired_count ON agent_schedules BEGIN SELECT RAISE(ABORT,'injected counter failure'); END`); stepErr != nil {
+	sharedBeforeFailure, found, readErr := a.GetSchedule(ctx, row.ID)
+	if readErr != nil || !found {
+		t.Fatalf("manual counter lifecycle before injection: %+v %v %v", sharedBeforeFailure, found, readErr)
+	}
+	if _, stepErr := host.DB.ExecContext(ctx, `CREATE TRIGGER fail_manual_count BEFORE UPDATE OF fired_count ON actor_schedules BEGIN SELECT RAISE(ABORT,'injected counter failure'); END`); stepErr != nil {
 		t.Fatal(stepErr)
 	}
-	if stepErr := a.BumpAgentScheduleFireCount(ctx, row.ID, manualAt.Add(time.Second)); stepErr == nil {
-		t.Fatal("counter failure accepted")
+	if stepErr := a.BumpAgentScheduleFireCount(ctx, row.ID, manualAt.Add(time.Second)); stepErr == nil || !strings.Contains(stepErr.Error(), "injected counter failure") {
+		t.Fatalf("injected counter failure not propagated: %v", stepErr)
 	}
 	after, err := a.GetAgentSchedule(ctx, row.ID)
 	if err != nil || *after != before {
 		t.Fatalf("failed bump changed state: %+v %v", after, err)
 	}
+	sharedAfterFailure, found, readErr := a.GetSchedule(ctx, row.ID)
+	if readErr != nil || !found || !reflect.DeepEqual(sharedBeforeFailure, sharedAfterFailure) {
+		t.Fatalf("counter failure changed shared lifecycle: %+v %v %v", sharedAfterFailure, found, readErr)
+	}
 	if _, stepErr := host.DB.ExecContext(ctx, `DROP TRIGGER fail_manual_count`); stepErr != nil {
 		t.Fatal(stepErr)
 	}
-	if _, stepErr := host.DB.ExecContext(ctx, `DELETE FROM agent_schedules WHERE id=?`, row.ID); stepErr != nil {
+	if _, stepErr := host.DB.ExecContext(ctx, `DELETE FROM actor_schedules WHERE id=?`, row.ID); stepErr != nil {
 		t.Fatal(stepErr)
 	}
 	sharedBefore, _, err := a.GetSchedule(ctx, row.ID)
@@ -664,7 +690,7 @@ func TestSQLStoreManualFireCount(t *testing.T) {
 		t.Fatalf("missing metadata bump: %v", stepErr)
 	}
 	sharedAfter, _, err := a.GetSchedule(ctx, row.ID)
-	if err != nil || !sharedAfter.LastRun.Equal(sharedBefore.LastRun) {
+	if err != nil || !reflect.DeepEqual(sharedAfter, sharedBefore) {
 		t.Fatalf("orphan bump committed lifecycle: %+v %v", sharedAfter, err)
 	}
 }

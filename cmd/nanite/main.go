@@ -915,19 +915,6 @@ func cmdServeWithInitializers(
 			slog.Warn("task restore", "err", err)
 		}
 	}
-	if container.TeamRunLauncher != nil {
-		teamRecovery := container.TeamRunLauncher.ReconcileTeamRuns(context.Background(), 100)
-		if len(teamRecovery.Failures) != 0 {
-			return fmt.Errorf("recover Team workflows (pending=%d signals=%d): %v", teamRecovery.PendingInspected, teamRecovery.SignalsInspected, teamRecovery.Failures)
-		}
-		slog.Info("Team workflow startup recovery complete", "pending", teamRecovery.PendingInspected, "signals", teamRecovery.SignalsInspected, "recovered", teamRecovery.Recovered)
-	}
-	workflowRecovery, err := sharedWorkflowEngine.RecoverActive(context.Background(), workflowStepExecutor, 100)
-	if err != nil {
-		return fmt.Errorf("recover active shared/pilot workflows (inspected=%d resumed=%d): %w", workflowRecovery.Inspected, workflowRecovery.Resumed, err)
-	}
-	slog.Info("Agent Workflows startup recovery complete", "inspected", workflowRecovery.Inspected, "resumed", workflowRecovery.Resumed)
-
 	// Reap clean orphaned checkouts; preserved work is reported for recovery.
 	if container.Worktrees != nil {
 		report, sweepErr := container.Worktrees.Sweep(context.Background(), worktree.OrphanedBy(nil), worktree.SweepOptions{})
@@ -1003,6 +990,32 @@ func cmdServeWithInitializers(
 		os.Exit(0)
 	})
 
+	// Start HTTP server.
+	srv, serverErr := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)
+	if serverErr != nil {
+		return fmt.Errorf("construct HTTP server: %w", serverErr)
+	}
+	srv.SetHealthWarnings(agentProtectionWarnings())
+
+	// Discover, load plugins, and re-discover MCP tools after server.New has
+	// installed the plugin router, but before any startup recovery or
+	// scheduler loop can dispatch work that depends on plugin registrations.
+	pluginsDir := discoverAndLoadPlugins(pluginHost, mcpManager, s)
+	srv.SetPluginsDir(pluginsDir)
+
+	if container.TeamRunLauncher != nil {
+		teamRecovery := container.TeamRunLauncher.ReconcileTeamRuns(context.Background(), 100)
+		if len(teamRecovery.Failures) != 0 {
+			return fmt.Errorf("recover Team workflows (pending=%d signals=%d): %v", teamRecovery.PendingInspected, teamRecovery.SignalsInspected, teamRecovery.Failures)
+		}
+		slog.Info("Team workflow startup recovery complete", "pending", teamRecovery.PendingInspected, "signals", teamRecovery.SignalsInspected, "recovered", teamRecovery.Recovered)
+	}
+	workflowRecovery, err := sharedWorkflowEngine.RecoverActive(context.Background(), workflowStepExecutor, 100)
+	if err != nil {
+		return fmt.Errorf("recover active shared/pilot workflows (inspected=%d resumed=%d): %w", workflowRecovery.Inspected, workflowRecovery.Resumed, err)
+	}
+	slog.Info("Agent Workflows startup recovery complete", "inspected", workflowRecovery.Inspected, "resumed", workflowRecovery.Resumed)
+
 	// Start periodic background workers (cleanup, snapshots, reapers).
 	daemonLifecycle.Go("shared-workflow-reconcile", func(ctx context.Context) {
 		sharedWorkflowEngine.RunActiveRecoveryLoop(ctx, workflowStepExecutor, 5*time.Second, 100, func(report workflowhost.ActiveRecoveryReport, err error) {
@@ -1012,17 +1025,6 @@ func cmdServeWithInitializers(
 		})
 	})
 	startBackgroundWorkers(daemonLifecycle, container, s)
-
-	// Start HTTP server.
-	srv, serverErr := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)
-	if serverErr != nil {
-		return fmt.Errorf("construct HTTP server: %w", serverErr)
-	}
-	srv.SetHealthWarnings(agentProtectionWarnings())
-
-	// Discover, load plugins, and re-discover MCP tools.
-	pluginsDir := discoverAndLoadPlugins(pluginHost, mcpManager, s)
-	srv.SetPluginsDir(pluginsDir)
 
 	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("server error", "err", err)

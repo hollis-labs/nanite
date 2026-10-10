@@ -688,10 +688,36 @@ func (s *Store) UpdateMessageContent(ctx context.Context, id, content string, is
 	return nil
 }
 
-// ForkSession creates a new session based on a source session, copying agents
-// and optionally messages. The entire operation runs inside a single
+// ForkSession creates an actorless context copy of a source session, optionally
+// copying sanitized messages. The entire operation runs inside a single
 // transaction — if any step fails, no partial child session is left behind.
 func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Session, copyMessages bool) (*Session, error) {
+	// A parent binding receipt is not approval to bind a new operational view.
+	// Until the actual parent-to-child issuer port is adopted, refuse the copy
+	// before allocating a session, transcript or journal row.
+	var bound bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM session_actor_bindings WHERE session_id=?)`, sourceID).Scan(&bound); err != nil {
+		return nil, err
+	}
+	if bound {
+		return nil, ErrVerifiedActorRequired
+	}
+	pin, pinErr := s.GetCognitiveView(ctx, sourceID)
+	if pinErr != nil && !errors.Is(pinErr, sql.ErrNoRows) {
+		return nil, pinErr
+	}
+	if pinErr == nil {
+		if definitionErr := verifyForkDefinition(ctx, s.DB, pin, 1<<20); definitionErr != nil {
+			return nil, definitionErr
+		}
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(pin.ChatConfigJSON), &cfg); err != nil {
+			return nil, err
+		}
+		if cfg[codeModeConfigKey] != nil {
+			return nil, ErrCodeModeNested
+		}
+	}
 	src, err := s.GetSession(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("load source session: %w", err)
@@ -699,14 +725,25 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 
 	// Build new session from source, applying overrides.
 	newSess := &Session{
-		ProjectID:   src.ProjectID,
-		Provider:    src.Provider,
-		Model:       src.Model,
-		Tags:        src.Tags,
-		ContextType: src.ContextType,
-		ContextID:   src.ContextID,
+		ProjectID: src.ProjectID,
+		Provider:  src.Provider,
+		Model:     src.Model,
+		Tags:      "[]",
 	}
 
+	if pinErr == nil {
+		var cfg struct {
+			Model struct{ Provider, Model string } `json:"model"`
+		}
+		if decodeErr := json.Unmarshal([]byte(pin.ChatConfigJSON), &cfg); decodeErr != nil || cfg.Model.Provider != src.Provider || cfg.Model.Model != src.Model {
+			return nil, ErrCodeModeSnapshot
+		}
+	}
+	// A defined view's host-approved model and immutable configuration cannot
+	// be replaced through the retained actorless context-copy operation.
+	if pinErr == nil && overrides != nil && ((overrides.Provider != "" && overrides.Provider != src.Provider) || (overrides.Model != "" && overrides.Model != src.Model)) {
+		return nil, ErrCodeModeEscalation
+	}
 	// Apply overrides.
 	if overrides != nil {
 		if overrides.Provider != "" {
@@ -730,13 +767,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 		}
 	}
 
-	// Read-side lookups (agents, messages) happen before the tx to keep the
-	// write transaction short and avoid read/write interleaving on the same
-	// connection.
-	agents, err := s.ListSessionAgents(ctx, sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("list source agents: %w", err)
-	}
+	// This path copies context only; it transfers no session actor authority.
 
 	var msgs []Message
 	if copyMessages {
@@ -766,6 +797,22 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	}
 	defer rollbackUnlessCommitted(tx)
 
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM session_actor_bindings WHERE session_id=?)`, sourceID).Scan(&bound); err != nil {
+		return nil, err
+	}
+	if bound {
+		return nil, ErrVerifiedActorRequired
+	}
+	if pinErr == nil {
+		var current CognitiveViewRecord
+		if err := tx.QueryRowContext(ctx, `SELECT session_view_id,definition_ref_json,chat_config_json FROM cognitive_views WHERE session_view_id=?`, sourceID).Scan(&current.SessionViewID, &current.DefinitionRefJSON, &current.ChatConfigJSON); err != nil {
+			return nil, err
+		}
+		if current != pin {
+			return nil, ErrCodeModeSnapshot
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if err := tx.QueryRowContext(ctx,
@@ -785,15 +832,9 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 		return nil, fmt.Errorf("create forked session: %w", err)
 	}
 
-	// Copy session agents inside the tx.
-	for _, sa := range agents {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO session_actor_bindings (session_id, agent_id, mode, joined_at, is_primary)
-			 VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(session_id, agent_id) DO UPDATE SET mode = excluded.mode, is_primary = excluded.is_primary`,
-			newSess.ID, sa.AgentID, sa.Mode, now, sa.IsPrimary,
-		); err != nil {
-			return nil, fmt.Errorf("copy agent %s: %w", sa.AgentID, err)
+	if pinErr == nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO cognitive_views(session_view_id,definition_ref_json,chat_config_json) VALUES(?,?,?)`, newSess.ID, pin.DefinitionRefJSON, pin.ChatConfigJSON); err != nil {
+			return nil, err
 		}
 	}
 
@@ -802,6 +843,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	if copyMessages && len(msgs) > 0 {
 		copiedIDs := make(map[string]string, len(msgs))
 		for _, m := range msgs {
+			m = contextOnlyMessage(m)
 			copiedID := uuid.NewString()
 			copiedIDs[m.ID] = copiedID
 			if _, err := tx.ExecContext(ctx,
@@ -811,6 +853,11 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 				nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, now,
 			); err != nil {
 				return nil, fmt.Errorf("copy message: %w", err)
+			}
+		}
+		for _, m := range msgs {
+			if _, err := tx.ExecContext(ctx, `UPDATE messages SET parent_id=? WHERE id=?`, nullIfEmpty(copiedIDs[m.ParentID]), copiedIDs[m.ID]); err != nil {
+				return nil, err
 			}
 		}
 		if copyErr := copyConversationClear(ctx, tx, sourceID, newSess.ID, copiedIDs, now); copyErr != nil {
@@ -837,23 +884,14 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	return newSess, nil
 }
 
-func forkSessionMetadata(sourceMetadata string, sourceID string, copyMessages bool) string {
-	metadata := map[string]any{}
-	if strings.TrimSpace(sourceMetadata) != "" {
-		_ = json.Unmarshal([]byte(sourceMetadata), &metadata)
-	}
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-	metadata["copied_from_session_id"] = sourceID
-	metadata["fork_kind"] = "restart"
+// Parent metadata may contain credentials, approvals, runtime selection or
+// authority claims. Copy only fresh context provenance on this actorless path.
+func forkSessionMetadata(_ string, sourceID string, copyMessages bool) string {
+	kind := "restart"
 	if copyMessages {
-		metadata["fork_kind"] = "fork"
+		kind = "fork"
 	}
-	out, err := json.Marshal(metadata)
-	if err != nil {
-		return `{"copied_from_session_id":` + strconv.Quote(sourceID) + `}`
-	}
+	out, _ := json.Marshal(map[string]string{"copied_from_session_id": sourceID, "fork_kind": kind})
 	return string(out)
 }
 

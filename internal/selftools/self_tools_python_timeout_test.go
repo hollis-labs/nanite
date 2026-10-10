@@ -61,7 +61,7 @@ func TestRunPythonSandbox_SignalDeathNamesTheSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunPythonSandbox: %v", err)
 	}
-	if !strings.Contains(result.Error, "killed by signal") || strings.Contains(result.Error, "timed out") {
+	if (!strings.Contains(result.Error, "killed by signal") && !strings.Contains(result.Error, "exit code 137 (possible child signal")) || strings.Contains(result.Error, "timed out") {
 		t.Fatalf("SIGKILL reported as %q, want it named as a signal and not as a timeout", result.Error)
 	}
 }

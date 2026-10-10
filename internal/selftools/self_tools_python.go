@@ -1,15 +1,14 @@
 package selftools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
+	"github.com/hollis-labs/nanite/internal/sandbox"
 	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
@@ -53,6 +53,19 @@ type PythonToolDispatcher interface {
 	Dispatch(ctx context.Context, sessionID, toolName string, args map[string]any) (any, error)
 }
 
+// PythonRunAdmission is a host-supplied execution boundary. A session string,
+// permission Allow or tool dispatcher alone does not establish caller authority.
+// Admission must verify the current caller and exact session without enrollment.
+type PythonRunAdmission interface {
+	AdmitPythonRun(context.Context, string) error
+}
+
+// ErrPythonExecutionUnavailable refuses missing verified host execution authority.
+var ErrPythonExecutionUnavailable = errors.New("python execution unavailable: verified execution owner required")
+
+// ErrPythonApprovalUnavailable refuses Ask without a verified continuation owner.
+var ErrPythonApprovalUnavailable = errors.New("python approval unavailable: verified continuation owner required")
+
 // sandboxToolRequest is the JSON wire format the Python preamble sends on FD3.
 type sandboxToolRequest struct {
 	ID   int            `json:"id"`
@@ -62,9 +75,10 @@ type sandboxToolRequest struct {
 
 // sandboxToolResponse is the JSON wire format Go sends back on FD4.
 type sandboxToolResponse struct {
-	ID     int    `json:"id"`
-	Result any    `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
+	ID        int    `json:"id"`
+	Result    any    `json:"result,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 // sandboxEnvelope is the JSON blob written to the Python process' stdin.
@@ -148,8 +162,8 @@ def tool_call(name: str, args: dict) -> dict:
     """
     Call a Nanite tool from inside the sandbox.
 
-    Every call traverses the full permission engine and chat-surface
-    enforcement — no security boundary is bypassed.
+    Calls require an explicit host permission Allow and a verified execution
+    owner. Ask requires an unavailable approval continuation and is refused.
 
     Returns the tool result as a plain Python dict (or raises on denial/error).
     """
@@ -162,6 +176,8 @@ def tool_call(name: str, args: dict) -> dict:
     if not resp_raw:
         raise RuntimeError("tool_call: response pipe closed unexpectedly")
     resp = json.loads(resp_raw)
+    if resp.get("id") != _req_counter:
+        raise RuntimeError("tool_call: response binding mismatch")
     if resp.get("error"):
         raise RuntimeError(f"tool_call({name!r}): {resp['error']}")
     return resp.get("result", {})
@@ -223,6 +239,19 @@ func RunPythonSandbox(
 	perm PythonPermissionChecker,
 	dispatcher PythonToolDispatcher,
 ) (*PythonRunResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	admission, ok := dispatcher.(PythonRunAdmission)
+	if !ok {
+		return nil, ErrPythonExecutionUnavailable
+	}
+	if err := admission.AdmitPythonRun(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Clamp limits.
 	if timeLimitSec <= 0 {
 		timeLimitSec = pythonSandboxDefaultTimeLimitSec
@@ -313,8 +342,18 @@ func RunPythonSandbox(
 	stderrBuf.max = pythonSandboxMaxOutputBytes
 	cmd.Stderr = &stderrBuf
 
-	// Apply OS-level isolation (setpgid for signal cascading; rlimit on unix).
-	applySandboxSysProcAttr(cmd)
+	// Never inherit the host environment, working directory or network access.
+	// This primitive provides isolation, not caller/tool execution authority.
+	scratchDir, err := os.MkdirTemp("", "nanite-python-")
+	if err != nil {
+		return nil, fmt.Errorf("python_run: create scratch directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(scratchDir) }()
+	cleanup, err := sandbox.PreparePythonCommand(cmd, scratchDir)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 
 	// Goroutine safety: tool_calls_log is written from the pump goroutine.
 	var toolCallsLog []PythonToolCallLog
@@ -336,25 +375,38 @@ func RunPythonSandbox(
 
 	// Pump goroutine: reads tool-call requests from pyReqR, dispatches them
 	// through the permission engine, writes responses to pyRespW.
-	pumpDone := make(chan struct{})
-	var pumpErr error
+	pumpDone := make(chan error, 1)
+	stopPump := context.AfterFunc(runCtx, func() {
+		_ = pyReqR.Close()
+		_ = pyRespW.Close()
+	})
+	defer stopPump()
 	go func() {
-		defer close(pumpDone)
-		defer func() {
-			_ = pyRespW.Close() // Closing the pump writer signals EOF; pumpErr owns the goroutine result.
-		}()
-		pumpErr = pumpToolCalls(runCtx, sessionID, pyReqR, pyRespW, perm, dispatcher, &toolCallsLog, &toolCallsMu)
+		pumpErr := pumpToolCalls(runCtx, sessionID, pyReqR, pyRespW, perm, dispatcher, &toolCallsLog, &toolCallsMu)
+		pumpDone <- pumpErr
+		_ = pyRespW.Close()
+		if pumpErr != nil {
+			cancel()
+		}
 	}()
 
-	// Wait for the process to exit and the pump to finish.
 	cmdErr := cmd.Wait()
-	<-pumpDone
+	runErr := runCtx.Err()
+	cancel()
+	_ = pyReqR.Close()
+	_ = pyRespW.Close()
+	var pumpErr error
+	select {
+	case pumpErr = <-pumpDone:
+	case <-time.After(500 * time.Millisecond):
+		pumpErr = errors.New("nested execution owner did not stop on cancellation")
+	}
 
 	// Determine if we timed out: the Go wall-clock deadline, or the CPU
 	// rlimit, which the preamble's SIGXCPU handler reports as exit code
 	// pythonCPULimitExitCode (a raw SIGXCPU death counts too, for model code
 	// that restores the default handler).
-	timedOut := runCtx.Err() == context.DeadlineExceeded
+	timedOut := runErr == context.DeadlineExceeded
 	if !timedOut && cmdErr != nil {
 		var exitErr *exec.ExitError
 		if errors.As(cmdErr, &exitErr) {
@@ -375,12 +427,18 @@ func RunPythonSandbox(
 	}
 	toolCallsMu.Lock()
 	if len(toolCallsLog) > 0 {
-		result.ToolCalls = toolCallsLog
+		result.ToolCalls = append([]PythonToolCallLog(nil), toolCallsLog...)
 	}
 	toolCallsMu.Unlock()
 
 	if timedOut {
 		result.Error = fmt.Sprintf("execution timed out after %ds", timeLimitSec)
+		return result, nil
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		// The caller must see its initiating cancellation, rather than the
+		// wrapper's resulting exit signal or a partial producer document.
+		result.Error = context.Canceled.Error()
 		return result, nil
 	}
 
@@ -399,8 +457,7 @@ func RunPythonSandbox(
 				result.Error = pyOut.Error
 			}
 		} else {
-			// stdout was not valid JSON — treat as raw stdout.
-			result.Stdout = rawOut
+			result.Error = "python_run: invalid or truncated result document"
 		}
 	}
 
@@ -418,7 +475,15 @@ func RunPythonSandbox(
 		}
 	}
 
-	_ = pumpErr // pump errors are surfaced via tool_calls_log status entries
+	if result.Error == "" && pumpErr != nil && !errors.Is(pumpErr, os.ErrClosed) {
+		result.Error = "python_run: nested tool channel failed"
+	}
+	if result.Error == "" && runErr != nil {
+		result.Error = "python_run: execution stopped without a completed result"
+	}
+	if result.Error == "" && rawOut == "" {
+		result.Error = "python_run: producer closed without a result"
+	}
 	return result, nil
 }
 
@@ -435,43 +500,67 @@ func pumpToolCalls(
 	log *[]PythonToolCallLog,
 	mu *sync.Mutex,
 ) error {
-	dec := json.NewDecoder(r)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 4096), 64*1024)
 	enc := json.NewEncoder(w)
-
-	for {
+	requestID := 0
+	for scanner.Scan() {
 		var req sandboxToolRequest
-		if err := dec.Decode(&req); err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return fmt.Errorf("pump: decode request: %w", err)
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+			return errors.New("pump: invalid tool request")
 		}
+		if req.ID != requestID+1 || requestID >= 256 || req.Name == "" || len(req.Name) > 256 {
+			return errors.New("pump: invalid request binding or transport limit exceeded")
+		}
+		requestID = req.ID
 
-		// Permission check.
 		var resp sandboxToolResponse
 		resp.ID = req.ID
-
-		if perm != nil {
-			checkResult := perm.Check(ctx, sessionID, req.Name, req.Args, permissionlib.ToolMeta{
-				IsReadOnly: false, // conservative: sandbox calls are treated as non-read-only
-			})
-			if checkResult.Decision == permissionlib.DecisionDeny {
-				resp.Error = fmt.Sprintf("permission denied for tool %q: %s", req.Name, checkResult.Reason)
-				mu.Lock()
-				*log = append(*log, PythonToolCallLog{Name: req.Name, Status: "denied"})
-				mu.Unlock()
-				slog.Info("python sandbox: tool call denied",
-					"tool", req.Name, "session_id", sessionID, "reason", checkResult.Reason)
-				if err := enc.Encode(resp); err != nil {
-					return fmt.Errorf("pump: encode deny response: %w", err)
+		status := "denied"
+		switch {
+		case ctx.Err() != nil:
+			resp.Error = ctx.Err().Error()
+		case mcp.UniformToolName("", req.Name) == "python_run" || mcp.UniformToolName("", req.Name) == "code_task":
+			resp.Error = "nested code execution is unavailable"
+			resp.ErrorCode = "execution_unavailable"
+		case perm == nil:
+			resp.Error = ErrPythonExecutionUnavailable.Error()
+			resp.ErrorCode = "execution_unavailable"
+		default:
+			check := perm.Check(ctx, sessionID, req.Name, req.Args, permissionlib.ToolMeta{IsReadOnly: false})
+			switch check.Decision {
+			case permissionlib.DecisionAllow:
+				// Cancellation after a host callback cannot authorize a dispatch.
+				if err := ctx.Err(); err != nil {
+					resp.Error = err.Error()
 				}
-				continue
+			case permissionlib.DecisionDeny:
+				resp.Error = fmt.Sprintf("permission denied for tool %q: %s", req.Name, check.Reason)
+			case permissionlib.DecisionAsk:
+				resp.Error = ErrPythonApprovalUnavailable.Error()
+				resp.ErrorCode = "approval_unavailable"
+			default:
+				resp.Error = ErrPythonExecutionUnavailable.Error()
+				resp.ErrorCode = "execution_unavailable"
 			}
+		}
+		if resp.Error != "" {
+			mu.Lock()
+			*log = append(*log, PythonToolCallLog{Name: req.Name, Status: status})
+			mu.Unlock()
+			if err := enc.Encode(resp); err != nil {
+				return fmt.Errorf("pump: encode refusal: %w", err)
+			}
+			continue
 		}
 
 		// Dispatch the tool call.
 		if dispatcher == nil {
-			resp.Error = "no tool dispatcher configured"
+			resp.Error = ErrPythonExecutionUnavailable.Error()
+			resp.ErrorCode = "execution_unavailable"
+			mu.Lock()
+			*log = append(*log, PythonToolCallLog{Name: req.Name, Status: "error"})
+			mu.Unlock()
 		} else {
 			toolResult, dispErr := dispatcher.Dispatch(ctx, sessionID, req.Name, req.Args)
 			if dispErr != nil {
@@ -493,6 +582,10 @@ func pumpToolCalls(
 			return fmt.Errorf("pump: encode response: %w", err)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("pump: request transport: %w", err)
+	}
+	return nil
 }
 
 // pythonCPULimitExitCode is the status the preamble's SIGXCPU handler exits
@@ -509,6 +602,11 @@ func exitDescription(err error) string {
 	if errors.As(err, &exitErr) {
 		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			return fmt.Sprintf("killed by signal %s", status.Signal())
+		}
+		// A sandbox wrapper can relay 128+signal as an ordinary exit. Do not
+		// assert a proven signal: Python can also explicitly exit with that code.
+		if code := exitErr.ExitCode(); code == 137 || code == 143 {
+			return fmt.Sprintf("exit code %d (possible child signal %s)", code, syscall.Signal(code-128))
 		}
 	}
 	return fmt.Sprintf("exit code %d", exitCode(err))
@@ -537,6 +635,7 @@ type limitedSandboxBuffer struct {
 func (b *limitedSandboxBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	accepted := len(p)
 	remaining := b.max - int(atomic.LoadInt64(&b.n))
 	if remaining <= 0 {
 		return len(p), nil
@@ -546,26 +645,13 @@ func (b *limitedSandboxBuffer) Write(p []byte) (int, error) {
 	}
 	n, _ := b.buf.Write(p)
 	atomic.AddInt64(&b.n, int64(n))
-	return len(p), nil
+	return accepted, nil
 }
 
 func (b *limitedSandboxBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
-}
-
-// applySandboxSysProcAttr configures process group isolation on supported platforms.
-// On unix: sets Setpgid so the sandbox process group can be killed as a unit.
-// On other platforms: no-op.
-func applySandboxSysProcAttr(cmd *exec.Cmd) {
-	if runtime.GOOS == "windows" {
-		return
-	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.Setpgid = true
 }
 
 // naniteRunPythonToolDefinition returns the tool definition for
@@ -590,7 +676,9 @@ func naniteRunPythonToolDefinition() mcp.Tool {
 - Unbounded directory scans: recursive file tree walks (such as Path.rglob across wide trees like ~ or ~/dev) hit the execution timeout (default 10s). For wide filesystem searches, use native tools (find_by_name, grep_search). If traversing files in Python, keep scans strictly bounded to specific leaf directories or limit traversal depth/count.
 
 **tool_call(name, args) helper:**
-Every call goes through the full permission engine — no security hole is opened.
+Calls require an admitted host execution owner and an explicit permission Allow.
+Ask is refused until a verified approval continuation is available. Missing host
+execution authority is unavailable before Python starts. No issuer is supplied.
 Returns a dict, raises RuntimeError on denial or error. Set ` + "`result`" + ` in the
 script namespace to control what is returned to the LLM. Call ` + "`tool_describe(name=\"python_run\")`" + `
 for a worked pagination-loop example.

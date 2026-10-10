@@ -10,11 +10,11 @@ package service
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
@@ -117,58 +117,26 @@ func TestResolveAgentContextForBoot_ResolverFailureAbortsBoot(t *testing.T) {
 	}
 }
 
-// TestDynamicContext_FoldsIntoAssembledBootContent is the full
-// resolution-to-boot-content proof Done-means bullet 1 asks for: a real
-// cmd resolver's output flows through resolveAgentContextForBoot, the
-// activeSessionContextBlocks stash driveBootSession populates on cold
-// boot, and regenerateBootDirSlots — the SAME function that (re)plants
-// CLAUDE.md for a live CLI session — and lands, verbatim, in the actual
-// file bytes a booted agent process would read.
+// Fresh boot prompt assembly preserves resolved dynamic context; bound-root
+// updates are explicitly unavailable and use a separate refusal test.
 func TestDynamicContext_FoldsIntoAssembledBootContent(t *testing.T) {
 	st := newContextResolverTestStore(t)
 	ctx := context.Background()
-
 	agent := &store.AgentProfile{Name: "Weather Agent", Slug: "weather-agent-2", SystemPrompt: "You help with weather."}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if _, err := st.InsertAgentContextResolver(ctx, store.AgentContextResolver{
-		AgentID: agent.ID, SlotName: "weather", Kind: "cmd", Run: "printf 72F-and-sunny", Enabled: true,
-	}); err != nil {
-		t.Fatalf("InsertAgentContextResolver: %v", err)
-	}
-
-	s := &chatServiceImpl{store: st}
-	sessionID := "sess-dynamic-context"
-
-	blocks, err := s.resolveAgentContextForBoot(ctx, agent.ID, "")
-	if err != nil {
-		t.Fatalf("resolveAgentContextForBoot: %v", err)
-	}
-	if len(blocks) == 0 {
-		t.Fatal("expected at least one resolved block")
-	}
-	// This Store call is exactly what driveBootSession's cold-boot branch
-	// does with bootOpts.DynamicContext before calling runtimeagent.Boot.
-	s.activeSessionContextBlocks.Store(sessionID, blocks)
-
-	bootDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o755); err != nil {
+	if err := st.CreateAgent(ctx, agent); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.regenerateBootDirSlots(sessionID, bootDir, agent); err != nil {
-		t.Fatalf("regenerateBootDirSlots: %v", err)
+	if _, err := st.InsertAgentContextResolver(ctx, store.AgentContextResolver{AgentID: agent.ID, SlotName: "weather", Kind: "cmd", Run: "printf 72F-and-sunny", Enabled: true}); err != nil {
+		t.Fatal(err)
 	}
-
-	claudeMD, err := os.ReadFile(filepath.Join(bootDir, "CLAUDE.md"))
+	s := &chatServiceImpl{store: st}
+	blocks, err := s.resolveAgentContextForBoot(ctx, agent.ID, "")
 	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
+		t.Fatal(err)
 	}
-	content := string(claudeMD)
-	if !strings.Contains(content, "You help with weather.") {
-		t.Errorf("CLAUDE.md missing the agent's own system prompt: %s", content)
-	}
-	if !strings.Contains(content, "## Dynamic context: weather") || !strings.Contains(content, "72F-and-sunny") {
-		t.Errorf("CLAUDE.md does not include the resolved dynamic-context block: %s", content)
+	prompt := runtimeagent.ResolveSystemPrompt(agent.Slug, agent, runtimeagent.ModeLongLived, "", blocks, "")
+	content := runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, prompt)
+	if !strings.Contains(content, "You help with weather.") || !strings.Contains(content, "## Dynamic context: weather") || !strings.Contains(content, "72F-and-sunny") {
+		t.Fatalf("fresh boot content lost resolved context: %s", content)
 	}
 }

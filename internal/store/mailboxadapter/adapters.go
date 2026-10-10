@@ -230,11 +230,11 @@ func (coordinator *messagingHandoffCoordinator) Approve(ctx context.Context, han
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE session_agents SET is_primary = 0 WHERE session_id = ? AND is_primary = 1`, sessionID); err != nil {
+		`UPDATE session_actor_bindings SET is_primary = 0 WHERE session_id = ? AND is_primary = 1`, sessionID); err != nil {
 		return fmt.Errorf("clear primary: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
+		INSERT INTO session_actor_bindings (session_id, agent_id, mode, joined_at, is_primary)
 		VALUES (?, ?, 'default', ?, 1)
 		ON CONFLICT(session_id, agent_id) DO UPDATE SET is_primary = 1
 	`, sessionID, toAgentID, now); err != nil {

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
+	"github.com/hollis-labs/nanite/internal/store"
 	mesh "github.com/hollis-labs/substrate/mesh"
 	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
@@ -47,8 +49,9 @@ var ErrUnsupportedModel = errors.New("model selection is not authorized for nati
 // VerifiedDefinition is host-resolved content. The resolver owns content/pin
 // verification; the chat consumer checks identity and maps supported semantics.
 type VerifiedDefinition struct {
-	Ref        DefinitionRef
-	Definition *agentdef.Definition
+	Ref          DefinitionRef
+	Definition   *agentdef.Definition
+	ReadResource func(context.Context, agentdef.Ref) ([]byte, error)
 }
 type DefinitionResolver interface {
 	Resolve(context.Context, DefinitionRef) (VerifiedDefinition, error)
@@ -58,7 +61,7 @@ type DefinitionResolver interface {
 var embeddedChatDefinition []byte
 
 func EmbeddedDefinition() (VerifiedDefinition, error) {
-	d, err := agentdef.Parse(embeddedChatDefinition)
+	d, err := agentdef.Parse(embeddedChatDefinition, agentpolicy.Option())
 	if err != nil {
 		return VerifiedDefinition{}, err
 	}
@@ -66,7 +69,7 @@ func EmbeddedDefinition() (VerifiedDefinition, error) {
 	if err != nil {
 		return VerifiedDefinition{}, err
 	}
-	return VerifiedDefinition{DefinitionRef{d.DefinitionID, d.Revision, digest}, d}, nil
+	return VerifiedDefinition{Ref: DefinitionRef{d.DefinitionID, d.Revision, digest}, Definition: d}, nil
 }
 
 // FileDefinitionResolver reads a host-selected directory. Request identifiers
@@ -118,7 +121,7 @@ func (r *FileDefinitionResolver) catalog(ctx context.Context) (map[string]Verifi
 		if len(data) > 1<<20 {
 			return nil, errors.New("agentdef file exceeds 1 MiB")
 		}
-		d, err := agentdef.Parse(data)
+		d, err := agentdef.Parse(data, agentpolicy.Option())
 		if err != nil {
 			return nil, fmt.Errorf("agentdef %q: %w", f.Name(), err)
 		}
@@ -130,7 +133,7 @@ func (r *FileDefinitionResolver) catalog(ctx context.Context) (map[string]Verifi
 		if _, exists := entries[key]; exists {
 			return nil, fmt.Errorf("duplicate definition revision %q", d.DefinitionID)
 		}
-		entries[key] = VerifiedDefinition{DefinitionRef{d.DefinitionID, d.Revision, digest}, d}
+		entries[key] = VerifiedDefinition{Ref: DefinitionRef{d.DefinitionID, d.Revision, digest}, Definition: d}
 	}
 	return entries, nil
 }
@@ -155,31 +158,86 @@ func (r *FileDefinitionResolver) Resolve(ctx context.Context, pin DefinitionRef)
 // ChatDefinitionConfig contains only the applied chat-loop semantics. It is
 // stored separately from caller metadata, which confers no host authority.
 type ChatDefinitionConfig struct {
-	Instructions      string         `json:"instructions"`
-	PermissionProfile string         `json:"permission_profile"`
-	Model             ModelSelection `json:"model"`
+	Instructions      string                    `json:"instructions"`
+	PermissionProfile string                    `json:"permission_profile"`
+	Model             ModelSelection            `json:"model"`
+	NativePolicy      *agentpolicy.NativePolicy `json:"native_policy,omitempty"`
+	ReflexBundle      *agentpolicy.ReflexBundle `json:"reflex_bundle,omitempty"`
+	HostSettings      *store.NativeHostSettings `json:"host_settings,omitempty"`
 }
 
 func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error) {
+	return mapChatDefinition(context.Background(), verified)
+}
+
+func mapChatDefinition(ctx context.Context, verified VerifiedDefinition) (ChatDefinitionConfig, error) {
 	d := verified.Definition
 	if d == nil {
 		return ChatDefinitionConfig{}, ErrUnsupportedDefinition
 	}
-	if err := d.Validate(); err != nil {
+	if err := d.Validate(agentpolicy.Option()); err != nil {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: %w", ErrUnsupportedDefinition, err)
 	}
-	if len(d.Behavior.Instructions)+len(d.Behavior.SOPs)+len(d.Behavior.Hooks)+len(d.Capabilities)+len(d.Requirements.Requires)+len(d.Requirements.Uses)+len(d.Requirements.Tools)+len(d.Requirements.Skills)+len(d.Requirements.Resources)+len(d.HarnessProfile.Steering)+len(d.HarnessProfile.Context.Sources)+len(d.HarnessProfile.Approvals)+len(d.HarnessProfile.Escalation) > 0 || d.HarnessProfile.Context.Policy != nil || d.Continuity.Mode != agentdef.Ephemeral || d.Continuity.MemoryPolicy != nil || d.Continuity.RecoveryStrategy != nil {
+	if len(d.Behavior.Hooks)+len(d.Capabilities)+len(d.Requirements.Requires)+len(d.Requirements.Uses)+len(d.Requirements.Tools)+len(d.Requirements.Skills)+len(d.Requirements.Resources)+len(d.HarnessProfile.Steering)+len(d.HarnessProfile.Context.Sources)+len(d.HarnessProfile.Approvals)+len(d.HarnessProfile.Escalation) > 0 || d.HarnessProfile.Context.Policy != nil || d.Continuity.Mode != agentdef.Ephemeral || d.Continuity.MemoryPolicy != nil || d.Continuity.RecoveryStrategy != nil {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: references, hooks, capability requests and continuity policies are not applied", ErrUnsupportedDefinition)
 	}
 	p := d.HarnessProfile.Permissions.Profile
 	if p != "default" && p != "read-only" {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: permission profile %q", ErrUnsupportedDefinition, p)
 	}
+	var native *agentpolicy.NativePolicy
+	if e, ok := d.Extensions[agentpolicy.NativeNamespace]; ok {
+		policy, err := agentpolicy.DecodeNative(e)
+		if err != nil {
+			return ChatDefinitionConfig{}, fmt.Errorf("%w: %w", ErrUnsupportedDefinition, err)
+		}
+		policy = policy.Defaults()
+		native = &policy
+	}
+	var bundle *agentpolicy.ReflexBundle
+	if e, ok := d.Extensions[agentpolicy.ReflexNamespace]; ok {
+		if verified.ReadResource == nil {
+			return ChatDefinitionConfig{}, fmt.Errorf("%w: reflex resource resolver unavailable", ErrUnsupportedDefinition)
+		}
+		p, err := agentpolicy.DecodeReflex(e)
+		if err != nil {
+			return ChatDefinitionConfig{}, err
+		}
+		body, err := verified.ReadResource(ctx, p.Bundle)
+		if err != nil {
+			return ChatDefinitionConfig{}, err
+		}
+		b, err := agentpolicy.ParseReflexBundle(body, p.Bundle)
+		if err != nil {
+			return ChatDefinitionConfig{}, err
+		}
+		for _, rule := range b.Rules {
+			if rule.Action.Kind == "force_tool_choice" {
+				return ChatDefinitionConfig{}, fmt.Errorf("%w: tool preference requires verified actor grants", store.ErrVerifiedActorRequired)
+			}
+		}
+		bundle = &b
+	}
 	// Unknown optional extensions are preserved by the resolver/digest. They are
 	// neither negotiated host policy nor an authority source. Mandatory ones fail Validate.
 	instructions := d.Behavior.Purpose + "\n\n" + d.Body
+	for _, refs := range [][]agentdef.Ref{d.Behavior.Instructions, d.Behavior.SOPs} {
+		for _, ref := range refs {
+			if verified.ReadResource == nil {
+				return ChatDefinitionConfig{}, fmt.Errorf("%w: instruction resource resolver unavailable", ErrUnsupportedDefinition)
+			}
+			body, err := verified.ReadResource(ctx, ref)
+			if err != nil {
+				return ChatDefinitionConfig{}, err
+			}
+			if agentdef.ArtifactDigest(body) != ref.Digest {
+				return ChatDefinitionConfig{}, ErrDefinitionDigestMismatch
+			}
+			instructions += "\n\n" + string(body)
+		}
+	}
 	if d.Behavior.Completion != "" {
 		instructions += "\n\nCompletion: " + d.Behavior.Completion
 	}
-	return ChatDefinitionConfig{Instructions: instructions, PermissionProfile: p}, nil
+	return ChatDefinitionConfig{Instructions: instructions, PermissionProfile: p, NativePolicy: native, ReflexBundle: bundle}, nil
 }

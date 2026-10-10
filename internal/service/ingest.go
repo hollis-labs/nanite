@@ -32,9 +32,7 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"time"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -70,48 +68,8 @@ import (
 // not-yet-loaded plugin can show up here as a false positive. This is a
 // diagnostic warning, not a hard gate, so that tradeoff is acceptable.
 func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools map[string]bool) int {
-	count := 0
-	considered := 0 // defs actually attempted, excluding nil/empty-slug skips
-	var failures []string
-	var unknownToolRefs []string
-	var hardcodedModels []string
-	for _, def := range defs {
-		if def == nil || def.Slug == "" {
-			continue
-		}
-		considered++
-		if err := upsertAgentDef(st, def); err != nil {
-			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
-			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
-			continue
-		}
-		count++
-		if knownTools != nil {
-			if bad := unknownDeclaredTools(def, knownTools); len(bad) > 0 {
-				slog.Warn("service: agent profile declares unregistered tool name(s) — these will silently never be selectable until fixed",
-					"slug", def.Slug, "unknown_tools", bad)
-				unknownToolRefs = append(unknownToolRefs, fmt.Sprintf("%s: %v", def.Slug, bad))
-			}
-		}
-		if def.Model != "" {
-			slog.Warn("service: agent profile hardcodes a model, opting out of the system default (ResolveProviderAndModel, CW-20260526-0003) — this profile will silently break the day this model ID is retired (see CW-20260815-0021); leave `model:` blank unless there is a deliberate, documented reason to pin it",
-				"slug", def.Slug, "hardcoded_model", def.Model)
-			hardcodedModels = append(hardcodedModels, fmt.Sprintf("%s: %s", def.Slug, def.Model))
-		}
-	}
-	if len(failures) > 0 {
-		slog.Error("service: one or more agent seed definitions failed to ingest into agent_profiles",
-			"failed", len(failures), "considered", considered, "succeeded", count, "discovered", len(defs), "failures", failures)
-	}
-	if len(unknownToolRefs) > 0 {
-		slog.Error("service: one or more agent profiles declare tool names that are not in the registered tool catalog — check for typos or renamed tools",
-			"profiles_affected", len(unknownToolRefs), "details", unknownToolRefs)
-	}
-	if len(hardcodedModels) > 0 {
-		slog.Warn("service: one or more agent profiles hardcode a model ID instead of inheriting the system default — each one is a future instance of CW-20260815-0021 waiting for its pinned model to be retired",
-			"profiles_affected", len(hardcodedModels), "details", hardcodedModels)
-	}
-	return count
+	// Old seed formats are historical inputs, never fresh runtime definitions.
+	return 0
 }
 
 // sourceTransitionSyncs decides whether a boot pass may content-sync an
@@ -178,139 +136,14 @@ func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) 
 // and capability children untouched. A source transition syncs once for
 // historical migrations such as builtin -> internal.
 func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// H1 trust: user/plugin-dropped files are untrusted until promoted.
-	trustTier := "normal"
-	if def.Source == "user" || def.Source == "plugin" {
-		trustTier = "untrusted"
+	retired, err := st.ProfileIngestionRetired(context.Background(), def.ID, def.Slug)
+	if err != nil {
+		return err
 	}
-
-	// ToProfile() maps Definition → store.AgentProfile including all v2 fields.
-	profile := def.ToProfile()
-	// Override fields set by the ingestion layer.
-	profile.Source = def.Source
-	if profile.Source == "" {
-		profile.Source = "user"
+	if retired {
+		return store.ErrProfileIngestionRetired
 	}
-	profile.ImportedAt = now
-	profile.OriginSystem = "nanite"
-	profile.Format = "markdown"
-
-	// Imported definitions may supply an explicit identity. Otherwise resolve
-	// by slug and let CreateAgent mint a UUID for a new seed.
-	var existing *store.AgentProfile
-	if def.ID != "" {
-		if row, err := st.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.ID); err == nil {
-			existing = row
-		}
-	}
-	if existing == nil {
-		if row, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug); err == nil {
-			existing = row
-		}
-	}
-
-	if existing == nil {
-		// Definitions without IDs (def.ID == "", so profile.ID == "" too --
-		// see Definition.ToProfile) get a minted DB UUID here, through the
-		// exact same store.CreateAgent path any other newly created agent
-		// goes through (TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
-		// -- this is the one-time seed for the internal builtin profiles:
-		// no parallel synthetic runtime identity or special-casing).
-		profile.Kind = "internal"
-		profile.CapabilitiesJSON = "[]"
-		profile.LimitsJSON = "{}"
-		if err := st.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
-			return fmt.Errorf("create: %w", err)
-		}
-	} else {
-		// Preserve existing ID, created_at, version counter.
-		profile.ID = existing.ID
-		profile.AgentHash = existing.AgentHash
-		profile.Version = existing.Version
-		profile.Kind = existing.Kind
-		if profile.Kind == "" {
-			profile.Kind = "internal"
-		}
-		if profile.CapabilitiesJSON == "" {
-			profile.CapabilitiesJSON = existing.CapabilitiesJSON
-		}
-		if profile.LimitsJSON == "" {
-			profile.LimitsJSON = existing.LimitsJSON
-		}
-		// role_id / consumer_id / model_id (Phase 1 items 02/03,
-		// architecture/01-agent-construction.md's composition model) have
-		// zero representation in Definition -- def.ToProfile() always returns
-		// their empty zero-value. Without this, a provenance-transition seed
-		// could silently wipe a value set through the composition write path.
-		// Preserve the existing row's values here -- "DB wins" on the write side, same
-		// as the read side (agentServiceImpl.Get/GetBySlug/List just
-		// return the row as-is now; see TASKS/adhoc/01-eliminate-file-
-		// based-agent-runtime.md).
-		// runtime_kind is deliberately NOT included -- unlike these
-		// three, it already self-heals via applyMultiAgentDefaults'
-		// inferRuntimeKind(a.DefaultProvider) whenever a caller leaves it
-		// empty (called inside st.UpdateAgent below), which is the
-		// desired behavior: a provider change on reingest SHOULD
-		// re-derive cli/api classification, not freeze it.
-		profile.RoleID = existing.RoleID
-		profile.ConsumerID = existing.ConsumerID
-		profile.ModelID = existing.ModelID
-		// protocol / transport (TASKS/agent-host-acp/11-nanite-per-agent-
-		// protocol-transport-config.md) are the identical shape: zero
-		// frontmatter representation, written via the direct-DB
-		// store.UpdateAgentACPConfig path (mirroring store.
-		// UpdateAgentComposition above). Without this preservation line, a
-		// later provenance transition could wipe an operator's protocol="acp" configuration
-		// back to "" (native) — same regression this file's RoleID/
-		// ConsumerID/ModelID preservation exists to prevent.
-		profile.Protocol = existing.Protocol
-		profile.Transport = existing.Transport
-		// TASKS/phase-1/08: on a boot-time pass, a row that's already been
-		// ingested under its current source is frozen -- skip the content
-		// sync so a DB-side edit (however it landed) survives the next
-		// restart. sourceChanged (below) carves out the one legitimate
-		// exception: a genuine provenance transition still syncs once.
-		if sourceTransitionSyncs(existing.Source, profile.Source) {
-			if err := st.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, profile); err != nil {
-				return fmt.Errorf("update: %w", err)
-			}
-		}
-	}
-	// freshContent is true when this call actually created the row or (on a
-	// boot pass) just completed a provenance-transition sync -- the two
-	// cases where the secondary seed passes below (procedures, role tools)
-	// should also run. It mirrors the UpdateAgent gate above so a frozen
-	// boot-time reingest doesn't re-stomp a GUI/API customization to either
-	// child table either.
-	freshContent := existing == nil || sourceTransitionSyncs(existing.Source, profile.Source)
-
-	// Apply H1 trust tier. Always reconcile — if an import was promoted to trusted
-	// and then its source changes, a later seed
-	// should not silently leave it trusted. We only override when the tier is
-	// deterministic from Source; workspace overrides (workspace_role_trust) are
-	// not touched — they remain independent per the H1 design.
-	if _, err := st.DB.Exec(
-		`UPDATE agent_profiles SET default_trust_tier = ? WHERE slug = ?`,
-		trustTier, def.Slug,
-	); err != nil {
-		return fmt.Errorf("set trust tier: %w", err)
-	}
-
-	if freshContent && len(def.Procedures) > 0 {
-		row, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug)
-		if err == nil && row != nil {
-			seedProcedures(context.Background(), st, row.ID, def.Procedures)
-		}
-	}
-	if freshContent && len(def.RoleTools) > 0 {
-		row, err := st.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.Slug)
-		if err == nil && row != nil {
-			seedRoleToolsFromIngest(context.Background(), st, row.ID, def.RoleTools)
-		}
-	}
-	return nil
+	return store.ErrImmutableAgentProfile
 }
 
 // seedRoleToolsFromIngest seeds two things from a def's roleTools:

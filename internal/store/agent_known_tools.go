@@ -58,7 +58,7 @@ func insertAgentKnownTool(ctx context.Context, db agentConfigDB, row AgentKnownT
 		ttl = row.TTLSeconds
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO agent_known_tools
+		`INSERT OR REPLACE INTO actor_known_tools
 		    (agent_id, tool_name, pinned, sort_order, activation_count, last_used_at,
 		     added_at, ttl_seconds, reason)
 		 VALUES (?, ?, ?, ?, ?, ?,
@@ -81,7 +81,7 @@ func insertAgentKnownTool(ctx context.Context, db agentConfigDB, row AgentKnownT
 func (s *Store) ListAgentKnownTools(ctx context.Context, agentID string) ([]AgentKnownTool, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentKnownToolColumns+`
-		 FROM agent_known_tools
+		 FROM actor_known_tools
 		 WHERE agent_id = ?
 		 ORDER BY pinned DESC, tool_name ASC`,
 		agentID,
@@ -108,7 +108,7 @@ func (s *Store) GetAgentKnownTool(ctx context.Context, agentID, toolName string)
 	var t AgentKnownTool
 	row := s.DB.QueryRowContext(ctx,
 		`SELECT `+agentKnownToolColumns+`
-		 FROM agent_known_tools
+		 FROM actor_known_tools
 		 WHERE agent_id = ? AND tool_name = ?`,
 		agentID, toolName,
 	)
@@ -125,7 +125,7 @@ func (s *Store) GetAgentKnownTool(ctx context.Context, agentID, toolName string)
 // ErrAgentKnownToolNotFound if no row matched.
 func (s *Store) DeleteAgentKnownTool(ctx context.Context, agentID, toolName string) error {
 	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_known_tools WHERE agent_id = ? AND tool_name = ?`,
+		`DELETE FROM actor_known_tools WHERE agent_id = ? AND tool_name = ?`,
 		agentID, toolName,
 	)
 	if err != nil {

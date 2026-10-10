@@ -77,14 +77,14 @@ func TestChatDefinitionUnsupportedSemantics(t *testing.T) {
 	for _, mutate := range mutations {
 		d := *base.Definition
 		mutate(&d)
-		if _, mapErr := MapChatDefinition(VerifiedDefinition{base.Ref, &d}); !errors.Is(mapErr, ErrUnsupportedDefinition) {
+		if _, mapErr := MapChatDefinition(VerifiedDefinition{Ref: base.Ref, Definition: &d}); !errors.Is(mapErr, ErrUnsupportedDefinition) {
 			t.Fatal("unsupported semantics applied", mapErr)
 		}
 	}
 	d := *base.Definition
 	d.HarnessProfile.Permissions.Profile = "read-only"
 	d.Extensions = map[string]agentdef.Extension{"example.org/optional": {Version: "1", Area: "behavior", Data: map[string]any{"model": "unauthorized", "grant": "write"}}}
-	cfg, err := MapChatDefinition(VerifiedDefinition{base.Ref, &d})
+	cfg, err := MapChatDefinition(VerifiedDefinition{Ref: base.Ref, Definition: &d})
 	if err != nil || cfg.Model != (ModelSelection{}) || cfg.PermissionProfile != "read-only" {
 		t.Fatal(cfg, err)
 	}
@@ -155,7 +155,7 @@ func TestNativeDefinitionPermissionPostureNarrowsHostYolo(t *testing.T) {
 	}
 	base.Ref.SemanticDigest = digest
 	v := &CognitiveViews{Store: f.st, Resolver: definitionResolverFunc(func(context.Context, DefinitionRef) (VerifiedDefinition, error) {
-		return VerifiedDefinition{base.Ref, &d}, nil
+		return VerifiedDefinition{Ref: base.Ref, Definition: &d}, nil
 	}), Models: ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
 		return ModelSelection{"characterization", "characterization-model"}, nil
 	})}

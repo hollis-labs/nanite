@@ -108,51 +108,25 @@ func TestSelfToolsTransport_ListSkills(t *testing.T) {
 	}
 }
 
-// TestSelfToolsTransport_CreateAgent tests agent creation round-trip.
+// TestSelfToolsTransport_CreateAgent verifies typed retirement before input or store effects.
 func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	st := newSelfTools(t)
-	ctx := context.Background()
-
-	result, err := st.CallTool(ctx, "agent_create", map[string]any{
-		"name":          "Test Agent",
-		"slug":          "test-agent",
-		"system_prompt": "You are a helpful test agent.",
-		"description":   "For testing purposes",
-		"default_model": "claude-3-haiku",
-	})
-	if err != nil {
-		t.Fatal(err)
+	db := fixtureStore(st)
+	retainedSelfToolProfile(t, db, "old-create-control", "user")
+	before := retainedSelfToolState(t, db)
+	for _, args := range []map[string]any{
+		{"name": "Test Agent", "slug": "test-agent", "system_prompt": "You are a helpful test agent.", "default_model": "claude-3-haiku"},
+		{},
+		{"slug": "../escape", "source": "internal", "role_id": "claimed-role"},
+	} {
+		assertRetiredSelfTool(t, st, "agent_create", args)
+		assertRetainedSelfToolState(t, db, before)
 	}
-	if result.IsError {
-		t.Fatalf("unexpected error: %s", result.Content[0].Text)
-	}
-	if !strings.Contains(result.Content[0].Text, "Created agent") {
-		t.Errorf("expected creation confirmation, got: %s", result.Content[0].Text)
-	}
-
-	_, createdJSON, ok := strings.Cut(result.Content[0].Text, "\n")
-	var created map[string]any
-	if !ok || json.Unmarshal([]byte(createdJSON), &created) != nil {
-		t.Fatalf("agent_create JSON missing: %s", result.Content[0].Text)
-	}
-	if created["name"] != "Test Agent" || created["slug"] != "test-agent" || created["system_prompt"] != "You are a helpful test agent." || created["default_model"] != "claude-3-haiku" || (created["id"] == nil || created["id"] == "") {
-		t.Fatalf("agent_create wire attributes: %#v", created)
-	}
-
-	// List agents and verify.
-	listResult, err := st.CallTool(ctx, "agent_list", map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if listResult.IsError {
-		t.Fatalf("unexpected error: %s", listResult.Content[0].Text)
-	}
-	if !strings.Contains(listResult.Content[0].Text, "Test Agent") {
-		t.Errorf("expected agent in list, got: %s", listResult.Content[0].Text)
-	}
-	if !strings.Contains(listResult.Content[0].Text, "test-agent") {
-		t.Errorf("expected slug in list, got: %s", listResult.Content[0].Text)
-	}
+	// A missing store/classifier cannot cause fall-through into old CRUD.
+	st.AgentProfileTools = &AgentProfileTools{}
+	assertRetiredSelfTool(t, st, "agent_create", nil)
+	assertRetiredSelfTool(t, st, "agent_update", map[string]any{"id": "claimed"})
+	assertRetainedSelfToolState(t, db, before)
 }
 
 // TASKS/skills/01: TestSelfToolsTransport_CreateSkill_MissingFields (the

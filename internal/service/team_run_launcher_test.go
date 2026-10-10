@@ -1,408 +1,194 @@
 package service
 
-// TASKS/teams/08-team-run-launcher.md's own regression coverage.
-//
-// Live-verification safety (EXECUTION-PROCESS.md, this task file's own
-// "Done means"): every test below constructs synthetic, fixture-only Roles
-// and AgentProfiles via the real store API against a t.TempDir()-rooted
-// SQLite database (newTestWorkflowStore, already used across this whole
-// batch's other test files) — never a real tracked .nanite/agents/*.md
-// file (no test here ever touches the filesystem at all beyond that
-// scratch DB) and never a real production durable_agent_instances row
-// (every DurableAgentInstance here is created fresh, in-memory-DB, by
-// this file's own test setup).
-
 import (
 	"context"
 	"errors"
-	"strings"
+	"reflect"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/workflowhost"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
-
-// --- fixtures ---
-
-// newTeamRunLauncherTestFixtures wires a real (t.TempDir()-scoped)
-// *store.Store, a fresh *agentworkflow.Registry, a real shared workflow host,
-// a real WorkflowLauncher, and the TeamRunLauncher under test — the same
-// dependency shape production wiring uses, with only the Team signal boundary
-// represented by a local test host and no mocks below the
-// fakeStepExecutor (which is never actually called by any test here: the
-// SME example's phase sequence has no llm/tool steps, only flex/gate).
-type unresolvedTeamStepHost struct{}
-
-func (unresolvedTeamStepHost) ResolveWorkflowTeamStep(context.Context, workflowhost.TeamStepResolveRequest) (workflowhost.TeamStepResolveResult, error) {
-	return workflowhost.TeamStepResolveResult{}, nil
-}
 
 func newTeamRunLauncherTestFixtures(t *testing.T) (*store.Store, *agentworkflow.Registry, *TeamRunLauncher) {
 	t.Helper()
-	st := newTestWorkflowStore(t)
+	st := newDurableAgentServiceTestStore(t)
 	registry := agentworkflow.NewRegistry(nil)
-	state, err := workflowhost.NewWorkflowStateStore(st)
-	if err != nil {
-		t.Fatalf("NewWorkflowStateStore: %v", err)
-	}
-	engine, err := workflowhost.NewEngine(state)
-	if err != nil {
-		t.Fatalf("workflowhost.NewEngine: %v", err)
-	}
-	engine.WithTeamStepHost(unresolvedTeamStepHost{})
 	durable := NewDurableAgentService(st)
-	wl := NewWorkflowLauncher(registry, engine, &fakeStepExecutor{}, durable)
-	trl := NewTeamRunLauncher(st, wl, durable)
-	return st, registry, trl
+	return st, registry, NewTeamRunLauncher(st, NewWorkflowLauncher(registry, &a2aLaunchRecordingHost{}, &fakeStepExecutor{}, durable), durable)
 }
 
-// createTestRoleBoundAgent creates a Role (roleSlug) and one AgentProfile
-// bound to it via role_id — the concrete Agent a "resolution: fresh" Team
-// Slot's RoleSlug resolves against (ListAgentsByRoleID, this task's own
-// small store addition). Both rows are synthetic fixtures in the test's
-// own scratch DB — no source_ref set, so this never touches any real
-// tracked agent file.
-func createTestRoleBoundAgent(t *testing.T, st *store.Store, roleSlug string) *store.AgentProfile {
-	t.Helper()
-	role := &store.Role{
-		Slug:            roleSlug,
-		Name:            roleSlug,
-		SystemPrompt:    "you are the " + roleSlug + " role",
-		DefaultProvider: "anthropic",
-		DefaultModel:    "claude-test-model",
-	}
-	if err := st.CreateRole(context.Background(), role); err != nil {
-		t.Fatalf("CreateRole(%s): %v", roleSlug, err)
-	}
-	profile := &store.AgentProfile{
-		Name:            roleSlug + " agent",
-		Slug:            roleSlug + "-agent-" + role.ID[:8],
-		SystemPrompt:    "you are a " + roleSlug + " agent",
-		DefaultProvider: "anthropic",
-		DefaultModel:    "claude-test-model",
-		RoleID:          role.ID,
-	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent(%s): %v", roleSlug, err)
-	}
-	return profile
+// Retained records are inserted directly into a private database. Existing
+// actor bindings are separately simulated as previously host-authorized;
+// neither set is enrollment input for the team launcher.
+type heldTeamFixture struct {
+	team       *store.Team
+	historical *store.AgentProfile
+	actor      *store.AgentProfile
+	runID      string
+	hostID     string
 }
 
-// createTestDurableCandidateAgent creates a plain, standalone AgentProfile
-// with no role_id — the profile a "resolution: durable" Team Slot's
-// AgentID names. Deliberately does NOT set Durable=true or a
-// "durable-agent" tag — this task's own corrected-semantics finding is
-// that resolveDurableMember must work regardless of that unrelated flag.
-func createTestDurableCandidateAgent(t *testing.T, st *store.Store, slug string) *store.AgentProfile {
+func newHeldTeamFixture(t *testing.T, st *store.Store) heldTeamFixture {
 	t.Helper()
-	profile := &store.AgentProfile{
-		Name:         slug + " agent",
-		Slug:         slug,
-		SystemPrompt: "you are " + slug,
+	ctx := t.Context()
+	historical := &store.AgentProfile{ID: "retained-team-profile", Name: "Retained team profile", Slug: "retained-team-profile", SystemPrompt: "Private retained instructions"}
+	if err := storetest.HistoricalProfile(ctx, st, historical); err != nil {
+		t.Fatal(err)
 	}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent(%s): %v", slug, err)
+	actor := &store.AgentProfile{Name: "Prior team actor", Slug: "prior-team-actor", SystemPrompt: "Private immutable instructions"}
+	if err := persistTestActor(ctx, st, actor); err != nil {
+		t.Fatal(err)
 	}
-	return profile
-}
-
-// buildSMETeam creates a Team matching docs/engineering/architecture/
-// 15-teams.md's Feature Development SME example verbatim: four Team Slots
-// (architect: durable/dormant, orchestrator: fresh/required,
-// engineer: fresh/concurrent min:1 max:4, reviewer: fresh/required), the
-// same four-phase sequence (scope_work flex -> review_gate gate ->
-// address_feedback flex -> merge_gate gate), and the SME's own literal
-// authority grant (orchestrator.may_spawn: [engineer, reviewer]) — note
-// this grant does NOT name "architect": the design doc's own illustrative
-// authority list only ever authorizes engineer/reviewer, consistent with
-// this task's own reading that resolving/waking architect is a message-
-// authority (may_message, task 09) concern, not a may_spawn one — see
-// TestResolveLazySlot_* below, which uses its own separate fixture with an
-// explicit may_spawn grant for its own dormant slot instead of assuming
-// this one covers it.
-func buildSMETeam(t *testing.T, st *store.Store, architectProfileID string) *store.Team {
-	t.Helper()
-	ctx := context.Background()
-
-	arch := architectProfileID
-	slots := []store.TeamSlotDefinition{
-		{Name: "architect", RoleSlug: "architecture-sme", Resolution: "durable", AgentID: &arch, ActivationMode: "singleton", Required: false},
-		{Name: "orchestrator", RoleSlug: "orchestrator", Resolution: "fresh", ActivationMode: "singleton", Required: true},
-		{Name: "engineer", RoleSlug: "engineer", Resolution: "fresh", ActivationMode: "concurrent", Min: 1, Max: 4, Required: false},
-		{Name: "reviewer", RoleSlug: "code-reviewer", Resolution: "fresh", ActivationMode: "singleton", Required: true},
+	var hostID string
+	if err := st.DB.QueryRowContext(ctx, `SELECT host_settings_id FROM agent_actor_bindings WHERE actor_uri=?`, actor.ID).Scan(&hostID); err != nil {
+		t.Fatal(err)
 	}
-	phases := []store.TeamPhase{
-		{ID: "scope_work", Kind: "flex", ActiveSlots: []string{"orchestrator", "engineer", "architect"}, ExitTrigger: map[string]any{"self_tool": "mark_ready_for_review"}},
-		{ID: "review_gate", Kind: "gate", ApproverSlot: "reviewer"},
-		{ID: "address_feedback", Kind: "flex", ActiveSlots: []string{"engineer", "reviewer", "architect"}, ExitTrigger: map[string]any{"event": "review_approved"}},
-		{ID: "merge_gate", Kind: "gate", ApproverSlot: "operator"},
-	}
-
-	team := &store.Team{Name: "Feature Development"}
-	if err := team.SetSlots(slots); err != nil {
-		t.Fatalf("SetSlots: %v", err)
-	}
-	if err := team.SetPhases(phases); err != nil {
-		t.Fatalf("SetPhases: %v", err)
+	team := &store.Team{Name: "Retained team", RoutingJSON: `{"coordinator_slot":"lead","rules":[{"name":"review","target_slot":"worker","phrases":["review"]}]}`}
+	if err := team.SetSlots([]store.TeamSlotDefinition{
+		{Name: "lead", Resolution: "durable", AgentID: &actor.ID, Required: true},
+		{Name: "worker", Resolution: "fresh", RoleSlug: "retained-team-role", Required: false},
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := st.CreateTeam(ctx, team); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+		t.Fatal(err)
 	}
-
-	if _, err := st.CreateTeamAuthorityGrant(ctx, store.TeamAuthorityGrant{
-		TeamID: team.ID, FromSlot: "orchestrator", Verb: store.TeamAuthorityVerbMaySpawn, ToSlot: "engineer",
-	}); err != nil {
-		t.Fatalf("CreateTeamAuthorityGrant(engineer): %v", err)
+	if _, err := st.CreateTeamAuthorityGrant(ctx, store.TeamAuthorityGrant{TeamID: team.ID, FromSlot: "lead", Verb: store.TeamAuthorityVerbMaySpawn, ToSlot: "worker"}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := st.CreateTeamAuthorityGrant(ctx, store.TeamAuthorityGrant{
-		TeamID: team.ID, FromSlot: "orchestrator", Verb: store.TeamAuthorityVerbMaySpawn, ToSlot: "reviewer",
-	}); err != nil {
-		t.Fatalf("CreateTeamAuthorityGrant(reviewer): %v", err)
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO roles(id,name,slug,system_prompt,created_at,updated_at) VALUES('retained-team-role','Retained role','retained-team-role','Private retained role instructions','2026-10-09','2026-10-09')`, nil},
+		{`UPDATE agent_profiles SET role_id='retained-team-role' WHERE id=?`, []any{historical.ID}},
+		{`INSERT INTO workflow_runs(id,definition_name,status,input_json,started_at) VALUES('retained-team-run','retained-team','completed','{"retained":true}','2026-10-09T00:00:00Z')`, nil},
+		{`INSERT INTO sessions(id,short_code,title) VALUES('retained-team-session','TMHIST','Retained session')`, nil},
+		{`INSERT INTO sessions(id,short_code,title) VALUES('prior-team-session','TMPRIOR','Prior authorized session')`, nil},
+		{`INSERT INTO team_run_members(id,workflow_run_id,slot_name,agent_id,session_id) VALUES('retained-team-member','retained-team-run','lead',?,'retained-team-session')`, []any{historical.ID}},
+		{`INSERT INTO actor_team_run_members(id,workflow_run_id,slot_name,agent_id,session_id) VALUES('prior-team-member','retained-team-run','lead',?,'prior-team-session')`, []any{actor.ID}},
+		{`INSERT INTO team_run_launches(idempotency_key,team_id,request_digest,planning_json,workflow_run_id,status,created_at,updated_at) VALUES('retained-launch',?,'retained-digest','{"private_plan":true}','retained-team-run','members_ready','2026-10-09','2026-10-09')`, []any{team.ID}},
+		{`INSERT INTO team_run_launches(idempotency_key,team_id,request_digest,planning_json,status,created_at,updated_at) VALUES('retained-prepared',?,'retained-prepared-digest','{"private_plan":true}','prepared','2026-10-09','2026-10-09')`, []any{team.ID}},
+		{`INSERT INTO team_run_member_intents(idempotency_key,ordinal,member_id,team_id,slot_name,agent_id,session_id,provisioning_kind,status,created_at,updated_at) VALUES('retained-prepared',0,'retained-intent',?,'worker',?,'retained-intent-session','fresh','planned','2026-10-09','2026-10-09')`, []any{team.ID, historical.ID}},
+		{`INSERT INTO team_signal_resolutions(workflow_run_id,step_id,responder_reference,output,member_ids_json,status,created_at,updated_at) VALUES('retained-team-run','private-step','retained-responder','Private retained output','["retained-team-member"]','prepared','2026-10-09','2026-10-09')`, nil},
 	}
-	return team
+	for _, statement := range statements {
+		if _, err := st.DB.ExecContext(ctx, statement.sql, statement.args...); err != nil {
+			t.Fatalf("private retained fixture: %v", err)
+		}
+	}
+	inst := &store.DurableAgentInstance{ID: "prior-team-instance", Name: "Prior team instance", Slug: "prior-team-instance", ProfileID: actor.ID, Status: store.DurableAgentStatusSleeping}
+	if err := persistTestDurableInstance(ctx, st, inst); err != nil {
+		t.Fatal(err)
+	}
+	return heldTeamFixture{team: team, historical: historical, actor: actor, runID: "retained-team-run", hostID: hostID}
 }
 
-// --- tests ---
+func heldTeamSnapshot(t *testing.T, st *store.Store) map[string][][]any {
+	t.Helper()
+	out := retainedDispatchSnapshot(t, st)
+	for _, query := range []string{
+		`SELECT * FROM roles ORDER BY id`, `SELECT * FROM teams ORDER BY id`, `SELECT * FROM team_authority_grants ORDER BY id`,
+		`SELECT * FROM team_run_launches ORDER BY idempotency_key`, `SELECT * FROM team_run_member_intents ORDER BY idempotency_key,ordinal`,
+		`SELECT * FROM actor_team_run_member_intents ORDER BY idempotency_key,ordinal`, `SELECT * FROM team_signal_resolutions ORDER BY workflow_run_id,step_id`,
+		`SELECT * FROM workflow_runs ORDER BY id`, `SELECT * FROM workflow_run_steps ORDER BY id`,
+		`SELECT * FROM sessions ORDER BY id`, `SELECT * FROM session_agents ORDER BY session_id,agent_id`,
+		`SELECT * FROM agent_messages ORDER BY id`, `SELECT * FROM event_log ORDER BY id`,
+	} {
+		out[query] = immutableConfigSnapshot(t, st, query)
+	}
+	return out
+}
 
-// TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting is this task's
-// "Done means" end-to-end requirement: launching the SME example Team
-// produces a real workflow_runs row, correct team_run_members rows for
-// every resolved slot, and reaches the first flex step in a waiting
-// state.
-func TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting(t *testing.T) {
-	st, registry, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	createTestRoleBoundAgent(t, st, "orchestrator")
-	createTestRoleBoundAgent(t, st, "engineer")
-	createTestRoleBoundAgent(t, st, "code-reviewer")
-	architect := createTestDurableCandidateAgent(t, st, "nanite-architect")
-
-	team := buildSMETeam(t, st, architect.ID)
-
-	result, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{})
-	if err != nil {
-		t.Fatalf("LaunchTeamRun: %v", err)
-	}
-	if result.RunID == "" {
-		t.Fatal("result.RunID is empty")
-	}
-	if result.Status != agentworkflow.RunStatusWaitingOnFlex {
-		t.Fatalf("Status = %q, want %q (error=%s)", result.Status, agentworkflow.RunStatusWaitingOnFlex, result.Error)
-	}
-	if names := registry.Names(); len(names) != 0 {
-		t.Fatalf("generated team definition leaked into mutable registry: %v", names)
-	}
-
-	// A real workflow_runs row exists.
-	run, err := st.GetWorkflowRun(context.Background(), result.RunID)
-	if err != nil {
-		t.Fatalf("GetWorkflowRun: %v", err)
-	}
-	if run.Status != string(agentworkflow.RunStatusWaitingOnFlex) {
-		t.Fatalf("persisted run status = %q, want %q", run.Status, agentworkflow.RunStatusWaitingOnFlex)
-	}
-
-	// The first phase (scope_work) is a real, persisted waiting_on_flex
-	// step.
-	steps, err := st.ListWorkflowRunSteps(context.Background(), result.RunID)
-	if err != nil {
-		t.Fatalf("ListWorkflowRunSteps: %v", err)
-	}
-	var scopeWork *store.WorkflowRunStepRow
-	for _, s := range steps {
-		if s.StepID == "scope_work" {
-			scopeWork = s
-		}
-	}
-	if scopeWork == nil {
-		t.Fatal("no scope_work step persisted")
-	}
-	if scopeWork.Status != "waiting_on_flex" {
-		t.Fatalf("scope_work status = %q, want waiting_on_flex", scopeWork.Status)
-	}
-
-	// Correct team_run_members rows for every resolved slot: orchestrator
-	// (required), engineer (elastic, min-eager, 1 member), reviewer
-	// (required) — architect (dormant, required:false, min:0) is NOT
-	// resolved.
-	members, err := st.ListTeamRunMembersByRun(ctx, result.RunID)
-	if err != nil {
-		t.Fatalf("ListTeamRunMembersByRun: %v", err)
-	}
-	bySlot := map[string][]store.TeamRunMember{}
-	for _, m := range members {
-		bySlot[m.SlotName] = append(bySlot[m.SlotName], m)
-	}
-	if len(bySlot["orchestrator"]) != 1 {
-		t.Fatalf("orchestrator members = %d, want 1", len(bySlot["orchestrator"]))
-	}
-	if len(bySlot["engineer"]) != 1 {
-		t.Fatalf("engineer members = %d, want 1 (min-eager)", len(bySlot["engineer"]))
-	}
-	if len(bySlot["reviewer"]) != 1 {
-		t.Fatalf("reviewer members = %d, want 1", len(bySlot["reviewer"]))
-	}
-	if len(bySlot["architect"]) != 0 {
-		t.Fatalf("architect members = %d, want 0 (lazy/dormant, never resolved at launch)", len(bySlot["architect"]))
-	}
-	for slot, ms := range bySlot {
-		for _, m := range ms {
-			if m.AgentID == "" || m.SessionID == "" {
-				t.Fatalf("slot %q member has empty agent_id/session_id: %+v", slot, m)
-			}
-			if m.WorkflowRunID != result.RunID {
-				t.Fatalf("slot %q member workflow_run_id = %q, want %q", slot, m.WorkflowRunID, result.RunID)
-			}
-			if m.Status != store.TeamRunMemberStatusActive {
-				t.Fatalf("slot %q member status = %q, want active", slot, m.Status)
-			}
-		}
+func assertHeldTeamUnchanged(t *testing.T, st *store.Store, before map[string][][]any) {
+	t.Helper()
+	if after := heldTeamSnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatal("held team operation changed retained history, planning, messages, sessions, grants, or runtime state")
 	}
 }
 
-// TestLaunchTeamRun_ConcurrentSlot_MinEagerMultiMemberResolution covers
-// this task's other required "Done means" test: min-eager multi-member
-// resolution for a concurrent slot, plus an invocation-time override count
-// between min and max.
-func TestLaunchTeamRun_ConcurrentSlot_MinEagerMultiMemberResolution(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	createTestRoleBoundAgent(t, st, "orchestrator")
-	createTestRoleBoundAgent(t, st, "engineer")
-	createTestRoleBoundAgent(t, st, "code-reviewer")
-	architect := createTestDurableCandidateAgent(t, st, "nanite-architect")
-	team := buildSMETeam(t, st, architect.ID)
-
-	t.Run("default resolves slot.Min eagerly", func(t *testing.T) {
-		result, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{})
-		if err != nil {
-			t.Fatalf("LaunchTeamRun: %v", err)
-		}
-		members, err := st.ListTeamRunMembersBySlot(ctx, result.RunID, "engineer")
-		if err != nil {
-			t.Fatalf("ListTeamRunMembersBySlot: %v", err)
-		}
-		if len(members) != 1 {
-			t.Fatalf("engineer members = %d, want 1 (slot.Min default)", len(members))
-		}
-	})
-
-	t.Run("override count between min and max resolves that many distinct sessions on the same agent", func(t *testing.T) {
-		result, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{
-			SlotMemberCounts: map[string]int{"engineer": 3},
+func TestHeldTeamLaunchRefusesBeforePlanningOrRetryEffects(t *testing.T) {
+	st, _, launcher := newTeamRunLauncherTestFixtures(t)
+	f := newHeldTeamFixture(t, st)
+	host := &a2aLaunchRecordingHost{}
+	runtime := &fakeDurableRuntimeController{}
+	durable := NewDurableAgentServiceWithRuntime(st, runtime)
+	launcher.launcher = NewWorkflowLauncher(agentworkflow.NewRegistry(nil), host, &fakeStepExecutor{}, durable)
+	launcher.durable = durable
+	before := heldTeamSnapshot(t, st)
+	for _, tc := range []struct{ name, team, key, identity string }{
+		{"new", f.team.ID, "new-key", f.actor.ID},
+		{"retained retry", f.team.ID, "retained-launch", f.historical.ID},
+		{"prepared recovery", f.team.ID, "retained-prepared", f.actor.ID},
+		{"host UUID", f.team.ID, "new-host-key", f.hostID},
+		{"missing team", "missing-team", "new-missing-key", f.actor.ID},
+		{"empty request", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := launcher.LaunchTeamRun(t.Context(), tc.team, TeamRunOverrides{IdempotencyKey: tc.key, AgentProfileID: tc.identity, Params: map[string]any{"changed": true}, SlotMemberCounts: map[string]int{"worker": 2}})
+			if result != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+				t.Fatalf("launch=%+v,%v; want nil, ErrVerifiedActorRequired", result, err)
+			}
+			assertHeldTeamUnchanged(t, st, before)
 		})
-		if err != nil {
-			t.Fatalf("LaunchTeamRun: %v", err)
-		}
-		members, err := st.ListTeamRunMembersBySlot(ctx, result.RunID, "engineer")
-		if err != nil {
-			t.Fatalf("ListTeamRunMembersBySlot: %v", err)
-		}
-		if len(members) != 3 {
-			t.Fatalf("engineer members = %d, want 3", len(members))
-		}
-		seenSessions := map[string]bool{}
-		agentID := ""
-		for _, m := range members {
-			if agentID == "" {
-				agentID = m.AgentID
-			}
-			if m.AgentID != agentID {
-				t.Fatalf("concurrent members resolved to different agent_ids: %q vs %q — a concurrent fresh slot should reuse the same resolved Agent across members", m.AgentID, agentID)
-			}
-			if seenSessions[m.SessionID] {
-				t.Fatalf("duplicate session_id %q across concurrent engineer members", m.SessionID)
-			}
-			seenSessions[m.SessionID] = true
-		}
-	})
-
-	t.Run("override count above max is rejected", func(t *testing.T) {
-		_, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{
-			SlotMemberCounts: map[string]int{"engineer": 5},
-		})
-		if err == nil || !strings.Contains(err.Error(), "exceeds the slot's own max") {
-			t.Fatalf("err = %v, want max-exceeded rejection", err)
-		}
-	})
-
-	t.Run("override count below min is rejected", func(t *testing.T) {
-		_, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{
-			SlotMemberCounts: map[string]int{"engineer": 0},
-		})
-		if err == nil || !strings.Contains(err.Error(), "below the slot's own min") {
-			t.Fatalf("err = %v, want min-violation rejection", err)
-		}
-	})
-}
-
-// TestLaunchTeamRun_ElasticSlotWithoutAuthorityGrant_Rejected is this
-// task's required may_spawn-enforcement test: an unauthorized elastic
-// resolution attempt is rejected, not silently skipped or silently
-// allowed.
-func TestLaunchTeamRun_ElasticSlotWithoutAuthorityGrant_Rejected(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	createTestRoleBoundAgent(t, st, "orchestrator")
-	createTestRoleBoundAgent(t, st, "engineer")
-	createTestRoleBoundAgent(t, st, "code-reviewer")
-	architect := createTestDurableCandidateAgent(t, st, "nanite-architect")
-
-	// Same team shape as buildSMETeam, but with NO authority grants at
-	// all — engineer (elastic, min:1) has nothing authorizing its launch-
-	// time eager resolution.
-	arch := architect.ID
-	slots := []store.TeamSlotDefinition{
-		{Name: "architect", RoleSlug: "architecture-sme", Resolution: "durable", AgentID: &arch, Required: false},
-		{Name: "orchestrator", RoleSlug: "orchestrator", Resolution: "fresh", ActivationMode: "singleton", Required: true},
-		{Name: "engineer", RoleSlug: "engineer", Resolution: "fresh", ActivationMode: "concurrent", Min: 1, Max: 4, Required: false},
-		{Name: "reviewer", RoleSlug: "code-reviewer", Resolution: "fresh", ActivationMode: "singleton", Required: true},
 	}
-	phases := []store.TeamPhase{
-		{ID: "scope_work", Kind: "flex", ActiveSlots: []string{"orchestrator", "engineer"}, ExitTrigger: map[string]any{"event": "done"}},
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if result, err := launcher.LaunchTeamRun(ctx, f.team.ID, TeamRunOverrides{IdempotencyKey: "canceled-key"}); result != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("canceled launch=%+v,%v", result, err)
 	}
-	team := &store.Team{Name: "Ungoverned Team"}
-	if err := team.SetSlots(slots); err != nil {
-		t.Fatalf("SetSlots: %v", err)
-	}
-	if err := team.SetPhases(phases); err != nil {
-		t.Fatalf("SetPhases: %v", err)
-	}
-	if err := st.CreateTeam(ctx, team); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
-	}
-
-	_, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{})
-	if err == nil {
-		t.Fatal("LaunchTeamRun succeeded, want rejection for unauthorized elastic slot")
-	}
-	if !errors.Is(err, ErrTeamRunElasticResolutionUnauthorized) {
-		t.Fatalf("err = %v, want wrapping ErrTeamRunElasticResolutionUnauthorized", err)
-	}
-
-	// No side effects: no run was ever launched, so there is nothing to
-	// find a team_run_members row against — reject-before-resolve, not
-	// resolve-then-rollback. The authority pre-check runs to completion
-	// (planEagerResolution) before Step 1 of LaunchTeamRun ever resolves a
-	// single member, so not even the required orchestrator/reviewer slots
-	// should have created a session.
-	var sessionCount int
-	if err := st.DB.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&sessionCount); err != nil {
-		t.Fatalf("count sessions: %v", err)
-	}
-	if sessionCount != 0 {
-		t.Fatalf("expected zero sessions created before the authorization check failed, got %d", sessionCount)
+	assertHeldTeamUnchanged(t, st, before)
+	if len(host.calls)+len(runtime.stopped)+len(runtime.recovered)+len(runtime.sent) != 0 {
+		t.Fatal("held launch invoked workflow or runtime")
 	}
 }
 
-// TestAuthorizedForElasticResolution_FailsClosed exercises
-// authorizedForElasticResolution directly (unit-level, not through the
-// full LaunchTeamRun path): no grant at all, and a grant for a different
-// verb/target, both fail closed.
+func TestHeldTeamLazyResolutionRefusesWithoutMemberIntent(t *testing.T) {
+	st, _, launcher := newTeamRunLauncherTestFixtures(t)
+	f := newHeldTeamFixture(t, st)
+	before := heldTeamSnapshot(t, st)
+	for _, slot := range []string{"worker", "lead", "missing", ""} {
+		members, err := launcher.ResolveLazySlot(t.Context(), f.runID, f.team.ID, slot, TeamRunOverrides{IdempotencyKey: "retained-prepared"})
+		if members != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("lazy %q=%+v,%v", slot, members, err)
+		}
+		assertHeldTeamUnchanged(t, st, before)
+	}
+	// The public cut precedes even dependency and identifier lookups.
+	empty := NewTeamRunLauncher(nil, nil, nil)
+	if result, err := empty.LaunchTeamRun(t.Context(), "", TeamRunOverrides{}); result != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("unconfigured launch=%+v,%v", result, err)
+	}
+	if result, err := empty.ResolveLazySlot(t.Context(), "", "", "", TeamRunOverrides{}); result != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("unconfigured lazy=%+v,%v", result, err)
+	}
+}
+
+func TestHeldTeamIdentityReadRequiresExistingVerifiedActor(t *testing.T) {
+	st, _, launcher := newTeamRunLauncherTestFixtures(t)
+	f := newHeldTeamFixture(t, st)
+	before := heldTeamSnapshot(t, st)
+	slot := store.TeamSlotDefinition{Name: "lead", Resolution: "durable", AgentID: &f.actor.ID}
+	id, err := launcher.resolveSlotAgentIdentity(t.Context(), slot)
+	if err != nil || id != f.actor.ID {
+		t.Fatalf("existing actor identity=%q,%v", id, err)
+	}
+	for _, id := range []string{f.historical.ID, f.hostID, f.actor.Slug, "missing"} {
+		slot.AgentID = &id
+		resolved, err := launcher.resolveSlotAgentIdentity(t.Context(), slot)
+		if resolved != "" || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("unverified %q=%q,%v", id, resolved, err)
+		}
+	}
+	slot = store.TeamSlotDefinition{Name: "worker", Resolution: "fresh", RoleSlug: "retained-team-role"}
+	if resolved, err := launcher.resolveSlotAgentIdentity(t.Context(), slot); resolved != "" || !errors.Is(err, store.ErrImmutableAgentProfile) {
+		t.Fatalf("historical role resolution=%q,%v", resolved, err)
+	}
+	assertHeldTeamUnchanged(t, st, before)
+}
+
 func TestAuthorizedForElasticResolution_FailsClosed(t *testing.T) {
 	st, _, trl := newTeamRunLauncherTestFixtures(t)
 	ctx := context.Background()
@@ -423,7 +209,7 @@ func TestAuthorizedForElasticResolution_FailsClosed(t *testing.T) {
 		t.Fatal("expected false with zero grants, got true")
 	}
 
-	if _, err := st.CreateTeamAuthorityGrant(ctx, store.TeamAuthorityGrant{
+	if _, err = st.CreateTeamAuthorityGrant(ctx, store.TeamAuthorityGrant{
 		TeamID: team.ID, FromSlot: "lead", Verb: store.TeamAuthorityVerbMayMessage, ToSlot: "worker",
 	}); err != nil {
 		t.Fatalf("CreateTeamAuthorityGrant: %v", err)
@@ -437,217 +223,25 @@ func TestAuthorizedForElasticResolution_FailsClosed(t *testing.T) {
 	}
 }
 
-// TestResolveLazySlot_ResolvesDormantSlotAndIsIdempotent is this task's
-// documented lazy-resolution mechanism, exercised directly: a
-// required:false, min:0 ("normally dormant") Team Slot is not resolved by
-// LaunchTeamRun at all, and ResolveLazySlot resolves it on demand,
-// idempotently.
-//
-// Uses its own minimal fixture (not buildSMETeam's literal authority set)
-// with an explicit may_spawn grant naming the dormant slot — the SME
-// example's own illustrative authority list (orchestrator.may_spawn:
-// [engineer, reviewer]) never names "architect" at all, which this test's
-// sibling (TestLaunchTeamRun_SMEExample_ReachesFirstFlexStepWaiting)
-// deliberately does not attempt to lazily-wake, precisely because it
-// wouldn't be authorized under buildSMETeam's own grants — a real,
-// documented finding (see buildSMETeam's own doc comment), not test
-// rigging.
-func TestResolveLazySlot_ResolvesDormantSlotAndIsIdempotent(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	createTestRoleBoundAgent(t, st, "lead")
-	architect := createTestDurableCandidateAgent(t, st, "architect")
-
-	arch := architect.ID
-	slots := []store.TeamSlotDefinition{
-		{Name: "lead", RoleSlug: "lead", Resolution: "fresh", ActivationMode: "singleton", Required: true},
-		{Name: "architect", RoleSlug: "architecture-sme", Resolution: "durable", AgentID: &arch, Required: false},
-	}
-	phases := []store.TeamPhase{
-		{ID: "work", Kind: "flex", ActiveSlots: []string{"lead"}, ExitTrigger: map[string]any{"event": "done"}},
-	}
-	team := &store.Team{Name: "Lazy Wake Team"}
-	if err := team.SetSlots(slots); err != nil {
-		t.Fatalf("SetSlots: %v", err)
-	}
-	if err := team.SetPhases(phases); err != nil {
-		t.Fatalf("SetPhases: %v", err)
-	}
-	if err := st.CreateTeam(ctx, team); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
-	}
-	if _, err := st.CreateTeamAuthorityGrant(ctx, store.TeamAuthorityGrant{
-		TeamID: team.ID, FromSlot: "lead", Verb: store.TeamAuthorityVerbMaySpawn, ToSlot: "architect",
-	}); err != nil {
-		t.Fatalf("CreateTeamAuthorityGrant: %v", err)
-	}
-
-	result, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{})
-	if err != nil {
-		t.Fatalf("LaunchTeamRun: %v", err)
-	}
-
-	// Confirm the dormant slot was NOT resolved at launch.
-	before, err := st.ListTeamRunMembersBySlot(ctx, result.RunID, "architect")
-	if err != nil {
-		t.Fatalf("ListTeamRunMembersBySlot (before): %v", err)
-	}
-	if len(before) != 0 {
-		t.Fatalf("architect members before ResolveLazySlot = %d, want 0", len(before))
-	}
-
-	first, err := trl.ResolveLazySlot(ctx, result.RunID, team.ID, "architect", TeamRunOverrides{})
-	if err != nil {
-		t.Fatalf("ResolveLazySlot: %v", err)
-	}
-	if len(first) != 1 {
-		t.Fatalf("ResolveLazySlot returned %d members, want 1", len(first))
-	}
-	if first[0].AgentID != architect.ID {
-		t.Fatalf("resolved agent_id = %q, want %q", first[0].AgentID, architect.ID)
-	}
-	if first[0].SessionID == "" {
-		t.Fatal("resolved session_id is empty")
-	}
-
-	// Idempotent: calling again returns the same already-active row, no
-	// new session/durable wake.
-	second, err := trl.ResolveLazySlot(ctx, result.RunID, team.ID, "architect", TeamRunOverrides{})
-	if err != nil {
-		t.Fatalf("second ResolveLazySlot: %v", err)
-	}
-	if len(second) != 1 || second[0].ID != first[0].ID || second[0].SessionID != first[0].SessionID {
-		t.Fatalf("second ResolveLazySlot did not return the same already-resolved row: first=%+v second=%+v", first[0], second[0])
-	}
-
-	after, err := st.ListTeamRunMembersBySlot(ctx, result.RunID, "architect")
-	if err != nil {
-		t.Fatalf("ListTeamRunMembersBySlot (after): %v", err)
-	}
-	if len(after) != 1 {
-		t.Fatalf("architect members after two ResolveLazySlot calls = %d, want exactly 1 (idempotent, no double-resolve)", len(after))
-	}
-}
-
-func TestResolveLazySlot_UnauthorizedDormantSlot_Rejected(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	createTestRoleBoundAgent(t, st, "lead")
-	architect := createTestDurableCandidateAgent(t, st, "architect")
-
-	arch := architect.ID
-	slots := []store.TeamSlotDefinition{
-		{Name: "lead", RoleSlug: "lead", Resolution: "fresh", ActivationMode: "singleton", Required: true},
-		{Name: "architect", RoleSlug: "architecture-sme", Resolution: "durable", AgentID: &arch, Required: false},
-	}
-	phases := []store.TeamPhase{
-		{ID: "work", Kind: "flex", ActiveSlots: []string{"lead"}, ExitTrigger: map[string]any{"event": "done"}},
-	}
-	team := &store.Team{Name: "Lazy Wake Team Ungoverned"}
-	if err := team.SetSlots(slots); err != nil {
-		t.Fatalf("SetSlots: %v", err)
-	}
-	if err := team.SetPhases(phases); err != nil {
-		t.Fatalf("SetPhases: %v", err)
-	}
-	if err := st.CreateTeam(ctx, team); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
-	}
-	// Deliberately no may_spawn grant naming "architect".
-
-	result, err := trl.LaunchTeamRun(ctx, team.ID, TeamRunOverrides{})
-	if err != nil {
-		t.Fatalf("LaunchTeamRun: %v", err)
-	}
-
-	_, err = trl.ResolveLazySlot(ctx, result.RunID, team.ID, "architect", TeamRunOverrides{})
-	if err == nil || !errors.Is(err, ErrTeamRunElasticResolutionUnauthorized) {
-		t.Fatalf("err = %v, want ErrTeamRunElasticResolutionUnauthorized", err)
-	}
-
-	members, err := st.ListTeamRunMembersBySlot(ctx, result.RunID, "architect")
-	if err != nil {
-		t.Fatalf("ListTeamRunMembersBySlot: %v", err)
-	}
-	if len(members) != 0 {
-		t.Fatalf("architect members after rejected lazy resolve = %d, want 0", len(members))
-	}
-}
-
-// TestResolveDurableMember_NewInstance_CallsStart_NotGatedOnDurableFlag is
-// this task's own corrected-semantics finding, made concrete and tested:
-// a Team Slot's `resolution: durable` wakes an agent_profiles row that has
-// NEITHER agent_profiles.durable=true NOR a "durable-agent" tag set
-// (createTestDurableCandidateAgent deliberately leaves both unset) — if
-// resolveDurableMember were (incorrectly) gated on that flag the way
-// reconcileProfileBackedInstances is, this would fail to find/create an
-// instance at all.
-func TestResolveDurableMember_NewInstance_CallsStart_NotGatedOnDurableFlag(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	profile := createTestDurableCandidateAgent(t, st, "sme")
-	if profile.Durable {
-		t.Fatal("test fixture unexpectedly set Durable=true — this test needs it false")
-	}
-
-	slot := store.TeamSlotDefinition{Name: "architect", Resolution: "durable", AgentID: &profile.ID, ActivationMode: "singleton"}
-	agentID, sessionID, err := trl.resolveDurableMember(ctx, slot)
-	if err != nil {
-		t.Fatalf("resolveDurableMember: %v", err)
-	}
-	if agentID != profile.ID {
-		t.Fatalf("agentID = %q, want %q", agentID, profile.ID)
-	}
-	if sessionID == "" {
-		t.Fatal("sessionID is empty")
-	}
-
-	inst, err := st.GetDurableAgentInstanceByProfileID(context.Background(), profile.ID)
-	if err != nil {
-		t.Fatalf("GetDurableAgentInstanceByProfileID: %v", err)
-	}
-	if inst.Status != store.DurableAgentStatusActive {
-		t.Fatalf("instance status = %q, want active", inst.Status)
-	}
-	if inst.CurrentSessionID != sessionID {
-		t.Fatalf("instance current_session_id = %q, want %q", inst.CurrentSessionID, sessionID)
-	}
-
-	// Resolving the SAME slot again should Resume (reuse) the existing
-	// instance and its already-attached session, not create a second one.
-	agentID2, sessionID2, err := trl.resolveDurableMember(ctx, slot)
-	if err != nil {
-		t.Fatalf("second resolveDurableMember: %v", err)
-	}
-	if agentID2 != agentID {
-		t.Fatalf("second agentID = %q, want %q", agentID2, agentID)
-	}
-	if sessionID2 != sessionID {
-		t.Fatalf("second call resumed a different session (%q) than the first (%q); resolution=durable should wake the SAME existing identity", sessionID2, sessionID)
-	}
-}
-
-func TestResolveDurableMember_ConcurrentMultiMember_Rejected(t *testing.T) {
-	st, _, trl := newTeamRunLauncherTestFixtures(t)
-	ctx := context.Background()
-
-	profile := createTestDurableCandidateAgent(t, st, "sme-concurrent")
-	slot := store.TeamSlotDefinition{
-		Name: "architect", Resolution: "durable", AgentID: &profile.ID,
-		ActivationMode: "concurrent", Min: 1, Max: 3,
-	}
-	if _, _, err := trl.resolveDurableMember(ctx, slot); err == nil || !strings.Contains(err.Error(), "does not support concurrent multi-member resolution") {
-		t.Fatalf("err = %v, want concurrent-multi-member rejection", err)
-	}
-}
-
-func TestLaunchTeamRun_UnknownTeam_ReturnsError(t *testing.T) {
-	_, _, trl := newTeamRunLauncherTestFixtures(t)
-	_, err := trl.LaunchTeamRun(context.Background(), "does-not-exist", TeamRunOverrides{})
-	if err == nil {
-		t.Fatal("expected error for unknown team id")
+func TestHeldTeamMemberCountBoundsRemainDeclarative(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode               string
+		min, max, override, want int
+		wantErr                  bool
+	}{
+		{"singleton", "singleton", 1, 1, 8, 1, false}, {"concurrent default", "concurrent", 2, 4, 0, 2, false},
+		{"concurrent override", "concurrent", 2, 4, 3, 3, false}, {"below minimum", "concurrent", 2, 4, 1, 0, true},
+		{"above maximum", "concurrent", 2, 4, 5, 0, true}, {"unbounded", "concurrent", 0, 0, 12, 12, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overrides := TeamRunOverrides{}
+			if tc.override != 0 {
+				overrides.SlotMemberCounts = map[string]int{"worker": tc.override}
+			}
+			got, err := resolveMemberCount(store.TeamSlotDefinition{Name: "worker", ActivationMode: tc.mode, Min: tc.min, Max: tc.max}, overrides)
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("count=%d,%v; want %d error=%v", got, err, tc.want, tc.wantErr)
+			}
+		})
 	}
 }

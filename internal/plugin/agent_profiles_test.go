@@ -235,6 +235,59 @@ agent:
 	}
 }
 
+func TestPluginAgentProfilesSkipRetiredSlug(t *testing.T) {
+	ctx := context.Background()
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "retired-plugin-agent.db"))
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO retired_agent_profiles
+		(id, slug, name, source, plugin_id, class, export_id, digest, actor, reason)
+		VALUES ('retired-id', 'retired-plugin-agent', 'Retired', 'plugin', 'demo-retired-plugin', 'process', 'export-id', 'sha256:test', 'test', 'retired')`); err != nil {
+		t.Fatalf("insert retired tombstone: %v", err)
+	}
+
+	pluginDir := t.TempDir()
+	if mkdirErr := os.MkdirAll(filepath.Join(pluginDir, "agents"), 0o750); mkdirErr != nil {
+		t.Fatalf("mkdir agents dir: %v", mkdirErr)
+	}
+	profileYAML := `role:
+  slug: retired-plugin-role
+  name: Retired Plugin Role
+  system_prompt: should not be recreated
+agent:
+  slug: retired-plugin-agent
+  name: Retired Plugin Agent
+`
+	if err := os.WriteFile(filepath.Join(pluginDir, "agents", "retired.yaml"), []byte(profileYAML), 0o600); err != nil {
+		t.Fatalf("write profile file: %v", err)
+	}
+
+	const pluginID = "demo-retired-plugin"
+	manifest := &PluginManifest{
+		SchemaVersion: 1,
+		Name:          pluginID,
+		ID:            pluginID,
+		Version:       "0.1.0",
+		Runtime:       "builtin",
+		Registers: ManifestRegisters{
+			AgentProfiles: []AgentProfileRegistration{{ID: "retired", File: "agents/retired.yaml"}},
+		},
+	}
+	host := NewHost(http.NewServeMux(), NewLogger("retired-agent-profiles"))
+	host.SetStore(st)
+	if err := applyManifestRegistrations(host, manifest, &fakePlugin{id: pluginID}, pluginDir); err != nil {
+		t.Fatalf("applyManifestRegistrations: %v", err)
+	}
+	if _, err := st.GetAgentBySlug(ctx, "retired-plugin-agent"); err == nil {
+		t.Fatal("plugin registration resurrected retired agent")
+	}
+	if role, err := st.GetRoleBySlug(ctx, "retired-plugin-role"); err != nil || role != nil {
+		t.Fatalf("plugin registration created role for suppressed agent: role=%+v err=%v", role, err)
+	}
+}
+
 // TestPhase5AgentProfiles_NoLegacyGrandfathering verifies that a plugin
 // agent-profile file NOT written in the new role/agent composition shape
 // (e.g. the old flat shape's top-level fields) is rejected with a clear

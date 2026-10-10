@@ -81,6 +81,10 @@ func AutoIngestAgents(st *store.Store, defs []*agentpkg.Definition, knownTools m
 		}
 		considered++
 		if err := upsertAgentDef(st, def); err != nil {
+			if errors.Is(err, store.ErrAgentProfileRetired) {
+				slog.Info("service: skip retired agent seed definition", "slug", def.Slug)
+				continue
+			}
 			slog.Warn("service: auto-ingest agent", "slug", def.Slug, "err", err)
 			failures = append(failures, fmt.Sprintf("%s: %v", def.Slug, err))
 			continue
@@ -179,6 +183,11 @@ func unknownDeclaredTools(def *agentpkg.Definition, knownTools map[string]bool) 
 // historical migrations such as builtin -> internal.
 func upsertAgentDef(st *store.Store, def *agentpkg.Definition) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	if retired, err := st.IsAgentProfileRetired(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, def.ID, def.Slug); err != nil {
+		return err
+	} else if retired {
+		return store.ErrAgentProfileRetired
+	}
 
 	// H1 trust: user/plugin-dropped files are untrusted until promoted.
 	trustTier := "normal"

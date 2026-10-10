@@ -67,8 +67,8 @@ func TestAssembleSlotSources_AgentPromptAndMessageCount(t *testing.T) {
 		Slug:         "test",
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), s, agent); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 
 	// Add a few messages.
@@ -114,8 +114,8 @@ func TestAssembleSlotSources_ExcludesEnvelopeDataFromReplayedHistory(t *testing.
 		t.Fatalf("CreateSession: %v", err)
 	}
 	agent := &store.AgentProfile{Name: "Test", Slug: "test", SystemPrompt: "You are a test agent."}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), s, agent); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 
 	// User turn.

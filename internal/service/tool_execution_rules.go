@@ -31,8 +31,14 @@ import (
 // Returns (allowed bool, reason string). If allowed is false, reason describes
 // the denial for the LLM.
 func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, toolName string) (bool, string) {
+	if isCognitiveTurn(ctx) {
+		if s.resultCache != nil && (toolName == "fetch_tool_result" || toolName == "search_tool_result") {
+			return true, ""
+		}
+		return false, "verified actor tool grants are unavailable for this native view"
+	}
 	if s.tools == nil {
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 
 	// Look up agent config via the agents service. Every agent (including
@@ -43,15 +49,15 @@ func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, to
 	// stale/unresolvable ID, matching this function's pre-existing
 	// missing-wiring precedent below.
 	if s.agents == nil {
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 	if _, err := s.agents.Get(ctx, agentID); err != nil {
-		slog.Warn("tool-execution-rules: agent lookup failed — allowing",
+		slog.Warn("tool-execution-rules: agent lookup failed — refusing",
 			"agent", agentID, "err", err)
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 	if s.store == nil {
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 
 	return s.enforceExecutionRulesViaAgentTools(ctx, agentID, toolName)
@@ -68,9 +74,9 @@ func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, to
 func (s *chatServiceImpl) enforceExecutionRulesViaAgentTools(ctx context.Context, agentID, toolName string) (bool, string) {
 	granted, err := s.store.ListAgentToolNames(ctx, agentID)
 	if err != nil {
-		slog.Warn("tool-execution-rules: list agent_tools failed — allowing",
+		slog.Warn("tool-execution-rules: list agent_tools failed — refusing",
 			"agent", agentID, "err", err)
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 	for _, name := range granted {
 		if name == toolName {
@@ -85,9 +91,9 @@ func (s *chatServiceImpl) enforceExecutionRulesViaAgentTools(ctx context.Context
 	// tools.
 	always, err := s.store.ListAlwaysIncludedKnownTools(ctx)
 	if err != nil {
-		slog.Warn("tool-execution-rules: list always_included known_tools failed — allowing",
+		slog.Warn("tool-execution-rules: list always_included known_tools failed — refusing",
 			"agent", agentID, "err", err)
-		return true, ""
+		return false, "verified tool authorization unavailable"
 	}
 	for _, t := range always {
 		if t.Name == toolName && t.Status == "available" {

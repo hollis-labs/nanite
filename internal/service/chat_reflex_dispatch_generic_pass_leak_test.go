@@ -116,7 +116,10 @@ func TestGenericReflexPass_DoesNotDuplicateDispatchToAgentFiring(t *testing.T) {
 	// treat Executor.Apply's dispatch_to_agent no-op as a real fire. ---
 	cw := ctxpkg.NewContextWindow(200_000, ctxpkg.DefaultEstimator{})
 	slotResult := &SlotAssemblyResult{Window: cw}
-	genericActions := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult)
+	genericActions, err := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var genericSawDispatchReflex bool
 	for _, a := range genericActions {

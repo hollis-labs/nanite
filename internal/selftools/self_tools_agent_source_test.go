@@ -1,7 +1,6 @@
 package selftools
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -9,86 +8,34 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// TestAgentSourceResolve_RoundTrip is the C1 resolver-endpoint check
-// (S5 platform-reshape, locked decision D2). It seeds an agent into the
-// agent_profiles SoT, calls agent_source_resolve through the self-tools
-// transport, and asserts the composed agent comes back in an
-// agentlaunch-compatible shape.
+// Fresh host IDs select immutable content; they never become launch identities.
 func TestAgentSourceResolve_RoundTrip(t *testing.T) {
 	st := newSelfTools(t)
-
-	seed := &store.AgentProfile{
-		Name:         "Recon Agent",
-		Slug:         "recon-agent",
-		SystemPrompt: "You are the recon agent.",
-		Description:  "scouts the codebase",
-		DefaultModel: "claude-sonnet",
-	}
-	if err := fixtureStore(st).CreateAgent(context.Background(), seed); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-
-	// Resolve by slug — the directory registers an agent-source under
-	// its slug, so slug is the resolution key a consumer holds.
-	res, err := st.CallTool(t.Context(), agentSourceResolveToolName, map[string]any{
-		"agent": "recon-agent",
-	})
+	db := fixtureStore(st)
+	data := []byte("---\nschema_version: \"2\"\ndefinition_id: def:source-fixture\nrevision: \"1\"\nname: source-fixture\ndescription: Private test.\nbehavior:\n  purpose: Read immutable source.\nrequirements: {}\nharness_profile:\n  context: {}\n  permissions:\n    profile: default\ncontinuity:\n  mode: ephemeral\n---\nFixture content.\n")
+	pin, err := db.InstallAgentDefinition(t.Context(), data, nil)
 	if err != nil {
-		t.Fatalf("CallTool: %v", err)
+		t.Fatal(err)
 	}
-	if res.IsError {
-		t.Fatalf("agent_source_resolve returned error: %s", res.Content[0].Text)
-	}
-
-	var out agentSourceResolveResult
-	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
-		t.Fatalf("unmarshal resolve result: %v\nbody: %s", err, res.Content[0].Text)
-	}
-
-	if out.SystemPrompt != seed.SystemPrompt {
-		t.Errorf("SystemPrompt = %q, want %q", out.SystemPrompt, seed.SystemPrompt)
-	}
-	if out.Slug != "recon-agent" {
-		t.Errorf("Slug = %q, want recon-agent", out.Slug)
-	}
-	// The agentlaunch.AgentSpec-equivalent projection must carry the
-	// slug as the stable id and the display name.
-	if out.AgentSpec.ID != "recon-agent" {
-		t.Errorf("AgentSpec.ID = %q, want recon-agent", out.AgentSpec.ID)
-	}
-	if out.AgentSpec.Name != "Recon Agent" {
-		t.Errorf("AgentSpec.Name = %q, want Recon Agent", out.AgentSpec.Name)
-	}
-}
-
-// TestAgentSourceResolve_ResolvesByID confirms an id also resolves (the
-// fallback path when a caller holds the row id rather than the slug).
-func TestAgentSourceResolve_ResolvesByID(t *testing.T) {
-	st := newSelfTools(t)
-	seed := &store.AgentProfile{
-		Name:         "By ID Agent",
-		Slug:         "by-id-agent",
-		SystemPrompt: "resolve me by id",
-	}
-	if err := fixtureStore(st).CreateAgent(context.Background(), seed); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-
-	res, err := st.CallTool(t.Context(), agentSourceResolveToolName, map[string]any{
-		"agent": seed.ID,
-	})
+	host, err := db.CreateAgentHostSettings(t.Context(), store.AgentHostSettings{Title: "Recon Agent", Slug: "recon-agent", DefinitionRef: pin, Enabled: true, Source: "operator", Settings: store.NativeHostSettings{Version: "1", Runtime: "api"}})
 	if err != nil {
-		t.Fatalf("CallTool: %v", err)
+		t.Fatal(err)
 	}
-	if res.IsError {
-		t.Fatalf("resolve by id returned error: %s", res.Content[0].Text)
-	}
-	var out agentSourceResolveResult
-	if err := json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if out.ID != seed.ID {
-		t.Errorf("ID = %q, want %q", out.ID, seed.ID)
+	for _, ref := range []string{host.Slug, host.ID} {
+		res, err := st.CallTool(t.Context(), agentSourceResolveToolName, map[string]any{"agent": ref})
+		if err != nil || res.IsError {
+			t.Fatalf("resolve: %v %+v", err, res)
+		}
+		var out agentSourceResolveResult
+		if err = json.Unmarshal([]byte(res.Content[0].Text), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.DefinitionRef != pin || out.Artifact != string(data) || out.ID != host.ID || out.HostSettingsRef.Revision != host.Revision {
+			t.Fatalf("source mismatch: %+v", out)
+		}
+		if strings.Contains(res.Content[0].Text, "agent_spec") {
+			t.Fatal("local host identifier presented as launch identity")
+		}
 	}
 }
 
@@ -105,7 +52,7 @@ func TestAgentSourceResolve_NotFound(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected a tool-level error for an unknown agent")
 	}
-	if !strings.Contains(res.Content[0].Text, "no agent profile found") {
+	if !strings.Contains(res.Content[0].Text, "no host settings found") {
 		t.Errorf("error text = %q, want a not-found message", res.Content[0].Text)
 	}
 }

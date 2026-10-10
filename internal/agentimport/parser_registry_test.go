@@ -10,7 +10,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 const claudeSubagent = `---
@@ -34,57 +33,28 @@ func chain(r *agent.AdapterRegistry) Parser {
 	return ChainParser{Parsers: []Parser{NativeParser{}, RegistryParser{Registry: r}}}
 }
 
-// TestSeam_ClaudeSubagentReachesTheDatabase is CW-20260910-0012's "prove the
-// seam rather than assert it" test: a real Claude subagent file, through the
-// real adapter, through the real pipeline, into a real agent_profiles row —
-// with the right ownership on the other side.
 func TestSeam_ClaudeSubagentReachesTheDatabase(t *testing.T) {
 	st := newTestStore(t)
 	root := t.TempDir()
 	path := filepath.Join(root, adapterclaude.SubagentsDir, "code-reviewer.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(claudeSubagent), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+		t.Fatal(err)
 	}
-
-	imp := &Importer{Store: st, Parse: chain(claudeRegistry())}
-	// The operator names the project root, not the file — the same shape a
-	// Cairn-planted boot directory has.
-	res, err := imp.Import(context.Background(), Source{Path: root})
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	parser := chain(claudeRegistry())
+	defs, err := parser.Parse(root)
+	if err != nil || len(defs) != 1 {
+		t.Fatalf("real adapter parse: %+v, %v", defs, err)
 	}
-	if created, _, _ := res.Counts(); created != 1 {
-		t.Fatalf("want 1 created, got %+v", res.Outcomes)
+	def := defs[0]
+	if def.Slug != "code-reviewer" || def.SystemPrompt != "You are a code reviewer." || def.Source != adapterclaude.AdapterName || def.Model != "" || len(def.Tools) != 0 || len(def.RoleTools) != 0 {
+		t.Fatalf("adapter lost body/provenance or retained foreign model: %+v", def)
 	}
-
-	row, err := st.GetAgentBySlug(context.Background(), "code-reviewer")
-	if err != nil {
-		t.Fatalf("GetAgentBySlug: %v", err)
-	}
-	if row.SystemPrompt != "You are a code reviewer." {
-		t.Errorf("SystemPrompt = %q — the body IS the agent, charter/lens already collapsed upstream", row.SystemPrompt)
-	}
-	// Two columns, two questions: where it came from, and how it got here.
-	if row.OriginSystem != adapterclaude.AdapterName {
-		t.Errorf("OriginSystem = %q, want %q", row.OriginSystem, adapterclaude.AdapterName)
-	}
-	if row.Source != SourceProvenance {
-		t.Errorf("Source = %q, want %q — an adapter never declares an imported agent operator-owned",
-			row.Source, SourceProvenance)
-	}
-	if class := agent.NewClassification().Classify(row.Source); class != agent.ManageClassExternal {
-		t.Errorf("class = %q, want external", class)
-	}
-	// The decided rules, observed at the far end of the seam.
-	if row.DefaultModel != "" {
-		t.Errorf("DefaultModel = %q, want blank — a Claude alias is not a Nanite model ID", row.DefaultModel)
-	}
-	if row.Tools != "[]" {
-		t.Errorf("Tools = %q, want empty — Claude tool names would produce grants that never resolve", row.Tools)
-	}
+	before := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, &Importer{Store: st, Parse: parser}, root)
+	requireImportStateUnchanged(t, st, before)
 }
 
 // TestChain_NativeFormatWinsOverAdapters — a definition authored for Nanite is
@@ -175,28 +145,9 @@ func TestRegistryParser_UnknownAdapterIsAnError(t *testing.T) {
 // adapter.
 func TestSeam_ImportedClaudeAgentIsStillRefusedOverAnIncumbent(t *testing.T) {
 	st := newTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
-		Name: "Reviewer", Slug: "code-reviewer", SystemPrompt: "incumbent", Source: "internal",
-	}); err != nil {
-		t.Fatalf("seed incumbent: %v", err)
-	}
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "code-reviewer.md")
-	if err := os.WriteFile(path, []byte(claudeSubagent), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	imp := &Importer{Store: st, Parse: chain(claudeRegistry())}
-	res, err := imp.Import(context.Background(), Source{Path: path})
-	if err != nil {
-		t.Fatalf("Import: %v", err)
-	}
-	if _, _, skipped := res.Counts(); skipped != 1 {
-		t.Fatalf("want 1 skipped, got %+v", res.Outcomes)
-	}
-	row, _ := st.GetAgentBySlug(context.Background(), "code-reviewer")
-	if row.SystemPrompt != "incumbent" {
-		t.Errorf("incumbent overwritten: %q", row.SystemPrompt)
-	}
+	retainedImportProfile(t, st, "code-reviewer", "internal")
+	path := writeDef(t, "code-reviewer.md", claudeSubagent)
+	before := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, &Importer{Store: st, Parse: chain(claudeRegistry())}, path)
+	requireImportStateUnchanged(t, st, before)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -66,224 +67,99 @@ func TestImportProvenanceIsExternal(t *testing.T) {
 func TestImport_CreatesExternalRowWithProvenance(t *testing.T) {
 	st := newTestStore(t)
 	path := writeDef(t, "reviewer.md", reviewerV1)
-
-	imp := &Importer{Store: st}
-	res, err := imp.Import(context.Background(), Source{Path: path})
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	defs, err := (NativeParser{}).Parse(path)
+	if err != nil || len(defs) != 1 {
+		t.Fatalf("native parse: %+v, %v", defs, err)
 	}
-	if created, _, _ := res.Counts(); created != 1 {
-		t.Fatalf("counts: want 1 created, got %+v", res.Outcomes)
+	if defs[0].Source != NativeOriginSystem || defs[0].SourceRef != path || defs[0].SystemPrompt != "imported prompt v1" {
+		t.Fatalf("lost source provenance/body: %+v", defs[0])
 	}
-
-	row, err := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-	if err != nil {
-		t.Fatalf("GetAgentBySlug: %v", err)
-	}
-	if row.Source != SourceProvenance {
-		t.Errorf("Source = %q, want %q", row.Source, SourceProvenance)
-	}
-	if row.SourceRef != path {
-		t.Errorf("SourceRef = %q, want the originating path %q", row.SourceRef, path)
-	}
-	if row.ImportedAt == "" {
-		t.Error("ImportedAt must record when the import happened")
-	}
-	// origin_system records the ecosystem the definition was authored in;
-	// `source` records how the row came to exist. Two different questions.
-	if row.OriginSystem != NativeOriginSystem {
-		t.Errorf("OriginSystem = %q, want %q", row.OriginSystem, NativeOriginSystem)
-	}
-	if got := agent.NewClassification().Classify(row.Source); got != agent.ManageClassExternal {
-		t.Errorf("stored row classifies as %q, want external", got)
-	}
-	// kind is migration 015's column, not ManageClass — an imported agent is
-	// a DB-backed profile, not a messaging auto-registration.
-	if row.Kind != "internal" {
-		t.Errorf("Kind = %q, want %q (kind is not ManageClass)", row.Kind, "internal")
-	}
+	before := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, &Importer{Store: st}, path)
+	requireImportStateUnchanged(t, st, before)
 }
 
-// TestImport_ArrivesUntrusted — foreign content does not arrive trusted.
+// Foreign content cannot change retained trust or acquire fresh authority.
 func TestImport_ArrivesUntrusted(t *testing.T) {
 	st := newTestStore(t)
-	imp := &Importer{Store: st}
-	if _, err := imp.Import(context.Background(), Source{Path: writeDef(t, "reviewer.md", reviewerV1)}); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
-
-	var tier string
-	if err := st.DB.QueryRow(
-		`SELECT default_trust_tier FROM agent_profiles WHERE slug = ?`, "imported-reviewer",
-	).Scan(&tier); err != nil {
-		t.Fatalf("read trust tier: %v", err)
-	}
-	if tier != "untrusted" {
-		t.Errorf("default_trust_tier = %q, want untrusted", tier)
-	}
+	retainedImportProfile(t, st, "imported-reviewer", SourceProvenance)
+	before := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, &Importer{Store: st}, writeDef(t, "reviewer.md", reviewerV1))
+	// Foreign content cannot enroll an actor, acquire grants, or change historical trust.
+	requireImportStateUnchanged(t, st, before)
 }
 
-// TestImport_NeverWritesBackToSource is the one-way rule, tested rather than
-// asserted: the bytes on disk must be identical before and after an import
-// that mints a fresh database identity for the definition.
 func TestImport_NeverWritesBackToSource(t *testing.T) {
 	st := newTestStore(t)
 	path := writeDef(t, "reviewer.md", reviewerV1)
-	before, readErr := os.ReadFile(path) //nolint:gosec // reads a fixture this test just wrote into t.TempDir()
-	if readErr != nil {
-		t.Fatalf("read before: %v", readErr)
+	before, err := os.ReadFile(path) //nolint:gosec // private source artifact
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	imp := &Importer{Store: st}
-	if _, err := imp.Import(context.Background(), Source{Path: path}); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
-
-	after, readErr := os.ReadFile(path) //nolint:gosec // reads a fixture this test just wrote into t.TempDir()
-	if readErr != nil {
-		t.Fatalf("read after: %v", readErr)
+	dbBefore := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, &Importer{Store: st}, path)
+	after, err := os.ReadFile(path) //nolint:gosec // private source artifact
+	if err != nil {
+		t.Fatal(err)
 	}
 	if string(before) != string(after) {
-		t.Errorf("source file changed during import:\nbefore:\n%s\nafter:\n%s", before, after)
+		t.Fatalf("source changed during refused import: %q -> %q", before, after)
 	}
-
-	row, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-	if row.ID == "" {
-		t.Fatal("expected a minted database identity")
-	}
-	if strings.Contains(string(after), row.ID) {
-		t.Errorf("minted identity %q was written back into the source file", row.ID)
-	}
+	requireImportStateUnchanged(t, st, dbBefore)
 }
 
-// TestImport_ReimportIsSync — the same path imported twice updates the row it
-// already owns rather than creating a second one or refusing.
 func TestImport_ReimportIsSync(t *testing.T) {
 	st := newTestStore(t)
-	dir := t.TempDir()
-	path := filepath.Join(dir, "reviewer.md")
-	if err := os.WriteFile(path, []byte(reviewerV1), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
+	retained := retainedImportProfile(t, st, "imported-reviewer", SourceProvenance)
+	path := writeDef(t, "reviewer.md", reviewerV1)
+	before := importBoundarySnapshot(t, st)
 	imp := &Importer{Store: st}
-	if _, err := imp.Import(context.Background(), Source{Path: path}); err != nil {
-		t.Fatalf("first Import: %v", err)
+	requireRetiredImport(t, imp, path)
+	if err := os.WriteFile(path, []byte(strings.Replace(reviewerV1, "imported prompt v1", "imported prompt v2", 1)), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	first, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-
-	edited := strings.Replace(reviewerV1, "imported prompt v1", "imported prompt v2", 1)
-	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
-		t.Fatalf("rewrite: %v", err)
-	}
-	res, err := imp.Import(context.Background(), Source{Path: path})
-	if err != nil {
-		t.Fatalf("second Import: %v", err)
-	}
-	if _, synced, _ := res.Counts(); synced != 1 {
-		t.Fatalf("want 1 synced, got %+v", res.Outcomes)
-	}
-
-	second, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-	if second.ID != first.ID {
-		t.Errorf("sync minted a new identity: %q -> %q", first.ID, second.ID)
-	}
-	if second.SystemPrompt != "imported prompt v2" {
-		t.Errorf("SystemPrompt = %q, want the re-read content", second.SystemPrompt)
+	requireRetiredImport(t, imp, path)
+	requireImportStateUnchanged(t, st, before)
+	after, err := st.GetHistoricalAgentProfile(t.Context(), retained.ID)
+	if err != nil || after.Revision != retained.Revision || after.SystemPrompt != retained.SystemPrompt || after.Protocol != "acp" || after.Transport != "stdio" {
+		t.Fatalf("historical profile changed: %+v, %v", after, err)
 	}
 }
 
-// TestImport_SyncPreservesDatabaseOnlyConfiguration: composition and ACP
-// columns have zero representation in the source format, so a sync must not
-// wipe values set through their own direct-DB write paths — the same
-// preservation upsertAgentDef performs, for the same reason.
 func TestImport_SyncPreservesDatabaseOnlyConfiguration(t *testing.T) {
 	st := newTestStore(t)
-	dir := t.TempDir()
-	path := filepath.Join(dir, "reviewer.md")
-	if err := os.WriteFile(path, []byte(reviewerV1), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
+	retained := retainedImportProfile(t, st, "imported-reviewer", SourceProvenance)
+	path := writeDef(t, "reviewer.md", reviewerV1)
+	before := importBoundarySnapshot(t, st)
 	imp := &Importer{Store: st}
-	if _, err := imp.Import(context.Background(), Source{Path: path}); err != nil {
-		t.Fatalf("Import: %v", err)
+	requireRetiredImport(t, imp, path)
+	if err := os.WriteFile(path, []byte(strings.Replace(reviewerV1, "imported prompt v1", "imported prompt v2", 1)), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	row, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-	if _, err := st.DB.Exec(
-		`UPDATE agent_profiles SET protocol = 'acp', transport = 'stdio' WHERE id = ?`, row.ID,
-	); err != nil {
-		t.Fatalf("set ACP config: %v", err)
-	}
-
-	edited := strings.Replace(reviewerV1, "imported prompt v1", "imported prompt v2", 1)
-	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
-		t.Fatalf("rewrite: %v", err)
-	}
-	if _, err := imp.Import(context.Background(), Source{Path: path}); err != nil {
-		t.Fatalf("sync: %v", err)
-	}
-
-	after, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-	if after.Protocol != "acp" || after.Transport != "stdio" {
-		t.Errorf("sync wiped ACP config: protocol=%q transport=%q", after.Protocol, after.Transport)
-	}
-	if after.SystemPrompt != "imported prompt v2" {
-		t.Errorf("SystemPrompt = %q, want the re-read content", after.SystemPrompt)
+	requireRetiredImport(t, imp, path)
+	requireImportStateUnchanged(t, st, before)
+	after, err := st.GetHistoricalAgentProfile(t.Context(), retained.ID)
+	if err != nil || after.Revision != retained.Revision || after.SystemPrompt != retained.SystemPrompt || after.Protocol != "acp" || after.Transport != "stdio" {
+		t.Fatalf("historical profile changed: %+v, %v", after, err)
 	}
 }
 
-// TestImport_RefusesSlugItDoesNotOwn is the inbound half of the ownership
-// boundary. Table-driven across every non-external class so a new
-// ManageClass cannot be added without a decision about this path.
 func TestImport_RefusesSlugItDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		source    string
-		wantClass agent.ManageClass
+		source string
+		class  agent.ManageClass
 	}{
-		{"internal harness primitive", "internal", agent.ManageClassInternal},
-		{"operator-managed profile", "user", agent.ManageClassManaged},
-		{"plugin-provided profile", "plugin", agent.ManageClassPlugin},
+		{"internal", agent.ManageClassInternal}, {"user", agent.ManageClassManaged}, {"plugin", agent.ManageClassPlugin},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.source, func(t *testing.T) {
 			st := newTestStore(t)
-			existing := &store.AgentProfile{
-				Name:         "Incumbent",
-				Slug:         "imported-reviewer",
-				SystemPrompt: "incumbent prompt",
-				Source:       tc.source,
+			retained := retainedImportProfile(t, st, "imported-reviewer", tc.source)
+			if got := agent.NewClassification().Classify(retained.Source); got != tc.class {
+				t.Fatalf("class = %q, want %q", got, tc.class)
 			}
-			if err := st.CreateAgent(context.Background(), existing); err != nil {
-				t.Fatalf("seed incumbent: %v", err)
-			}
-
-			imp := &Importer{Store: st}
-			res, err := imp.Import(context.Background(), Source{Path: writeDef(t, "reviewer.md", reviewerV1)})
-			if err != nil {
-				t.Fatalf("Import returned a hard error; a refusal is a reported outcome: %v", err)
-			}
-			if _, _, skipped := res.Counts(); skipped != 1 {
-				t.Fatalf("want 1 skipped, got %+v", res.Outcomes)
-			}
-			out := res.Outcomes[0]
-			if out.BlockedBy != tc.wantClass {
-				t.Errorf("BlockedBy = %q, want %q", out.BlockedBy, tc.wantClass)
-			}
-			if !errors.Is(out.Err, ErrSlugNotImportable) {
-				t.Errorf("Err = %v, want it to wrap ErrSlugNotImportable so a caller can classify it", out.Err)
-			}
-			if !strings.Contains(out.Reason, tc.wantClass.Describe()) {
-				t.Errorf("reason %q does not say what is in the way", out.Reason)
-			}
-
-			after, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-			if after.SystemPrompt != "incumbent prompt" {
-				t.Errorf("incumbent was overwritten: %q", after.SystemPrompt)
-			}
-			if after.Source != tc.source {
-				t.Errorf("incumbent provenance changed: %q -> %q", tc.source, after.Source)
-			}
+			before := importBoundarySnapshot(t, st)
+			requireRetiredImport(t, &Importer{Store: st}, writeDef(t, "reviewer.md", reviewerV1))
+			requireImportStateUnchanged(t, st, before)
 		})
 	}
 }
@@ -330,38 +206,22 @@ func TestImport_EmptyPathAndUnrecognizedPath(t *testing.T) {
 	}
 }
 
-// TestImport_SeedsChildrenOnCreateAndSync — an imported definition's declared
-// procedures must reach agent_procedures, or the imported agent is missing
-// content it declared.
 func TestImport_SeedsChildren(t *testing.T) {
 	st := newTestStore(t)
-	body := `---
-name: Reviewer
-slug: imported-reviewer
-procedures:
-  - name: triage
-    body: how to triage
----
-prompt
-`
-	var seededAgentID string
-	imp := &Importer{
-		Store: st,
-		SeedChildren: func(_ context.Context, agentID string, def *agent.Definition, _ bool) error {
-			seededAgentID = agentID
-			if len(def.Procedures) != 1 || def.Procedures[0].Name != "triage" {
-				t.Errorf("seeder received unexpected procedures: %+v", def.Procedures)
-			}
-			return nil
-		},
+	body := "---\nname: Reviewer\nslug: imported-reviewer\nprocedures:\n  - name: triage\n    body: how to triage\n---\nprompt\n"
+	path := writeDef(t, "reviewer.md", body)
+	defs, err := (NativeParser{}).Parse(path)
+	if err != nil || len(defs) != 1 || len(defs[0].Procedures) != 1 || defs[0].Procedures[0].Name != "triage" {
+		t.Fatalf("procedure parsing: %+v, %v", defs, err)
 	}
-	if _, err := imp.Import(context.Background(), Source{Path: writeDef(t, "reviewer.md", body)}); err != nil {
-		t.Fatalf("Import: %v", err)
+	calls := 0
+	imp := &Importer{Store: st, SeedChildren: func(context.Context, string, *agent.Definition, bool) error { calls++; return nil }}
+	before := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, imp, path)
+	if calls != 0 {
+		t.Fatalf("refused import seeded children %d times", calls)
 	}
-	row, _ := st.GetAgentBySlug(context.Background(), "imported-reviewer")
-	if seededAgentID != row.ID {
-		t.Errorf("seeder got agent id %q, want %q", seededAgentID, row.ID)
-	}
+	requireImportStateUnchanged(t, st, before)
 }
 
 // stubParser lets a test drive the pipeline without a source format.
@@ -372,42 +232,26 @@ type stubParser struct {
 
 func (p stubParser) Parse(string) ([]*agent.Definition, error) { return p.defs, p.err }
 
-// TestImport_MultiDefinitionPathReportsPerDefinition — the "directory
-// argument is sugar" contract: a path that expands to N definitions reports
-// each one, and one refusal does not abandon the rest.
 func TestImport_MultiDefinitionPathReportsPerDefinition(t *testing.T) {
 	st := newTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
-		Name: "Incumbent", Slug: "blocked-one", SystemPrompt: "incumbent", Source: "user",
-	}); err != nil {
-		t.Fatalf("seed incumbent: %v", err)
+	retainedImportProfile(t, st, "blocked-one", "user")
+	parser := stubParser{defs: []*agent.Definition{
+		{Name: "First", Slug: "first-one", SystemPrompt: "a"},
+		{Name: "Blocked", Slug: "blocked-one", SystemPrompt: "b"},
+		{Name: "Third", Slug: "third-one", SystemPrompt: "c"},
+	}}
+	defs, err := parser.Parse("/some/dir")
+	if err != nil || len(defs) != 3 || defs[0].Slug != "first-one" || defs[1].Slug != "blocked-one" || defs[2].Slug != "third-one" {
+		t.Fatalf("directory expansion: %+v, %v", defs, err)
 	}
-
-	imp := &Importer{
-		Store: st,
-		Parse: stubParser{defs: []*agent.Definition{
-			{Name: "First", Slug: "first-one", SystemPrompt: "a"},
-			{Name: "Blocked", Slug: "blocked-one", SystemPrompt: "b"},
-			{Name: "Third", Slug: "third-one", SystemPrompt: "c"},
-		}},
+	before := importBoundarySnapshot(t, st)
+	calls := 0
+	imp := &Importer{Store: st, Parse: parser, SeedChildren: func(context.Context, string, *agent.Definition, bool) error { calls++; return nil }}
+	requireRetiredImport(t, imp, "/some/dir")
+	if calls != 0 {
+		t.Fatalf("partial seed effects: %d", calls)
 	}
-	res, err := imp.Import(context.Background(), Source{Path: "/some/dir"})
-	if err != nil {
-		t.Fatalf("Import: %v", err)
-	}
-	created, _, skipped := res.Counts()
-	if created != 2 || skipped != 1 {
-		t.Fatalf("want 2 created / 1 skipped, got %d / %d: %+v", created, skipped, res.Outcomes)
-	}
-	if len(res.Outcomes) != 3 {
-		t.Fatalf("want an outcome per definition, got %d", len(res.Outcomes))
-	}
-	if res.Outcomes[2].Action != ActionCreated {
-		t.Error("a refusal in the middle must not abandon the definitions after it")
-	}
-	if !res.Skipped() {
-		t.Error("Skipped() must report the refusal so the CLI can exit non-zero")
-	}
+	requireImportStateUnchanged(t, st, before)
 }
 
 func TestImport_ChildSeederDistinguishesInstallFromSyncAndReturnsFailure(t *testing.T) {
@@ -415,20 +259,123 @@ func TestImport_ChildSeederDistinguishesInstallFromSyncAndReturnsFailure(t *test
 	path := writeDef(t, "agent.md", "---\nname: Agent\nslug: agent\n---\nPrompt.\n")
 	var modes []bool
 	seedFailure := errors.New("grant persistence unavailable")
-	importer := &Importer{Store: st, SeedChildren: func(_ context.Context, _ string, _ *agent.Definition, created bool) error {
+	imp := &Importer{Store: st, SeedChildren: func(_ context.Context, _ string, _ *agent.Definition, created bool) error {
 		modes = append(modes, created)
-		if !created {
-			return seedFailure
-		}
-		return nil
+		return seedFailure
 	}}
-	if _, err := importer.Import(context.Background(), Source{Path: path}); err != nil {
+	before := importBoundarySnapshot(t, st)
+	requireRetiredImport(t, imp, path)
+	requireRetiredImport(t, imp, path)
+	if len(modes) != 0 {
+		t.Fatalf("refused install/retry invoked child seeder: %v", modes)
+	}
+	requireImportStateUnchanged(t, st, before)
+}
+
+// importBoundarySnapshot captures retained history and both authority partitions in the private DB.
+func importBoundarySnapshot(t *testing.T, st *store.Store) map[string][][]any {
+	t.Helper()
+	out := make(map[string][][]any)
+	for _, query := range []struct{ table, sql string }{
+		{"agent_profiles", "SELECT * FROM agent_profiles ORDER BY rowid"},
+		{"agent_profile_revisions", "SELECT * FROM agent_profile_revisions ORDER BY rowid"},
+		{"agent_procedures", "SELECT * FROM agent_procedures ORDER BY rowid"},
+		{"agent_reflexes", "SELECT * FROM agent_reflexes ORDER BY rowid"},
+		{"agent_tools", "SELECT * FROM agent_tools ORDER BY rowid"},
+		{"agent_known_skills", "SELECT * FROM agent_known_skills ORDER BY rowid"},
+		{"agent_definitions", "SELECT * FROM agent_definitions ORDER BY rowid"},
+		{"agent_definition_resources", "SELECT * FROM agent_definition_resources ORDER BY rowid"},
+		{"agent_definition_resource_refs", "SELECT * FROM agent_definition_resource_refs ORDER BY rowid"},
+		{"agent_host_settings", "SELECT * FROM agent_host_settings ORDER BY rowid"},
+		{"agent_actor_bindings", "SELECT * FROM agent_actor_bindings ORDER BY rowid"},
+		{"actor_granted_tools", "SELECT * FROM actor_granted_tools ORDER BY rowid"},
+		{"actor_known_skills", "SELECT * FROM actor_known_skills ORDER BY rowid"},
+	} {
+		rows, err := st.DB.QueryContext(t.Context(), query.sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			cells := make([]any, len(columns))
+			refs := make([]any, len(columns))
+			for i := range cells {
+				refs[i] = &cells[i]
+			}
+			if err := rows.Scan(refs...); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			for i, cell := range cells {
+				if raw, ok := cell.([]byte); ok {
+					cells[i] = append([]byte(nil), raw...)
+				}
+			}
+			out[query.table] = append(out[query.table], cells)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
+}
+
+func retainedImportProfile(t *testing.T, st *store.Store, slug, source string) *store.AgentProfile {
+	t.Helper()
+	p := &store.AgentProfile{Name: "Historical reviewer", Slug: slug, SystemPrompt: "retained prompt", Source: source}
+	// Raw retained data is not an import, enrollment, or runtime fixture.
+	if err := storetest.HistoricalProfile(t.Context(), st, p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := importer.Import(context.Background(), Source{Path: path}); !errors.Is(err, seedFailure) {
-		t.Fatalf("lost seeder failure: %v", err)
+	if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET protocol='acp', transport='stdio', default_trust_tier='trusted' WHERE id=?`, p.ID); err != nil {
+		t.Fatal(err)
 	}
-	if len(modes) != 2 || !modes[0] || modes[1] {
-		t.Fatalf("install/sync modes %v", modes)
+
+	// Retained grants and procedure content must stay historical and intact.
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO known_tools(id,name,created_at,updated_at) VALUES(?,?,datetime('now'),datetime('now'))`, "retained-import-tool", "retained_import_tool"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_tools(agent_id,tool_id,granted_via,created_at) VALUES(?,?,?,datetime('now'))`, p.ID, "retained-import-tool", "historical-operator"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_known_skills(agent_id,skill_name,approved_content_hash,granted_by,capabilities_granted) VALUES(?,?,?,?,?)`, p.ID, "retained-import-skill", "historical-approved-content", "historical-operator", `{"run":true}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_procedures(agent_id,name,body) VALUES(?,?,?)`, p.ID, "retained-procedure", "Private retained procedure content."); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := st.GetHistoricalAgentProfile(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return saved
+}
+
+func requireRetiredImport(t *testing.T, imp *Importer, path string) {
+	t.Helper()
+	res, err := imp.Import(t.Context(), Source{Path: path})
+	if !errors.Is(err, store.ErrImmutableAgentProfile) {
+		t.Fatalf("Import = %+v, %v; want immutable profile refusal", res, err)
+	}
+	if len(res.Outcomes) != 0 || res.Skipped() {
+		t.Fatalf("refused import reported effects: %+v", res)
+	}
+	if imp.State() != StateFailed {
+		t.Fatalf("state = %q, want failed", imp.State())
+	}
+}
+
+func requireImportStateUnchanged(t *testing.T, st *store.Store, before map[string][][]any) {
+	t.Helper()
+	if after := importBoundarySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("retired import changed history or authority: before=%#v after=%#v", before, after)
 	}
 }

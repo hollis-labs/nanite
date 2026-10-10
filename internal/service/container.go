@@ -57,7 +57,7 @@ import (
 	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/pkg/models"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	"github.com/hollis-labs/substrate/agent/loopdetect"
 	"github.com/hollis-labs/substrate/agent/subagent"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"

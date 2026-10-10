@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	"github.com/hollis-labs/substrate/agent/subagent"
 	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )

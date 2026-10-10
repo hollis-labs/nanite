@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/tool/intent"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // G-HOT-SWAP-DEAD activation tests at the slot-assembly seam.

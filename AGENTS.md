@@ -70,9 +70,11 @@ this repo at `b58db1fa`. Many Go comments, script headers and `Makefile`
 targets still cite paths beneath them. Those paths do not resolve and are not
 coming back; a claim is not verified because a comment cites one.
 
-The Context Broker's slot invariants live in
-the pinned substrate agent module’s `context/INVARIANTS.md`, enforced by
-`internal/service/slot_invariants_test.go`. Change both together or neither.
+The Context Broker uses the pinned substrate agent module's `contextwindow`
+package. Its mechanism contract lives in `contextwindow/INVARIANTS.md`;
+Nanite's dispatch, renderer and cache-marker guarantees are enforced by
+`internal/service/slot_invariants_test.go`. Keep contract changes and their
+enforcement together.
 
 Migrations carry schema, not application data: no `VALUES` clause in
 `internal/store/migrations/*.sql` for rows the application owns — those belong

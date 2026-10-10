@@ -15,7 +15,7 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )

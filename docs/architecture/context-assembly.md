@@ -59,17 +59,25 @@ documented state rather than a bug to fix.
 
 ## The contract, and where it actually lives
 
-The pinned substrate agent module’s `context/INVARIANTS.md` is the contract — seven invariants, each stated
-with what relies on it and which test pins it. Every one is enforced by
+Nanite consumes `github.com/hollis-labs/substrate/agent/contextwindow` from
+the pinned agent module. This is the published home of the former
+`go-context-window` extraction, replacing the legacy `agent/context` package.
+The agent-context provider and dynamic resolvers already use the same module's
+`agentcontext` package. This adoption adds no application-agent runtime or
+actor authority.
+
+The module's `contextwindow/INVARIANTS.md` defines its mechanism guarantees.
+Nanite's seven dispatch, renderer and cache-marker invariants remain enforced by
 `internal/service/slot_invariants_test.go`, which also carries
 deliberate-violation tests, so each assertion is shown to catch a real break
 rather than merely to run.
 
-That file is the specification and this document is not a summary of it. Read it
-before changing slot order, slot identity, compactability, or marker placement.
+Read the mechanism contract and host tests before changing slot order, slot
+identity, compactability, or marker placement. Compaction event identifiers
+remain opaque strings accepted by existing persistence and readers.
 
-`AGENTS.md` states the rule that governs edits here: change the invariants
-document and the test together, or change neither. A contract and its
+`AGENTS.md` states the rule that governs edits here: keep contract changes and
+their enforcement together. A contract and its
 enforcement drifting apart is worse than either being absent, because the test
 still passes and the document still reads as authoritative.
 
@@ -157,7 +165,7 @@ invariants rather than from the slot content.
 ```bash
 # which slots the plan carries, in order
 agent_module=$(go list -m -f '{{.Dir}}' github.com/hollis-labs/substrate/agent)
-grep -n -A18 'var SlotOrder' "$agent_module/context/slot.go"
+grep -n -A18 'var SlotOrder' "$agent_module/contextwindow/slot.go"
 # what the CLI boot prompt is built from
 grep -n 'func composeSystemPrompt\|func ResolveSystemPrompt\|func withCLINarration' internal/runtime/agent/prompt.go
 # the CLI re-plant: slot-hash check, rewrite of boot-dir files, launch-time blocks

@@ -7,7 +7,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) ([]reflexes.AppliedAction, error) {

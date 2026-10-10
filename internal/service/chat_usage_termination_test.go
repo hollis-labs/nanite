@@ -14,7 +14,7 @@ import (
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/usagecost"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"

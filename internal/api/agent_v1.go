@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/clientcontext"
 	"github.com/hollis-labs/nanite/internal/effort"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -137,7 +138,8 @@ type agentV1TurnRequest struct {
 	Delivery string             `json:"delivery"`
 	Effort   string             `json:"effort,omitempty"`
 	// DeltaMode is "phased" (default) or "live"; see SendMessageRequest.DeltaMode.
-	DeltaMode string `json:"delta_mode,omitempty"`
+	DeltaMode     string          `json:"delta_mode,omitempty"`
+	ClientContext json.RawMessage `json:"client_context,omitempty"`
 }
 
 type agentV1TurnResponse struct {
@@ -188,7 +190,7 @@ func (a *API) handleAgentV1Capabilities(w http.ResponseWriter, r *http.Request) 
 		SupportedEventTypes: agentV1EventTypes(),
 		SessionCreateFields: agentV1FieldSupport{Supported: []string{"definition_ref", "host_settings", "model_selection", "project_id", "title", "metadata"}, Unsupported: []string{"agent_id", "provider", "model", "runtime_kind", "work_root", "durable_agent_id", "boot_profile_id", "subagent_runtime"}},
 		TurnSendFields: agentV1FieldSupport{
-			Supported:   []string{"content", "delivery", "effort", "delta_mode"},
+			Supported:   []string{"content", "delivery", "effort", "delta_mode", "client_context"},
 			Unsupported: []string{},
 		},
 		TurnDelivery:       agentV1TurnDelivery{MidRun: "at_idle", Interrupt: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}/cancel", Notes: []string{"One executing turn and up to sixteen queued turns per view; overflow is refused before transcript mutation.", "Cancellation targets one turn. Observers resume independently; a disconnected observer does not cancel execution."}},
@@ -312,6 +314,14 @@ func (a *API) handleAgentV1SendTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx = chat.WithDeltaMode(ctx, deltaMode)
+	if len(req.ClientContext) > 0 {
+		snapshot, validationErr := clientcontext.Decode(req.ClientContext)
+		if validationErr != nil {
+			a.agentV1Error(w, http.StatusBadRequest, validationErr.Error())
+			return
+		}
+		ctx = service.WithClientContextSnapshot(ctx, snapshot)
+	}
 	admission, ok := a.Services.Chat.(service.CognitiveTurnAdmission)
 	if !ok {
 		a.agentV1Error(w, http.StatusServiceUnavailable, "bounded native turn admission unavailable")

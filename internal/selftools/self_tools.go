@@ -949,8 +949,8 @@ the current turn for subsequent writes.
 				"**When to use:** When you need raw transcript context that `chat_search`'s snippet view doesn't give you, " +
 				"or when you need to reread exactly what you (or the user) wrote before a compaction event.\n\n" +
 				"**When NOT to use:** Do not use this to read chats you have no contextual reason to inspect — chat content is privileged.\n\n" +
-				"**Scope boundary:** read-only, workspace-scoped. Targets in other workspaces are rejected.\n\n" +
-				"**Output shape:** `{session_id, short_code, title, workspace_id, total, offset, limit, has_more, count, messages: [{id, role, text, is_compacted, created_at}, ...]}`. " +
+				"**Scope boundary:** read-only through the host-authorized transcript reader and existing tool permissions. A session identifier selects history; it does not confer actor authority.\n\n" +
+				"**Output shape:** `{session_id, short_code, title, total, offset, limit, has_more, count, messages: [{id, role, text, is_compacted, created_at}, ...]}`. " +
 				"Messages are chronological (created_at ASC). Use `limit`/`offset` to paginate large chats; default limit 50, max 500.",
 			InputSchema: map[string]any{
 				"type": "object",

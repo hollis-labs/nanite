@@ -1051,8 +1051,9 @@ func (s *chatServiceImpl) handleRequestTools(
 	sessionID string,
 	reflectionFired *bool,
 	inspectorTurnID string, // I1 (CW-20260426-0004): "" when inspector is disabled
+	labels ...toolDisplayLabels,
 ) ([]llmtypes.ContentBlock, []chat.ToolCallRef, []llmtypes.ToolDefinition) {
-	ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID}
+	ch <- toolCallDisplayEvent(tu, labels...)
 	*totalCalls++
 
 	// Pull the LLM-supplied intent up front so it ends up in every
@@ -1138,6 +1139,7 @@ func (s *chatServiceImpl) handleRequestTools(
 		return resultBlocks, toolCallRefs, tools
 	}
 
+	normalizeToolInputSchemas(newTools)
 	var loaded []string
 	for _, nt := range newTools {
 		if !loadedTools[nt.Name] {
@@ -1799,38 +1801,6 @@ func normalizeToolInputSchemas(tools []llmtypes.ToolDefinition) {
 		normalizeSchemaNode(clone)
 		injectUXMetadataProperties(clone)
 		tools[i].InputSchema = clone
-	}
-}
-
-func injectUXMetadataProperties(schema map[string]any) {
-	if schema == nil {
-		return
-	}
-	if typ, _ := schema["type"].(string); typ != "object" {
-		return
-	}
-	var props map[string]any
-	if p, ok := schema["properties"]; ok && p != nil {
-		if m, ok := p.(map[string]any); ok {
-			props = m
-		}
-	}
-	if props == nil {
-		props = make(map[string]any)
-		schema["properties"] = props
-	}
-
-	if _, exists := props["toolAction"]; !exists {
-		props["toolAction"] = map[string]any{
-			"type":        "string",
-			"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
-		}
-	}
-	if _, exists := props["toolSummary"]; !exists {
-		props["toolSummary"] = map[string]any{
-			"type":        "string",
-			"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
-		}
 	}
 }
 

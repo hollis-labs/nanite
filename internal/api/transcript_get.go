@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+
+	"github.com/hollis-labs/nanite/internal/structuredmessage"
 )
 
 // handleGetMessageTranscript returns the exact durable prose for a specific message,
-// ensuring the caller has provided the correct sessionID that owns the message.
+// under the existing operator HTTP history policy. Session consistency is
+// checked here; a supplied UUID never becomes verified actor authority.
 func (a *API) handleGetMessageTranscript(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	messageID := r.PathValue("messageId")
@@ -23,7 +26,7 @@ func (a *API) handleGetMessageTranscript(w http.ResponseWriter, r *http.Request)
 			a.errorResp(w, http.StatusNotFound, "message not found")
 			return
 		}
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
+		a.serviceError(w, r, err)
 		return
 	}
 
@@ -33,8 +36,15 @@ func (a *API) handleGetMessageTranscript(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Exact durable prose returned without UI or default-rendering mutation.
+	// Decode only the persisted assistant wrapper, keeping the text byte-exact.
+	// Other roles retain their literal content, even if it happens to be JSON.
+	prose := msg.Content
+	if msg.Role == "assistant" {
+		if text, wrapped := structuredmessage.UnwrapText(prose); wrapped {
+			prose = text
+		}
+	}
 	a.jsonResp(w, http.StatusOK, map[string]string{
-		"transcript": msg.Content,
+		"transcript": prose,
 	})
 }

@@ -697,7 +697,7 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 	}
 	for _, m := range members {
 		if m.Status == store.TeamRunMemberStatusActive {
-			profile, err := svc.store.GetAgent(ctx, m.AgentID)
+			profile, err := svc.store.GetAgentForActor(ctx, m.AgentID)
 			if err != nil {
 				return "", fmt.Errorf("look up resolved agent %s for team slot %q: %w", m.AgentID, slot.Name, err)
 			}
@@ -710,7 +710,7 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 		if slot.AgentID == nil || *slot.AgentID == "" {
 			return "", fmt.Errorf("team slot %q: resolution=durable requires agent_id", slot.Name)
 		}
-		profile, err := svc.store.GetAgent(ctx, *slot.AgentID)
+		profile, err := svc.store.GetAgentForActor(ctx, *slot.AgentID)
 		if err != nil {
 			return "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, *slot.AgentID, err)
 		}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -117,58 +118,30 @@ func TestMigrate125SeedsProvenanceAllowList(t *testing.T) {
 	}
 }
 
-// TestApprovePendingReflexCollapsesProvenanceTierToOperator is the
-// regression test for TASKS/reflex-taxonomy/05-provenance-tier-enforcement.md
-// step 4: the live agent_reflexes row ApprovePendingReflex produces must
-// carry provenance_tier='operator' regardless of the pending reflex's own
-// proposer identity — mirroring the pre-existing created_by ->
-// "operator:"+reviewedBy collapse (Facet 3: agent_proposed is not a fourth
-// live tier; "active in agent_reflexes => operator-approved" holds for
-// provenance_tier the same way it already holds for created_by).
-func TestApprovePendingReflexCollapsesProvenanceTierToOperator(t *testing.T) {
+// Claimed provenance cannot authorize a mutable intrinsic edit after the cut.
+// Retained pending rows remain unchanged for explicit historical disposition.
+func TestApprovePendingReflexRefusesClaimedProvenanceWithoutHistoricalMutation(t *testing.T) {
 	s := newTestStore(t)
-	ctx := context.Background()
-
-	cases := []struct {
-		name       string
-		proposedBy string
-	}{
-		{"proposer looks like a plain agent id", "agent-curator"},
-		{"proposer looks like a system seeder", "system"},
-		{"proposer already looks operator-ish", "operator:someone-else"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			pendingID, err := s.InsertPendingReflex(ctx, PendingReflex{
-				ProposedBy:  tc.proposedBy,
-				Name:        "pending-" + tc.proposedBy,
-				TriggerKind: ReflexTriggerPredicate,
-				TriggerSpec: `{"kind":"tool_calls_window","window":1,"op":"=","value":0}`,
-				ActionKind:  ReflexActionInjectReminder,
-				ActionSpec:  `{"body":"ground"}`,
-				Rationale:   "test",
-			})
-			if err != nil {
-				t.Fatalf("InsertPendingReflex: %v", err)
+	ctx := t.Context()
+	for _, claim := range []string{"agent-curator", "system", "operator:someone-else"} {
+		t.Run(claim, func(t *testing.T) {
+			id := "pending-" + claim
+			if _, err := s.DB.ExecContext(ctx, `INSERT INTO pending_reflexes(id,proposed_by,name,trigger_kind,trigger_spec,action_kind,action_spec,rationale) VALUES(?,?,?,'event','{}','inject_reminder','{}','retained fixture')`, id, claim, id); err != nil {
+				t.Fatal(err)
 			}
-
-			approved, err := s.ApprovePendingReflex(ctx, pendingID, "reviewer-alice")
-			if err != nil {
-				t.Fatalf("ApprovePendingReflex: %v", err)
+			if _, err := s.InsertPendingReflex(ctx, PendingReflex{ID: "new-" + id, ProposedBy: claim}); !errors.Is(err, ErrImmutableAgentProfile) {
+				t.Fatal(err)
 			}
-			if approved.ProvenanceTier != "operator" {
-				t.Errorf("ApprovePendingReflex(proposed_by=%q).ProvenanceTier = %q, want %q", tc.proposedBy, approved.ProvenanceTier, "operator")
+			if _, err := s.ApprovePendingReflex(ctx, id, "reviewer-alice"); !errors.Is(err, ErrImmutableAgentProfile) {
+				t.Fatal(err)
 			}
-
-			// Re-fetch independently to confirm what's actually persisted,
-			// not just what the in-memory return value claims.
-			reloaded, err := s.GetAgentReflex(ctx, approved.ID)
-			if err != nil {
-				t.Fatalf("GetAgentReflex(%s): %v", approved.ID, err)
+			var status, proposer string
+			if err := s.DB.QueryRowContext(ctx, `SELECT status,proposed_by FROM pending_reflexes WHERE id=?`, id).Scan(&status, &proposer); err != nil || status != "pending" || proposer != claim {
+				t.Fatal(status, proposer, err)
 			}
-			if reloaded.ProvenanceTier != "operator" {
-				t.Errorf("reloaded agent_reflexes row provenance_tier = %q, want %q", reloaded.ProvenanceTier, "operator")
+			var n int
+			if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM agent_reflexes WHERE id=? OR name=?`, id, id).Scan(&n); err != nil || n != 0 {
+				t.Fatal("approval wrote intrinsic behavior", n, err)
 			}
 		})
 	}

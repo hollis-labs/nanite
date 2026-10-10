@@ -8,17 +8,33 @@ import (
 	"github.com/google/uuid"
 )
 
+// makeTestAgent simulates an ALREADY host-authorized binding in a private
+// database. It is not an enrollment port, and a host ID is never its actor ID.
 func makeTestAgent(t *testing.T, s *Store, slug string) *AgentProfile {
 	t.Helper()
-	a := &AgentProfile{
-		Name:         "Test Agent " + slug,
-		Slug:         slug,
-		SystemPrompt: "You are a test agent.",
+	h := makeTestHost(t, s, slug)
+	actor := "msg://agent/private-fixture/" + slug
+	if _, err := s.DB.ExecContext(t.Context(), `INSERT INTO agent_actor_bindings(actor_uri,host_settings_id,binding_receipt) VALUES(?,?,?)`, actor, h.ID, "private-test-existing-host-authorization"); err != nil {
+		t.Fatal(err)
 	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	p, err := s.GetAgentForActor(t.Context(), actor)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return a
+	return p
+}
+
+func makeTestHost(t *testing.T, s *Store, slug string) AgentHostSettings {
+	t.Helper()
+	pin, err := s.InstallAgentDefinition(t.Context(), definitionTestBytes("def:private-test-host", "1", "You are a test agent."), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.CreateAgentHostSettings(t.Context(), AgentHostSettings{Slug: slug, Title: "Test Agent " + slug, DefinitionRef: pin, Settings: NativeHostSettings{Version: "1", Runtime: "api"}, Source: "explicit-private-test-authoring", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }
 
 // makeTestAgentRawSQL inserts an agent_profiles row using only the columns

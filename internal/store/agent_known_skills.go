@@ -95,6 +95,9 @@ func (s *Store) InsertAgentKnownSkill(ctx context.Context, row AgentKnownSkill) 
 }
 
 func insertAgentKnownSkill(ctx context.Context, db agentConfigDB, row AgentKnownSkill) error {
+	if !row.IsBareAssignment() {
+		return ErrVerifiedActorRequired
+	}
 	if row.AgentID == "" {
 		return fmt.Errorf("insert agent_known_skills: agent_id is required")
 	}
@@ -106,7 +109,7 @@ func insertAgentKnownSkill(ctx context.Context, db agentConfigDB, row AgentKnown
 		ttl = row.TTLSeconds
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO agent_known_skills
+		`INSERT OR REPLACE INTO actor_known_skills
 		    (agent_id, skill_name, pinned, activation_count, last_used_at,
 		     added_at, ttl_seconds, reason,
 		     approved_content_hash, granted_at, granted_by, capabilities_granted)
@@ -131,8 +134,8 @@ func insertAgentKnownSkill(ctx context.Context, db agentConfigDB, row AgentKnown
 func (s *Store) ListAgentKnownSkills(ctx context.Context, agentID string) ([]AgentKnownSkill, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentKnownSkillColumns+`
-		 FROM agent_known_skills
-		 WHERE agent_id = ?
+		 FROM actor_known_skills
+		 WHERE agent_id = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=actor_known_skills.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)
 		 ORDER BY pinned DESC, last_used_at DESC, skill_name ASC`,
 		agentID,
 	)
@@ -158,8 +161,8 @@ func (s *Store) GetAgentKnownSkill(ctx context.Context, agentID, skillName strin
 	var t AgentKnownSkill
 	row := s.DB.QueryRowContext(ctx,
 		`SELECT `+agentKnownSkillColumns+`
-		 FROM agent_known_skills
-		 WHERE agent_id = ? AND skill_name = ?`,
+		 FROM actor_known_skills
+		 WHERE agent_id = ? AND skill_name = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=actor_known_skills.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)`,
 		agentID, skillName,
 	)
 	if err := scanAgentKnownSkill(row, &t); err != nil {
@@ -175,7 +178,7 @@ func (s *Store) GetAgentKnownSkill(ctx context.Context, agentID, skillName strin
 // ErrAgentKnownSkillNotFound if no row matched.
 func (s *Store) DeleteAgentKnownSkill(ctx context.Context, agentID, skillName string) error {
 	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_known_skills WHERE agent_id = ? AND skill_name = ?`,
+		`DELETE FROM actor_known_skills WHERE agent_id = ? AND skill_name = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=actor_known_skills.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)`,
 		agentID, skillName,
 	)
 	if err != nil {

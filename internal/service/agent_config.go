@@ -395,7 +395,7 @@ func validateEditableAgent(p *store.AgentProfile) error {
 }
 
 func (s *AgentConfigService) ListRevisions(ctx context.Context, id string, limit, offset int) ([]store.AgentRevision, error) {
-	if _, err := s.store.GetAgent(ctx, id); err != nil {
+	if _, err := s.store.GetHistoricalAgentProfile(ctx, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
 		}

@@ -114,64 +114,7 @@ func (s *Store) UpdateAgentConfigRevision(ctx context.Context, p *AgentProfile, 
 }
 
 func (s *Store) writeAgentConfig(ctx context.Context, p *AgentProfile, a AgentAssignments, seeds AgentConfigSeeds, create bool, revision *string, restoredFrom string) (*AgentProfile, error) {
-	tx, beginErr := s.DB.BeginTx(ctx, nil)
-	if beginErr != nil {
-		return nil, &AgentConfigWriteError{Step: "begin", Err: beginErr}
-	}
-	defer rollbackUnlessCommitted(tx)
-	fail := func(step string, err error) (*AgentProfile, error) {
-		return nil, &AgentConfigWriteError{Step: step, Err: err}
-	}
-	if revision != nil {
-		current, err := getAgent(ctx, tx, p.ID)
-		if err != nil {
-			return fail("read", err)
-		}
-		if current.Revision != *revision {
-			return fail("revision", ErrAgentRevisionConflict)
-		}
-	}
-	// Apply assignments before the single profile mutation, so a revision never
-	// describes an intermediate profile/assignment combination from this command.
-	applyAgentAssignments(p, a)
-	if err := validateAgentAssignments(ctx, tx, p, AgentAssignments{}); err != nil {
-		return fail("assignments", err)
-	}
-	if create {
-		if err := createAgent(ctx, tx, p); err != nil {
-			return fail("create", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_profiles SET default_trust_tier = 'untrusted' WHERE id = ?`, p.ID); err != nil {
-			return fail("trust", err)
-		}
-	} else if err := updateAgent(ctx, tx, p); err != nil {
-		return fail("update", err)
-	}
-	if err := seedAgentConfig(ctx, tx, p.ID, seeds); err != nil {
-		return fail("seeds", err)
-	}
-	// Preserve current authority across restart, too. A profile first created
-	// after startup may not yet have the independent one-time legacy marker.
-	// An edit/restore must not make old declarations eligible for a future grant
-	// backfill over the operator's current grant set.
-	if !create && (seeds.PreserveToolGrants || restoredFrom != "") {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_tools_legacy_backfill(agent_id,created_at) VALUES (?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(agent_id) DO NOTHING`, p.ID); err != nil {
-			return fail("grants", err)
-		}
-	}
-	saved, err := getAgent(ctx, tx, p.ID)
-	if err != nil {
-		return fail("read", err)
-	}
-	if restoredFrom != "" {
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_profile_revisions SET operation = 'restore_partial', restored_from = ? WHERE id = ? AND agent_id = ?`, restoredFrom, saved.Revision, saved.ID); err != nil {
-			return fail("history", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fail("commit", err)
-	}
-	return saved, nil
+	return nil, ErrImmutableAgentProfile
 }
 
 func applyAgentAssignments(p *AgentProfile, a AgentAssignments) {

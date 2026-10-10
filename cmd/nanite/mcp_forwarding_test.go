@@ -159,8 +159,10 @@ func sortedNames(tools []mcp.Tool) []string {
 // CW-20261001-0188: an agent's `nanite mcp` runs inside its sandbox, where
 // the database's directory is to be read-only (CW-20261001-0143). With
 // NANITE_API_URL it must start there, open nothing in that directory, and
-// serve its launch's self tools through the API: a chat launch every self
-// tool, a subagent the bare-store set. Without NANITE_API_URL the same
+// serve its launch's retained self tools through the API: a chat launch the
+// harness set, a subagent the bare-store set. Recursive tool dispatch requires
+// verified execution authority and is unavailable through this operator proxy.
+// Without NANITE_API_URL the same
 // setup still cannot open the database, which shows the directory really
 // is read-only to the child.
 func TestMCPServe_APIModeRunsWithReadOnlyDBDir(t *testing.T) {
@@ -170,8 +172,12 @@ func TestMCPServe_APIModeRunsWithReadOnlyDBDir(t *testing.T) {
 		mcpserver.ScopeHarness: append(sortedNames(append(slices.Clone(allSelf), devTools...)), "fetch_tool_result", "search_tool_result"),
 		mcpserver.ScopeStore:   sortedNames(append(selftools.BareStoreTools(), devTools...)),
 	}
-	for _, want := range wantFor {
+	for scope, want := range wantFor {
+		want = slices.DeleteFunc(want, func(name string) bool {
+			return name == "python_run" || name == "workflow_execute_tool_step"
+		})
 		slices.Sort(want)
+		wantFor[scope] = want
 	}
 
 	for _, ro := range readOnlyDBDirs(t) {

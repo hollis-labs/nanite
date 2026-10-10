@@ -1,146 +1,98 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func agentRevisionRequest(t *testing.T, mux http.Handler, method, path, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(method, path, strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-	mux.ServeHTTP(w, r)
-	return w
-}
-
-func TestAgentPUTStrictBodiesCannotErasePrompt(t *testing.T) {
+func TestRetiredAgentPublicMuxCannotEditOrRestoreHistoricalPromptAndAssignments(t *testing.T) {
 	a, mux := newTestAPI(t)
-	ctx := context.Background()
-	p := &store.AgentProfile{Name: "Safe", Slug: "strict-put", SystemPrompt: "Never erase this prompt", Source: "user"}
-	if err := a.store.CreateAgent(ctx, p); err != nil {
+	const id = "historical-revision-api"
+	retiredAPIHistoricalProfile(t, a, id, "user")
+	if _, err := a.store.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET source_ref='/provenance/only.md',protocol='acp',transport='stdio',can_execute=1,default_provider='retained-provider',system_prompt='Retained edited private prompt' WHERE id=?`, id); err != nil {
 		t.Fatal(err)
 	}
-	get := agentRevisionRequest(t, mux, "GET", "/api/agents/"+p.ID, "")
-	if get.Code != 200 {
-		t.Fatal(get.Body.String())
-	}
-	cases := []string{"", "null", "[]", "{}", `{"revision":"only-token"}`, `{"agent":{}}`, get.Body.String(), `{"name":null}`, `{"role_id":null}`, `{"revision":null}`, `{"Name":"case alias"}`, `{"unknown":true}`, `{"name":"a","name":"b"}`, `{"name":""}`, `{"slug":" "}`, `{"system_prompt":" "}`, `{"can_execute":"false"}`, `{"name":"a"} {}`, `{"name":"a"} trailing`, `{"settings":"null"}`, `{"role_tools":"{}"}`, `{"status":"unsupported"}`, `{"protocol":"made-up"}`}
-	for _, body := range cases {
-		t.Run(body, func(t *testing.T) {
-			w := agentRevisionRequest(t, mux, "PUT", "/api/agents/"+p.ID, body)
-			if w.Code != 400 {
-				t.Fatalf("body %s returned %d: %s", body, w.Code, w.Body.String())
-			}
-			current, err := a.store.GetAgent(ctx, p.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if current.Revision != p.Revision || current.SystemPrompt != p.SystemPrompt || current.Name != p.Name {
-				t.Fatalf("refused body mutated profile: %#v", current)
-			}
-		})
-	}
-}
-
-func TestAgentPUTPartialFieldsPreserveAssignmentsAndDetectStaleRevision(t *testing.T) {
-	a, mux := newTestAPI(t)
-	ctx := context.Background()
-	role := &store.Role{Slug: "partial-role", Name: "Partial Role"}
-	if err := a.store.CreateRole(ctx, role); err != nil {
-		t.Fatal(err)
-	}
-	p := &store.AgentProfile{Name: "Original", Slug: "partial-fields", SystemPrompt: "Original prompt", Source: "user", SourceRef: "/provenance/only.md", RoleID: role.ID, Protocol: "acp", Transport: "stdio", CanExecute: true, DefaultProvider: "original-provider"}
-	if err := a.store.CreateAgent(ctx, p); err != nil {
-		t.Fatal(err)
-	}
-	w := agentRevisionRequest(t, mux, "PUT", "/api/agents/"+p.ID, `{"description":"edited","can_execute":false}`)
-	if w.Code != 200 {
-		t.Fatalf("partial PUT = %d: %s", w.Code, w.Body.String())
-	}
-	var got AgentProfileView
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Description != "edited" || got.CanExecute || got.SystemPrompt != p.SystemPrompt || got.Name != p.Name || got.RoleID != role.ID || got.Protocol != "acp" || got.Transport != "stdio" || got.SourceRef != p.SourceRef || got.DefaultProvider != p.DefaultProvider || got.Revision == p.Revision || got.Revision == "" {
-		t.Fatalf("partial update lost fields: %#v", got)
-	}
-	body, _ := json.Marshal(map[string]string{"name": "stale edit", "revision": p.Revision})
-	w = agentRevisionRequest(t, mux, "PUT", "/api/agents/"+p.ID, string(body))
-	if w.Code != 409 {
-		t.Fatalf("stale PUT = %d: %s", w.Code, w.Body.String())
-	}
-	w = agentRevisionRequest(t, mux, "PUT", "/api/agents/"+p.ID, `{"role_id":"","protocol":"","transport":"","default_provider":"updated-provider","runtime_kind":"api"}`)
-	if w.Code != 200 {
-		t.Fatalf("clear assignments = %d: %s", w.Code, w.Body.String())
-	}
-	current, err := a.store.GetAgent(ctx, p.ID)
+	profile, err := a.store.GetHistoricalAgentProfile(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.RoleID != "" || current.Protocol != "" || current.Transport != "" || current.DefaultProvider != "updated-provider" || current.RuntimeKind != "api" || current.SystemPrompt != p.SystemPrompt {
-		t.Fatalf("explicit clears not applied: %#v", current)
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`, `SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = retiredAPISnapshot(t, a, q)
+	}
+	for _, body := range []string{"", "null", "[]", `{}`, `{"revision":"only-token"}`, `{"agent":{}}`, `{"name":null}`, `{"role_id":null}`, `{"revision":null}`, `{"Name":"case alias"}`, `{"unknown":true}`, `{"name":"a","name":"b"}`, `{"name":""}`, `{"slug":" "}`, `{"system_prompt":" "}`, `{"can_execute":"false"}`, `{"name":"a"} {}`, `{"name":"a"} trailing`, `{"settings":"null"}`, `{"role_tools":"{}"}`, `{"status":"unsupported"}`, `{"protocol":"made-up"}`, `{"description":"changed","can_execute":false}`, `{"role_id":"","protocol":"","transport":"","default_provider":"changed","runtime_kind":"api"}`} {
+		requireRetiredAPI(t, retiredAPIRequest(t, mux, "PUT", "/api/agents/"+id, body))
+	}
+	for _, revision := range []string{profile.Revision, "missing-revision"} {
+		for _, body := range []string{`{}`, `{"revision":"` + profile.Revision + `"}`, `{"revision":"stale"}`, "not json"} {
+			requireRetiredAPI(t, retiredAPIRequest(t, mux, "POST", "/api/agents/"+id+"/revisions/"+revision+"/restore", body))
+		}
+	}
+	requireRetiredAPI(t, retiredAPIRequest(t, mux, "DELETE", "/api/agents/"+id, ""))
+	if w := retiredAPIRequest(t, mux, "GET", "/api/agents/"+id, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("ordinary runtime getter fell back to history: %d %s", w.Code, w.Body.String())
+	}
+	for i, q := range queries {
+		retiredAPIHistoryUnchanged(t, a, q, before[i])
 	}
 }
 
-func TestAgentRevisionAPIListsAndLabelsPartialRestore(t *testing.T) {
+func TestHistoricalAgentRevisionPublicMuxReadsPagesWithoutRestoringAuthority(t *testing.T) {
 	a, mux := newTestAPI(t)
-	ctx := context.Background()
-	p := &store.AgentProfile{Name: "Original", Slug: "revision-api", SystemPrompt: "Original prompt", Source: "user"}
-	if err := a.store.CreateAgent(ctx, p); err != nil {
+	const id = "historical-revision-pages"
+	retiredAPIHistoricalProfile(t, a, id, "user")
+	original, err := a.store.GetHistoricalAgentProfile(t.Context(), id)
+	if err != nil {
 		t.Fatal(err)
 	}
-	w := agentRevisionRequest(t, mux, "PUT", "/api/agents/"+p.ID, `{"system_prompt":"Changed prompt"}`)
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	var current AgentProfileView
-	if err := json.Unmarshal(w.Body.Bytes(), &current); err != nil {
+	if _, err = a.store.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET system_prompt='Retained later prompt' WHERE id=?`, id); err != nil {
 		t.Fatal(err)
 	}
-	w = agentRevisionRequest(t, mux, "GET", "/api/agents/"+p.ID+"/revisions?limit=1&offset=1", "")
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
+	current, err := a.store.GetHistoricalAgentProfile(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const query = `SELECT * FROM agent_profile_revisions ORDER BY sequence`
+	before := retiredAPISnapshot(t, a, query)
+	base := "/api/agents/" + id + "/revisions"
+	w := retiredAPIRequest(t, mux, "GET", base+"?limit=1&offset=1", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("historical revision page: %d %s", w.Code, w.Body.String())
 	}
 	var page struct {
-		Revisions []store.AgentRevision `json:"revisions"`
-		Scope     string                `json:"restore_scope"`
+		Revisions     []store.AgentRevision `json:"revisions"`
+		Scope         string                `json:"restore_scope"`
+		Limit, Offset int
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+	if err = json.Unmarshal(w.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Revisions) != 1 || page.Revisions[0].ID != p.Revision || page.Scope != "partial_profile_and_assignments" {
-		t.Fatalf("history page = %#v", page)
+	if len(page.Revisions) != 1 || page.Revisions[0].ID != original.Revision || page.Revisions[0].Profile.SystemPrompt != original.SystemPrompt || page.Scope != "partial_profile_and_assignments" || page.Limit != 1 || page.Offset != 1 {
+		t.Fatalf("historical page lost original snapshot: %+v", page)
 	}
-	path := "/api/agents/" + p.ID + "/revisions/" + p.Revision + "/restore"
-	w = agentRevisionRequest(t, mux, "POST", path, `{}`)
-	if w.Code != 400 {
-		t.Fatalf("restore without current revision = %d", w.Code)
+	w = retiredAPIRequest(t, mux, "GET", base+"?limit=1", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), current.Revision) {
+		t.Fatalf("latest historical revision: %d %s", w.Code, w.Body.String())
 	}
-	body, _ := json.Marshal(map[string]string{"revision": current.Revision})
-	w = agentRevisionRequest(t, mux, "POST", path, string(body))
-	if w.Code != 200 {
-		t.Fatalf("restore = %d: %s", w.Code, w.Body.String())
+	for _, suffix := range []string{"?limit=0", "?limit=101", "?offset=-1", "?limit=abc", "?offset=abc"} {
+		w = retiredAPIRequest(t, mux, "GET", base+suffix, "")
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("malformed historical page %s: %d %s", suffix, w.Code, w.Body.String())
+		}
 	}
-	var restored struct {
-		Agent  AgentProfileView `json:"agent"`
-		Scope  string           `json:"restore_scope"`
-		Grants bool             `json:"grants_restored"`
+	w = retiredAPIRequest(t, mux, "GET", "/api/agents/missing/revisions", "")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing historical profile: %d %s", w.Code, w.Body.String())
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &restored); err != nil {
-		t.Fatal(err)
-	}
-	if restored.Agent.SystemPrompt != p.SystemPrompt || restored.Agent.Revision == current.Revision || restored.Scope != "partial_profile_and_assignments" || restored.Grants {
-		t.Fatalf("restore response = %#v", restored)
-	}
-	w = agentRevisionRequest(t, mux, "POST", path, string(body))
-	if w.Code != 409 {
-		t.Fatalf("repeated stale restore = %d: %s", w.Code, w.Body.String())
+	requireRetiredAPI(t, retiredAPIRequest(t, mux, "POST", base+"/"+original.Revision+"/restore", `{"revision":"`+current.Revision+`"}`))
+	retiredAPIHistoryUnchanged(t, a, query, before)
+	retained, err := a.store.GetHistoricalAgentProfile(t.Context(), id)
+	if err != nil || retained.Revision != current.Revision || retained.SystemPrompt != current.SystemPrompt {
+		t.Fatalf("read-only historical page/restore changed profile: %+v %v", retained, err)
 	}
 }

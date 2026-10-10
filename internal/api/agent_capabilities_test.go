@@ -1,425 +1,143 @@
 package api
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestAgentCapabilitiesAPI_KnownToolsCRUD(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Known Tool Agent",
-		Slug:         "known-tool-agent",
-		SystemPrompt: "x",
-	})
-
-	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-tools", bytes.NewBufferString(`{
-		"tool_name":"torque_task_create",
-		"pinned":true,
-		"sort_order":7,
-		"ttl_seconds":3600,
-		"reason":"operator pin"
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create known tool: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("GET", "/api/agents/"+agentID+"/known-tools", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "torque_task_create") {
-		t.Fatalf("list known tools: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("GET", "/api/agents/"+agentID+"/known-tools/torque_task_create", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get known tool: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("PUT", "/api/agents/"+agentID+"/known-tools/torque_task_create", bytes.NewBufferString(`{
-		"tool_name":"torque_task_create",
-		"pinned":false,
-		"sort_order":1,
-		"ttl_seconds":120,
-		"reason":"cooldown"
-	}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update known tool: %d %s", w.Code, w.Body.String())
-	}
-	row, err := a.store.GetAgentKnownTool(context.Background(), agentID, "torque_task_create")
+// A fresh host settings row is deliberately created without an actor binding.
+// This fixture never fabricates an enrollment receipt or an authority issuer.
+func capabilityHostWithoutActor(t *testing.T, a *testAPI, slug, source string) store.AgentHostSettings {
+	t.Helper()
+	embedded, err := service.EmbeddedDefinition()
 	if err != nil {
-		t.Fatalf("GetAgentKnownTool: %v", err)
+		t.Fatal(err)
 	}
-	if row.Pinned || row.SortOrder != 1 || row.TTLSeconds != 120 || row.Reason != "cooldown" {
-		t.Fatalf("updated known tool mismatch: %+v", row)
-	}
-
-	req = httptest.NewRequest("DELETE", "/api/agents/"+agentID+"/known-tools/torque_task_create", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete known tool: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAgentCapabilitiesAPI_KnownSkillsCRUD(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Known Skill Agent",
-		Slug:         "known-skill-agent",
-		SystemPrompt: "x",
-	})
-
-	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-skills", bytes.NewBufferString(`{
-		"skill_name":"project_advisor",
-		"pinned":true,
-		"ttl_seconds":600,
-		"reason":"role carry"
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create known skill: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("GET", "/api/agents/"+agentID+"/known-skills/project_advisor", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get known skill: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("PUT", "/api/agents/"+agentID+"/known-skills/project_advisor", bytes.NewBufferString(`{
-		"skill_name":"project_advisor",
-		"pinned":false,
-		"ttl_seconds":0,
-		"reason":"manual reset"
-	}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update known skill: %d %s", w.Code, w.Body.String())
-	}
-	row, err := a.store.GetAgentKnownSkill(context.Background(), agentID, "project_advisor")
+	host, err := a.store.CreateAgentHostSettings(t.Context(), store.AgentHostSettings{Slug: slug, Title: "Capability host", Source: source, DefinitionRef: embedded.Ref.MeshRef(), Enabled: true, Settings: store.NativeHostSettings{Version: "1", Runtime: "api", Provider: "fixture", Model: "fixture-model"}})
 	if err != nil {
-		t.Fatalf("GetAgentKnownSkill: %v", err)
+		t.Fatal(err)
 	}
-	if row.Pinned || row.Reason != "manual reset" {
-		t.Fatalf("updated known skill mismatch: %+v", row)
-	}
-
-	req = httptest.NewRequest("DELETE", "/api/agents/"+agentID+"/known-skills/project_advisor", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete known skill: %d %s", w.Code, w.Body.String())
-	}
+	return host
 }
 
-// TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment
-// reproduces the fresh reviewer's first finding directly (TASKS/skills/02's
-// fix-required section, 2026-08-21): AssignSkillToAgent (POST
-// /api/agents/{id}/skills, the Wizard's own "Assigned Skills" step) and
-// handleCreateAgentKnownSkill (POST /api/agents/{id}/known-skills) now share
-// agent_known_skills' (agent_id, skill_name) row space. Assigning a skill
-// via the first endpoint, then creating a known-skill entry for the exact
-// same skill via the second, must succeed (upserting onto the bare row) —
-// not 409, which is what AgentBuilderWizard.tsx's own submit flow does for
-// a skill it lists in both assigned_skill_ids/assigned_skill_slugs and
-// known_skills.
-func TestAgentCapabilitiesAPI_CreateKnownSkill_UpsertsOntoBareAssignment(t *testing.T) {
+func TestAgentCapabilitiesPublicMuxKeepsHistoricalCatalogInvisibleAndRequiresActor(t *testing.T) {
 	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Collision Agent",
-		Slug:         "collision-agent",
-		SystemPrompt: "x",
-	})
-
-	sk := &store.Skill{Name: "Collision Skill", Slug: "collision-skill"}
-	if err := a.store.CreateSkill(context.Background(), sk); err != nil {
-		t.Fatalf("CreateSkill: %v", err)
+	const historical = "historical-capability-api"
+	retiredAPIHistoricalProfile(t, a, historical, "user")
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_known_tools(agent_id,tool_name,pinned,activation_count,last_used_at,added_at,ttl_seconds,reason) VALUES(?,'historical-tool',1,7,'retained-last-used','retained-added',3600,'retained reason')`, historical); err != nil {
+		t.Fatal(err)
 	}
-
-	// Same-skill assignment via the unrelated /skills endpoint first —
-	// mirrors AgentBuilderWizard.tsx's assignBuilderCapabilities loop.
-	if err := a.store.AssignSkillToAgent(context.Background(), agentID, sk.ID, ""); err != nil {
-		t.Fatalf("AssignSkillToAgent: %v", err)
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_known_skills(agent_id,skill_name,pinned,activation_count,last_used_at,added_at,ttl_seconds,reason) VALUES(?,'historical-skill',1,8,'retained-last-used','retained-added',600,'retained reason')`, historical); err != nil {
+		t.Fatal(err)
 	}
-
-	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-skills", bytes.NewBufferString(`{
-		"skill_name":"collision-skill",
-		"pinned":true,
-		"reason":"role carry"
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create known skill onto bare assignment: got %d, want 201; body=%s", w.Code, w.Body.String())
+	host := capabilityHostWithoutActor(t, a, "capability-api-fresh", "user")
+	queries := []string{`SELECT * FROM agent_known_tools ORDER BY agent_id,tool_name`, `SELECT * FROM agent_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM actor_known_tools ORDER BY agent_id,tool_name`, `SELECT * FROM actor_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`, `SELECT * FROM agent_host_settings ORDER BY id`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = retiredAPISnapshot(t, a, q)
 	}
-
-	row, err := a.store.GetAgentKnownSkill(context.Background(), agentID, "collision-skill")
-	if err != nil {
-		t.Fatalf("GetAgentKnownSkill: %v", err)
+	for _, resource := range []struct{ path, name, body string }{
+		{"known-tools", "historical-tool", `{"tool_name":"historical-tool","pinned":true,"reason":"claimed authority","actor_uri":"urn:claimed"}`},
+		{"known-skills", "historical-skill", `{"skill_name":"historical-skill","pinned":true,"reason":"claimed authority","actor_uri":"urn:claimed"}`},
+	} {
+		for _, id := range []string{historical, "missing-agent"} {
+			for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+				path := "/api/agents/" + id + "/" + resource.path
+				if method == "PUT" || method == "DELETE" {
+					path += "/" + resource.name
+				}
+				w := retiredAPIRequest(t, mux, method, path, resource.body)
+				if w.Code != http.StatusNotFound {
+					t.Fatalf("historical/missing host %s %s: %d %s", method, path, w.Code, w.Body.String())
+				}
+			}
+		}
+		base := "/api/agents/" + host.ID + "/" + resource.path
+		w := retiredAPIRequest(t, mux, "GET", base, "")
+		if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
+			t.Fatalf("fresh catalog inherited historical capabilities: %d %s", w.Code, w.Body.String())
+		}
+		for _, method := range []string{"GET", "PUT", "DELETE"} {
+			w = retiredAPIRequest(t, mux, method, base+"/"+resource.name, resource.body)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("absent operational capability %s: %d %s", method, w.Code, w.Body.String())
+			}
+		}
+		w = retiredAPIRequest(t, mux, "POST", base, resource.body)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "verified enabled actor binding required") {
+			t.Fatalf("host UUID accepted as actor authority: %d %s", w.Code, w.Body.String())
+		}
 	}
-	if !row.Pinned || row.Reason != "role carry" {
-		t.Fatalf("known skill row not upserted correctly: %+v", row)
-	}
-
-	// A second create against the now-real known-skill row must still 409 —
-	// the fix only relaxes the bare-row case, not genuine duplicate creates.
-	req = httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-skills", bytes.NewBufferString(`{
-		"skill_name":"collision-skill"
-	}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("create known skill onto real grant row: got %d, want 409; body=%s", w.Code, w.Body.String())
+	for i, q := range queries {
+		retiredAPIHistoryUnchanged(t, a, q, before[i])
 	}
 }
 
-func TestAgentCapabilitiesAPI_ProceduresCRUD(t *testing.T) {
+func TestAgentCapabilitiesPublicMuxPreservesApplicableBodyAndManagedSourceGuards(t *testing.T) {
 	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Procedure Agent",
-		Slug:         "procedure-agent",
-		SystemPrompt: "x",
-	})
-
-	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/procedures", bytes.NewBufferString(`{
-		"name":"checklist",
-		"body":"Step 1\nStep 2",
-		"scope":"agent"
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create procedure: %d %s", w.Code, w.Body.String())
+	host := capabilityHostWithoutActor(t, a, "capability-guard-user", "user")
+	internal := capabilityHostWithoutActor(t, a, "capability-guard-internal", "internal")
+	for _, resource := range []struct{ path, key string }{{"known-tools", "tool_name"}, {"known-skills", "skill_name"}} {
+		base := "/api/agents/" + host.ID + "/" + resource.path
+		for _, body := range []string{"not json", `{}`, `{"agent_id":"different","` + resource.key + `":"fixture"}`} {
+			w := retiredAPIRequest(t, mux, "POST", base, body)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("invalid active capability body=%s: %d %s", body, w.Code, w.Body.String())
+			}
+		}
+		w := retiredAPIRequest(t, mux, "POST", "/api/agents/"+internal.ID+"/"+resource.path, `{"`+resource.key+`":"fixture"}`)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"manage_class":"internal"`) {
+			t.Fatalf("internal host guard: %d %s", w.Code, w.Body.String())
+		}
 	}
-
-	req = httptest.NewRequest("GET", "/api/agents/"+agentID+"/procedures/checklist", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get procedure: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("PUT", "/api/agents/"+agentID+"/procedures/checklist", bytes.NewBufferString(`{
-		"name":"checklist",
-		"body":"Updated body",
-		"scope":"shared"
-	}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update procedure: %d %s", w.Code, w.Body.String())
-	}
-	row, err := a.store.GetAgentProcedure(context.Background(), agentID, "checklist")
-	if err != nil {
-		t.Fatalf("GetAgentProcedure: %v", err)
-	}
-	if row.Body != "Updated body" || row.Scope != "shared" {
-		t.Fatalf("updated procedure mismatch: %+v", row)
-	}
-
-	req = httptest.NewRequest("DELETE", "/api/agents/"+agentID+"/procedures/checklist", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete procedure: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAgentCapabilitiesAPI_KnowledgeSeedsCRUDAndMarkApplied(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Knowledge Agent",
-		Slug:         "knowledge-agent",
-		SystemPrompt: "x",
-	})
-
-	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/knowledge-seeds", bytes.NewBufferString(`{
-		"seed_key":"boot-conventions",
-		"namespace":"user/chrispian/knowledge",
-		"body":"Prefer rg.",
-		"tags":["shell","boot"]
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create knowledge seed: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("GET", "/api/agents/"+agentID+"/knowledge-seeds/boot-conventions", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("get knowledge seed: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("PUT", "/api/agents/"+agentID+"/knowledge-seeds/boot-conventions", bytes.NewBufferString(`{
-		"seed_key":"boot-conventions",
-		"namespace":"user/chrispian/knowledge",
-		"body":"Prefer rg and fd.",
-		"tags_json":"[\"shell\",\"search\"]"
-	}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update knowledge seed: %d %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest("POST", "/api/agents/"+agentID+"/knowledge-seeds/boot-conventions/mark-applied", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("mark applied: %d %s", w.Code, w.Body.String())
-	}
-	row, err := a.store.GetAgentKnowledgeSeed(context.Background(), agentID, "boot-conventions")
-	if err != nil {
-		t.Fatalf("GetAgentKnowledgeSeed: %v", err)
-	}
-	if row.AppliedAt == "" || row.TagsJSON != `["shell","search"]` {
-		t.Fatalf("updated knowledge seed mismatch: %+v", row)
-	}
-
-	req = httptest.NewRequest("DELETE", "/api/agents/"+agentID+"/knowledge-seeds/boot-conventions", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete knowledge seed: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAgentCapabilitiesAPI_MissingAgentReturns404(t *testing.T) {
-	_, mux := newTestAPI(t)
-	req := httptest.NewRequest("GET", "/api/agents/missing/known-tools", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("missing agent status = %d, want 404; body=%s", w.Code, w.Body.String())
-	}
-}
-
-func TestAgentCapabilitiesAPI_MissingRowsReturn404(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Missing Row Agent",
-		Slug:         "missing-row-agent",
-		SystemPrompt: "x",
-	})
-
-	paths := []string{
-		"/api/agents/" + agentID + "/known-tools/missing",
-		"/api/agents/" + agentID + "/known-skills/missing",
-		"/api/agents/" + agentID + "/procedures/missing",
-		"/api/agents/" + agentID + "/knowledge-seeds/missing",
-	}
-	for _, path := range paths {
-		req := httptest.NewRequest("GET", path, nil)
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, req)
-		if w.Code != http.StatusNotFound {
-			t.Fatalf("%s status = %d, want 404; body=%s", path, w.Code, w.Body.String())
+	for _, query := range []string{`SELECT * FROM actor_known_tools`, `SELECT * FROM actor_known_skills`, `SELECT * FROM agent_actor_bindings`} {
+		if rows := retiredAPISnapshot(t, a, query); len(rows) != 0 {
+			t.Fatal("rejected body created operational authority", query, rows)
 		}
 	}
 }
 
-func TestAgentCapabilitiesAPI_PathBodyMismatchRejected(t *testing.T) {
+func TestRetiredCapabilitiesPublicMuxPreservesProceduresAndAppliedSeedHistory(t *testing.T) {
 	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Mismatch Agent",
-		Slug:         "mismatch-agent",
-		SystemPrompt: "x",
-	})
-	if err := a.store.InsertAgentKnownTool(context.Background(), store.AgentKnownTool{
-		AgentID:  agentID,
-		ToolName: "torque_task_create",
-	}); err != nil {
-		t.Fatalf("InsertAgentKnownTool: %v", err)
+	const owner = "historical-sop-seed-api"
+	retiredAPIHistoricalProfile(t, a, owner, "user")
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_procedures(agent_id,name,body,scope,created_at,updated_at) VALUES(?,'retained-sop','Private retained SOP','shared','retained-created','retained-updated')`, owner); err != nil {
+		t.Fatal(err)
 	}
-
-	req := httptest.NewRequest("PUT", "/api/agents/"+agentID+"/known-tools/torque_task_create", bytes.NewBufferString(`{
-		"tool_name":"different_name"
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("mismatch status = %d, want 400; body=%s", w.Code, w.Body.String())
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_knowledge_seed(agent_id,seed_key,namespace,body,tags_json,applied_at) VALUES(?,'unapplied','project/private-fixture','Retained unapplied','["private"]',NULL),(?,'applied','project/private-fixture','Retained applied','[]','2026-10-01')`, owner, owner); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestAgentCapabilitiesAPI_InternalAgentMutationsConflict(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "Internal Capability Agent",
-		Slug:         "internal-capability-agent",
-		SystemPrompt: "x",
-		Source:       "internal",
-		SourceRef:    "embedded:profiles/internal-capability-agent.md",
-	})
-
-	req := httptest.NewRequest("POST", "/api/agents/"+agentID+"/known-tools", bytes.NewBufferString(`{
-		"tool_name":"torque_task_create"
-	}`))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("internal mutation status = %d, want 409; body=%s", w.Code, w.Body.String())
+	queries := []string{`SELECT * FROM agent_procedures ORDER BY agent_id,name`, `SELECT * FROM agent_knowledge_seed ORDER BY agent_id,seed_key`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = retiredAPISnapshot(t, a, q)
 	}
-	if !strings.Contains(w.Body.String(), `"manage_class":"internal"`) {
-		t.Fatalf("internal mutation response missing manage_class=internal: %s", w.Body.String())
+	for _, agentID := range []string{owner, "missing-agent"} {
+		for _, resource := range []string{"procedures", "knowledge-seeds"} {
+			base := "/api/agents/" + agentID + "/" + resource
+			for _, c := range []struct{ method, path, body string }{
+				{"GET", base, ""}, {"GET", base + "/retained-sop", ""},
+				{"POST", base, `{"name":"new","seed_key":"new","body":"replacement","tags":["changed"]}`},
+				{"POST", base, "not json"}, {"PUT", base + "/unapplied", `{"body":"changed","namespace":"project/other"}`}, {"DELETE", base + "/applied", ""},
+			} {
+				requireRetiredAPI(t, retiredAPIRequest(t, mux, c.method, c.path, c.body))
+			}
+		}
+		for _, key := range []string{"unapplied", "applied", "missing"} {
+			requireRetiredAPI(t, retiredAPIRequest(t, mux, "POST", "/api/agents/"+agentID+"/knowledge-seeds/"+key+"/mark-applied", `{}`))
+		}
 	}
-}
-
-func seedCapabilityAgent(t *testing.T, a *testAPI, profile store.AgentProfile) string {
-	t.Helper()
-	if err := a.store.CreateAgent(context.Background(), &profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	for i, q := range queries {
+		retiredAPIHistoryUnchanged(t, a, q, before[i])
 	}
-	return profile.ID
-}
-
-func TestAgentCapabilitiesAPI_ListKnowledgeSeedsResponseShape(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agentID := seedCapabilityAgent(t, a, store.AgentProfile{
-		Name:         "List Seed Agent",
-		Slug:         "list-seed-agent",
-		SystemPrompt: "x",
-	})
-	if err := a.store.InsertAgentKnowledgeSeed(context.Background(), store.AgentKnowledgeSeed{
-		AgentID:   agentID,
-		SeedKey:   "alpha",
-		Namespace: "user/demo",
-		Body:      "hello",
-		TagsJSON:  `["one"]`,
-	}); err != nil {
-		t.Fatalf("InsertAgentKnowledgeSeed: %v", err)
-	}
-
-	req := httptest.NewRequest("GET", "/api/agents/"+agentID+"/knowledge-seeds", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("list knowledge seeds: %d %s", w.Code, w.Body.String())
-	}
-	var rows []store.AgentKnowledgeSeed
-	if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(rows) != 1 || rows[0].TagsJSON != `["one"]` {
-		t.Fatalf("knowledge seed list mismatch: %+v", rows)
+	// Applied state is retained raw historical data; it is not a successful
+	// response shape from the retired mutable seed endpoint.
+	rows := retiredAPISnapshot(t, a, queries[1])
+	if len(rows) != 2 {
+		t.Fatal("historical seed preservation controls missing")
 	}
 }

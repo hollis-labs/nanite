@@ -377,6 +377,7 @@ func (s *chatServiceImpl) initializeRun(
 	return initializeRunResult{
 		directive: runloop.Proceed,
 		run: &runState{
+			clientInput:      newClientContextInput(ctx, setup.chatMessages, chatMessages),
 			loop:             ls,
 			chatMessages:     chatMessages,
 			tools:            tools,
@@ -428,6 +429,7 @@ type prepareTurnResult struct {
 }
 
 type runState struct {
+	clientInput      *clientContextInput
 	loop             *loopState
 	chatMessages     []llmtypes.ChatMessage
 	tools            []llmtypes.ToolDefinition
@@ -614,11 +616,14 @@ func (s *chatServiceImpl) requestProviderIteration(
 		budgetCeiling = int(float64(ws) * chat.HardCeilingPct)
 	}
 	budgetCeiling = effort.ApplyToCeiling(budgetCeiling, run.loop.Effort())
-	run.chatMessages, run.tools, run.breakdown, budgetErr = chat.EnforceTokenBudget(run.systemPrompt, run.chatMessages, run.tools, budgetCeiling)
+	budgetErr = clientContextBudget(ctx, run, budgetCeiling)
 	// D-32: the tool-output ceiling and the per-result cap follow what remains
 	// of the context, re-evaluated every iteration.
 	run.loop.setRemainingFromBreakdown(run.breakdown)
 	if budgetErr != nil {
+		if run.breakdown == nil {
+			run.breakdown = &chat.TokenBreakdown{Ceiling: budgetCeiling}
+		}
 		slog.Warn("chat-service: token budget enforcement refused", "err", budgetErr)
 		if s.events != nil {
 			s.events.EmitContextBudgetExceeded(ctx, sessionID, run.breakdown.Total, run.breakdown.Ceiling)
@@ -710,6 +715,12 @@ func (s *chatServiceImpl) requestProviderIteration(
 			run.chatMessages = fm
 		}
 	}
+	requestMessages, projectionErr := run.clientInput.project(ctx, run.chatMessages)
+	if projectionErr != nil {
+		attempt.close()
+		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Turn client context boundary unavailable", nil)
+		return requestProviderIterationResult{directive: runloop.Terminate}
+	}
 
 	var provCh <-chan llmtypes.StreamEvent
 	if len(run.tools) > 0 {
@@ -754,7 +765,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		cacheablePrefixTokens = cp.EstimateCacheablePrefix(provCtx, llmtypes.ChatRequest{
 			SystemPrompt: extraSystemPrefix,
 			SlotBlocks:   slotBlocksFor(slotResult),
-			Messages:     run.chatMessages,
+			Messages:     requestMessages,
 			Model:        model,
 			Tools:        run.tools,
 			CacheHints:   cacheStrategy,
@@ -833,7 +844,7 @@ func (s *chatServiceImpl) requestProviderIteration(
 		provCh, err = prov.StreamChat(provCtx, llmtypes.ChatRequest{
 			SystemPrompt: extraSystemPrefix,
 			SlotBlocks:   slotBlocksFor(slotResult),
-			Messages:     run.chatMessages,
+			Messages:     requestMessages,
 			Model:        model,
 			Tools:        run.tools,
 			CacheHints:   cacheStrategy,

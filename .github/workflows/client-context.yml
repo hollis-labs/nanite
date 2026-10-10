@@ -1,0 +1,51 @@
+name: Embedded client context
+
+on:
+  pull_request:
+    paths:
+      - 'internal/clientcontext/**'
+      - 'internal/chat/message_cutoff*.go'
+      - 'internal/chat/context_client.go'
+      - 'internal/service/client_context*.go'
+      - 'internal/service/chat.go'
+      - 'internal/service/chat_generation_actions.go'
+      - 'internal/api/agent_v1*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/client-context.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  context:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Isolated fixtures
+        shell: bash
+        run: |
+          fixture_root=$(mktemp -d)
+          chmod 700 "$fixture_root"
+          echo "TMPDIR=$fixture_root" >> "$GITHUB_ENV"
+          echo "GOTMPDIR=$fixture_root" >> "$GITHUB_ENV"
+      - name: Vet host and descriptor packages
+        run: go vet ./internal/clientcontext ./internal/chat ./internal/service ./internal/api
+      - name: Exercise exact-turn isolation and native admission
+        run: >-
+          go test -race -count=20 -timeout=5m
+          ./internal/clientcontext ./internal/chat ./internal/service ./internal/api
+          -run '^(TestDescriptor|TestWorkingHistory|TestClientContext|TestAgentV1ClientContext|TestCognitiveAdmission|TestCognitiveTurnStatus|TestCognitiveCancel)'

@@ -29,6 +29,8 @@ func TestHandleCompactSession_RunsPipelineAndPersists(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
+	bindFixtureSessionActor(t, a.store, sess.ID)
+
 	// Seed enough conversation history that strip-tool-blocks / drop-enrichment
 	// stages have something to operate on. No tools/enrichment are configured
 	// in the test container, so the summarizer-less pipeline will short-circuit

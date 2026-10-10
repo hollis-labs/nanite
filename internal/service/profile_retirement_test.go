@@ -11,12 +11,13 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestProfileRetirementExportsBeforeDeleteAndRetainsReceipt(t *testing.T) {
 	svc, st, root := newAgentConfigTestService(t)
 	ctx := t.Context()
-	p, err := svc.Create(&store.AgentProfile{Name: "Test", Slug: "retirement-test", SystemPrompt: "private instructions"}, []agent.ProcedureDefinition{{Name: "test", Body: "private procedure"}})
+	p, err := historicalRetirementFixture(svc, &store.AgentProfile{Name: "Test", Slug: "retirement-test", SystemPrompt: "private instructions"}, []agent.ProcedureDefinition{{Name: "test", Body: "private procedure"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,19 +48,19 @@ func TestProfileRetirementExportsBeforeDeleteAndRetainsReceipt(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0700 {
 		t.Fatal("export directory is not private", err)
 	}
-	if _, err = st.GetAgent(ctx, p.Profile.ID); err != nil {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.Profile.ID); err != nil {
 		t.Fatal("export deleted profile", err)
 	}
 	result, err := svc.RetireEditableProfile(ctx, p.Profile.ID, receipt.ExportID, receipt.Digest)
 	if err != nil || !result.Retired || !result.ReceiptPersisted {
 		t.Fatal(result, err)
 	}
-	if _, err = st.GetAgent(ctx, p.Profile.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.Profile.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("retirement did not delete profile", err)
 	}
-	procedures, err := st.ListAgentProcedures(ctx, p.Profile.ID)
-	if err != nil || len(procedures) != 0 {
-		t.Fatal("retirement left procedures", err)
+	var remainingProcedures int
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM agent_procedures WHERE agent_id=?`, p.Profile.ID).Scan(&remainingProcedures); err != nil || remainingProcedures != 0 {
+		t.Fatal("retirement left historical procedures", err)
 	}
 	if _, err = os.Stat(file); err != nil {
 		t.Fatal("retirement removed export", err)
@@ -75,13 +76,13 @@ func TestProfileRetirementRefusesProtectedSources(t *testing.T) {
 		t.Run(tc.source+tc.plugin, func(t *testing.T) {
 			svc, st, _ := newAgentConfigTestService(t)
 			p := &store.AgentProfile{Name: "Protected", Slug: "protected", SystemPrompt: "x", Source: tc.source, PluginID: tc.plugin}
-			if err := st.CreateAgent(t.Context(), p); err != nil {
+			if err := storetest.HistoricalProfile(t.Context(), st, p); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := svc.ExportEditableProfile(t.Context(), p.ID); !errors.Is(err, store.ErrProfileRetirementProtected) {
 				t.Fatal("protected export accepted", err)
 			}
-			if _, err := st.GetAgent(t.Context(), p.ID); err != nil {
+			if _, err := st.GetHistoricalAgentProfile(t.Context(), p.ID); err != nil {
 				t.Fatal("protected profile changed", err)
 			}
 		})
@@ -92,7 +93,7 @@ func TestProtectedProfileRetirementExportsAuditsAndSuppressesBootReingest(t *tes
 	svc, st, _ := newAgentConfigTestService(t)
 	ctx := t.Context()
 	p := &store.AgentProfile{Name: "Protected", Slug: "protected-retire", SystemPrompt: "x", Source: "builtin", Class: "process"}
-	if err := st.CreateAgent(ctx, p); err != nil {
+	if err := storetest.HistoricalProfile(ctx, st, p); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.ExportEditableProfile(ctx, p.ID); !errors.Is(err, store.ErrProfileRetirementProtected) {
@@ -106,7 +107,7 @@ func TestProtectedProfileRetirementExportsAuditsAndSuppressesBootReingest(t *tes
 	if err != nil || !result.Retired {
 		t.Fatal(result, err)
 	}
-	if _, err = st.GetAgent(ctx, p.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("protected retirement did not delete profile", err)
 	}
 	retired, err := st.GetRetiredAgentProfileBySlug(ctx, p.Slug)
@@ -117,7 +118,7 @@ func TestProtectedProfileRetirementExportsAuditsAndSuppressesBootReingest(t *tes
 		t.Fatalf("unexpected tombstone: %+v", retired)
 	}
 	err = upsertAgentDef(st, &agent.Definition{Name: "Protected", Slug: p.Slug, SystemPrompt: "resurrect", Source: "internal"})
-	if !errors.Is(err, store.ErrAgentProfileRetired) {
+	if !errors.Is(err, store.ErrProfileIngestionRetired) {
 		t.Fatal("boot reingest was not suppressed", err)
 	}
 	if _, err = st.GetAgentBySlug(ctx, p.Slug); err == nil {
@@ -130,7 +131,7 @@ func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *
 		t.Run(mutation, func(t *testing.T) {
 			svc, st, _ := newAgentConfigTestService(t)
 			ctx := t.Context()
-			p, err := svc.Create(&store.AgentProfile{Name: "Test", Slug: "state-change", SystemPrompt: "x"}, nil)
+			p, err := historicalRetirementFixture(svc, &store.AgentProfile{Name: "Test", Slug: "state-change", SystemPrompt: "x"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +143,10 @@ func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *
 			case "profile":
 				changed := *p.Profile
 				changed.SystemPrompt = "changed"
-				if err = st.UpdateAgent(ctx, &changed); err != nil {
+				if err = func() error {
+					_, e := st.DB.ExecContext(ctx, `UPDATE agent_profiles SET system_prompt=? WHERE id=?`, changed.SystemPrompt, changed.ID)
+					return e
+				}(); err != nil {
 					t.Fatal(err)
 				}
 			case "grant":
@@ -150,7 +154,10 @@ func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *
 				if e != nil {
 					t.Fatal(e)
 				}
-				if err = st.GrantAgentDispatchTool(ctx, p.Profile.ID, tool); err != nil {
+				if err = func() error {
+					_, e := st.DB.ExecContext(ctx, `INSERT INTO agent_dispatch_tool_allowlist(agent_id,tool_id,created_at) VALUES(?,?,datetime('now'))`, p.Profile.ID, tool)
+					return e
+				}(); err != nil {
 					t.Fatal(err)
 				}
 			case "procedure":
@@ -164,7 +171,7 @@ func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *
 					t.Fatal(err)
 				}
 			}
-			before, err := st.GetAgent(ctx, p.Profile.ID)
+			before, err := st.GetHistoricalAgentProfile(ctx, p.Profile.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +182,7 @@ func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *
 			if !errors.Is(err, store.ErrProfileRetirementConflict) && !errors.Is(err, store.ErrProfileRetirementProtected) {
 				t.Fatal("changed state accepted", err)
 			}
-			after, e := st.GetAgent(ctx, p.Profile.ID)
+			after, e := st.GetHistoricalAgentProfile(ctx, p.Profile.ID)
 			if e != nil || after.Revision != before.Revision {
 				t.Fatal("refusal changed profile", e)
 			}
@@ -186,11 +193,11 @@ func TestProfileRetirementRejectsChangedProfileAndGrantWithoutRevisionChange(t *
 func TestProfileRetirementRequiresOwnExportAndRollsBackFailedCleanup(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
 	ctx := t.Context()
-	p, err := svc.Create(&store.AgentProfile{Name: "Test", Slug: "retire-rollback", SystemPrompt: "x"}, []agent.ProcedureDefinition{{Name: "keep", Body: "keep"}})
+	p, err := historicalRetirementFixture(svc, &store.AgentProfile{Name: "Test", Slug: "retire-rollback", SystemPrompt: "x"}, []agent.ProcedureDefinition{{Name: "keep", Body: "keep"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := svc.Create(&store.AgentProfile{Name: "Other", Slug: "other-retire", SystemPrompt: "x"}, nil)
+	other, err := historicalRetirementFixture(svc, &store.AgentProfile{Name: "Other", Slug: "other-retire", SystemPrompt: "x"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +217,11 @@ func TestProfileRetirementRequiresOwnExportAndRollsBackFailedCleanup(t *testing.
 	if err == nil || result.Retired {
 		t.Fatal("failed deletion claims success")
 	}
-	rows, err := st.ListAgentProcedures(ctx, p.Profile.ID)
-	if err != nil || len(rows) != 1 {
-		t.Fatal("failed delete lost children", err)
+	var rows int
+	if err = st.DB.QueryRowContext(ctx, `SELECT count(*) FROM agent_procedures WHERE agent_id=?`, p.Profile.ID).Scan(&rows); err != nil || rows != 1 {
+		t.Fatal("failed delete lost historical children", err)
 	}
-	if _, err = st.GetAgent(ctx, p.Profile.ID); err != nil {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.Profile.ID); err != nil {
 		t.Fatal("failed delete lost profile", err)
 	}
 	canceled, cancel := context.WithCancel(ctx)
@@ -226,7 +233,7 @@ func TestProfileRetirementRequiresOwnExportAndRollsBackFailedCleanup(t *testing.
 
 func TestProfileRetirementRefusesSymlinkArchive(t *testing.T) {
 	svc, _, root := newAgentConfigTestService(t)
-	p, err := svc.Create(&store.AgentProfile{Name: "Test", Slug: "symlink-export", SystemPrompt: "x"}, nil)
+	p, err := historicalRetirementFixture(svc, &store.AgentProfile{Name: "Test", Slug: "symlink-export", SystemPrompt: "x"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +253,7 @@ func TestProfileRetirementRefusesSymlinkArchive(t *testing.T) {
 func TestProfileRetirementOldExportFormatRequiresFreshExport(t *testing.T) {
 	svc, st, root := newAgentConfigTestService(t)
 	ctx := t.Context()
-	p, err := svc.Create(&store.AgentProfile{Name: "Test", Slug: "old-export", SystemPrompt: "x"}, nil)
+	p, err := historicalRetirementFixture(svc, &store.AgentProfile{Name: "Test", Slug: "old-export", SystemPrompt: "x"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +285,7 @@ func TestProfileRetirementOldExportFormatRequiresFreshExport(t *testing.T) {
 	if _, err = svc.RetireEditableProfile(ctx, p.Profile.ID, receipt.ExportID, archive.Receipt.Digest); !errors.Is(err, store.ErrProfileRetirementConflict) {
 		t.Fatal("old format admitted", err)
 	}
-	if _, err = st.GetAgent(ctx, p.Profile.ID); err != nil {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.Profile.ID); err != nil {
 		t.Fatal("old-format refusal deleted profile", err)
 	}
 	fresh, err := svc.ExportEditableProfile(ctx, p.Profile.ID)
@@ -288,4 +295,18 @@ func TestProfileRetirementOldExportFormatRequiresFreshExport(t *testing.T) {
 	if result, err := svc.RetireEditableProfile(ctx, p.Profile.ID, fresh.ExportID, fresh.Digest); err != nil || !result.Retired {
 		t.Fatal("fresh format refused", result, err)
 	}
+}
+
+// Build the pre-cut historical state only; none of these rows is a runtime actor.
+func historicalRetirementFixture(svc *AgentConfigService, p *store.AgentProfile, procedures []agent.ProcedureDefinition) (*AgentConfigResult, error) {
+	ctx := context.Background()
+	if err := storetest.HistoricalProfile(ctx, svc.store, p); err != nil {
+		return nil, err
+	}
+	for _, proc := range procedures {
+		if _, err := svc.store.DB.ExecContext(ctx, `INSERT INTO agent_procedures(agent_id,name,body,scope) VALUES(?,?,?,?)`, p.ID, proc.Name, proc.Body, proc.Scope); err != nil {
+			return nil, err
+		}
+	}
+	return &AgentConfigResult{Profile: p, Class: svc.Classify(p), Revision: p.Revision}, nil
 }

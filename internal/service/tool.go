@@ -169,8 +169,24 @@ func (s *toolServiceImpl) SetRepairConfig(rc *RepairConfig) {
 	s.repairConfig = rc
 }
 
+// resolveToolActor admits operational selection only through an existing
+// verified binding. Host settings UUIDs and historical profiles carry no grants.
+func (s *toolServiceImpl) resolveToolActor(ctx context.Context, actor string) (*store.AgentProfile, error) {
+	reader, ok := s.agents.(interface {
+		GetAgentForActor(context.Context, string) (*store.AgentProfile, error)
+	})
+	if !ok {
+		return nil, store.ErrVerifiedActorRequired
+	}
+	return reader.GetAgentForActor(ctx, actor)
+}
+
 // SelectForAgent implements ToolService.
 func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID, userMessage, workspaceID string, windowSize int) (*ToolSelection, error) {
+	dbAgent, err := s.resolveToolActor(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
 	intent, hints := extractIntent(userMessage)
 	slog.Debug("service/tool: extracted intent", "intent", intent, "hints", hints)
 
@@ -192,31 +208,13 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 		}
 	}
 
-	// If no MCP tools from the broker, try direct discovery from agent's configured servers.
+	// The already verified actor projection supplies host-owned tool settings.
 	mcpCount := countMCPOriginTools(s.toolClient, allTools)
-	if mcpCount == 0 && s.mcpManager != nil && s.agents != nil {
-		agent, err := s.agents.GetAgent(ctx, agentID)
-		if err == nil {
-			allTools, seen = s.discoverAgentMCPTools(ctx, agent.MCPServers, allTools, seen)
-		}
+	if mcpCount == 0 && s.mcpManager != nil {
+		allTools, _ = s.discoverAgentMCPTools(ctx, dbAgent.MCPServers, allTools, seen)
 	}
-
-	// Resolve the agent's real agent_profiles row once, if any -- used by
-	// the agent_tools grant filter below, dispatch-allowlist parsing, and
-	// the chat-surface filter. Every agent (including the compiled-in
-	// builtin profiles) is a real agent_profiles row with a real ID by the
-	// time any selection runs (TASKS/adhoc/01-eliminate-file-based-agent-
-	// runtime.md), so a miss (err != nil) here means agentID itself does
-	// not resolve to a known agent, not "this population needs a
-	// different permission model."
 	var callerSlug string
 	var callerDispatchAllowlist []string
-	var dbAgent *store.AgentProfile
-	if s.agents != nil {
-		if agent, err := s.agents.GetAgent(ctx, agentID); err == nil {
-			dbAgent = agent
-		}
-	}
 
 	// agent_tools (through known_tools) is the sole roster-membership
 	// gate, unconditionally, for every agent -- the FK-based replacement
@@ -709,13 +707,13 @@ func (s *toolServiceImpl) HandleRequestTools(ctx context.Context, agentID string
 	if s.toolClient == nil {
 		return nil, "No tool client configured.", fmt.Errorf("no tool client configured")
 	}
+	agent, err := s.resolveToolActor(ctx, agentID)
+	if err != nil {
+		return nil, "Verified actor binding required for tool discovery.", err
+	}
 	tools, summary := s.toolClient.HandleRequestToolsForAgent(ctx, agentID, input)
 	caller := describer.CallerAgent{ID: agentID}
-	if s.agents != nil {
-		agent, err := s.agents.GetAgent(ctx, agentID)
-		if err != nil {
-			return nil, "Cannot resolve the calling agent for tool discovery.", err
-		}
+	{
 		if agent != nil {
 			caller.Slug = agent.Slug
 			caller.DispatchAllowlist = parseParentDispatchAllowlist(agent.ParentDispatchAllowlist)

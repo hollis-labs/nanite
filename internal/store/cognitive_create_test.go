@@ -6,43 +6,46 @@ import (
 	"testing"
 )
 
-func TestCognitiveCreateRollsBackBindingFailure(t *testing.T) {
+func TestCognitiveCreateRefusesProfileIdentityWithoutEffects(t *testing.T) {
 	s := newTestStore(t)
-	profile := &AgentProfile{Name: "Native", Slug: "native"}
-	if err := s.CreateAgent(t.Context(), profile); err != nil {
+	h := makeTestHost(t, s, "no-profile-binding")
+	view := &Session{ID: "refused-view", Provider: "anthropic"}
+	if err := s.CreateCognitiveSession(t.Context(), view, h.ID); !errors.Is(err, ErrVerifiedActorRequired) {
 		t.Fatal(err)
-	}
-	// Fail after the view INSERT, at the primary-binding write.
-	if _, err := s.DB.ExecContext(t.Context(), `CREATE TRIGGER reject_cognitive_binding BEFORE INSERT ON session_agents BEGIN SELECT RAISE(ABORT, 'binding refused'); END`); err != nil {
-		t.Fatal(err)
-	}
-	view := &Session{ID: "rollback-view", Provider: "anthropic"}
-	if err := s.CreateCognitiveSession(t.Context(), view, profile.ID); err == nil {
-		t.Fatal("binding failure was ignored")
 	}
 	if _, err := s.GetSession(t.Context(), view.ID); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("view leaked after rollback: %v", err)
+		t.Fatal("refused view persisted", err)
 	}
 }
-
-func TestCognitiveCreateCommitsNativePolicyAndBinding(t *testing.T) {
+func TestCognitiveCreateCommitsDefinitionAndRejectsFailedConfigWrite(t *testing.T) {
 	s := newTestStore(t)
-	profile := &AgentProfile{Name: "Native", Slug: "native"}
-	if err := s.CreateAgent(t.Context(), profile); err != nil {
+	h := makeTestHost(t, s, "native-view")
+	view := &Session{ID: "native-view", Provider: "anthropic", Metadata: `{"label":"example"}`}
+	record := CognitiveViewRecord{DefinitionRefJSON: `{"id":"verified-test-pin"}`, ChatConfigJSON: `{"instructions":"private fixture"}`}
+	if _, err := s.DB.ExecContext(t.Context(), `CREATE TRIGGER refuse_config BEFORE INSERT ON cognitive_views BEGIN SELECT RAISE(ABORT,'fixture failure');END`); err != nil {
 		t.Fatal(err)
 	}
-	view := &Session{Provider: "anthropic", Metadata: `{"label":"example"}`}
-	if err := s.CreateCognitiveSession(t.Context(), view, profile.ID); err != nil {
+	if err := s.CreateDefinedSessionWithHost(t.Context(), view, record, HostSettingsAdmission{ID: h.ID, Revision: h.Revision}); err == nil {
+		t.Fatal("failed config accepted")
+	}
+	if _, err := s.GetSession(t.Context(), view.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("partial view persisted", err)
+	}
+	if _, err := s.DB.ExecContext(t.Context(), `DROP TRIGGER refuse_config`); err != nil {
 		t.Fatal(err)
 	}
-	var runtime, bound string
-	if err := s.DB.QueryRowContext(t.Context(), `SELECT subagent_runtime FROM sessions WHERE id=?`, view.ID).Scan(&runtime); err != nil {
+	if err := s.CreateDefinedSessionWithHost(t.Context(), view, record, HostSettingsAdmission{ID: h.ID, Revision: h.Revision}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DB.QueryRowContext(t.Context(), `SELECT agent_id FROM session_agents WHERE session_id=? AND is_primary=1`, view.ID).Scan(&bound); err != nil {
-		t.Fatal(err)
+	runtime, err := s.GetSessionSubagentRuntime(t.Context(), view.ID)
+	if err != nil || runtime != "api" {
+		t.Fatal(runtime, err)
 	}
-	if runtime != "api" || bound != profile.ID {
-		t.Fatalf("incomplete create: runtime=%q binding=%q", runtime, bound)
+	persisted, err := s.GetCognitiveView(t.Context(), view.ID)
+	if err != nil || persisted.ChatConfigJSON != record.ChatConfigJSON {
+		t.Fatal(persisted, err)
+	}
+	if _, err := s.GetSessionPrimaryAgent(t.Context(), view.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("definition became actor", err)
 	}
 }

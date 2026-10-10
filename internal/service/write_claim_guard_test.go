@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/writeclaim"
@@ -263,8 +264,12 @@ func (g *guardTools) Execute(_ context.Context, _ string, name string, _ map[str
 }
 
 func newGuardFixture(t *testing.T, steps []characterizationProviderStep, tools *guardTools) *characterizationFixture {
+	return newGuardFixtureWithPolicy(t, steps, tools, "deny")
+}
+
+func newGuardFixtureWithPolicy(t *testing.T, steps []characterizationProviderStep, tools *guardTools, mode string) *characterizationFixture {
 	t.Helper()
-	f := newCharacterizationFixture(t, steps, "kb_write", "kb_read", "whoami", "think")
+	f := newCharacterizationFixtureWithPolicy(t, steps, "Private guard instructions", &agentpolicy.NativePolicy{WriteClaimGuard: mode}, "kb_write", "kb_read", "whoami", "think")
 	tools.definitions = f.tools.definitions
 	f.svc.tools = tools
 	return f
@@ -360,8 +365,8 @@ func TestWriteClaimGuardCannotLoop(t *testing.T) {
 }
 
 // The dev profile warns and does not block.
-func TestWriteClaimGuardDevProfileWarns(t *testing.T) {
-	f := newGuardFixture(t, []characterizationProviderStep{{events: doneEvents(claim(invented))}}, &guardTools{})
+func TestWriteClaimGuardPinnedWarnWithDevHostWarns(t *testing.T) {
+	f := newGuardFixtureWithPolicy(t, []characterizationProviderStep{{events: doneEvents(claim(invented))}}, &guardTools{}, "warn")
 	if err := f.st.UpdateSessionMetadata(context.Background(), f.session, `{"harness_profile":"dev"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -390,15 +395,15 @@ func TestWriteClaimGuardDevProfileWarns(t *testing.T) {
 	}
 }
 
-// ...and the profile can be tightened or loosened either way.
-func TestWriteClaimGuardModeIsOverridable(t *testing.T) {
+// Session metadata cannot weaken the guard requested by the verified definition.
+func TestWriteClaimGuardDefinitionCannotBeWeakenedByMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		meta     string
 		requests int
 	}{
 		{`{"harness_profile":"dev","harness_overrides":{"hooks":{"write_claim_guard":"deny"}}}`, 2},
-		{`{"harness_overrides":{"hooks":{"write_claim_guard":"off"}}}`, 1},
-		{`{"harness_overrides":{"hooks":{"write_claim_guard":"ask"}}}`, 1},
+		{`{"harness_overrides":{"hooks":{"write_claim_guard":"off"}}}`, 2},
+		{`{"harness_overrides":{"hooks":{"write_claim_guard":"ask"}}}`, 2},
 	} {
 		f := newGuardFixture(t, []characterizationProviderStep{
 			{events: doneEvents(claim(invented))}, {events: doneEvents("ok, nothing was written")},
@@ -657,10 +662,10 @@ func TestWriteClaimGuardNarrationBackedByTheTurnsOwnWrite(t *testing.T) {
 
 // Under warn the narrated claim is reported, not appended to the reply.
 func TestWriteClaimGuardNarrationUnderWarn(t *testing.T) {
-	f := newGuardFixture(t, []characterizationProviderStep{
+	f := newGuardFixtureWithPolicy(t, []characterizationProviderStep{
 		{events: narratedToolTurn("I saved it as "+invented+". ", toolUse("r1", "kb_read"))},
 		{events: doneEvents("Checked.")},
-	}, &guardTools{})
+	}, &guardTools{}, "warn")
 	if err := f.st.UpdateSessionMetadata(context.Background(), f.session, `{"harness_profile":"dev"}`); err != nil {
 		t.Fatal(err)
 	}

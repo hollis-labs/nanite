@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -83,6 +84,10 @@ type harnessSettings interface {
 // and the model. reg nil means the built-ins; settings nil means no app layer.
 // The chat loop and the diagnostics endpoint both resolve through here.
 func ResolveHarness(ctx context.Context, reg *harnessprofile.Registry, settings harnessSettings, session *store.Session, constraints chat.AgentConstraints, model string) (*harnessprofile.Resolved, error) {
+	return resolveHarnessWithHost(ctx, reg, settings, session, constraints, model, nil)
+}
+
+func resolveHarnessWithHost(ctx context.Context, reg *harnessprofile.Registry, settings harnessSettings, session *store.Session, constraints chat.AgentConstraints, model string, host *store.NativeHostSettings) (*harnessprofile.Resolved, error) {
 	if reg == nil {
 		reg = builtinOnlyRegistry()
 	}
@@ -95,6 +100,15 @@ func ResolveHarness(ctx context.Context, reg *harnessprofile.Registry, settings 
 		Model:   model,
 		Agent:   agentLayer(constraints),
 		Launch:  launch,
+	}
+	if host != nil {
+		if validationErr := host.Validate(); validationErr != nil {
+			return nil, validationErr
+		}
+		in.Agent = host.NativeLoop
+		if host.HarnessProfile != "" {
+			in.Profile = host.HarnessProfile
+		}
 	}
 	if settings != nil {
 		if us, usErr := settings.GetUserSettings(ctx); usErr == nil && us != nil {
@@ -114,6 +128,19 @@ func ResolveHarness(ctx context.Context, reg *harnessprofile.Registry, settings 
 		return nil, fmt.Errorf("harness profile: %w", err)
 	}
 	return res, nil
+}
+
+// applyDefinitionGuard can narrow the host guard, never weaken it. The resolved
+// host limits and permission/grant configuration remain independently enforced.
+func applyDefinitionGuard(r *harnessprofile.Resolved, policy *agentpolicy.NativePolicy) {
+	if r == nil || policy == nil {
+		return
+	}
+	request := policy.Defaults().WriteClaimGuard
+	rank := map[string]int{"off": 0, "warn": 1, "ask": 2, "deny": 3}
+	if rank[request] > rank[string(r.Values.WriteClaimGuard)] {
+		r.Values.WriteClaimGuard = harnessprofile.GuardMode(request)
+	}
 }
 
 // agentLayer turns an agent's stored constraints into the per-agent layer. A

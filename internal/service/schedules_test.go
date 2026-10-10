@@ -13,7 +13,7 @@ func newScheduleTestService(t *testing.T) (*ScheduleService, *store.Store, strin
 	t.Helper()
 	st := newConfigTestStore(t)
 	agent := &store.AgentProfile{Name: "Scheduled", Slug: "scheduled-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return NewScheduleService(st), st, agent.ID

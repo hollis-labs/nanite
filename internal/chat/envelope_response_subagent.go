@@ -10,11 +10,9 @@ import (
 	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
-// SubagentApprovalHandler dispatches a typed envelope-response submission to
-// subagent.Service.Approve / Reject. Run ID is read from the SERVER-persisted
-// envelope payload (env.EnvelopeJSON), NOT from the client response, so a
-// buggy or hostile client cannot approve a different run than the one they
-// were shown.
+// SubagentApprovalHandler validates the server-persisted approval presentation.
+// Continuation refuses until a verified host approval-owner port is adopted;
+// a run ID alone does not authorize changing a retained run.
 type SubagentApprovalHandler struct {
 	svc *subagent.Service
 }
@@ -33,23 +31,11 @@ func (h *SubagentApprovalHandler) HandleResponse(ctx context.Context, env store.
 	}
 
 	switch resp.Status {
-	case StatusSubmitted:
-		if err := h.svc.Approve(ctx, p.RunID); err != nil {
-			return HandlerResult{}, fmt.Errorf("approve run %s: %w", p.RunID, err)
-		}
-		return HandlerResult{
-			FollowUp:       fmt.Sprintf("Subagent run %s approved — running.", p.RunID),
-			TranscriptData: map[string]any{"run_id": p.RunID, "decision": "approved"},
-		}, nil
-	case StatusCanceled:
-		reason, _ := resp.Data["reason"].(string)
-		if err := h.svc.Reject(ctx, p.RunID, reason); err != nil {
-			return HandlerResult{}, fmt.Errorf("reject run %s: %w", p.RunID, err)
-		}
-		return HandlerResult{
-			FollowUp:       fmt.Sprintf("Subagent run %s rejected.", p.RunID),
-			TranscriptData: map[string]any{"run_id": p.RunID, "decision": "rejected", "reason": reason},
-		}, nil
+	case StatusSubmitted, StatusCanceled:
+		// A persisted run_id binds presentation, not current actor ownership. The
+		// released approval service does not re-authorize retained runs, and this
+		// host has no verified continuation/approval owner port yet.
+		return HandlerResult{}, store.ErrVerifiedActorRequired
 	default:
 		return HandlerResult{}, fmt.Errorf("unsupported response status %q", resp.Status)
 	}

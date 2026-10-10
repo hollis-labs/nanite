@@ -8,6 +8,7 @@ import type {
   AgentCancelResponse,
   AgentCapabilitiesResponse,
   AgentCreateSessionRequest,
+  AgentHostSettings,
   AgentInitializeResponse,
   AgentKnowledgeSeed,
   AgentKnowledgeSeedUpsertRequest,
@@ -82,6 +83,7 @@ import type {
   PendingReflexRejectResponse,
   PendingReflexRow,
   PermissionMode,
+  PinnedAgentDefinition,
   Plan,
   PlanFilter,
   PlanStep,
@@ -302,6 +304,37 @@ export const api = {
     return res.json();
   },
 
+  listAgentDefinitions: (): Promise<PinnedAgentDefinition[]> =>
+    pinnedAgentRequest("/agent-definitions"),
+  listAgentHostSettings: (): Promise<AgentHostSettings[]> =>
+    pinnedAgentRequest("/agent-host-settings"),
+  installAgentDefinition: (
+    artifact: string,
+    resources: Array<{ uri: string; content: string }>,
+  ): Promise<{ id: string; revision: string; digest: string }> =>
+    pinnedAgentRequest("/agent-definitions", {
+      method: "POST",
+      body: JSON.stringify({ artifact, resources }),
+    }),
+  authorAgentDefinition: (concrete: string, role?: string): Promise<{ artifact: string }> =>
+    pinnedAgentRequest("/agent-definitions/author", {
+      method: "POST",
+      body: JSON.stringify({ concrete, role }),
+    }),
+  saveAgentHostSettings: (
+    host: Omit<AgentHostSettings, "id" | "source" | "plugin_id">,
+    id?: string,
+  ): Promise<AgentHostSettings> =>
+    pinnedAgentRequest(`/agent-host-settings${id ? `/${encodeURIComponent(id)}` : ""}`, {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify({ ...host, revision: id ? host.revision : undefined }),
+    }),
+  deleteAgentHostSettings: (id: string, revision: string): Promise<void> =>
+    pinnedAgentRequest(`/agent-host-settings/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ revision }),
+    }),
+
   createSession: async (data: {
     project_id?: string;
     provider?: string;
@@ -318,13 +351,20 @@ export const api = {
       });
       return response.session;
     }
-    const res = await fetch(`${API_BASE}/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+    const host = (await api.listAgentHostSettings()).find((h) => h.id === data.agent_id);
+    if (!host) throw new Error("Selected host settings are unavailable.");
+    const response = await api.createAgentSession({
+      definition_ref: {
+        definition_id: host.definition_ref.id,
+        revision: host.definition_ref.revision,
+        semantic_digest: host.definition_ref.digest,
+      },
+      host_settings: { id: host.id, revision: host.revision },
+      project_id: data.project_id,
+      model_selection:
+        data.provider && data.model ? { provider: data.provider, model: data.model } : undefined,
     });
-    if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
-    return res.json();
+    return response.session;
   },
 
   updateSession: async (id: string, data: Partial<Session>): Promise<Session> => {
@@ -2734,3 +2774,15 @@ export const api = {
     return res.json();
   },
 };
+
+async function pinnedAgentRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...options?.headers },
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error || `Agent request failed: ${res.status}`);
+  }
+  return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
+}

@@ -58,6 +58,8 @@ func httpOutcome(t *testing.T, h http.Handler, method, path string, args any) tp
 	// has its own richer shape. Map the actual HTTP contract explicitly.
 	code := svcerr.CodeInternal
 	switch status {
+	case http.StatusGone:
+		code = svcerr.CodeUnavailable
 	case http.StatusBadRequest:
 		code = svcerr.CodeInvalid
 	case http.StatusNotFound:
@@ -205,16 +207,16 @@ func TestTransportParityAgentUpdateRefusal(t *testing.T) {
 	for _, source := range []string{"internal", "plugin", "external"} {
 		t.Run(source, func(t *testing.T) {
 			row := &store.AgentProfile{Name: "Protected", Slug: "protected-" + source, SystemPrompt: "keep prompt", Source: source}
-			if err := st.CreateAgent(context.Background(), row); err != nil {
+			if err := storetest.HistoricalProfile(context.Background(), st, row); err != nil {
 				t.Fatal(err)
 			}
 			a := httpOutcome(t, h, http.MethodPut, "/api/agents/"+row.ID, map[string]any{"name": "must not write"})
 			b := mcpOutcome(t, cs, "agent_update", map[string]any{"id": row.ID, "name": "must not write"})
-			if a.Category != svcerr.CodePermission || b.Category != svcerr.CodePermission {
-				t.Fatalf("want permission: %s / %s", a, b)
+			if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
+				t.Fatalf("want immutable unavailable: %s / %s", a, b)
 			}
 			tp.AssertSameOutcome(t, "noneditable agent", a, b)
-			after, err := st.GetAgent(context.Background(), row.ID)
+			after, err := st.GetHistoricalAgentProfile(context.Background(), row.ID)
 			if err != nil || after.Name != row.Name {
 				t.Fatalf("protected agent changed: %v / %+v", err, after)
 			}
@@ -222,8 +224,8 @@ func TestTransportParityAgentUpdateRefusal(t *testing.T) {
 	}
 	a := httpOutcome(t, h, http.MethodPut, "/api/agents/missing", map[string]any{"name": "x"})
 	b := mcpOutcome(t, cs, "agent_update", map[string]any{"id": "missing", "name": "x"})
-	if a.Category != svcerr.CodeNotFound || b.Category != svcerr.CodeNotFound {
-		t.Fatalf("want not_found: %s / %s", a, b)
+	if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
+		t.Fatalf("want immutable unavailable: %s / %s", a, b)
 	}
 	tp.AssertSameOutcome(t, "missing agent", a, b)
 }
@@ -241,17 +243,17 @@ func TestTransportParityInfrastructureFailure(t *testing.T) {
 	tp.AssertSameOutcome(t, "closed database", a, b)
 	a = httpOutcome(t, h, http.MethodPut, "/api/agents/missing", map[string]any{"name": "x"})
 	b = mcpOutcome(t, cs, "agent_update", map[string]any{"id": "missing", "name": "x"})
-	if a.Category != svcerr.CodeInternal || b.Category != svcerr.CodeInternal || a.Status != 500 {
-		t.Fatalf("want internal failure: %s / %s", a, b)
+	if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable || a.Status != http.StatusGone {
+		t.Fatalf("want immutable unavailable: %s / %s", a, b)
 	}
 	tp.AssertSameOutcome(t, "closed database agent", a, b)
 }
 
-func TestAgentWriteFailureParityLogsCauses(t *testing.T) {
+func TestRetiredAgentWriteDoesNotReachFailingStore(t *testing.T) {
 	for _, op := range []string{"create", "update"} {
 		t.Run(op, func(t *testing.T) {
 			st, h, cs := parityDoors(t)
-			if err := st.CreateAgent(context.Background(), &store.AgentProfile{ID: "write-target", Name: "Target", Slug: "write-target", SystemPrompt: "fixture", Source: "user"}); err != nil {
+			if err := storetest.HistoricalProfile(context.Background(), st, &store.AgentProfile{ID: "write-target", Name: "Target", Slug: "write-target", SystemPrompt: "fixture", Source: "user"}); err != nil {
 				t.Fatal(err)
 			}
 			statement := "INSERT"
@@ -279,15 +281,23 @@ func TestAgentWriteFailureParityLogsCauses(t *testing.T) {
 			}
 			a := httpOutcome(t, h, method, path, restArgs)
 			b := mcpOutcome(t, cs, tool, args)
-			if a.Category != svcerr.CodeInternal || b.Category != svcerr.CodeInternal {
-				t.Fatalf("want internal: %s / %s", a, b)
+			if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
+				t.Fatalf("want immutable unavailable: %s / %s", a, b)
 			}
-			tp.AssertSameOutcome(t, "agent write failure", a, b)
+			tp.AssertSameOutcome(t, "retired writer refusal", a, b)
+			kept, lookupErr := st.GetHistoricalAgentProfile(t.Context(), "write-target")
+			if lookupErr != nil || kept.Name != "Target" || kept.SystemPrompt != "fixture" {
+				t.Fatalf("history changed: %+v %v", kept, lookupErr)
+			}
+			if _, lookupErr = st.GetAgentBySlug(t.Context(), "fresh"); lookupErr == nil {
+				t.Fatal("retired create admitted fresh host")
+			}
+
 			if strings.Contains(a.Detail, "write_secret") || strings.Contains(b.Detail, "write_secret") {
 				t.Fatalf("leaked write cause: %s / %s", a, b)
 			}
-			if strings.Count(logs.String(), "write_secret") != 2 {
-				t.Fatalf("both doors must log the write cause: %s", logs.String())
+			if strings.Contains(logs.String(), "write_secret") {
+				t.Fatalf("retired operation reached a forbidden writer: %s", logs.String())
 			}
 		})
 	}
@@ -301,8 +311,8 @@ func TestAgentCreateClosedDBParity(t *testing.T) {
 	args := map[string]any{"name": "Fresh", "slug": "fresh", "system_prompt": "fixture"}
 	a := httpOutcome(t, h, http.MethodPost, "/api/agents", args)
 	b := mcpOutcome(t, cs, "agent_create", args)
-	if a.Category != svcerr.CodeInternal || b.Category != svcerr.CodeInternal {
-		t.Fatalf("want internal: %s / %s", a, b)
+	if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
+		t.Fatalf("want immutable unavailable: %s / %s", a, b)
 	}
 	tp.AssertSameOutcome(t, "closed DB create", a, b)
 	if strings.Contains(a.Detail, "database is closed") || strings.Contains(b.Detail, "database is closed") {

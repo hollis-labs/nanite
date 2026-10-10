@@ -17,7 +17,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/skillvendor"
@@ -85,23 +88,18 @@ func installFixture(t *testing.T, idx *store.Store, vendor *skillvendor.Store, d
 }
 
 func TestResolveSkillParameters_DynamicBindingResolvesEndToEnd(t *testing.T) {
-	s := newResolverTestStore(t)
+	resolvers := &standaloneSkillResolvers{}
 	ctx := context.Background()
 
-	agent := &store.AgentProfile{Name: "Resolver Test Agent", Slug: "resolver-test-agent", SystemPrompt: "test"}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
+	agentID := "standalone-resolver-1"
 
-	if _, err := s.InsertAgentContextResolver(ctx, store.AgentContextResolver{
-		AgentID:  agent.ID,
+	resolvers.rows = []store.AgentContextResolver{{
+		AgentID:  agentID,
 		SlotName: "greeting-slot",
 		Kind:     "cmd",
 		Run:      "printf hello-from-resolver",
 		Enabled:  true,
-	}); err != nil {
-		t.Fatalf("InsertAgentContextResolver: %v", err)
-	}
+	}}
 
 	def := Definition{
 		Slug: "greeter",
@@ -110,32 +108,32 @@ func TestResolveSkillParameters_DynamicBindingResolvesEndToEnd(t *testing.T) {
 		},
 	}
 
-	got, err := ResolveSkillParameters(ctx, def, agent.ID, nil, "", s)
+	got, err := ResolveSkillParameters(ctx, def, agentID, nil, "", resolvers)
 	if err != nil {
 		t.Fatalf("ResolveSkillParameters: %v", err)
 	}
 	if got["greeting"] != "hello-from-resolver" {
 		t.Errorf(`got["greeting"] = %q, want "hello-from-resolver"`, got["greeting"])
 	}
+	if resolvers.calls != 1 || resolvers.agentID != agentID {
+		t.Fatalf("resolver request scope: %+v", resolvers)
+	}
+	assertHistoricalResolverInert(t, def)
 }
 
 func TestResolveSkillParameters_StaticArgOverridesDynamicBinding(t *testing.T) {
-	s := newResolverTestStore(t)
+	resolvers := &standaloneSkillResolvers{}
 	ctx := context.Background()
 
-	agent := &store.AgentProfile{Name: "Resolver Test Agent 2", Slug: "resolver-test-agent-2", SystemPrompt: "test"}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if _, err := s.InsertAgentContextResolver(ctx, store.AgentContextResolver{
-		AgentID:  agent.ID,
+	agentID := "standalone-resolver-2"
+
+	resolvers.rows = []store.AgentContextResolver{{
+		AgentID:  agentID,
 		SlotName: "greeting-slot",
 		Kind:     "cmd",
 		Run:      "printf hello-from-resolver",
 		Enabled:  true,
-	}); err != nil {
-		t.Fatalf("InsertAgentContextResolver: %v", err)
-	}
+	}}
 
 	def := Definition{
 		Slug: "greeter",
@@ -144,12 +142,15 @@ func TestResolveSkillParameters_StaticArgOverridesDynamicBinding(t *testing.T) {
 		},
 	}
 
-	got, err := ResolveSkillParameters(ctx, def, agent.ID, map[string]string{"greeting": "hello-from-caller"}, "", s)
+	got, err := ResolveSkillParameters(ctx, def, agentID, map[string]string{"greeting": "hello-from-caller"}, "", resolvers)
 	if err != nil {
 		t.Fatalf("ResolveSkillParameters: %v", err)
 	}
 	if got["greeting"] != "hello-from-caller" {
 		t.Errorf("static arg should win over a dynamic binding, got %q", got["greeting"])
+	}
+	if resolvers.calls != 0 {
+		t.Fatalf("static override queried dynamic resolver %d times", resolvers.calls)
 	}
 }
 
@@ -223,12 +224,9 @@ func TestResolveSkillParameters_MissingRequiredParameter_UnconfiguredResolverSlo
 	// row for that slot at all (not merely disabled) — this must still
 	// surface as a clear MissingSkillParameterError, not a resolver
 	// lookup failure and not a silently-empty value.
-	s := newResolverTestStore(t)
+	resolvers := &standaloneSkillResolvers{}
 	ctx := context.Background()
-	agent := &store.AgentProfile{Name: "Resolver Test Agent 3", Slug: "resolver-test-agent-3", SystemPrompt: "test"}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
+	agentID := "standalone-resolver-3"
 
 	def := Definition{
 		Slug: "needs-input",
@@ -237,7 +235,7 @@ func TestResolveSkillParameters_MissingRequiredParameter_UnconfiguredResolverSlo
 		},
 	}
 
-	_, err := ResolveSkillParameters(ctx, def, agent.ID, nil, "", s)
+	_, err := ResolveSkillParameters(ctx, def, agentID, nil, "", resolvers)
 	var merr *MissingSkillParameterError
 	if !errors.As(err, &merr) {
 		t.Fatalf("expected a *MissingSkillParameterError, got %T: %v", err, err)
@@ -279,36 +277,38 @@ func TestResolveSkillParameters_ResolverRowFailureAbortsWholeCall(t *testing.T) 
 	// Matches runtimeagent.ResolveContextBlocks's own documented
 	// all-or-nothing behavior — a single matching resolver row's failure
 	// aborts resolution entirely, not just that one parameter.
-	s := newResolverTestStore(t)
+	resolvers := &standaloneSkillResolvers{}
 	ctx := context.Background()
-	agent := &store.AgentProfile{Name: "Resolver Test Agent 4", Slug: "resolver-test-agent-4", SystemPrompt: "test"}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if _, err := s.InsertAgentContextResolver(ctx, store.AgentContextResolver{
-		AgentID:  agent.ID,
-		SlotName: "broken-slot",
-		Kind:     "cmd",
-		Run:      "exit 3",
-		Enabled:  true,
-	}); err != nil {
-		t.Fatalf("InsertAgentContextResolver: %v", err)
-	}
+	agentID := "standalone-resolver-4"
+
+	resolvers.rows = []store.AgentContextResolver{
+		{AgentID: agentID, SlotName: "valid-slot", Kind: "cmd", Run: "printf valid-value", Enabled: true},
+		{
+			AgentID:  agentID,
+			SlotName: "broken-slot",
+			Kind:     "cmd",
+			Run:      "exit 3",
+			Enabled:  true,
+		}}
 
 	def := Definition{
 		Slug: "greeter",
 		Parameters: []ParameterSpec{
+			{Name: "valid", Required: true, ResolverSlot: "valid-slot"},
 			{Name: "greeting", Required: true, ResolverSlot: "broken-slot"},
 		},
 	}
 
-	_, err := ResolveSkillParameters(ctx, def, agent.ID, nil, "", s)
+	got, err := ResolveSkillParameters(ctx, def, agentID, nil, "", resolvers)
 	if err == nil {
 		t.Fatal("expected the broken resolver row's failure to propagate")
 	}
 	var merr *MissingSkillParameterError
 	if errors.As(err, &merr) {
 		t.Fatalf("a real resolver failure should not be reported as a missing parameter: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("failed resolver returned partial parameters: %+v", got)
 	}
 }
 
@@ -377,4 +377,102 @@ func TestResolveDependencyAddresses_UnresolvedDependencyIsAHardError(t *testing.
 	if err == nil {
 		t.Fatal("expected an error for a declared dependency that isn't installed")
 	}
+}
+
+// These rows exercise library semantics without installing mutable host behavior.
+type standaloneSkillResolvers struct {
+	rows    []store.AgentContextResolver
+	calls   int
+	agentID string
+}
+
+func (r *standaloneSkillResolvers) ListEnabledAgentContextResolvers(_ context.Context, agentID string) ([]store.AgentContextResolver, error) {
+	r.calls++
+	r.agentID = agentID
+	return append([]store.AgentContextResolver(nil), r.rows...), nil
+}
+
+func assertHistoricalResolverInert(t *testing.T, def Definition) {
+	t.Helper()
+	st := newResolverTestStore(t)
+	retained := &store.AgentProfile{Name: "Retained resolver", Slug: "historical-skill-resolver", SystemPrompt: "Retained body", Source: "user"}
+	if err := storetest.HistoricalProfile(t.Context(), st, retained); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "must-not-run")
+	command := fmt.Sprintf("printf unauthorized > %q", marker)
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_context_resolvers(id,agent_id,slot_name,kind,run,enabled,created_at,updated_at) VALUES(?,?,?,'cmd',?,1,datetime('now'),datetime('now'))`, "historical-resolver", retained.ID, "greeting-slot", command); err != nil {
+		t.Fatal(err)
+	}
+	before := skillBoundarySnapshot(t, st)
+	for _, slot := range []string{"greeting-slot", "unconfigured-slot"} {
+		invocation := def
+		invocation.Parameters = append([]ParameterSpec(nil), def.Parameters...)
+		invocation.Parameters[0].ResolverSlot = slot
+		got, err := ResolveSkillParameters(t.Context(), invocation, retained.ID, nil, "", st)
+		if !errors.Is(err, store.ErrImmutableAgentProfile) || got != nil {
+			t.Fatalf("historical resolver slot %q admitted: %+v, %v", slot, got, err)
+		}
+	}
+	if id, err := st.InsertAgentContextResolver(t.Context(), store.AgentContextResolver{AgentID: retained.ID, SlotName: "claimed-slot", Kind: "cmd", Run: command, Enabled: true}); id != "" || !errors.Is(err, store.ErrImmutableAgentProfile) {
+		t.Fatalf("mutable resolver authoring = %q, %v", id, err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("historical resolver command executed: %v", statErr)
+	}
+	if after := skillBoundarySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("resolver refusal changed history or authority: %#v -> %#v", before, after)
+	}
+}
+
+func skillBoundarySnapshot(t *testing.T, st *store.Store) map[string][][]any {
+	t.Helper()
+	out := make(map[string][][]any)
+	for _, query := range []struct{ table, sql string }{
+		{"agent_profiles", "SELECT * FROM agent_profiles ORDER BY rowid"},
+		{"agent_profile_revisions", "SELECT * FROM agent_profile_revisions ORDER BY rowid"},
+		{"agent_context_resolvers", "SELECT * FROM agent_context_resolvers ORDER BY rowid"},
+		{"agent_known_skills", "SELECT * FROM agent_known_skills ORDER BY rowid"},
+		{"actor_known_skills", "SELECT * FROM actor_known_skills ORDER BY rowid"},
+		{"agent_definitions", "SELECT * FROM agent_definitions ORDER BY rowid"},
+		{"agent_host_settings", "SELECT * FROM agent_host_settings ORDER BY rowid"},
+		{"agent_actor_bindings", "SELECT * FROM agent_actor_bindings ORDER BY rowid"},
+		{"subagent_runs", "SELECT * FROM subagent_runs ORDER BY rowid"},
+		{"agent_messages", "SELECT * FROM agent_messages ORDER BY rowid"},
+	} {
+		rows, err := st.DB.QueryContext(t.Context(), query.sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			cells := make([]any, len(columns))
+			refs := make([]any, len(columns))
+			for i := range cells {
+				refs[i] = &cells[i]
+			}
+			if err := rows.Scan(refs...); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			for i, cell := range cells {
+				if raw, ok := cell.([]byte); ok {
+					cells[i] = append([]byte(nil), raw...)
+				}
+			}
+			out[query.table] = append(out[query.table], cells)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
 }

@@ -9,10 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
-
-	"github.com/oklog/ulid/v2"
 )
 
 // ErrAgentReflexNotFound is returned when an agent_reflexes row cannot
@@ -222,145 +219,22 @@ func scanPendingReflex(scanner interface{ Scan(...any) error }, r *PendingReflex
 // empty, a ULID is generated. The row replaces an existing one on PK
 // conflict (idempotent re-seed semantics).
 func (s *Store) InsertAgentReflex(ctx context.Context, row AgentReflex) (string, error) {
-	if row.Name == "" {
-		return "", fmt.Errorf("insert agent_reflexes: name is required")
-	}
-	if row.TriggerKind == "" {
-		return "", fmt.Errorf("insert agent_reflexes: trigger_kind is required")
-	}
-	if row.TriggerSpec == "" {
-		return "", fmt.Errorf("insert agent_reflexes: trigger_spec is required")
-	}
-	if row.ActionKind == "" {
-		return "", fmt.Errorf("insert agent_reflexes: action_kind is required")
-	}
-	if row.ActionSpec == "" {
-		return "", fmt.Errorf("insert agent_reflexes: action_spec is required")
-	}
-	if row.Status == "" {
-		row.Status = ReflexStatusActive
-	}
-	if row.CreatedBy == "" {
-		row.CreatedBy = "operator"
-	}
-	if row.ID == "" {
-		row.ID = "rfx-" + ulid.Make().String()
-	}
-	if row.ProvenanceTier == "" {
-		// Same rule migration 124_reflex_action_taxonomy.sql's backfill
-		// applies to pre-existing rows: created_by = "system" (the base
-		// reflex seeder's convention, seeds.go/loom_pilot_seeds.go) means
-		// provenance_tier = "system"; every other convention in use today
-		// (a bare "operator", or ApprovePendingReflex's
-		// "operator:"+reviewedBy) means "operator". Keeps every future
-		// InsertAgentReflex call — including re-running the seeder against
-		// a fresh database — consistent with that same rule instead of
-		// silently falling through to the column's own DEFAULT 'operator'
-		// for system-seeded rows.
-		if row.CreatedBy == "system" {
-			row.ProvenanceTier = "system"
-		} else {
-			row.ProvenanceTier = "operator"
-		}
-	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT OR REPLACE INTO agent_reflexes
-		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
-		     action_kind, action_spec, status, priority, fired_count,
-		     last_fired_at, created_at, created_by, opt_out_allowed,
-		     provenance_tier, recurrence_override_seconds, workflow_run_id)
-		 VALUES (?, ?, ?, ?, ?, ?,
-		         ?, ?, ?, ?, ?,
-		         ?,
-		         COALESCE(NULLIF(?, ''), datetime('now')),
-		         ?, ?,
-		         ?, ?, ?)`,
-		row.ID, nullIfEmpty(row.AgentID), nullIfEmpty(row.ClassTag),
-		row.Name, row.TriggerKind, row.TriggerSpec,
-		row.ActionKind, row.ActionSpec, row.Status, row.Priority, row.FiredCount,
-		nullIfEmpty(row.LastFiredAt),
-		row.CreatedAt,
-		row.CreatedBy, row.OptOutAllowed,
-		row.ProvenanceTier, nullIfNilInt64(row.RecurrenceOverrideSeconds),
-		nullIfEmpty(row.WorkflowRunID),
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert agent_reflexes: %w", err)
-	}
-	return row.ID, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return "", ErrImmutableAgentProfile
 }
 
 // InsertAgentReflexIfAbsent inserts a caller-keyed reflex without replacing an
 // existing row. Replays preserve fired_count/last_fired_at; a deterministic-ID
 // collision with different immutable routing material fails closed.
 func (s *Store) InsertAgentReflexIfAbsent(ctx context.Context, row AgentReflex) (bool, error) {
-	if row.ID == "" || row.Name == "" || row.TriggerKind == "" || row.TriggerSpec == "" || row.ActionKind == "" || row.ActionSpec == "" {
-		return false, errors.New("insert agent reflex if absent: id, name, trigger, and action are required")
-	}
-	if row.Status == "" {
-		row.Status = ReflexStatusActive
-	}
-	if row.CreatedBy == "" {
-		row.CreatedBy = "operator"
-	}
-	if row.ProvenanceTier == "" {
-		if row.CreatedBy == "system" {
-			row.ProvenanceTier = "system"
-		} else {
-			row.ProvenanceTier = "operator"
-		}
-	}
-	result, err := s.DB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO agent_reflexes
-		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
-		     action_kind, action_spec, status, priority, fired_count,
-		     last_fired_at, created_at, created_by, opt_out_allowed,
-		     provenance_tier, recurrence_override_seconds, workflow_run_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')), ?, ?, ?, ?, ?)`,
-		row.ID, nullIfEmpty(row.AgentID), nullIfEmpty(row.ClassTag), row.Name,
-		row.TriggerKind, row.TriggerSpec, row.ActionKind, row.ActionSpec, row.Status,
-		row.Priority, row.FiredCount, nullIfEmpty(row.LastFiredAt), row.CreatedAt,
-		row.CreatedBy, row.OptOutAllowed, row.ProvenanceTier,
-		nullIfNilInt64(row.RecurrenceOverrideSeconds), nullIfEmpty(row.WorkflowRunID),
-	)
-	if err != nil {
-		return false, fmt.Errorf("insert agent reflex if absent: %w", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("insert agent reflex if absent rows: %w", err)
-	}
-	if count == 1 {
-		return true, nil
-	}
-	existing, err := s.GetAgentReflex(ctx, row.ID)
-	if err != nil {
-		return false, err
-	}
-	if existing.AgentID != row.AgentID || existing.ClassTag != row.ClassTag || existing.Name != row.Name ||
-		existing.TriggerKind != row.TriggerKind || existing.TriggerSpec != row.TriggerSpec ||
-		existing.ActionKind != row.ActionKind || existing.ActionSpec != row.ActionSpec ||
-		existing.Status != row.Status || existing.Priority != row.Priority || existing.CreatedBy != row.CreatedBy ||
-		existing.OptOutAllowed != row.OptOutAllowed || existing.ProvenanceTier != row.ProvenanceTier ||
-		existing.WorkflowRunID != row.WorkflowRunID {
-		return false, fmt.Errorf("insert agent reflex if absent: id %q belongs to different reflex material", row.ID)
-	}
-	return false, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return false, ErrImmutableAgentProfile
 }
 
 // GetAgentReflex returns the row by ID, or ErrAgentReflexNotFound.
 func (s *Store) GetAgentReflex(ctx context.Context, id string) (*AgentReflex, error) {
-	var out AgentReflex
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+agentReflexColumns+` FROM agent_reflexes WHERE id = ?`, id,
-	)
-	if err := scanAgentReflex(row, &out); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrAgentReflexNotFound
-		}
-		return nil, fmt.Errorf("get agent_reflexes: %w", err)
-	}
-	return &out, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListAgentReflexesForAgent returns the combined set of:
@@ -376,46 +250,8 @@ func (s *Store) GetAgentReflex(ctx context.Context, id string) (*AgentReflex, er
 // then created_at ASC so the evaluator processes higher-priority
 // reflexes first.
 func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag string) ([]AgentReflex, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentReflexColumns+`
-		 FROM agent_reflexes
-		 WHERE status = 'active'
-		   AND (
-		         (
-		           agent_id IS NULL AND class_tag = ?
-		           AND (
-		                 opt_out_allowed = 0
-		              OR NOT EXISTS (
-		                   SELECT 1 FROM agent_reflex_opt_outs o
-		                    WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
-		                 )
-		               )
-		         )
-		      OR (agent_id = ? AND (
-		            provenance_tier != 'plugin' OR opt_out_allowed = 0 OR NOT EXISTS (
-		              SELECT 1 FROM agent_reflex_opt_outs o
-		               WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
-		            )
-		          ))
-		       )
-		 ORDER BY priority DESC, created_at ASC`,
-		classTag, agentID, agentID, agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list agent_reflexes: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]AgentReflex, 0)
-	for rows.Next() {
-		var r AgentReflex
-		if err := scanAgentReflex(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
-		}
-		if s.pluginReflexAvailable(r) {
-			out = append(out, r)
-		}
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListAgentReflexesForWorkflowRun returns the run-scoped counterpart of
@@ -446,50 +282,8 @@ func (s *Store) ListAgentReflexesForAgent(ctx context.Context, agentID, classTag
 // Returns an empty slice, no error, when runID is empty (no run context
 // to scope against — the common case for a non-Team session).
 func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agentID, classTag string) ([]AgentReflex, error) {
-	if runID == "" {
-		return nil, nil
-	}
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentReflexColumns+`
-		 FROM agent_reflexes
-		 WHERE status = 'active'
-		   AND workflow_run_id = ?
-		   AND (
-		         (
-		           agent_id IS NULL AND class_tag = ?
-		           AND (
-		                 opt_out_allowed = 0
-		              OR NOT EXISTS (
-		                   SELECT 1 FROM agent_reflex_opt_outs o
-		                    WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
-		                 )
-		               )
-		         )
-		      OR (agent_id = ? AND (
-		            provenance_tier != 'plugin' OR opt_out_allowed = 0 OR NOT EXISTS (
-		              SELECT 1 FROM agent_reflex_opt_outs o
-		               WHERE o.agent_id = ? AND o.reflex_id = agent_reflexes.id
-		            )
-		          ))
-		       )
-		 ORDER BY priority DESC, created_at ASC`,
-		runID, classTag, agentID, agentID, agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list agent_reflexes for workflow run: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]AgentReflex, 0)
-	for rows.Next() {
-		var r AgentReflex
-		if err := scanAgentReflex(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
-		}
-		if s.pluginReflexAvailable(r) {
-			out = append(out, r)
-		}
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListAgentReflexesForLoopRun returns the active resume_loop_run reflex
@@ -510,58 +304,15 @@ func (s *Store) ListAgentReflexesForWorkflowRun(ctx context.Context, runID, agen
 // bundled version) — no other query in this file needed it before this
 // task.
 func (s *Store) ListAgentReflexesForLoopRun(ctx context.Context, loopRunID string) ([]AgentReflex, error) {
-	if loopRunID == "" {
-		return nil, nil
-	}
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentReflexColumns+`
-		 FROM agent_reflexes
-		 WHERE status = 'active'
-		   AND action_kind = ?
-		   AND json_extract(action_spec, '$.loop_run_id') = ?
-		 ORDER BY priority DESC, created_at ASC`,
-		ReflexActionResumeLoopRun, loopRunID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list agent_reflexes for loop run: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]AgentReflex, 0)
-	for rows.Next() {
-		var r AgentReflex
-		if err := scanAgentReflex(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
-		}
-		if s.pluginReflexAvailable(r) {
-			out = append(out, r)
-		}
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListAllAgentReflexes returns every row in agent_reflexes ordered by
 // priority DESC, created_at ASC. Used by the operator surface.
 func (s *Store) ListAllAgentReflexes(ctx context.Context, agentID string) ([]AgentReflex, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentReflexColumns+`
-		 FROM agent_reflexes
-		 WHERE agent_id = ?
-		 ORDER BY priority DESC, created_at ASC`,
-		agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list all agent_reflexes: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]AgentReflex, 0)
-	for rows.Next() {
-		var r AgentReflex
-		if err := scanAgentReflex(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan agent_reflexes: %w", err)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // UpdateAgentReflex updates an existing row's editable fields. Scope
@@ -577,63 +328,15 @@ func (s *Store) ListAllAgentReflexes(ctx context.Context, agentID string) ([]Age
 // TASKS/reflex-taxonomy/02-recurrence-cascade.md's job), so today every
 // call preserves whatever value GetAgentReflex populated row from.
 func (s *Store) UpdateAgentReflex(ctx context.Context, row AgentReflex) error {
-	if row.ID == "" {
-		return fmt.Errorf("update agent_reflexes: id is required")
-	}
-	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_reflexes
-		    SET name = ?,
-		        trigger_kind = ?,
-		        trigger_spec = ?,
-		        action_kind = ?,
-		        action_spec = ?,
-		        status = ?,
-		        priority = ?,
-		        fired_count = ?,
-		        last_fired_at = ?,
-		        opt_out_allowed = ?,
-		        recurrence_override_seconds = ?
-		  WHERE id = ?`,
-		row.Name, row.TriggerKind, row.TriggerSpec,
-		row.ActionKind, row.ActionSpec,
-		row.Status, row.Priority, row.FiredCount,
-		nullIfEmpty(row.LastFiredAt), row.OptOutAllowed,
-		nullIfNilInt64(row.RecurrenceOverrideSeconds), row.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update agent_reflexes: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update agent_reflexes rows affected: %w", err)
-	}
-	if n == 0 {
-		return ErrAgentReflexNotFound
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }
 
 // BumpAgentReflexFired increments fired_count and stamps last_fired_at.
 // Called by the executor after a reflex's action has been staged.
 func (s *Store) BumpAgentReflexFired(ctx context.Context, id string, now time.Time) error {
-	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_reflexes
-		    SET fired_count = fired_count + 1,
-		        last_fired_at = ?
-		  WHERE id = ?`,
-		now.UTC().Format(time.RFC3339), id,
-	)
-	if err != nil {
-		return fmt.Errorf("bump agent_reflexes fired: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("bump agent_reflexes rows: %w", err)
-	}
-	if n == 0 {
-		return ErrAgentReflexNotFound
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }
 
 // DeleteAgentReflex removes a row by id. Any agent_reflex_opt_outs rows
@@ -642,20 +345,8 @@ func (s *Store) BumpAgentReflexFired(ctx context.Context, id string, now time.Ti
 // here, unlike agent_reflexes.agent_id's own FK to agent_profiles,
 // which DeleteAgent still cleans up explicitly.
 func (s *Store) DeleteAgentReflex(ctx context.Context, id string) error {
-	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_reflexes WHERE id = ?`, id,
-	)
-	if err != nil {
-		return fmt.Errorf("delete agent_reflexes: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete agent_reflexes rows: %w", err)
-	}
-	if n == 0 {
-		return ErrAgentReflexNotFound
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }
 
 // SetAgentReflexOptOut records that agentID has opted out of reflexID —
@@ -666,69 +357,31 @@ func (s *Store) DeleteAgentReflex(ctx context.Context, id string) error {
 // false — ListAgentReflexesForAgent ignores this table entirely for
 // those rows, by design.
 func (s *Store) SetAgentReflexOptOut(ctx context.Context, agentID, reflexID string) error {
-	if agentID == "" || reflexID == "" {
-		return fmt.Errorf("set agent_reflex_opt_outs: agent_id and reflex_id are required")
-	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO agent_reflex_opt_outs (agent_id, reflex_id) VALUES (?, ?)`,
-		agentID, reflexID,
-	)
-	if err != nil {
-		return fmt.Errorf("set agent_reflex_opt_outs: %w", err)
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }
 
 // ClearAgentReflexOptOut removes an opt-out marker, re-enabling the
 // reflex for that agent. A no-op (not an error) if no such marker
 // exists.
 func (s *Store) ClearAgentReflexOptOut(ctx context.Context, agentID, reflexID string) error {
-	_, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_reflex_opt_outs WHERE agent_id = ? AND reflex_id = ?`,
-		agentID, reflexID,
-	)
-	if err != nil {
-		return fmt.Errorf("clear agent_reflex_opt_outs: %w", err)
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }
 
 // ListAgentReflexOptOuts returns the reflex ids agentID has opted out
 // of.
 func (s *Store) ListAgentReflexOptOuts(ctx context.Context, agentID string) ([]string, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT reflex_id FROM agent_reflex_opt_outs WHERE agent_id = ? ORDER BY created_at ASC`,
-		agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list agent_reflex_opt_outs: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan agent_reflex_opt_outs: %w", err)
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // CountClassBaseReflexByName returns the count of class-base rows (no
 // agent_id) with the given class_tag and name. Used by the seeder to
 // idempotently re-insert only when missing.
 func (s *Store) CountClassBaseReflexByName(ctx context.Context, classTag, name string) (int, error) {
-	var n int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM agent_reflexes
-		   WHERE agent_id IS NULL AND class_tag = ? AND name = ?`,
-		classTag, name,
-	).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count class-base reflexes: %w", err)
-	}
-	return n, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return 0, ErrImmutableAgentProfile
 }
 
 // CountAgentReflexByName returns the count of agent-scoped rows (a
@@ -738,111 +391,28 @@ func (s *Store) CountClassBaseReflexByName(ctx context.Context, classTag, name s
 // profile (e.g. CW-20260816-0023's Loom Curator/Weaver pilot pair)
 // rather than to a whole class.
 func (s *Store) CountAgentReflexByName(ctx context.Context, agentID, name string) (int, error) {
-	var n int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM agent_reflexes
-		   WHERE agent_id = ? AND name = ?`,
-		agentID, name,
-	).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count agent reflexes: %w", err)
-	}
-	return n, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return 0, ErrImmutableAgentProfile
 }
 
 // InsertPendingReflex inserts a new pending_reflexes row. If row.ID is
 // empty, a ULID is generated.
 func (s *Store) InsertPendingReflex(ctx context.Context, row PendingReflex) (string, error) {
-	if row.ProposedBy == "" {
-		return "", fmt.Errorf("insert pending_reflexes: proposed_by is required")
-	}
-	if row.Name == "" {
-		return "", fmt.Errorf("insert pending_reflexes: name is required")
-	}
-	if row.TriggerKind == "" || row.TriggerSpec == "" {
-		return "", fmt.Errorf("insert pending_reflexes: trigger_kind and trigger_spec required")
-	}
-	if row.ActionKind == "" || row.ActionSpec == "" {
-		return "", fmt.Errorf("insert pending_reflexes: action_kind and action_spec required")
-	}
-	if row.Rationale == "" {
-		return "", fmt.Errorf("insert pending_reflexes: rationale is required")
-	}
-	if row.Status == "" {
-		row.Status = PendingReflexStatusPending
-	}
-	if row.ID == "" {
-		row.ID = "prfx-" + ulid.Make().String()
-	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO pending_reflexes
-		    (id, proposed_by, proposed_at, target_agent_id, name,
-		     trigger_kind, trigger_spec, action_kind, action_spec,
-		     rationale, status)
-		 VALUES (?, ?, COALESCE(NULLIF(?, ''), datetime('now')), ?, ?,
-		         ?, ?, ?, ?,
-		         ?, ?)`,
-		row.ID, row.ProposedBy, row.ProposedAt,
-		nullIfEmpty(row.TargetAgentID), row.Name,
-		row.TriggerKind, row.TriggerSpec, row.ActionKind, row.ActionSpec,
-		row.Rationale, row.Status,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert pending_reflexes: %w", err)
-	}
-	return row.ID, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return "", ErrImmutableAgentProfile
 }
 
 // GetPendingReflex returns a row by id, or ErrPendingReflexNotFound.
 func (s *Store) GetPendingReflex(ctx context.Context, id string) (*PendingReflex, error) {
-	var out PendingReflex
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+pendingReflexColumns+` FROM pending_reflexes WHERE id = ?`, id,
-	)
-	if err := scanPendingReflex(row, &out); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrPendingReflexNotFound
-		}
-		return nil, fmt.Errorf("get pending_reflexes: %w", err)
-	}
-	return &out, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListPendingReflexes returns all rows with the given status, or all
 // statuses if status is empty. Ordered by proposed_at DESC.
 func (s *Store) ListPendingReflexes(ctx context.Context, status string) ([]PendingReflex, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if status == "" {
-		rows, err = s.DB.QueryContext(ctx,
-			`SELECT `+pendingReflexColumns+`
-			 FROM pending_reflexes
-			 ORDER BY proposed_at DESC`,
-		)
-	} else {
-		rows, err = s.DB.QueryContext(ctx,
-			`SELECT `+pendingReflexColumns+`
-			 FROM pending_reflexes
-			 WHERE status = ?
-			 ORDER BY proposed_at DESC`,
-			status,
-		)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list pending_reflexes: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]PendingReflex, 0)
-	for rows.Next() {
-		var r PendingReflex
-		if err := scanPendingReflex(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan pending_reflexes: %w", err)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ApprovePendingReflex flips the pending row to status='approved' and
@@ -853,93 +423,13 @@ func (s *Store) ListPendingReflexes(ctx context.Context, status string) ([]Pendi
 // this path are never the hand-picked safety-critical seeds Phase 1
 // item 07 marks non-opt-outable in seeds.go.
 func (s *Store) ApprovePendingReflex(ctx context.Context, id, reviewedBy string) (*AgentReflex, error) {
-	pending, err := s.GetPendingReflex(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if pending.Status != PendingReflexStatusPending {
-		return nil, fmt.Errorf("approve pending_reflexes: row is %s, not pending", pending.Status)
-	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("approve pending_reflexes: begin tx: %w", err)
-	}
-	defer rollbackUnlessCommitted(tx)
-
-	newID := "rfx-" + ulid.Make().String()
-	createdBy := pending.ProposedBy
-	if reviewedBy != "" {
-		createdBy = "operator:" + reviewedBy
-	}
-	// provenance_tier is hardcoded 'operator' here, independent of
-	// pending.ProposedBy or whatever the pending row's own (nonexistent)
-	// tier might otherwise suggest — TASKS/reflex-taxonomy/
-	// 05-provenance-tier-enforcement.md, mirroring the createdBy
-	// "operator:"+reviewedBy collapse immediately above. agent_proposed is
-	// not a fourth live provenance tier (Facet 3,
-	// docs/engineering/architecture/10-reflex-action-taxonomy.md); approval
-	// through this path is what makes a pending reflex real, and "active in
-	// agent_reflexes => operator-approved" must hold for provenance_tier
-	// the same way it already holds for created_by. Relying on the
-	// column's own DEFAULT 'operator' (migration
-	// 124_reflex_action_taxonomy.sql) would happen to produce the same
-	// value today, but leaving it implicit would silently break if that
-	// default ever changed — so it's set explicitly in this INSERT's
-	// column list instead.
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO agent_reflexes
-		    (id, agent_id, class_tag, name, trigger_kind, trigger_spec,
-		     action_kind, action_spec, status, priority, fired_count,
-		     last_fired_at, created_at, created_by, provenance_tier)
-		 VALUES (?, ?, NULL, ?, ?, ?,
-		         ?, ?, 'active', 0, 0,
-		         NULL, datetime('now'), ?, 'operator')`,
-		newID, nullIfEmpty(pending.TargetAgentID),
-		pending.Name, pending.TriggerKind, pending.TriggerSpec,
-		pending.ActionKind, pending.ActionSpec, createdBy,
-	); err != nil {
-		return nil, fmt.Errorf("approve pending_reflexes: insert agent_reflex: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE pending_reflexes
-		    SET status = 'approved',
-		        reviewed_at = datetime('now'),
-		        reviewed_by = ?
-		  WHERE id = ?`,
-		reviewedBy, id,
-	); err != nil {
-		return nil, fmt.Errorf("approve pending_reflexes: update pending: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("approve pending_reflexes: commit: %w", err)
-	}
-	return s.GetAgentReflex(ctx, newID)
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // RejectPendingReflex flips the row to status='rejected' with the
 // reason recorded in reviewed_by (e.g. "alice: too aggressive").
 func (s *Store) RejectPendingReflex(ctx context.Context, id, reviewedBy, reason string) error {
-	tag := reviewedBy
-	if reason != "" {
-		tag = reviewedBy + ": " + reason
-	}
-	res, err := s.DB.ExecContext(ctx,
-		`UPDATE pending_reflexes
-		    SET status = 'rejected',
-		        reviewed_at = datetime('now'),
-		        reviewed_by = ?
-		  WHERE id = ? AND status = 'pending'`,
-		tag, id,
-	)
-	if err != nil {
-		return fmt.Errorf("reject pending_reflexes: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("reject pending_reflexes rows: %w", err)
-	}
-	if n == 0 {
-		return ErrPendingReflexNotFound
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }

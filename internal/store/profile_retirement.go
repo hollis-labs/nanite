@@ -139,7 +139,7 @@ func (s *Store) RetireExportedProfileWithAudit(ctx context.Context, id, digest s
 	if actual != digest {
 		return ErrProfileRetirementConflict
 	}
-	profile, err := getAgent(ctx, tx, id)
+	profile, err := getHistoricalAgentProfile(ctx, tx, id)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ type retirementLink struct {
 func quoteRetirementName(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 
 func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string, includeProtected bool) (ProfileRetirementExport, error) {
-	profile, err := getAgent(ctx, tx, id)
+	profile, err := getHistoricalAgentProfile(ctx, tx, id)
 	if err != nil {
 		return ProfileRetirementExport{}, err
 	}

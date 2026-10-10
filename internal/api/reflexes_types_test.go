@@ -2,10 +2,7 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -73,62 +70,19 @@ func TestReflexViewEmptyListsMarshalAsArray(t *testing.T) {
 	}
 }
 
-// A valid definition has always produced "errors": null from the validate
-// endpoint, not [].
-func TestValidateReflexEndpointValidErrorsNull(t *testing.T) {
-	_, mux := newTestAPI(t)
-	body := `{"trigger_kind":"predicate","trigger_spec":"{\"kind\":\"tool_calls_window\",\"window\":1,\"op\":\"=\",\"value\":0}","action_kind":"inject_reminder","action_spec":"{\"text\":\"hi\"}"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/reflexes/validate", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d; body %s", w.Code, w.Body.String())
-	}
-	var got map[string]json.RawMessage
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if string(got["valid"]) != "true" || string(got["errors"]) != "null" {
-		t.Fatalf("valid=%s errors=%s, want true and null; body %s", got["valid"], got["errors"], w.Body.String())
-	}
-}
-
-// A missing reflex (404) and another agent's reflex (400 ownership) are both
-// reported before a malformed body is read.
-func TestPatchAgentReflexPrecedenceBeforeBodyDecode(t *testing.T) {
+func TestRetiredReflexValidateAndPatchRefuseBeforeDecode(t *testing.T) {
 	a, mux := newTestAPI(t)
-	owner := createTestAgent(t, a, "reflex-owner-agent")
-	caller := createTestAgent(t, a, "reflex-caller-agent")
-	id, err := a.store.InsertAgentReflex(context.Background(), store.AgentReflex{
-		AgentID:     owner.ID,
-		Name:        "owned",
-		TriggerKind: store.ReflexTriggerPredicate,
-		TriggerSpec: `{"kind":"tool_calls_window","window":1,"op":"=","value":0}`,
-		ActionKind:  store.ReflexActionInjectReminder,
-		ActionSpec:  `{"text":"hi"}`,
-		CreatedBy:   "operator",
-	})
-	if err != nil {
-		t.Fatalf("InsertAgentReflex: %v", err)
-	}
-
-	cases := []struct {
-		name, path string
-		code       int
-		msg        string
-	}{
-		{"missing", "/api/agents/" + caller.ID + "/reflexes/no-such-reflex", http.StatusNotFound, "reflex not found"},
-		{"foreign", "/api/agents/" + caller.ID + "/reflexes/" + id, http.StatusBadRequest, "cannot patch inherited or different-agent reflex through this endpoint"},
-	}
-	for _, tc := range cases {
-		req := httptest.NewRequest(http.MethodPatch, tc.path, strings.NewReader(`{not json`))
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, req)
-		if w.Code != tc.code {
-			t.Fatalf("%s: status %d, want %d; body %s", tc.name, w.Code, tc.code, w.Body.String())
+	retiredAPIHistoricalProfile(t, a, "typed-reflex-retained", "user")
+	const query = `SELECT * FROM agent_profiles ORDER BY id`
+	before := retiredAPISnapshot(t, a, query)
+	for _, path := range []string{"/api/reflexes/validate", "/api/agents/typed-reflex-retained/reflexes/missing"} {
+		method := "POST"
+		if strings.Contains(path, "/agents/") {
+			method = "PATCH"
 		}
-		if msg := errorBody(t, w); msg != tc.msg {
-			t.Fatalf("%s: error %q, want %q", tc.name, msg, tc.msg)
+		for _, body := range []string{"not json", `{"trigger_kind":"event","trigger_spec":"{}","action_kind":"inject_reminder","action_spec":"{\"text\":\"hi\"}"}`} {
+			requireRetiredAPI(t, retiredAPIRequest(t, mux, method, path, body))
 		}
 	}
+	retiredAPIHistoryUnchanged(t, a, query, before)
 }

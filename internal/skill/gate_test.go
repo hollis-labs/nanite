@@ -42,6 +42,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -116,7 +117,7 @@ func writeSkillFixture(t *testing.T, slug, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	content := fmt.Sprintf("---\nname: Gate Test Skill\nslug: %s\ndescription: fixture skill for TASKS/skills/09 gate tests.\n---\n\n%s\n", slug, body)
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write fixture SKILL.md: %v", err)
 	}
 	return dir
@@ -170,15 +171,16 @@ func reinstallGateFixture(t *testing.T, idx *store.Store, vendor *skillvendor.St
 func makeGateTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	a := &store.AgentProfile{Name: "Gate Test Agent " + slug, Slug: slug, SystemPrompt: "test"}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	// Explicit prior host authorization in a private database, never an issuer.
+	if err := storetest.PriorAuthorizedActor(t.Context(), s, a); err != nil {
+		t.Fatalf("private prior binding: %v", err)
 	}
 	return a
 }
 
 // newAuthorizedGate sets up a real store+vendor, installs a fresh fixture
-// skill, creates an agent, and grants that agent an approved capability
-// row for the fixture with capsJSON as capabilities_granted. Returns a
+// skill, simulates a prior host-authorized actor and already-issued capability
+// row in the private DB with capsJSON as capabilities_granted. Returns a
 // ready-to-use Gate plus the agent ID and skill slug to build ExecRequests
 // against.
 func newAuthorizedGate(t *testing.T, capsJSON string) (gate *Gate, agentID, skillSlug string) {
@@ -191,16 +193,14 @@ func newAuthorizedGate(t *testing.T, capsJSON string) (gate *Gate, agentID, skil
 
 	agent := makeGateTestAgent(t, idx, "gate-test-agent")
 
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	persistPriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID:             agent.ID,
 		SkillName:           sk.Slug,
 		ApprovedContentHash: sk.ContentHash,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
 		GrantedBy:           "test-operator",
 		CapabilitiesGranted: capsJSON,
-	}); err != nil {
-		t.Fatalf("InsertAgentKnownSkill: %v", err)
-	}
+	})
 
 	return NewGate(idx, idx), agent.ID, sk.Slug
 }
@@ -217,10 +217,20 @@ func TestExecuteGated_NoGrantRow_Refused(t *testing.T) {
 	sk := installGateFixture(t, idx, vendor, dir)
 	agent := makeGateTestAgent(t, idx, "no-grant-agent")
 
+	historical := &store.AgentProfile{Name: "Historical skill holder", Slug: "retained-gate-agent", Source: "user"}
+	if err := storetest.HistoricalProfile(t.Context(), idx, historical); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := idx.DB.ExecContext(t.Context(), `INSERT INTO agent_known_skills(agent_id,skill_name,approved_content_hash,granted_by,capabilities_granted) VALUES(?,?,?,?,?)`, historical.ID, sk.Slug, sk.ContentHash, "historical-operator", `{"fs":{"write":["/"]}}`); err != nil {
+		t.Fatal(err)
+	}
+
 	g := NewGate(idx, idx)
+	before := skillBoundarySnapshot(t, idx)
+	marker := filepath.Join(t.TempDir(), "must-not-execute")
 	req := ExecRequest{
 		SkillSlug: sk.Slug, AgentID: agent.ID,
-		Command: []string{"/bin/sh", "-c", "echo should-not-run"},
+		Command: []string{"/bin/sh", "-c", fmt.Sprintf("printf unauthorized > %q", marker)},
 		WorkDir: t.TempDir(),
 		Kind:    ExecKindMarker, Label: "echo",
 	}
@@ -235,6 +245,23 @@ func TestExecuteGated_NoGrantRow_Refused(t *testing.T) {
 	if gerr.Reason != "no grant row exists" {
 		t.Errorf("Reason: got %q, want %q", gerr.Reason, "no grant row exists")
 	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("unapproved command ran: %v", statErr)
+	}
+	if after := skillBoundarySnapshot(t, idx); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused execution changed state: %#v -> %#v", before, after)
+	}
+	req.AgentID = historical.ID
+	if _, err := g.ExecuteGated(t.Context(), req); !errors.As(err, &gerr) || gerr.Reason != "no grant row exists" {
+		t.Fatalf("historical grant was not ignored by actor authority lookup: %v", err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("historical grant executed command: %v", statErr)
+	}
+	if after := skillBoundarySnapshot(t, idx); !reflect.DeepEqual(before, after) {
+		t.Fatalf("historical grant replay changed state: %#v -> %#v", before, after)
+	}
+
 }
 
 func TestExecuteGated_BareAssignmentGrant_Refused(t *testing.T) {
@@ -253,9 +280,11 @@ func TestExecuteGated_BareAssignmentGrant_Refused(t *testing.T) {
 	}
 
 	g := NewGate(idx, idx)
+	before := skillBoundarySnapshot(t, idx)
+	marker := filepath.Join(t.TempDir(), "must-not-execute")
 	req := ExecRequest{
 		SkillSlug: sk.Slug, AgentID: agent.ID,
-		Command: []string{"/bin/sh", "-c", "echo should-not-run"},
+		Command: []string{"/bin/sh", "-c", fmt.Sprintf("printf unauthorized > %q", marker)},
 		WorkDir: t.TempDir(),
 		Kind:    ExecKindMarker, Label: "echo",
 	}
@@ -270,6 +299,12 @@ func TestExecuteGated_BareAssignmentGrant_Refused(t *testing.T) {
 	if gerr.Reason != "grant row exists but has never been approved" {
 		t.Errorf("Reason: got %q, want %q", gerr.Reason, "grant row exists but has never been approved")
 	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("unapproved command ran: %v", statErr)
+	}
+	if after := skillBoundarySnapshot(t, idx); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused execution changed state: %#v -> %#v", before, after)
+	}
 }
 
 func TestExecuteGated_HashMismatch_ReapprovalRequired(t *testing.T) {
@@ -281,14 +316,12 @@ func TestExecuteGated_HashMismatch_ReapprovalRequired(t *testing.T) {
 	hash1 := sk.ContentHash
 
 	agent := makeGateTestAgent(t, idx, "reapproval-agent")
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	persistPriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: sk.Slug,
 		ApprovedContentHash: hash1,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
 		GrantedBy:           "test-operator",
-	}); err != nil {
-		t.Fatalf("InsertAgentKnownSkill: %v", err)
-	}
+	})
 
 	g := NewGate(idx, idx)
 	req := ExecRequest{
@@ -327,14 +360,12 @@ func TestExecuteGated_HashMismatch_ReapprovalRequired(t *testing.T) {
 	}
 
 	// Re-approval (grant row updated to the new hash) restores execution.
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	persistPriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: sk.Slug,
 		ApprovedContentHash: hash2,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
 		GrantedBy:           "test-operator",
-	}); err != nil {
-		t.Fatalf("InsertAgentKnownSkill (re-approval): %v", err)
-	}
+	})
 	if _, err := g.ExecuteGated(context.Background(), req); err != nil {
 		t.Fatalf("ExecuteGated after re-approval: unexpected error: %v", err)
 	}
@@ -420,7 +451,7 @@ func TestExecuteGated_NetworkBlockedOutsideGrant_AllowedWithGrant(t *testing.T) 
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})}
 	go func() { _ = srv.Serve(ln) }()
@@ -654,5 +685,27 @@ func TestSkillSandboxLoopbackChild(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatal("sandbox loopback response", response.StatusCode)
+	}
+}
+
+// persistPriorSkillGrant simulates a previously issued approval in a private DB.
+// The production writer must refuse it; this is not enrollment or a grant issuer.
+func persistPriorSkillGrant(t *testing.T, st *store.Store, row store.AgentKnownSkill) {
+	t.Helper()
+	if _, err := st.GetAgentForActor(t.Context(), row.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	before := skillBoundarySnapshot(t, st)
+	if err := st.InsertAgentKnownSkill(t.Context(), row); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("production approval writer = %v, want unavailable issuer refusal", err)
+	}
+	if after := skillBoundarySnapshot(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused approval changed state: %#v -> %#v", before, after)
+	}
+	_, err := st.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name,approved_content_hash,granted_at,granted_by,capabilities_granted)
+ VALUES(?,?,?,?,?,?) ON CONFLICT(agent_id,skill_name) DO UPDATE SET approved_content_hash=excluded.approved_content_hash,granted_at=excluded.granted_at,granted_by=excluded.granted_by,capabilities_granted=excluded.capabilities_granted`,
+		row.AgentID, row.SkillName, row.ApprovedContentHash, row.GrantedAt, row.GrantedBy, row.CapabilitiesGranted)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

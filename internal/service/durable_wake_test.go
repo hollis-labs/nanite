@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -33,8 +34,8 @@ func (s *bumpFailingStore) BumpAgentScheduleFireCount(context.Context, string, t
 func TestDurableWakeListDueAndDryRun(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	profile := &store.AgentProfile{Name: "Wake Agent", Slug: "wake-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:           "Wake Instance",
@@ -45,8 +46,8 @@ func TestDurableWakeListDueAndDryRun(t *testing.T) {
 		Model:          "model-a",
 		RuntimeKind:    "api",
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	ctx := context.Background()
 	if err := st.InsertAgentSchedule(ctx, store.AgentSchedule{
@@ -102,8 +103,8 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Wake Start Agent", Slug: "wake-start-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(context.Background(), seedSession); err != nil {
@@ -119,8 +120,8 @@ func TestDurableWakeRunDueStartsAttachedSessionAndBumpsSchedule(t *testing.T) {
 		RuntimeKind:      "api",
 		CurrentSessionID: seedSession.ID,
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
@@ -170,8 +171,8 @@ func TestDurableWakeRunDueLogsExpiryFailureAndPreservesSuccess(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Expiry Log Agent", Slug: "expiry-log-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(ctx, profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(ctx, st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(ctx, seedSession); err != nil {
@@ -187,8 +188,8 @@ func TestDurableWakeRunDueLogsExpiryFailureAndPreservesSuccess(t *testing.T) {
 		RuntimeKind:      "api",
 		CurrentSessionID: seedSession.ID,
 	}
-	if err := st.CreateDurableAgentInstance(ctx, inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(ctx, st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	if err := st.AttachDurableAgentInstanceSession(ctx, inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
@@ -250,8 +251,8 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Wake Skip Agent", Slug: "wake-skip-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	// "active" uses DurableAgentClassTemplate, not Process: per the
 	// CW-20260817 fix (see TestDurableWakeProcessClassRewakeableWhileActive),
@@ -266,8 +267,8 @@ func TestDurableWakeRunDueSkipsPausedAndActiveInstances(t *testing.T) {
 		{Name: "active", Slug: "active", ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassTemplate, Status: store.DurableAgentStatusActive},
 	}
 	for i := range instances {
-		if err := st.CreateDurableAgentInstance(context.Background(), &instances[i]); err != nil {
-			t.Fatalf("CreateDurableAgentInstance %d: %v", i, err)
+		if err := persistTestDurableInstance(context.Background(), st, &instances[i]); err != nil {
+			t.Fatalf("persist prior instance %d: %v", i, err)
 		}
 	}
 	if err := st.InsertAgentSchedule(ctx, store.AgentSchedule{
@@ -310,8 +311,8 @@ func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
 	profile := &store.AgentProfile{Name: "Wake Agent 2", Slug: "wake-agent-2", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := persistTestActor(context.Background(), st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:           "Wake Instance 2",
@@ -322,8 +323,8 @@ func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 		Model:          "model-a",
 		RuntimeKind:    "api",
 	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(context.Background(), st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 
 	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
@@ -346,165 +347,102 @@ func TestDurableWakeNoAttachedSessionStillSucceeds(t *testing.T) {
 	}
 }
 
-// TestDurableWakeProcessClassRewakeableWhileActive is the regression test for
-// the CW-20260817 finding: nothing anywhere transitions a durable-agent
-// instance back out of "active" once Start() sets it (no completion hook
-// from chat's async generation), so before this fix a process-class instance
-// (SessionPolicyFreshPerWake — a brand new session every wake, by design)
-// was wakeable exactly once, ever — every wake after the first was silently
-// skipped with "wake already active" forever, including CW-20260816-0021's
-// own daily scheduled tick. This proves a process-class instance already
-// sitting Active still wakes (and gets a genuinely fresh session, distinct
-// from whatever session it was "active" with before).
-//
-// The profile explicitly sets ActivationMode: "fresh-per-wake" -- Phase 1
-// item 02 (TASKS/phase-1/02-add-agents-composition-columns.md) rewired
-// wakeSkipReason to read this column instead of the hardcoded
-// `lifecycle_class != process` check the CW-20260817 fix originally used,
-// so this fixture now has to carry the same real-world value migration
-// 110's backfill gives every actual process-class row (loom-curator,
-// atlas-curator) to keep exercising the exact behavior this test's name
-// promises.
-func TestDurableWakeProcessClassRewakeableWhileActive(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	ctx := context.Background()
-	profile := &store.AgentProfile{Name: "Rewake Agent", Slug: "rewake-agent", SystemPrompt: "x", Class: "process", ActivationMode: "fresh-per-wake"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	priorSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(context.Background(), priorSession); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	inst := &store.DurableAgentInstance{
-		Name:             "Rewake Instance",
-		Slug:             "rewake-instance",
-		ProfileID:        profile.ID,
-		LifecycleClass:   store.DurableAgentClassProcess,
-		Provider:         "anthropic",
-		Model:            "model-a",
-		RuntimeKind:      "api",
-		Status:           store.DurableAgentStatusActive,
-		CurrentSessionID: priorSession.ID,
-	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
-	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
-		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
-	}
-
-	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
-	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
-		WakePayload: DurableAgentWakePayload{Reason: "callback:wiki_page"},
-	})
-	if err != nil {
-		t.Fatalf("Wake: unexpected error: %v", err)
-	}
-	if result.Skipped {
-		t.Fatalf("process-class wake skipped while instance was already active: %+v", result)
-	}
-	if result.LaunchResult == nil || result.LaunchResult.Session == nil {
-		t.Fatalf("wake result missing launch_result/session: %+v", result)
-	}
-	if result.LaunchResult.Session.ID == priorSession.ID {
-		t.Fatalf("expected a fresh session distinct from the prior active one, got the same session %s", priorSession.ID)
+// Fresh pinned policy has no supported concurrent activation field. Journal
+// class and historical activation_mode cannot grant repeated active wakes.
+func TestDurableWakeFreshActiveInstancesStayConservative(t *testing.T) {
+	for _, class := range []string{store.DurableAgentClassAdvisor, store.DurableAgentClassProcess, store.DurableAgentClassTemplate} {
+		t.Run(class, func(t *testing.T) {
+			st := newDurableAgentServiceTestStore(t)
+			profile := &store.AgentProfile{Name: "Active prior", Slug: "active-" + class, SystemPrompt: "Private pin"}
+			if err := persistTestActor(t.Context(), st, profile); err != nil {
+				t.Fatal(err)
+			}
+			// A retained namesake claims concurrency; it is historical data only.
+			durableHistoricalFixture(t, st, profile.Slug, class, `["durable-agent"]`)
+			session := &store.Session{Provider: "anthropic", Model: "model-a"}
+			if err := st.CreateSession(t.Context(), session); err != nil {
+				t.Fatal(err)
+			}
+			inst := &store.DurableAgentInstance{Name: "Active prior", Slug: "active-" + class, ProfileID: profile.ID, LifecycleClass: class, Status: store.DurableAgentStatusActive, CurrentSessionID: session.ID, MetadataJSON: `{"activation_mode":"concurrent"}`}
+			if err := persistTestDurableInstance(t.Context(), st, inst); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.AttachDurableAgentInstanceSession(t.Context(), inst.ID, session.ID, store.DurableAgentSessionRelationPrimary); err != nil {
+				t.Fatal(err)
+			}
+			runtime := &fakeDurableRuntimeController{}
+			svc := NewDurableAgentWakeService(st, NewDurableAgentServiceWithRuntime(st, runtime))
+			before := durableAuthoritySnapshot(t, st)
+			result, err := svc.Wake(t.Context(), inst.ID, DurableAgentWakeRequest{WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual, Prompt: "must not run"}})
+			if err != nil || !result.Skipped || result.SkipReason != "wake already active" || result.LaunchResult != nil {
+				t.Fatalf("active wake=%+v err=%v", result, err)
+			}
+			got, err := st.GetDurableAgentInstance(t.Context(), inst.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != store.DurableAgentStatusActive || got.CurrentSessionID != session.ID || got.ProfileID != profile.ID || got.URN != profile.ID {
+				t.Fatalf("skipped wake changed journal/identity: %+v", got)
+			}
+			after := durableAuthoritySnapshot(t, st)
+			// Wake audit events are expected; every authority/journal/relation row
+			// must remain intact and no session may be attached.
+			delete(before, `SELECT * FROM actor_instance_events ORDER BY id`)
+			delete(after, `SELECT * FROM actor_instance_events ORDER BY id`)
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("active wake changed authority or journal")
+			}
+			if len(runtime.sent) != 0 || len(runtime.recovered) != 0 {
+				t.Fatalf("skipped wake invoked runtime: %+v", runtime)
+			}
+		})
 	}
 }
 
-// TestDurableWakeAdvisorClassStillBlockedWhileActive confirms the fix above
-// is scoped to compositions whose activation_mode actually says
-// fresh-per-wake/concurrent: an advisor-class instance (which reuses one
-// long-lived session — SessionPolicyReuseLatestOrCreate) has a profile
-// that defaults to activation_mode='singleton' (DefaultActivationModeForClass),
-// and must still skip a wake while already active, since "active" there
-// means "has a live session to reuse", not "finished its one-shot work".
-func TestDurableWakeAdvisorClassStillBlockedWhileActive(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	ctx := context.Background()
-	profile := &store.AgentProfile{Name: "Advisor Agent", Slug: "advisor-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if profile.ActivationMode != "singleton" {
-		t.Fatalf("test assumption broken: advisor-class default ActivationMode = %q, want 'singleton'", profile.ActivationMode)
-	}
-	inst := &store.DurableAgentInstance{
-		Name:           "Advisor Instance",
-		Slug:           "advisor-instance",
-		ProfileID:      profile.ID,
-		LifecycleClass: store.DurableAgentClassAdvisor,
-		Provider:       "anthropic",
-		Model:          "model-a",
-		RuntimeKind:    "api",
-		Status:         store.DurableAgentStatusActive,
-	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
-
-	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
-	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
-		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
-	})
-	if err != nil {
-		t.Fatalf("Wake: unexpected error: %v", err)
-	}
-	if !result.Skipped || result.SkipReason != "wake already active" {
-		t.Fatalf("expected advisor-class wake to stay blocked while active, got %+v", result)
+func TestDurableWakeActivationResolutionRequiresActualEnabledBinding(t *testing.T) {
+	for _, binding := range []string{"disabled", "empty-receipt", "missing-port"} {
+		t.Run(binding, func(t *testing.T) {
+			st := newDurableAgentServiceTestStore(t)
+			profile := &store.AgentProfile{Name: "Prior", Slug: "activation-" + binding, SystemPrompt: "Private pin"}
+			if err := persistTestActor(t.Context(), st, profile); err != nil {
+				t.Fatal(err)
+			}
+			inst := &store.DurableAgentInstance{Name: "Prior", Slug: profile.Slug, ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassProcess, Status: store.DurableAgentStatusActive}
+			if err := persistTestDurableInstance(t.Context(), st, inst); err != nil {
+				t.Fatal(err)
+			}
+			var source durableWakeStore = st
+			switch binding {
+			case "disabled":
+				if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_actor_bindings SET enabled=0 WHERE actor_uri=?`, profile.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "empty-receipt":
+				if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_actor_bindings SET binding_receipt=' ' WHERE actor_uri=?`, profile.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "missing-port":
+				source = struct{ durableWakeStore }{st}
+			}
+			svc := &durableWakeService{store: source}
+			if mode := svc.activationModeForInstance(inst); mode != "" || wakeAllowsConcurrentActive(mode) {
+				t.Fatalf("unavailable binding supplied activation=%q", mode)
+			}
+		})
 	}
 }
 
-// TestDurableWakeTemplateClassRewakeableWhileActive is the generalization
-// this task's rewrite adds on top of the CW-20260817 fix: the original fix
-// only exempted lifecycle_class == process from the "wake already active"
-// block, leaving template-class instances (SessionPolicyFreshOneShot — a
-// brand new session per invocation, same as process's FreshPerWake, with
-// the same "no reuse collision to guard against" reasoning) with the exact
-// same latent bug. content-writer (a real, currently-active template-class
-// agent per the production backup inspected for this task) is exactly this
-// case. Once wakeSkipReason reads activation_mode instead of
-// lifecycle_class, a template-class composition with activation_mode=
-// 'fresh-per-wake' (the value migration 117's backfill gives content-writer)
-// gets the same rewake fix process already had.
-func TestDurableWakeTemplateClassRewakeableWhileActive(t *testing.T) {
-	st := newDurableAgentServiceTestStore(t)
-	ctx := context.Background()
-	profile := &store.AgentProfile{Name: "Template Rewake Agent", Slug: "template-rewake-agent", SystemPrompt: "x", Class: "template", ActivationMode: "fresh-per-wake"}
-	if err := st.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	priorSession := &store.Session{Provider: "anthropic", Model: "model-a"}
-	if err := st.CreateSession(context.Background(), priorSession); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	inst := &store.DurableAgentInstance{
-		Name:             "Template Rewake Instance",
-		Slug:             "template-rewake-instance",
-		ProfileID:        profile.ID,
-		LifecycleClass:   store.DurableAgentClassTemplate,
-		Provider:         "anthropic",
-		Model:            "model-a",
-		RuntimeKind:      "api",
-		Status:           store.DurableAgentStatusActive,
-		CurrentSessionID: priorSession.ID,
-	}
-	if err := st.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
-	if err := st.AttachDurableAgentInstanceSession(context.Background(), inst.ID, priorSession.ID, store.DurableAgentSessionRelationWake); err != nil {
-		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
-	}
-
-	wakeSvc := NewDurableAgentWakeService(st, NewDurableAgentService(st))
-	result, err := wakeSvc.Wake(ctx, inst.ID, DurableAgentWakeRequest{
-		WakePayload: DurableAgentWakePayload{Reason: DurableAgentWakeManual},
-	})
-	if err != nil {
-		t.Fatalf("Wake: unexpected error: %v", err)
-	}
-	if result.Skipped {
-		t.Fatalf("template-class wake with activation_mode=fresh-per-wake skipped while instance was already active: %+v", result)
+func TestDurableWakeAllowsConcurrentActiveOnlyForExplicitSupportedMode(t *testing.T) {
+	for _, mode := range []string{"fresh-per-wake", "concurrent", "singleton", "", "process", "template", "unknown"} {
+		want := mode == "fresh-per-wake" || mode == "concurrent"
+		if got := wakeAllowsConcurrentActive(mode); got != want {
+			t.Errorf("mode %q allows active=%v want %v", mode, got, want)
+		}
+		inst := &store.DurableAgentInstance{Status: store.DurableAgentStatusActive, LifecycleClass: store.DurableAgentClassProcess}
+		reason := wakeSkipReason(inst, mode)
+		if want && reason != "" || !want && reason != "wake already active" {
+			t.Errorf("mode %q skip=%q", mode, reason)
+		}
 	}
 }
 
@@ -519,9 +457,9 @@ func TestDurableWakeTemplateClassRewakeableWhileActive(t *testing.T) {
 func TestDurableWakeBumpFailureLoggedAndDoesNotBlockOneShotExpiry(t *testing.T) {
 	st := newDurableAgentServiceTestStore(t)
 	ctx := context.Background()
-	profile := &store.AgentProfile{Name: "Bump Fail Agent", Slug: "bump-fail-agent", SystemPrompt: "x", Class: "process", ActivationMode: "fresh-per-wake"}
-	if err := st.CreateAgent(ctx, profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	profile := &store.AgentProfile{Name: "Bump Fail Agent", Slug: "bump-fail-agent", SystemPrompt: "x"}
+	if err := persistTestActor(ctx, st, profile); err != nil {
+		t.Fatalf("persist prior actor: %v", err)
 	}
 	seedSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := st.CreateSession(ctx, seedSession); err != nil {
@@ -537,8 +475,8 @@ func TestDurableWakeBumpFailureLoggedAndDoesNotBlockOneShotExpiry(t *testing.T) 
 		RuntimeKind:      "api",
 		CurrentSessionID: seedSession.ID,
 	}
-	if err := st.CreateDurableAgentInstance(ctx, inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
+	if err := persistTestDurableInstance(ctx, st, inst); err != nil {
+		t.Fatalf("persist prior instance: %v", err)
 	}
 	if err := st.AttachDurableAgentInstanceSession(ctx, inst.ID, seedSession.ID, store.DurableAgentSessionRelationWake); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)

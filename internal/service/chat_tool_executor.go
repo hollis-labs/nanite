@@ -93,6 +93,22 @@ func (s *chatServiceImpl) preCheckTools(
 			tu:            tu,
 			originalIndex: i,
 		}
+		// A native view has no actor issuer port. Permission answers cannot
+		// invent that missing authority, and discovery cannot expand it. Refuse
+		// before prompting or invoking any caller-provided/plugin surface.
+		if isCognitiveTurn(ctx) && !isResultCacheTool(tu.Name) {
+			allowed, reason := s.enforceExecutionRules(ctx, agentID, tu.Name)
+			if !allowed {
+				deny := fmt.Sprintf("EXECUTION_RULES_DENIED: %s — %s", tu.Name, reason)
+				block := llmtypes.ContentBlock{Type: "tool_result", ToolUseID: tu.ID, Content: deny, IsError: true}
+				plan.status, plan.denyReason, plan.resultBlock = toolPlanDenied, reason, &block
+				plan.ref = &chat.ToolCallRef{ID: tu.ID, Name: tu.Name, Status: "denied", ErrorReason: deny}
+				ch <- chat.StreamEvent{Type: "tool_call", Tool: tu.Name, ToolID: tu.ID, Detail: toolCallDetail(tu.Name, tu.Input)}
+				ch <- chat.StreamEvent{Type: "tool_result", Tool: tu.Name, ToolID: tu.ID, Summary: deny, IsError: true}
+				plans = append(plans, plan)
+				continue
+			}
+		}
 
 		// Handle request_tools meta-tool.
 		if tu.Name == "request_tools" {

@@ -5,13 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
-	"github.com/hollis-labs/nanite/internal/agent/reflexes"
-	"github.com/hollis-labs/nanite/internal/classify"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/agent/subagent"
 	"github.com/hollis-labs/substrate/harness/broker"
 )
@@ -25,24 +21,9 @@ import (
 // relays it to the frontend. Raw worker output never enters the Chat
 // agent's context window — only the structured envelope does.
 //
-// E1 integration (CW-20260419-0027; migrated off internal/promptrouter by
-// TASKS/phase-4/03-migrate-promptrouter-to-reflexes.md): before calling
-// dispatch.ExecuteTask this function runs matchDispatchToAgentReflex
-// (below) against the live DB-backed dispatch_to_agent agent_reflexes
-// rows for the caller's agent class. A matched reflex injects
-// ReflexHints.AgentSlug into ExecuteTaskArgs so the dispatch layer uses
-// the reflex's target agent slug instead of AssignRole's tier/pattern
-// default. On a miss the dispatch path is unchanged.
-//
-// This is a second, DELIBERATELY INDEPENDENT evaluation of the same
-// dispatch_to_agent reflex rows internal/service/chat_reflex_dispatch.go's
-// attemptReflexDispatch evaluates upstream (before task_execute is ever
-// invoked) — this file's evaluation runs downstream, INSIDE the
-// task_execute call itself, once the LLM has already decided to
-// dispatch. Both layers run; neither is collapsed into the other (the
-// retired internal/service/chat_broker_dispatch.go's own header comment
-// stated this design instruction for the pre-migration broker/promptrouter
-// pair, and it still applies conceptually to this pair post-migration).
+// Retained mutable dispatch rules are inert. Dispatch still reaches the
+// configured lifecycle port, whose real host adapter refuses missing verified
+// ownership before spawning; test ports can exercise envelope behavior.
 func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {
 	if st.Dispatch == nil {
 		return mcp.ErrorResult("dispatch is not configured (subagent service unavailable)"), nil
@@ -95,10 +76,7 @@ func (st *SelfToolsTransport) callExecuteTask(ctx context.Context, args map[stri
 	// required — existing safe default).
 	apID := mcp.CallerProfileFromContext(ctx)
 
-	// E1: DB-backed dispatch_to_agent reflex match — see
-	// matchDispatchToAgentReflex's doc comment for the full design
-	// (migrated off internal/promptrouter by TASKS/phase-4/
-	// 03-migrate-promptrouter-to-reflexes.md).
+	// Mutable retained dispatch rules cannot supply a target or firing.
 	reflexHints := st.matchDispatchToAgentReflex(ctx, sessionID, apID, message)
 
 	// CW-20260502-0005: agent-broker consultation (no-op scaffold).
@@ -232,264 +210,11 @@ func (st *SelfToolsTransport) recursionBlocked(ctx context.Context) (bool, error
 	return isChild, nil
 }
 
-// matchDispatchToAgentReflex is callExecuteTask's own, deliberately
-// independent evaluation of the DB-backed dispatch_to_agent
-// agent_reflexes rows (see callExecuteTask's header comment for why this
-// is a second layer, not a call into
-// internal/service/chat_reflex_dispatch.go's upstream
-// attemptReflexDispatch).
-//
-// It lists active dispatch_to_agent rows for the caller's class via
-// Store.ListAgentReflexesForAgent (already ordered priority DESC,
-// created_at ASC), then — as of TASKS/reflex-taxonomy/
-// 03-shared-decision-engine.md — decides which one (if any) actually wins
-// via the SAME shared reflexes.Resolve() primitive Engine.EvaluateState
-// and attemptReflexDispatch call, rather than a hand-rolled loop of its
-// own. This function still can't call into internal/service directly
-// (internal/mcp cannot import internal/service — service already imports
-// mcp, that would be a cycle), so it builds its own State/candidate list
-// and Resolve() call rather than calling attemptReflexDispatch itself —
-// but the actual combining-algorithm decision logic is no longer
-// duplicated, only the State-building and store access are (a legitimate,
-// permanent difference per the architecture doc's "One shared decision
-// engine, multiple legitimate invocation points" section, not the
-// duplicated-decision-logic problem task 03 fixes).
-//
-// Returns nil on any of: no store wired, no candidate rows, no firing
-// trigger, or a fired trigger whose action_spec has an empty agent_slug
-// (defensive — internal/api/reflexes.go's validateReflexDefinition
-// rejects that at write time for anything created through the CRUD
-// path). nil means "no override" — dispatch.ExecuteTask falls through to
-// AssignRole's own tier/pattern default, exactly as a promptrouter miss
-// used to.
-//
-// Design note: unlike attemptReflexDispatch, this function does NOT
-// carry HintTier/HintPattern/Mode/WorkflowName into the returned
-// ReflexHints — the dispatch_to_agent action_spec shape task 02 settled
-// on ({"agent_slug","confidence","reason"}) has no fields for them. This
-// is a real, deliberate behavior narrowing from the old promptrouter-fed
-// hints, documented in the migration task's Work Log: AgentSlug is the
-// only field that ever had an observable effect at THIS call site
-// anyway (dispatch.ExecuteTask forces mode to sync regardless of Mode;
-// Role — derived from tier/pattern, not from AgentSlug — only feeds a
-// cosmetic title fallback string when the spawned agent's own envelope
-// output is absent). WorkflowName-via-implicit-phrase-match is retired
-// outright — the workflow_run self-tool remains the direct, supported
-// way to invoke a named workflow.
+// matchDispatchToAgentReflex deliberately returns no mutable-history override.
+// Native behavior belongs to the pinned definition handler.
 func (st *SelfToolsTransport) matchDispatchToAgentReflex(ctx context.Context, sessionID, agentProfileID, message string) *dispatch.ReflexHints {
-	if st.Writes.Dispatch == nil {
-		return nil
-	}
-
-	class := ""
-	if agentProfileID != "" {
-		if ap, err := st.Writes.Dispatch.GetAgent(ctx, agentProfileID); err == nil && ap != nil {
-			class = ap.Class
-		}
-	}
-	if class == "" {
-		// Same default internal/service/chat_reflex_dispatch.go's
-		// attemptReflexDispatch and chat_reflexes.go's
-		// evaluateAndInjectReflexes use — advisor is the class of every
-		// real top-level chat-facing agent_profiles row (task 02's Work
-		// Log verified this against a real backup DB).
-		class = "advisor"
-	}
-
-	m1Tier, m1Pattern := classify.Classify(classify.IntentSignals{
-		Message:         message,
-		MessageTokenEst: len(message) / 4,
-	})
-
-	allCandidates, err := st.Writes.Dispatch.ListAgentReflexesForAgent(ctx, agentProfileID, class)
-	if err != nil {
-		slog.Warn("mcp: dispatch-reflex list failed",
-			"agent_id", agentProfileID, "class", class, "err", err)
-		return nil
-	}
-
-	// TASKS/teams/05-agent-reflexes-run-scoping.md: allCandidates above
-	// (ListAgentReflexesForAgent) is NOT filtered by workflow_run_id at
-	// the SQL level — it returns every row matching (agentProfileID,
-	// class) regardless of scope, exactly as it always has (narrowing
-	// that shared query would change behavior for every other caller of
-	// it too, including Engine.EvaluateState's generic per-turn pass,
-	// which has no run context of its own). The WorkflowRunID=="" check
-	// below is this call site's own responsibility, same as the
-	// candidates variable's existing ActionKind filter (below,
-	// dispatchCandidates) — it is what keeps a run-scoped row (once one
-	// exists) from leaking into a session outside its own run via this
-	// global list.
-	candidates := make([]store.AgentReflex, 0, len(allCandidates))
-	for _, r := range allCandidates {
-		if r.WorkflowRunID == "" {
-			candidates = append(candidates, r)
-		}
-	}
-
-	// Widen with this session's TeamRun-scoped dispatch_to_agent rows, if
-	// any — the same widening internal/service/chat_reflex_dispatch.go's
-	// attemptReflexDispatch applies upstream (see that call site's own
-	// comment for the full rationale, including the documented
-	// global-vs-run-scoped priority-ordering call: candidates are merged
-	// into one flat list and dispatch_to_agent's existing
-	// first_applicable combining algorithm — unchanged — is the sole
-	// arbiter of which one wins). Global rules (candidates above) still
-	// apply; run-scoped rules layer on top, they do not replace the
-	// global set. A resolve failure (including "team_run_members doesn't
-	// exist on this database yet") degrades to "no run scoping" rather
-	// than aborting this call site's own evaluation — additive widening
-	// must never regress the base (non-Team) dispatch_to_agent behavior
-	// that existed before this task.
-	if runID, found, rerr := st.Writes.Dispatch.ResolveWorkflowRunIDForSession(ctx, sessionID); rerr != nil {
-		slog.Warn("mcp: dispatch-reflex workflow-run resolve failed",
-			"session_id", sessionID, "err", rerr)
-	} else if found {
-		runScoped, rlErr := st.Writes.Dispatch.ListAgentReflexesForWorkflowRun(ctx, runID, agentProfileID, class)
-		if rlErr != nil {
-			slog.Warn("mcp: dispatch-reflex run-scoped list failed",
-				"session_id", sessionID, "workflow_run_id", runID, "err", rlErr)
-		} else {
-			candidates = append(candidates, runScoped...)
-		}
-	}
-
-	state := reflexes.State{
-		// SessionID (TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md):
-		// no trigger predicate reads this (evaluator.go never touches
-		// State.SessionID), but reflexes.EmitFirings' unified event_log
-		// write below needs it to attribute the emitted trace record to
-		// the right session — the same field
-		// internal/service/chat_reflex_dispatch.go's attemptReflexDispatch
-		// already populates for its own (upstream) evaluation.
-		SessionID:        sessionID,
-		AgentID:          agentProfileID,
-		AgentClass:       class,
-		ScopeTier:        m1Tier.String(),
-		ExecutionPattern: m1Pattern.String(),
-		// Synthetic single-entry window over the CURRENT turn's raw text
-		// — same substrate internal/service/chat_reflex_dispatch.go
-		// builds for its own (upstream) evaluation. Not a DB read.
-		UserMessages: []reflexes.MessageSignal{{Content: message}},
-	}
-
-	// Facet 4 recurrence cascade (TASKS/reflex-taxonomy/
-	// 02-recurrence-cascade.md, docs/engineering/architecture/
-	// 10-reflex-action-taxonomy.md): resolved once per call (there's only
-	// ever one dispatch_to_agent kind row to look up, not one per
-	// candidate) via the same store.GetReflexActionKind primitive
-	// internal/agent/reflexes.Engine's own cache is built from. A lookup
-	// failure (e.g. an unmigrated test DB) degrades to nil — the same
-	// "inherit the system default" behavior EffectiveCooldown gives an
-	// absent kind-level override. The same fetched row's
-	// CombiningAlgorithm (Facet 2, seeded 'first_applicable') is reused
-	// below as the ActionKindLookup Resolve() calls — this call site's own
-	// candidates list (below) is filtered to dispatch_to_agent only, so no
-	// other kind name is ever requested.
-	dispatchKind, kindErr := st.Writes.Dispatch.GetReflexActionKind(ctx, store.ReflexActionDispatchToAgent)
-	var dispatchKindDefaultSeconds *int64
-	if kindErr == nil {
-		dispatchKindDefaultSeconds = dispatchKind.DefaultRecurrenceSeconds
-	}
-	now := time.Now()
-	cooldownFn := func(r store.AgentReflex) bool {
-		// A fired candidate whose own cooldown hasn't elapsed yet is not
-		// eligible to win — same shared check
-		// internal/service/chat_reflex_dispatch.go's attemptReflexDispatch
-		// applies. Under today's seed data (kind default 0, no
-		// reflex-level overrides) this never suppresses; a future non-zero
-		// recurrence_override_seconds on a dispatch_to_agent row now takes
-		// effect here too, not just at the upstream call site.
-		cooldown := reflexes.EffectiveCooldown(dispatchKindDefaultSeconds, r.RecurrenceOverrideSeconds)
-		suppressed := reflexes.RecentlyFired(r, now, cooldown)
-		if suppressed {
-			slog.Info("mcp: dispatch-reflex fired but suppressed by cooldown",
-				"reflex", r.Name, "cooldown", cooldown)
-		}
-		return suppressed
-	}
-	kindLookup := func(_ context.Context, _ string) (*store.ReflexActionKind, error) {
-		return dispatchKind, kindErr
-	}
-
-	// This call site's own candidate list — see engine.go's/
-	// attemptReflexDispatch's identical comment: Resolve() (below) has no
-	// opinion on which rows a caller passes it; filtering to
-	// dispatch_to_agent only is this caller's own job.
-	dispatchCandidates := make([]store.AgentReflex, 0, len(candidates))
-	for _, r := range candidates {
-		if r.ActionKind == store.ReflexActionDispatchToAgent {
-			dispatchCandidates = append(dispatchCandidates, r)
-		}
-	}
-
-	// This call site has no *reflexes.Engine of its own to reuse an
-	// Executor from (unlike attemptReflexDispatch, which reuses
-	// s.reflexEngine.Executor) — a bare Executor with only Logger set is
-	// equivalent for dispatch_to_agent's own Apply case (executor.go's
-	// dispatch_to_agent branch touches no hook, it only parses
-	// action_spec into the returned AppliedAction.Spec), matching exactly
-	// what this function's own hand-rolled json.Unmarshal(r.ActionSpec)
-	// used to do before this task.
-	dispatchExecutor := &reflexes.Executor{Logger: slog.Default()}
-	resolved, outcomes, resolveErr := reflexes.Resolve(ctx, dispatchCandidates, state, dispatchExecutor, cooldownFn, kindLookup)
-	if resolveErr != nil {
-		slog.Warn("mcp: dispatch-reflex resolve failed", "err", resolveErr)
-		return nil
-	}
-	for _, oc := range outcomes {
-		if oc.TriggerError != "" {
-			slog.Warn("mcp: dispatch-reflex trigger eval failed",
-				"reflex", oc.ReflexName, "err", oc.TriggerError)
-		}
-		if oc.ApplyError != "" {
-			slog.Warn("mcp: dispatch-reflex apply failed",
-				"reflex", oc.ReflexName, "err", oc.ApplyError)
-		}
-	}
-	if len(resolved.FiredReflexes) == 0 {
-		return nil
-	}
-	if len(resolved.FiredReflexes) > 1 {
-		// TASKS/reflex-taxonomy/08-fix-resolve-fail-open-visibility.md:
-		// canary for the same kind-lookup-failure fail-open Resolve() now
-		// Warn-logs directly — see the matching note in
-		// chat_reflex_dispatch.go's attemptReflexDispatch. Only the first
-		// candidate is ever used below.
-		slog.Warn("mcp: dispatch-reflex resolved multiple candidates, only the first is used",
-			"session_id", sessionID,
-			"candidate_count", len(resolved.FiredReflexes),
-		)
-	}
-	r := resolved.FiredReflexes[0]
-	winnerAction := resolved.Actions[0]
-
-	agentSlug, _ := winnerAction.Spec["agent_slug"].(string)
-	if agentSlug == "" {
-		return nil
-	}
-
-	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: this call
-	// site's former dedicated playbook_match_log write (via
-	// st.ReflexLogger/store.LogReflexMatch) is retired in favor of the
-	// same unified event_log sink Engine.EvaluateState and
-	// attemptReflexDispatch now go through — see the task's Work Log for
-	// the "no real reader" grep confirming playbook_match_log had no
-	// consumer left to starve. The matched-input excerpt is preserved via
-	// ExtraMetadata rather than dropped.
-	excerpt := message
-	if len(excerpt) > 200 {
-		excerpt = excerpt[:200]
-	}
-	extra := map[string]any{"matched_input_excerpt": excerpt}
-	reflexes.EmitFirings(ctx, st.Writes.Events, st.Plugins, resolved, outcomes, state, reflexes.FiringContext{
-		AgentID:       agentProfileID,
-		AgentClass:    class,
-		ExtraMetadata: extra,
-	}, slog.Default())
-
-	return &dispatch.ReflexHints{
-		AgentSlug: agentSlug,
-		ReflexID:  r.ID,
-	}
+	// Retained mutable behavior cannot select a dispatch target, supply authority
+	// or emit a firing. Native policy is read from the pinned definition by its
+	// own handler; absent fabric ownership remains refused at actual Spawn.
+	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
@@ -165,7 +166,7 @@ func TestServiceErrorToolDispatchLogsContext(t *testing.T) {
 			}
 			level, code, message := "ERROR", "unavailable", "todo service not available"
 			if tool == "agent_update" {
-				level, code, message = "WARN", "not_found", "agent not found"
+				level, code, message = "ERROR", "unavailable", store.ErrImmutableAgentProfile.Error()
 			}
 			for _, want := range []string{"level=" + level, "code=" + code, `message="` + message + `"`, "tool=" + tool, "id=missing-resource"} {
 				if !strings.Contains(logs.String(), want) {

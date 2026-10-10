@@ -23,32 +23,31 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 			}
 			agent := makeTestAgentRawSQL(t, host, "history")
 			at := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
-			scheduleID := makeTestSchedule(t, host, agent.ID, "historical", at)
-			creation := testFireCreation(scheduleID, "legacy-fire", at)
-			creation.Fire.ID = "legacy-row-alias"
-			if ok, createErr := host.CreateScheduleFire(ctx, creation); createErr != nil || !ok {
-				t.Fatalf("history: %v %v", ok, createErr)
+			// This downgrade test supplies historical rows explicitly; current
+			// actor APIs never dual-read a schema from before the fresh cut.
+			scheduleID := "historical"
+			if _, err := host.DB.ExecContext(ctx, `INSERT INTO agent_schedules(id,agent_id,name,schedule_kind,schedule_spec,body,next_run,job_type,job_payload) VALUES(?,?,'history','cron','* * * * *','retained body',?,'command_run','{"command":"noop"}')`, scheduleID, agent.ID, at.UTC().Format(time.RFC3339Nano)); err != nil {
+				t.Fatal(err)
 			}
-			historical, historyErr := host.GetAgentSchedule(ctx, scheduleID)
-			if historyErr != nil {
-				t.Fatal(historyErr)
+			if _, err := host.DB.ExecContext(ctx, `INSERT INTO schedule_runs(id,schedule_id,run_id,scheduled_at,fired_at,status,job_type,job_payload) VALUES('legacy-row-alias',?,'legacy-fire',?,?,'pending','command_run','{"command":"noop"}')`, scheduleID, at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)); err != nil {
+				t.Fatal(err)
 			}
-			fire, fireErr := host.GetScheduleFire(ctx, "legacy-fire")
-			if fireErr != nil {
-				t.Fatal(fireErr)
+			readHistory := func() []string {
+				t.Helper()
+				var body, next, run, status string
+				if err := host.DB.QueryRowContext(ctx, `SELECT body,next_run FROM agent_schedules WHERE id=?`, scheduleID).Scan(&body, &next); err != nil {
+					t.Fatal(err)
+				}
+				if err := host.DB.QueryRowContext(ctx, `SELECT run_id,status FROM schedule_runs WHERE id='legacy-row-alias'`).Scan(&run, &status); err != nil {
+					t.Fatal(err)
+				}
+				return []string{body, next, run, status}
 			}
+			original := readHistory()
 			assertHistory := func() {
 				t.Helper()
-				got, readErr := host.GetAgentSchedule(ctx, scheduleID)
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				gotFire, readErr := host.GetScheduleFire(ctx, "legacy-fire")
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				if !reflect.DeepEqual(got, historical) || !reflect.DeepEqual(gotFire, fire) {
-					t.Fatalf("legacy rows changed: schedule=%+v fire=%+v", got, gotFire)
+				if got := readHistory(); !reflect.DeepEqual(got, original) {
+					t.Fatalf("historical rows changed: %v", got)
 				}
 			}
 			if _, upErr := provider.UpTo(ctx, 173); upErr != nil {

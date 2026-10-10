@@ -62,6 +62,20 @@ func ResolveAutoRecallConfig(agent *store.AgentProfile) AutoRecallConfig {
 		MinConfidence: DefaultAutoRecallMinConfidence,
 		Timeout:       DefaultAutoRecallTimeout,
 	}
+	if agent != nil && agent.DefinitionPolicy != nil {
+		p := agent.DefinitionPolicy.Defaults()
+		cfg.Enabled = *p.AutoRecall.Enabled
+		cfg.MinConfidence = *p.AutoRecall.MinConfidence
+		if agent.NativeHost != nil {
+			if agent.NativeHost.RecallLimit != nil {
+				cfg.Limit = *agent.NativeHost.RecallLimit
+			}
+			if agent.NativeHost.RecallTimeoutMS != nil {
+				cfg.Timeout = time.Duration(*agent.NativeHost.RecallTimeoutMS) * time.Millisecond
+			}
+		}
+		return cfg
+	}
 	if agent == nil || agent.Settings == "" {
 		return cfg
 	}

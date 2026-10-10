@@ -25,7 +25,7 @@ func TestCacheProjection_ResumeAndClear(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent := &store.AgentProfile{Name: "Reader", Slug: "reader", SystemPrompt: "SYSTEM SURVIVES"}
-	if err = st.CreateAgent(ctx, agent); err != nil {
+	if err = storetest.PriorAuthorizedActor(t.Context(), st, agent); err != nil {
 		t.Fatal(err)
 	}
 	if err = st.SetSessionContextPrompt(ctx, session.ID, "PIN SURVIVES"); err != nil {

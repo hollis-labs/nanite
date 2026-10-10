@@ -34,7 +34,7 @@ func TestAgentToolsGrant_SelectionAndExecutionBothAccept(t *testing.T) {
 		// execution accept it.
 		Tools: `["some_other_legacy_tool"]`,
 	}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -43,8 +43,8 @@ func TestAgentToolsGrant_SelectionAndExecutionBothAccept(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
-	if err := st.GrantAgentTool(ctx, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
+	if operationErr := grantTestActorTool(ctx, st, agent.ID, toolID, "explicit"); operationErr != nil {
+		t.Fatalf("GrantAgentTool: %v", operationErr)
 	}
 
 	// --- Selection side: SelectForAgent must offer the granted tool. ---
@@ -97,7 +97,7 @@ func TestEnforceExecutionRules_AgentToolsRejectsUngrantedTool(t *testing.T) {
 		Slug:         "ungranted-agent",
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestEnforceExecutionRules_AgentToolsAllowsAlwaysIncluded(t *testing.T) {
 		Slug:         "always-included-agent",
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	if _, err := st.UpsertKnownTool(ctx, "request_tools", "builtin", "available", "escape hatch"); err != nil {

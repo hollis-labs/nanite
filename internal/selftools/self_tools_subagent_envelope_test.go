@@ -20,8 +20,8 @@ import (
 
 // gatedSubagentTestTransport wires a SelfToolsTransport with a
 // SubagentApprovalRequired=true settings reader and a stub approval
-// emitter — matches the production default for non-developer-mode
-// users. Spawn() will route through the gated path and return a
+// emitter with an explicit standalone fixture decision. It is not the
+// host enrollment path. Spawn routes through the gated path and returns a
 // StatusRequested run row instead of executing the runner.
 //
 // Round-1 fix target (Copilot #2/#4/#6): the prior test wiring
@@ -38,7 +38,7 @@ func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfTools
 
 	emitter := &gatedApprovalEmitter{}
 	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
-	svc := subagenthost.NewService(s.DB, runner, nil, emitter, settings)
+	svc := newPrivateSubagentService(s.DB, runner, emitter, subagenthost.SettingsAdapter{Reader: settings})
 	return &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
@@ -76,7 +76,7 @@ func newSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTr
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
-	svc := subagenthost.NewService(s.DB, runner, nil, nil, nil)
+	svc := newPrivateSubagentService(s.DB, runner, nil, nil)
 	return &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
@@ -515,7 +515,7 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 	}
 	t.Cleanup(func() { _ = os.Remove(dbPath) })
 
-	svc := subagenthost.NewService(s.DB, subagent.EchoRunner{}, nil, nil, nil)
+	svc := newPrivateSubagentService(s.DB, subagent.EchoRunner{}, nil, nil)
 	st := &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 
 	// Build a completed run directly via the service Spawn path

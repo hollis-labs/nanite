@@ -39,7 +39,7 @@ func TestCallSkillGet_UsesSkillGrantsField(t *testing.T) {
 	vendor := newSkillGetTestVendor(t)
 	sk := installSkillGetFixture(t, idx, vendor, writeSkillGetFixture(t, "skill-get-fake-grants"))
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-fake-grants-agent")
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID:             agent.ID,
 		SkillName:           sk.Slug,
 		ApprovedContentHash: sk.ContentHash,

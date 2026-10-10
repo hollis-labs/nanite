@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestDurableAgentsAPI_MissingProfileIsNotFound(t *testing.T) {
@@ -37,40 +41,28 @@ func TestDurableAgentsAPI_MissingProfileIsNotFound(t *testing.T) {
 func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Traversal Profile", Slug: "traversal-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 
-	body, _ := json.Marshal(CreateDurableAgentRequest{
-		Name:             "Torque Supervisor",
-		Slug:             "torque-supervisor-traversal",
-		ProfileID:        profile.ID,
-		LifecycleClass:   store.DurableAgentClassProcess,
-		Provider:         "anthropic",
-		Model:            "claude-sonnet-4",
-		RuntimeKind:      "api",
+	created := store.DurableAgentInstance{
+		Name: "Torque Supervisor", Slug: "torque-supervisor-traversal", ProfileID: profile.ID,
+		LifecycleClass: store.DurableAgentClassProcess,
+		Provider:       "anthropic", Model: "claude-sonnet-4", RuntimeKind: "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
-	})
-	req := httptest.NewRequest("POST", "/api/durable-agents", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST /api/durable-agents = %d body=%s", w.Code, w.Body.String())
 	}
-	var created store.DurableAgentInstance
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, &created)
+	before := durableAPIRefusalState(t, a)
 	for _, malicious := range []string{"../evil", "../../etc/evil", "a/b", "UPPER"} {
 		patch, _ := json.Marshal(UpdateDurableAgentRequest{Slug: &malicious})
-		req = httptest.NewRequest("PATCH", "/api/durable-agents/"+created.ID, bytes.NewReader(patch))
+		req := httptest.NewRequest("PATCH", "/api/durable-agents/"+created.ID, bytes.NewReader(patch))
 		req.Header.Set("Content-Type", "application/json")
-		w = httptest.NewRecorder()
+		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("rename with slug %q = %d, want 400; body=%s", malicious, w.Code, w.Body.String())
 		}
+		assertDurableAPIRefusalState(t, a, before)
 	}
 	persisted, err := a.Services.DurableAgents.Get(context.Background(), created.ID)
 	if err != nil || persisted.Slug != created.Slug {
@@ -81,37 +73,32 @@ func TestDurableAgentsAPI_UpdateRejectsSlugTraversal(t *testing.T) {
 	}
 }
 
-func TestDurableAgentsAPI_CreateGetPatchArchive(t *testing.T) {
+func TestDurableAgentsAPI_PriorInstanceGetPatchArchive(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Durable API Profile", Slug: "durable-api-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 
-	body, _ := json.Marshal(CreateDurableAgentRequest{
-		Name:             "Torque Supervisor",
-		Slug:             "torque-supervisor-api",
-		ProfileID:        profile.ID,
-		LifecycleClass:   store.DurableAgentClassProcess,
-		Provider:         "anthropic",
-		Model:            "claude-sonnet-4",
-		RuntimeKind:      "api",
-		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
-		WorkRoot:         "/tmp/torque",
-	})
-	req := httptest.NewRequest("POST", "/api/durable-agents", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	created := store.DurableAgentInstance{
+		Name: "Torque Supervisor", Slug: "torque-supervisor-api", ProfileID: profile.ID,
+		LifecycleClass: store.DurableAgentClassProcess,
+		Provider:       "anthropic", Model: "claude-sonnet-4", RuntimeKind: "api",
+		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor, WorkRoot: t.TempDir(),
+	}
+	persistPriorAPIInstance(t, a.store, &created)
+	req := httptest.NewRequest("GET", "/api/durable-agents/"+created.ID, nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST /api/durable-agents = %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET prior instance = %d body=%s", w.Code, w.Body.String())
 	}
-	var created store.DurableAgentInstance
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create: %v", err)
+	var read store.DurableAgentInstance
+	if err := json.NewDecoder(w.Body).Decode(&read); err != nil {
+		t.Fatal(err)
 	}
-	if created.ID == "" || created.LifecycleClass != store.DurableAgentClassProcess {
-		t.Fatalf("created = %+v", created)
+	if read.ID != created.ID || read.ProfileID != profile.ID || read.URN != profile.ID {
+		t.Fatalf("prior instance read changed bound identity: %+v", read)
 	}
 
 	newName := "Torque Supervisor Renamed"
@@ -155,8 +142,8 @@ func TestDurableAgentsAPI_CreateGetPatchArchive(t *testing.T) {
 func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Attach Profile", Slug: "attach-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:             "Attach Instance",
@@ -164,9 +151,7 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchAPIChat,
 	}
-	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, inst)
 	sess := &store.Session{Title: "attached", Provider: "anthropic", Model: "model-a"}
 	if err := a.store.CreateSession(context.Background(), sess); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -224,8 +209,8 @@ func TestDurableAgentsAPI_LifecycleAndSessionAttachment(t *testing.T) {
 func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Launch Profile", Slug: "launch-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:             "Launch Instance",
@@ -236,9 +221,7 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, inst)
 
 	req := httptest.NewRequest("GET", "/api/durable-agents/"+inst.ID+"/launch-plan", nil)
 	w := httptest.NewRecorder()
@@ -331,8 +314,8 @@ func TestDurableAgentsAPI_StartAndResume(t *testing.T) {
 func TestDurableAgentsAPI_Wake(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Wake Profile", Slug: "wake-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 
 	process := &store.DurableAgentInstance{
@@ -345,9 +328,7 @@ func TestDurableAgentsAPI_Wake(t *testing.T) {
 		RuntimeKind:      "api",
 		LaunchSourceType: store.DurableAgentLaunchProcessTick,
 	}
-	if err := a.store.CreateDurableAgentInstance(context.Background(), process); err != nil {
-		t.Fatalf("CreateDurableAgentInstance process: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, process)
 	scopeSession := &store.Session{Provider: "anthropic", Model: "model-a"}
 	if err := a.store.CreateSession(context.Background(), scopeSession); err != nil {
 		t.Fatalf("CreateSession scope: %v", err)
@@ -381,8 +362,8 @@ func TestDurableAgentsAPI_Wake(t *testing.T) {
 func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Events Profile", Slug: "events-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:             "Events Instance",
@@ -390,9 +371,7 @@ func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchAPIChat,
 	}
-	if err := a.Services.DurableAgents.Create(context.Background(), inst); err != nil {
-		t.Fatalf("Create durable agent: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, inst)
 	for i := 0; i < 205; i++ {
 		if err := a.store.CreateDurableAgentEvent(context.Background(), &store.DurableAgentEvent{
 			InstanceID:   inst.ID,
@@ -450,8 +429,8 @@ func TestDurableAgentsAPI_ListEventsLimitAndCap(t *testing.T) {
 func TestDurableAgentsAPI_UnsupportedLaunchPolicy(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "PTY Profile", Slug: "pty-profile", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
 		Name:             "PTY Instance",
@@ -460,13 +439,120 @@ func TestDurableAgentsAPI_UnsupportedLaunchPolicy(t *testing.T) {
 		RuntimeKind:      "pty",
 		LaunchSourceType: store.DurableAgentLaunchCLIHarness,
 	}
-	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, inst)
 	req := httptest.NewRequest("GET", "/api/durable-agents/"+inst.ID+"/launch-plan", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("unsupported launch plan = %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// A request for a known host projection still cannot issue an actor or an
+// instance. These private fixtures distinguish retained history and already
+// authorized instances from the unsupported production enrollment port.
+func TestDurableAgentsAPI_CreateRequiresVerifiedAuthority(t *testing.T) {
+	a, mux := newTestAPI(t)
+	profile := &store.AgentProfile{Name: "Prior actor", Slug: "prior-create-control"}
+	if err := storetest.PriorAuthorizedActor(t.Context(), a.store, profile); err != nil {
+		t.Fatal(err)
+	}
+	prior := &store.DurableAgentInstance{Name: "Prior instance", Slug: "prior-instance-control", ProfileID: profile.ID}
+	persistPriorAPIInstance(t, a.store, prior)
+	seedDurableAPIHistory(t, a)
+	var hostID string
+	if err := a.store.DB.QueryRowContext(t.Context(), `SELECT host_settings_id FROM agent_actor_bindings WHERE actor_uri=?`, profile.ID).Scan(&hostID); err != nil {
+		t.Fatal(err)
+	}
+	before := durableAPIRefusalState(t, a)
+	claimed := &store.DurableAgentInstance{Name: "Claimed", Slug: "claimed-create", ProfileID: profile.ID, URN: profile.ID}
+	if err := a.Services.DurableAgents.Create(t.Context(), claimed); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("production Create = %v, want verified-authority refusal", err)
+	}
+	if err := a.store.CreateDurableAgentInstance(t.Context(), claimed); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("production store Create = %v, want verified-authority refusal", err)
+	}
+	for _, id := range []string{"claimed-instance", prior.ID} {
+		body, err := json.Marshal(CreateDurableAgentRequest{ID: id, Name: "Claimed", Slug: prior.Slug, ProfileID: hostID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/durable-agents", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), store.ErrVerifiedActorRequired.Error()) {
+			t.Fatalf("production POST = %d body=%s", w.Code, w.Body.String())
+		}
+		assertDurableAPIRefusalState(t, a, before)
+	}
+	if claimed.ID != "" || !claimed.CreatedAt.IsZero() {
+		t.Fatalf("refused Create issued identity: %+v", claimed)
+	}
+	if _, err := os.Stat(filepath.Join(a.Services.WorkingDir, ".nanite", "durable-agents")); !os.IsNotExist(err) {
+		t.Fatalf("refused Create produced filesystem projection: %v", err)
+	}
+}
+
+func seedDurableAPIHistory(t *testing.T, a *testAPI) {
+	t.Helper()
+	profile := retiredAgentHistory(t, a, "durable-api-history")
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO durable_agent_instances(id,name,slug,profile_id,urn) VALUES(?,?,?,?,?)`, "historical-api-instance", "Historical instance", "historical-api-instance", profile.ID, "msg://agent/historical/unverified"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO durable_agent_events(id,instance_id,event_type,message) VALUES(?,?,?,?)`, "historical-api-event", "historical-api-instance", "updated", "retained historical event"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func durableAPIRefusalState(t *testing.T, a *testAPI) map[string][][]any {
+	t.Helper()
+	state := retiredAgentState(t, a)
+	for _, table := range []string{"durable_agent_instances", "durable_agent_instance_sessions", "durable_agent_events", "sessions"} {
+		rows, err := a.store.DB.QueryContext(t.Context(), fmt.Sprintf(`SELECT * FROM %q ORDER BY rowid`, table))
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state[table] = make([][]any, 0)
+		for rows.Next() {
+			values := make([]any, len(columns))
+			targets := make([]any, len(columns))
+			for i := range values {
+				targets[i] = &values[i]
+			}
+			if err := rows.Scan(targets...); err != nil {
+				t.Fatal(err)
+			}
+			for i, value := range values {
+				if raw, ok := value.([]byte); ok {
+					values[i] = string(raw)
+				}
+			}
+			state[table] = append(state[table], values)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return state
+}
+
+func assertDurableAPIRefusalState(t *testing.T, a *testAPI, before map[string][][]any) {
+	t.Helper()
+	after := durableAPIRefusalState(t, a)
+	for table, rows := range before {
+		if !reflect.DeepEqual(rows, after[table]) {
+			t.Fatalf("refusal changed %s rows", table)
+		}
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("refusal changed stored graph")
 	}
 }

@@ -52,13 +52,18 @@ To land a change, open a pull request; a maintainer will review it.
 
 ## Boundaries
 
-Retained operator agent profiles and durable instances are database-backed.
-Native `/api/agent/v1` creates cognitive views from a verified agentdef v2 pin.
-`NANITE_AGENTDEF_DIR` selects a host-owned directory of Markdown definitions;
-one default definition is embedded under `internal/service/definitions/`.
-Those files are source of truth for this native API. They do not import or
-replace retained profiles, enroll actors, or grant tools. The older profiles
-under `internal/agent/builtin/profiles/` remain first-run database seeds.
+Ordinary agent readers use immutable agentdef v2 artifacts in
+`agent_definitions` and mutable typed execution inputs in `agent_host_settings`.
+Native `/api/agent/v1` creates cognitive views from a verified semantic pin;
+optional host settings are selected at an explicit revision. Authored resources
+are checked against exact byte digests. Nine pristine flat archetypes live under
+`internal/agentdefs/`; the original General Chat definition remains unchanged.
+Historical `agent_profiles` and their old relation graph are retained solely for
+explicit history/export and audited retirement. They are never runtime fallback,
+first-run seeds or a conversion source. Actor bindings and grants require real
+issuer-owned authority; a definition pin, host UUID, slug or request metadata
+does not enroll an actor or confer capabilities. Missing adopted issuer ports
+refuse explicitly. See `docs/adding-an-agent.md` for authoring and host setup.
 
 `TASKS/`, `adr/`, `docs/engineering/` and `docs/audits/` were archived out of
 this repo at `b58db1fa`. Many Go comments, script headers and `Makefile`

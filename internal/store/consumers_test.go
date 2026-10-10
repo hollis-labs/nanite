@@ -138,64 +138,29 @@ func TestConsumersCreate_RequiresSlugAndName(t *testing.T) {
 // is nullable (empty string = internal/operator-owned) and round-trips
 // through CreateAgent/UpdateAgent/GetAgent, tagging an agent against the
 // seeded Loom consumer row.
-func TestAgentProfile_ConsumerIDRoundTrip(t *testing.T) {
+func TestHistoricalProfileConsumerFKRemainsAuditedOnly(t *testing.T) {
 	s := newTestStore(t)
-
-	loom, err := s.GetConsumerBySlug(context.Background(), "loom")
-	if err != nil || loom == nil {
-		t.Fatalf("GetConsumerBySlug(loom): %v, %+v", err, loom)
-	}
-
-	a := &AgentProfile{
-		Name:         "Curator",
-		Slug:         "curator-consumer-test",
-		SystemPrompt: "test",
-	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if a.ConsumerID != "" {
-		t.Errorf("default ConsumerID: got %q, want empty (operator-owned)", a.ConsumerID)
-	}
-
-	got, err := s.GetAgent(context.Background(), a.ID)
+	ctx := context.Background()
+	c, err := s.GetConsumerBySlug(ctx, "loom")
 	if err != nil {
-		t.Fatalf("GetAgent: %v", err)
+		t.Fatal(err)
 	}
-	if got.ConsumerID != "" {
-		t.Errorf("round-trip ConsumerID on unset row: got %q want empty", got.ConsumerID)
+	old := makeTestAgentRawSQL(t, s, "historical-consumer")
+	if _, err = s.DB.ExecContext(ctx, `UPDATE agent_profiles SET consumer_id=? WHERE id=?`, c.ID, old.ID); err != nil {
+		t.Fatal(err)
 	}
-
-	got.ConsumerID = loom.ID
-	if err := s.UpdateAgent(context.Background(), got); err != nil {
-		t.Fatalf("UpdateAgent: %v", err)
+	audited, err := s.GetHistoricalAgentProfile(ctx, old.ID)
+	if err != nil || audited.ConsumerID != c.ID {
+		t.Fatal(audited, err)
 	}
-
-	tagged, err := s.GetAgent(context.Background(), a.ID)
-	if err != nil {
-		t.Fatalf("GetAgent after tagging: %v", err)
+	if err = s.DeleteConsumer(ctx, c.ID); err == nil {
+		t.Fatal("historical FK lost")
 	}
-	if tagged.ConsumerID != loom.ID {
-		t.Errorf("ConsumerID after tagging: got %q want %q", tagged.ConsumerID, loom.ID)
+	if _, err = s.DB.ExecContext(ctx, `UPDATE agent_profiles SET consumer_id=NULL WHERE id=?`, old.ID); err != nil {
+		t.Fatal(err)
 	}
-
-	// Deleting the referenced consumer while an agent still points at it
-	// must fail -- this codebase runs with PRAGMA foreign_keys=1.
-	if err := s.DeleteConsumer(context.Background(), loom.ID); err == nil {
-		t.Error("expected DeleteConsumer to fail while an agent_profiles row still references it")
-	}
-
-	// Clearing the tag first must allow the delete to proceed.
-	tagged.ConsumerID = ""
-	if err := s.UpdateAgent(context.Background(), tagged); err != nil {
-		t.Fatalf("UpdateAgent (clear consumer_id): %v", err)
-	}
-	cleared, err := s.GetAgent(context.Background(), a.ID)
-	if err != nil {
-		t.Fatalf("GetAgent after clearing: %v", err)
-	}
-	if cleared.ConsumerID != "" {
-		t.Errorf("ConsumerID after clearing: got %q want empty", cleared.ConsumerID)
+	if err = s.DeleteConsumer(ctx, c.ID); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -212,8 +177,9 @@ func TestMigrate112DownRemovesConsumersAndColumn(t *testing.T) {
 	}
 
 	a := &AgentProfile{Name: "Down Test", Slug: "down-test-consumer", SystemPrompt: "x", ConsumerID: loom.ID}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	a.ID = "historical-down-consumer"
+	if _, operationErr := s.DB.ExecContext(ctx, `INSERT INTO agent_profiles(id,name,slug,system_prompt,consumer_id) VALUES(?,?,?,?,?)`, a.ID, a.Name, a.Slug, a.SystemPrompt, a.ConsumerID); operationErr != nil {
+		t.Fatalf("CreateAgent: %v", operationErr)
 	}
 
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")

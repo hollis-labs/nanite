@@ -10,7 +10,7 @@ import (
 // These are the Done-means tests for
 // TASKS/phase-1/07-add-reflex-opt-out-field.md: a required
 // (opt_out_allowed=false) reflex still fires for an agent that has
-// attempted to opt out of it via agent_reflex_opt_outs, while a
+// attempted to opt out of it via private_declared_opt_outs, while a
 // default-on (opt_out_allowed=true) reflex is genuinely suppressed by the
 // same mechanism. Each case below uses its own freshly-inserted reflex
 // row rather than sharing one across assertions — Engine.EvaluateState's
@@ -22,7 +22,7 @@ import (
 
 func newOptOutTestAgent(t *testing.T, st *store.Store, id string) {
 	t.Helper()
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: id, Name: id, Slug: id, Class: "process",
 		SystemPrompt: "test", Source: "test",
 	}); err != nil {
@@ -32,13 +32,13 @@ func newOptOutTestAgent(t *testing.T, st *store.Store, id string) {
 
 // TestReflexOptOut_RequiredFiresDespiteOptOutAttempt: opt_out_allowed=false
 // means the reflex applies unconditionally, even when an
-// agent_reflex_opt_outs row exists for it.
+// private_declared_opt_outs row exists for it.
 func TestReflexOptOut_RequiredFiresDespiteOptOutAttempt(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
 	newOptOutTestAgent(t, st, "agent-required-probe")
 
-	requiredID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	requiredID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "process",
 		Name:          "required_probe",
 		TriggerKind:   store.ReflexTriggerEvent,
@@ -52,12 +52,12 @@ func TestReflexOptOut_RequiredFiresDespiteOptOutAttempt(t *testing.T) {
 	}
 
 	// The agent attempts to opt out before the reflex has ever evaluated.
-	if err := st.SetAgentReflexOptOut(ctx, "agent-required-probe", requiredID); err != nil {
-		t.Fatalf("SetAgentReflexOptOut: %v", err)
+	if operationErr := declaredFixture(st).SetAgentReflexOptOut(ctx, "agent-required-probe", requiredID); operationErr != nil {
+		t.Fatalf("SetAgentReflexOptOut: %v", operationErr)
 	}
 
 	engine := NewEngine(st, nil)
-	out, err := engine.EvaluateState(ctx, "agent-required-probe", "process", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-required-probe", "process", State{
 		AgentClass: "process",
 		Events:     []EventSignal{{EventType: "probe"}},
 	})
@@ -70,14 +70,14 @@ func TestReflexOptOut_RequiredFiresDespiteOptOutAttempt(t *testing.T) {
 }
 
 // TestReflexOptOut_PermissiveCanBeSuppressedPerAgent: opt_out_allowed=true
-// (the default) means an agent_reflex_opt_outs row genuinely suppresses
+// (the default) means an private_declared_opt_outs row genuinely suppresses
 // the class-bound reflex for that agent.
 func TestReflexOptOut_PermissiveCanBeSuppressedPerAgent(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
 	newOptOutTestAgent(t, st, "agent-permissive-probe")
 
-	permissiveID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	permissiveID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "process",
 		Name:          "permissive_probe",
 		TriggerKind:   store.ReflexTriggerEvent,
@@ -89,12 +89,12 @@ func TestReflexOptOut_PermissiveCanBeSuppressedPerAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex: %v", err)
 	}
-	if err := st.SetAgentReflexOptOut(ctx, "agent-permissive-probe", permissiveID); err != nil {
-		t.Fatalf("SetAgentReflexOptOut: %v", err)
+	if operationErr := declaredFixture(st).SetAgentReflexOptOut(ctx, "agent-permissive-probe", permissiveID); operationErr != nil {
+		t.Fatalf("SetAgentReflexOptOut: %v", operationErr)
 	}
 
 	engine := NewEngine(st, nil)
-	out, err := engine.EvaluateState(ctx, "agent-permissive-probe", "process", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-permissive-probe", "process", State{
 		AgentClass: "process",
 		Events:     []EventSignal{{EventType: "probe"}},
 	})
@@ -114,7 +114,7 @@ func TestReflexOptOut_ClearingOptOutReenables(t *testing.T) {
 	st := newReflexTestStore(t)
 	newOptOutTestAgent(t, st, "agent-clear-probe")
 
-	permissiveID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	permissiveID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "process",
 		Name:          "permissive_probe",
 		TriggerKind:   store.ReflexTriggerEvent,
@@ -126,15 +126,15 @@ func TestReflexOptOut_ClearingOptOutReenables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex: %v", err)
 	}
-	if err := st.SetAgentReflexOptOut(ctx, "agent-clear-probe", permissiveID); err != nil {
-		t.Fatalf("SetAgentReflexOptOut: %v", err)
+	if operationErr := declaredFixture(st).SetAgentReflexOptOut(ctx, "agent-clear-probe", permissiveID); operationErr != nil {
+		t.Fatalf("SetAgentReflexOptOut: %v", operationErr)
 	}
-	if err := st.ClearAgentReflexOptOut(ctx, "agent-clear-probe", permissiveID); err != nil {
-		t.Fatalf("ClearAgentReflexOptOut: %v", err)
+	if operationErr := declaredFixture(st).ClearAgentReflexOptOut(ctx, "agent-clear-probe", permissiveID); operationErr != nil {
+		t.Fatalf("ClearAgentReflexOptOut: %v", operationErr)
 	}
 
 	engine := NewEngine(st, nil)
-	out, err := engine.EvaluateState(ctx, "agent-clear-probe", "process", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-clear-probe", "process", State{
 		AgentClass: "process",
 		Events:     []EventSignal{{EventType: "probe"}},
 	})
@@ -155,7 +155,7 @@ func TestReflexOptOut_OnlyAppliesToTheOptingOutAgent(t *testing.T) {
 	newOptOutTestAgent(t, st, "agent-a")
 	newOptOutTestAgent(t, st, "agent-b")
 
-	permissiveID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	permissiveID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "process",
 		Name:          "permissive_probe",
 		TriggerKind:   store.ReflexTriggerEvent,
@@ -167,14 +167,14 @@ func TestReflexOptOut_OnlyAppliesToTheOptingOutAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex: %v", err)
 	}
-	if err := st.SetAgentReflexOptOut(ctx, "agent-a", permissiveID); err != nil {
-		t.Fatalf("SetAgentReflexOptOut: %v", err)
+	if operationErr := declaredFixture(st).SetAgentReflexOptOut(ctx, "agent-a", permissiveID); operationErr != nil {
+		t.Fatalf("SetAgentReflexOptOut: %v", operationErr)
 	}
 
 	engine := NewEngine(st, nil)
 	state := State{AgentClass: "process", Events: []EventSignal{{EventType: "probe"}}}
 
-	outA, err := engine.EvaluateState(ctx, "agent-a", "process", state)
+	outA, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-a", "process", state)
 	if err != nil {
 		t.Fatalf("EvaluateState agent-a: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestReflexOptOut_OnlyAppliesToTheOptingOutAgent(t *testing.T) {
 		t.Fatalf("agent-a (opted out) actions = %d, want 0", len(outA.Actions))
 	}
 
-	outB, err := engine.EvaluateState(ctx, "agent-b", "process", state)
+	outB, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-b", "process", state)
 	if err != nil {
 		t.Fatalf("EvaluateState agent-b: %v", err)
 	}

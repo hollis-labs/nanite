@@ -5,11 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
-	"time"
 
 	svcerr "github.com/hollis-labs/libs/util/svcerr"
-
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
@@ -37,373 +36,187 @@ func newConfigTestStoreAt(t *testing.T, path string) *store.Store {
 	return st
 }
 
-func TestAgentConfigCreateIsDatabaseOnly(t *testing.T) {
-	svc, st, root := newAgentConfigTestService(t)
-	res, err := svc.Create(&store.AgentProfile{
-		Name: "Atlas", Slug: "atlas", SystemPrompt: "Curate.", RoleTools: `["dev_read"]`,
-	}, []agent.ProcedureDefinition{{Name: "lint", Body: "Lint the graph."}})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
+// Raw private rows stand for retained history. They cannot author a fresh
+// definition, enroll an actor or act as a production profile writer.
+func immutableConfigHistoricalFixture(t *testing.T, st *store.Store, p store.AgentProfile) *store.AgentProfile {
+	t.Helper()
+	if err := storetest.HistoricalProfile(t.Context(), st, &p); err != nil {
+		t.Fatal(err)
 	}
-	if res.Profile.ID == "" || res.Profile.Source != "user" || res.Profile.SourceRef != "" {
-		t.Fatalf("created profile = %#v", res.Profile)
-	}
-	if res.Revision == "" || svc.Revision(res.Profile) != res.Revision {
-		t.Fatalf("database profile is missing its persisted revision: %#v", res)
-	}
-	if _, statErr := os.Stat(filepath.Join(root, ".nanite", "agents")); !os.IsNotExist(statErr) {
-		t.Fatalf("create wrote an agent projection directory: %v", statErr)
-	}
-	procedures, err := st.ListAgentProcedures(context.Background(), res.Profile.ID)
-	if err != nil || len(procedures) != 1 || procedures[0].Name != "lint" {
-		t.Fatalf("procedures = %#v, %v", procedures, err)
-	}
-	var trust string
-	if err := st.DB.QueryRow(`SELECT default_trust_tier FROM agent_profiles WHERE id = ?`, res.Profile.ID).Scan(&trust); err != nil {
-		t.Fatalf("read trust tier: %v", err)
-	}
-	if trust != "untrusted" {
-		t.Fatalf("trust tier = %q, want untrusted", trust)
-	}
+	return &p
 }
 
-func TestAgentConfigUpdateRenamePreservesIdentityAndCapabilities(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"},
-		[]agent.ProcedureDefinition{{Name: "lint", Body: "Lint."}})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	updated := *created.Profile
-	updated.Slug = "atlas-curator"
-	updated.Description = "renamed in the database"
-	updated.SourceRef = "/tmp/legacy-authority-must-not-be-written.md"
-	res, err := svc.Update(created.Profile, &updated, nil, created.Revision)
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if res.Profile.ID != created.Profile.ID || res.Profile.Slug != "atlas-curator" {
-		t.Fatalf("identity/slug changed incorrectly: %#v", res.Profile)
-	}
-	if res.Profile.SourceRef != "" {
-		t.Fatalf("legacy source_ref round-tripped after edit: %q", res.Profile.SourceRef)
-	}
-	procedures, err := st.ListAgentProcedures(context.Background(), res.Profile.ID)
-	if err != nil || len(procedures) != 1 || procedures[0].Name != "lint" {
-		t.Fatalf("procedures after rename = %#v, %v", procedures, err)
-	}
-}
-
-func TestAgentConfigRejectsUnsafeSlugBeforeDatabaseWrite(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	before, err := st.ListAgents(context.Background())
-	if err != nil {
-		t.Fatalf("ListAgents before: %v", err)
-	}
-	for _, slug := range []string{"../evil", "a/b", "UPPER"} {
-		if _, createErr := svc.Create(&store.AgentProfile{Name: "Evil", Slug: slug, SystemPrompt: "x"}, nil); createErr == nil {
-			t.Errorf("Create(%q) unexpectedly succeeded", slug)
-		}
-	}
-	rows, err := st.ListAgents(context.Background())
-	if err != nil {
-		t.Fatalf("ListAgents: %v", err)
-	}
-	if len(rows) != len(before) {
-		t.Fatalf("unsafe creates changed row count: before=%d after=%d", len(before), len(rows))
-	}
-}
-
-func TestAgentConfigCopyDoesNotDereferenceSourceRef(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	source := &store.AgentProfile{
-		Name: "Plugin Agent", Slug: "plugin-agent", SystemPrompt: "x", Source: "plugin",
-		SourceRef: "/path/that/must/not/be/read/plugin-agent.md",
-	}
-	if err := st.CreateAgent(context.Background(), source); err != nil {
-		t.Fatalf("seed plugin: %v", err)
-	}
-	if err := st.InsertAgentProcedure(context.Background(), store.AgentProcedure{
-		AgentID: source.ID, Name: "search", Body: "Search upstream.", Scope: "agent",
-	}); err != nil {
-		t.Fatalf("seed plugin procedure: %v", err)
-	}
-	res, err := svc.CopyToManaged(source, nil)
-	if err != nil {
-		t.Fatalf("CopyToManaged: %v", err)
-	}
-	if res.Profile.ID == source.ID || res.Profile.Source != "user" || res.Profile.SourceRef != "" {
-		t.Fatalf("copy = %#v", res.Profile)
-	}
-	procedures, err := st.ListAgentProcedures(context.Background(), res.Profile.ID)
-	if err != nil || len(procedures) != 1 || procedures[0].Name != "search" {
-		t.Fatalf("copied procedures = %#v, %v", procedures, err)
-	}
-	if _, err := svc.CopyToManaged(res.Profile, nil); !errors.Is(err, ErrAgentAlreadyManaged) {
-		t.Fatalf("managed copy error = %v, want ErrAgentAlreadyManaged", err)
-	}
-}
-
-func TestAgentConfigCopyRejectsInternalRegardlessOfSourceRef(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	internal := &store.AgentProfile{
-		Name: "Chat", Slug: "chat-internal", SystemPrompt: "x", Source: "internal",
-		SourceRef: "/plugin-looking/path/that/must-not-change-ownership.md",
-	}
-	if err := st.CreateAgent(context.Background(), internal); err != nil {
-		t.Fatalf("seed internal: %v", err)
-	}
-	if _, err := svc.CopyToManaged(internal, nil); !errors.Is(err, ErrAgentNotManaged) {
-		t.Fatalf("CopyToManaged internal error = %v, want ErrAgentNotManaged", err)
-	}
-	if _, err := st.GetAgentBySlug(context.Background(), "chat-internal-copy"); err == nil {
-		t.Fatal("internal profile was copied despite CopyToManagedAllowed=false")
-	}
-}
-
-func TestAgentConfigCopyAllowsExternalRegardlessOfSourceRef(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	external := &store.AgentProfile{
-		Name: "Adapter Agent", Slug: "adapter-agent", SystemPrompt: "x", Source: "adapter",
-		SourceRef: "/internal-looking/path/that-must-not-change-ownership.md",
-	}
-	if err := st.CreateAgent(context.Background(), external); err != nil {
-		t.Fatalf("seed external: %v", err)
-	}
-	result, err := svc.CopyToManaged(external, nil)
-	if err != nil {
-		t.Fatalf("CopyToManaged external: %v", err)
-	}
-	if result.Profile.Source != "user" || result.Profile.SourceRef != "" || result.Profile.ID == external.ID {
-		t.Fatalf("external copy = %+v", result.Profile)
-	}
-}
-
-func TestAgentConfigDeleteIsDatabaseOnlyAndCascades(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	created, err := svc.Create(&store.AgentProfile{Name: "Atlas", Slug: "atlas", SystemPrompt: "x"},
-		[]agent.ProcedureDefinition{{Name: "lint", Body: "Lint."}})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if deleteErr := svc.Delete(created.Profile); deleteErr != nil {
-		t.Fatalf("Delete: %v", deleteErr)
-	}
-	if _, getErr := st.GetAgentBySlug(context.Background(), "atlas"); getErr == nil {
-		t.Fatal("profile remained after delete")
-	}
-	procedures, err := st.ListAgentProcedures(context.Background(), created.Profile.ID)
-	if err != nil || len(procedures) != 0 {
-		t.Fatalf("procedure children remained: %#v, %v", procedures, err)
-	}
-}
-
-func TestAgentConfigRejectsReadOnlyInternalUpdate(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	internal := &store.AgentProfile{Name: "Chat", Slug: "chat", SystemPrompt: "x", Source: "internal"}
-	if err := st.CreateAgent(context.Background(), internal); err != nil {
-		t.Fatalf("seed internal: %v", err)
-	}
-	updated := *internal
-	updated.Description = "not allowed"
-	if _, err := svc.Update(internal, &updated, nil, ""); !errors.Is(err, ErrAgentNotManaged) {
-		t.Fatalf("Update error = %v, want ErrAgentNotManaged", err)
-	}
-}
-
-// TestAgentConfigCreateSeedsRoleSkillsAsCatalogNotGrant pins the distinction
-// the roleSkills seeder exists to preserve: a seeded skill is discoverable but
-// not yet executable. internal/skill/gate.go refuses a row with no
-// ApprovedContentHash (GrantRequiredError, "never been approved"), so seeding
-// an approval here would turn every declared skill into an ambient capability.
-func TestAgentConfigCreateSeedsRoleSkillsAsCatalogNotGrant(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-
-	if err := st.CreateSkill(ctx, &store.Skill{
-		Name: "KB Triage", Slug: "kb-triage",
-		Description: "Search the KB before offering a ticket.",
-		SourceTier:  "user", ContentHash: "skl-test-abc123", Enabled: true,
-	}); err != nil {
-		t.Fatalf("CreateSkill: %v", err)
-	}
-
-	res, err := svc.Create(&store.AgentProfile{
-		Name: "Desk", Slug: "desk", SystemPrompt: "Work the queue.",
-		// "no-such-skill" must be skipped without failing the create.
-		RoleSkills: `["kb-triage","no-such-skill"]`,
-	}, nil)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	rows, err := st.ListAgentKnownSkills(ctx, res.Profile.ID)
-	if err != nil {
-		t.Fatalf("ListAgentKnownSkills: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("got %d known-skill rows, want 1 (the unknown slug must be skipped): %+v", len(rows), rows)
-	}
-	got := rows[0]
-	if got.SkillName != "kb-triage" {
-		t.Errorf("skill_name = %q, want %q", got.SkillName, "kb-triage")
-	}
-	if !got.Pinned {
-		t.Error("seeded row should be pinned")
-	}
-	if got.Reason != "role_seed" {
-		t.Errorf("reason = %q, want %q", got.Reason, "role_seed")
-	}
-	if got.ApprovedContentHash != "" {
-		t.Errorf("seeded row carries approval %q — roleSkills must seed a catalog entry, never a grant", got.ApprovedContentHash)
-	}
-}
-
-// TestAgentConfigUpdateDoesNotRevokeSkillApproval guards a regression found in
-// dogfooding: the roleSkills seeder runs on every Update, and
-// InsertAgentKnownSkill is INSERT OR REPLACE — so re-seeding an already-granted
-// slug blanked its approval columns. Editing an unrelated field must not
-// silently revoke a skill the operator approved.
-func TestAgentConfigUpdateDoesNotRevokeSkillApproval(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	ctx := context.Background()
-
-	if err := st.CreateSkill(ctx, &store.Skill{
-		Name: "KB Triage", Slug: "kb-triage", Description: "d",
-		SourceTier: "user", ContentHash: "skl-test-abc123", Enabled: true,
-	}); err != nil {
-		t.Fatalf("CreateSkill: %v", err)
-	}
-	res, err := svc.Create(&store.AgentProfile{
-		Name: "Desk", Slug: "desk", SystemPrompt: "Work the queue.",
-		RoleSkills: `["kb-triage"]`,
-	}, nil)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Approve it, the way the grant API does.
-	if err = st.InsertAgentKnownSkill(ctx, store.AgentKnownSkill{
-		AgentID: res.Profile.ID, SkillName: "kb-triage", Pinned: true,
-		Reason: "role_seed", ApprovedContentHash: "skl-test-abc123",
-		GrantedAt: "2026-09-16T00:00:00Z", GrantedBy: "operator@example.com",
-	}); err != nil {
-		t.Fatalf("approve: %v", err)
-	}
-
-	updated := *res.Profile
-	updated.Description = "edited for an unrelated reason"
-	if _, err = svc.Update(res.Profile, &updated, nil, ""); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
-	got, err := st.GetAgentKnownSkill(ctx, res.Profile.ID, "kb-triage")
-	if err != nil || got == nil {
-		t.Fatalf("GetAgentKnownSkill after update: %v (row=%+v)", err, got)
-	}
-	if got.ApprovedContentHash != "skl-test-abc123" {
-		t.Errorf("approval lost on update: approved_content_hash = %q, want %q",
-			got.ApprovedContentHash, "skl-test-abc123")
-	}
-	if got.GrantedBy != "operator@example.com" {
-		t.Errorf("granted_by lost on update: %q", got.GrantedBy)
-	}
-}
-
-func TestAgentConfigTypedErrorsPreserveDistinctSentinels(t *testing.T) {
-	svc, _, _ := newAgentConfigTestService(t)
-	created, err := svc.Create(&store.AgentProfile{Name: "Managed", Slug: "typed-errors", SystemPrompt: "x"}, nil)
+func immutableConfigSnapshot(t *testing.T, st *store.Store, query string) [][]any {
+	t.Helper()
+	rows, err := st.DB.QueryContext(t.Context(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, duplicate := svc.Create(&store.AgentProfile{Name: "Duplicate", Slug: created.Profile.Slug, SystemPrompt: "x"}, nil)
-	_, alreadyManaged := svc.CopyToManaged(created.Profile, nil)
-	for _, tc := range []struct {
-		err        error
-		own, other error
-	}{
-		{duplicate, ErrManagedSlugExists, ErrAgentAlreadyManaged},
-		{alreadyManaged, ErrAgentAlreadyManaged, ErrManagedSlugExists},
-	} {
-		if svcerr.CodeFor(tc.err) != svcerr.CodeConflict || !errors.Is(tc.err, tc.own) || errors.Is(tc.err, tc.other) {
-			t.Fatalf("category lost sentinel identity: %v", tc.err)
-		}
+	defer func() { _ = rows.Close() }()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, denied := svc.Update(&store.AgentProfile{Source: "internal", Slug: "internal"}, &store.AgentProfile{}, nil, "")
-	if svcerr.CodeFor(denied) != svcerr.CodePermission || !errors.Is(denied, ErrAgentNotManaged) {
-		t.Fatalf("permission error lost sentinel: %v", denied)
+	var out [][]any
+	for rows.Next() {
+		cells := make([]any, len(cols))
+		dest := make([]any, len(cols))
+		for i := range cells {
+			dest[i] = &cells[i]
+		}
+		if err = rows.Scan(dest...); err != nil {
+			t.Fatal(err)
+		}
+		for i, c := range cells {
+			if b, ok := c.([]byte); ok {
+				cells[i] = append([]byte(nil), b...)
+			}
+		}
+		out = append(out, cells)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func immutableConfigUnchanged(t *testing.T, st *store.Store, query string, before [][]any) {
+	t.Helper()
+	if after := immutableConfigSnapshot(t, st, query); !reflect.DeepEqual(before, after) {
+		t.Fatalf("retired operation changed %s: before=%v after=%v", query, before, after)
 	}
 }
 
-func TestAgentConfigBehaviorValidationField(t *testing.T) {
-	svc, _, _ := newAgentConfigTestService(t)
+func requireImmutableConfig(t *testing.T, result *AgentConfigResult, err error) {
+	t.Helper()
+	if !errors.Is(err, store.ErrImmutableAgentProfile) || result != nil {
+		t.Fatalf("retired operation returned result=%+v err=%v, want immutable refusal", result, err)
+	}
+}
+
+func TestImmutableAgentConfigRefusesValidCreateAndAssignmentSeeding(t *testing.T) {
+	svc, st, root := newAgentConfigTestService(t)
+	immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Retained", Slug: "retained-config-create", SystemPrompt: "Retained", Source: "user"})
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`, `SELECT * FROM agent_procedures ORDER BY agent_id,name`, `SELECT * FROM agent_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM agent_tools ORDER BY agent_id,tool_id`, `SELECT * FROM actor_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM actor_granted_tools ORDER BY agent_id,tool_id`, `SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = immutableConfigSnapshot(t, st, q)
+	}
+	missingRole := "missing-role"
+	for _, slug := range []string{"new-config-create", "retained-config-create"} {
+		p := store.AgentProfile{Name: "Create refused", Slug: slug, SystemPrompt: "Never installed", RoleTools: `["*"]`, RoleSkills: `["kb-triage"]`}
+		result, err := svc.Create(&p, []agent.ProcedureDefinition{{Name: "lint", Body: "Never seeded"}})
+		requireImmutableConfig(t, result, err)
+		result, err = svc.CreateWithAssignments(t.Context(), &p, []agent.ProcedureDefinition{{Name: "lint", Body: "Never seeded"}}, AgentAssignments{RoleID: &missingRole})
+		requireImmutableConfig(t, result, err)
+	}
+	for i, q := range queries {
+		immutableConfigUnchanged(t, st, q, before[i])
+	}
+	if _, err := os.Stat(filepath.Join(root, ".nanite", "agents")); !os.IsNotExist(err) {
+		t.Fatalf("retired create wrote projection directory: %v", err)
+	}
+}
+
+func TestImmutableAgentConfigUpdateDeleteAndCopyPreserveHistoricalDataWithoutNotification(t *testing.T) {
+	_, st, root := newAgentConfigTestService(t)
+	notifications := 0
+	svc := NewAgentConfigService(st, agent.NewClassification(), func(string, string) { notifications++ })
+	p := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Retained", Slug: "retained-config-edit", SystemPrompt: "Private retained prompt", Source: "user"})
+	sourcePath := filepath.Join(root, "historical.md")
+	const sourceBody = "Private historical source bytes.\n"
+	if err := os.WriteFile(sourcePath, []byte(sourceBody), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET source_ref=?,role_skills='["kb-triage"]',role_tools='["retained-tool"]',default_trust_tier='trusted' WHERE id=?`, sourcePath, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_procedures(agent_id,name,body,scope,created_at,updated_at) VALUES(?,'lint','Retained SOP','shared','retained-created','retained-updated')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_known_skills(agent_id,skill_name,pinned,approved_content_hash,granted_at,granted_by) VALUES(?,'kb-triage',1,'retained-hash','2026-09-16','historical-operator')`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	p, err = st.GetHistoricalAgentProfile(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugin := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Plugin", Slug: "retained-config-plugin", SystemPrompt: "Plugin retained prompt", Source: "plugin", PluginID: "private-fixture"})
+	queries := []string{`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`, `SELECT * FROM agent_procedures ORDER BY agent_id,name`, `SELECT * FROM agent_known_skills ORDER BY agent_id,skill_name`, `SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = immutableConfigSnapshot(t, st, q)
+	}
+	updated := *p
+	updated.Slug = "renamed-refused"
+	updated.SystemPrompt = "replacement"
+	updated.SourceRef = "/must-not-be-written"
+	updated.Description = "replacement"
+	result, err := svc.Update(p, &updated, []agent.ProcedureDefinition{{Name: "replacement", Body: "Never seeded"}}, p.Revision)
+	requireImmutableConfig(t, result, err)
+	result, err = svc.UpdateWithAssignments(t.Context(), p, &updated, nil, p.Revision, AgentAssignments{})
+	requireImmutableConfig(t, result, err)
+	if err = svc.Delete(p); !errors.Is(err, store.ErrImmutableAgentProfile) {
+		t.Fatalf("retired delete=%v", err)
+	}
+	for _, procedures := range [][]agent.ProcedureDefinition{nil, {{Name: "copied", Body: "Never copied"}}} {
+		result, err = svc.CopyToManaged(plugin, procedures)
+		requireImmutableConfig(t, result, err)
+	}
+	if notifications != 0 {
+		t.Fatal("refused legacy operations emitted committed-write notifications", notifications)
+	}
+	for i, q := range queries {
+		immutableConfigUnchanged(t, st, q, before[i])
+	}
+	data, err := os.ReadFile(sourcePath) //nolint:gosec // private fixture created above
+	if err != nil || string(data) != sourceBody {
+		t.Fatalf("retired operation changed source file: %q %v", data, err)
+	}
+}
+
+func TestImmutableAgentConfigKeepsApplicableValidationAndOwnershipGuards(t *testing.T) {
+	svc, st, _ := newAgentConfigTestService(t)
+	const query = `SELECT * FROM agent_profiles ORDER BY id`
+	before := immutableConfigSnapshot(t, st, query)
+	for _, slug := range []string{"../evil", "a/b", "UPPER", "user"} {
+		_, err := svc.Create(&store.AgentProfile{Name: "Invalid", Slug: slug, SystemPrompt: "x"}, nil)
+		var typed *svcerr.Error
+		if !errors.As(err, &typed) || typed.Code != svcerr.CodeInvalid || typed.Field != "slug" {
+			t.Fatalf("invalid slug %q: %v", slug, err)
+		}
+	}
 	for _, field := range []string{"class", "activation_mode", "default_state"} {
-		profile := &store.AgentProfile{Slug: "fixture"}
+		p := &store.AgentProfile{Name: "Invalid", Slug: "invalid-behavior", SystemPrompt: "x"}
 		switch field {
 		case "class":
-			profile.Class = "bogus"
+			p.Class = "bogus"
 		case "activation_mode":
-			profile.ActivationMode = "bogus"
+			p.ActivationMode = "bogus"
 		case "default_state":
-			profile.DefaultState = "bogus"
+			p.DefaultState = "bogus"
 		}
-		_, err := svc.Create(profile, nil)
+		_, err := svc.Create(p, nil)
 		var typed *svcerr.Error
 		if !errors.As(err, &typed) || typed.Code != svcerr.CodeInvalid || typed.Field != field {
-			t.Fatalf("%s: %+v", field, err)
+			t.Fatalf("invalid %s: %v", field, err)
 		}
 	}
-}
-
-func TestAgentConfigNotifiesOnlyCommittedWrites(t *testing.T) {
-	st := newConfigTestStore(t)
-	var notifications []string
-	svc := NewAgentConfigService(st, agent.NewClassification(), func(slug, action string) {
-		// With the store's single connection, this read can succeed only after
-		// the writing transaction has committed and released its connection.
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
-		profile, err := st.GetAgentBySlug(ctx, slug)
-		if err != nil {
-			t.Fatalf("notify before committed profile is readable: %v", err)
-		}
-		procedures, err := st.ListAgentProcedures(ctx, profile.ID)
-		if err != nil || len(procedures) != 1 || procedures[0].Body != action {
-			t.Fatalf("notify before committed seeds are readable: %+v, %v", procedures, err)
-		}
-		notifications = append(notifications, slug+":"+action)
-	})
-	created, err := svc.Create(&store.AgentProfile{Name: "Notify", Slug: "notify", SystemPrompt: "fixture"},
-		[]agent.ProcedureDefinition{{Name: "fixture", Body: "created"}})
-	if err != nil || len(notifications) != 1 || notifications[0] != "notify:created" {
-		t.Fatalf("create notifications=%v err=%v", notifications, err)
+	immutableConfigUnchanged(t, st, query, before)
+	p := immutableConfigHistoricalFixture(t, st, store.AgentProfile{Name: "Internal", Slug: "retained-config-internal", SystemPrompt: "Internal", Source: "internal"})
+	before = immutableConfigSnapshot(t, st, query)
+	updated := *p
+	updated.Description = "refused"
+	_, err := svc.Update(p, &updated, nil, "")
+	if !errors.Is(err, ErrAgentNotManaged) || svcerr.CodeFor(err) != svcerr.CodePermission {
+		t.Fatalf("internal update guard=%v", err)
 	}
-	if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_notify_seed BEFORE INSERT ON agent_procedures BEGIN SELECT RAISE(ABORT,'fixture rollback'); END`); err != nil {
-		t.Fatal(err)
+	if err = svc.Delete(p); !errors.Is(err, ErrAgentNotManaged) {
+		t.Fatalf("internal deletion guard=%v", err)
 	}
-	_, failedCreate := svc.Create(&store.AgentProfile{Name: "Failed", Slug: "failed-notify", SystemPrompt: "fixture"},
-		[]agent.ProcedureDefinition{{Name: "fixture", Body: "created"}})
-	updated := *created.Profile
-	updated.Slug = "renamed-notify"
-	_, failedUpdate := svc.Update(created.Profile, &updated,
-		[]agent.ProcedureDefinition{{Name: "fixture", Body: "updated"}}, "")
-	if failedCreate == nil || failedUpdate == nil || len(notifications) != 1 {
-		t.Fatalf("rolled-back writes notified: %v; create=%v update=%v", notifications, failedCreate, failedUpdate)
+	if _, err = svc.CopyToManaged(p, nil); !errors.Is(err, ErrAgentNotManaged) {
+		t.Fatalf("internal copy guard=%v", err)
 	}
-	if _, err := st.GetAgentBySlug(t.Context(), "failed-notify"); err == nil {
-		t.Fatal("failed create survived rollback")
-	}
-	if _, err := st.GetAgentBySlug(t.Context(), created.Profile.Slug); err != nil {
-		t.Fatalf("failed update changed profile: %v", err)
-	}
-	if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_notify_seed`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Update(created.Profile, &updated,
-		[]agent.ProcedureDefinition{{Name: "fixture", Body: "updated"}}, ""); err != nil {
-		t.Fatal(err)
-	}
-	if len(notifications) != 2 || notifications[1] != "renamed-notify:updated" {
-		t.Fatalf("update notifications=%v", notifications)
-	}
+	immutableConfigUnchanged(t, st, query, before)
 }

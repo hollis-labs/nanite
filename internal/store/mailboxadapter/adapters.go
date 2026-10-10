@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,49 +47,20 @@ func (registry *messagingAgentRegistry) AgentExists(ctx context.Context, agentID
 	if registry == nil || registry.store == nil {
 		return false, fmt.Errorf("agent registry is not configured")
 	}
-	_, err := registry.store.GetAgent(ctx, agentID)
+	_, err := registry.store.GetAgentForActor(ctx, agentID)
 	if err == nil {
 		return true, nil
 	}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, store.ErrVerifiedActorRequired) {
 		return false, nil
 	}
 	return false, err
 }
 
-func (registry *messagingAgentRegistry) RegisterAgent(ctx context.Context, agentID, registerAs string) error {
-	if registry == nil || registry.store == nil {
-		return fmt.Errorf("agent registry is not configured")
-	}
-	kind := "external"
-	if registerAs == "cli" {
-		kind = "cli"
-	}
-	return registry.store.CreateAgent(ctx, &store.AgentProfile{
-		ID:     agentID,
-		Slug:   messagingAgentSlug(agentID),
-		Name:   agentID,
-		Source: "auto",
-		Kind:   kind,
-	})
-}
-
-func messagingAgentSlug(agentID string) string {
-	lower := strings.ToLower(agentID)
-	var slug strings.Builder
-	for _, char := range lower {
-		switch {
-		case char >= 'a' && char <= 'z', char >= '0' && char <= '9', char == '-':
-			slug.WriteRune(char)
-		case char == '_' || char == ' ' || char == '.' || char == '/':
-			slug.WriteRune('-')
-		}
-	}
-	cleaned := strings.Trim(slug.String(), "-")
-	if cleaned == "" {
-		return agentID
-	}
-	return cleaned
+func (registry *messagingAgentRegistry) RegisterAgent(_ context.Context, _, _ string) error {
+	// Mail metadata and register_as cannot enroll an actor. A verified issuer
+	// port is not adopted; existing bound actors remain usable.
+	return store.ErrVerifiedActorRequired
 }
 
 // SessionEvents implements both the mailbox EventStore seam and Nanite's
@@ -230,11 +200,11 @@ func (coordinator *messagingHandoffCoordinator) Approve(ctx context.Context, han
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE session_agents SET is_primary = 0 WHERE session_id = ? AND is_primary = 1`, sessionID); err != nil {
+		`UPDATE session_actor_bindings SET is_primary = 0 WHERE session_id = ? AND is_primary = 1`, sessionID); err != nil {
 		return fmt.Errorf("clear primary: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
+		INSERT INTO session_actor_bindings (session_id, agent_id, mode, joined_at, is_primary)
 		VALUES (?, ?, 'default', ?, 1)
 		ON CONFLICT(session_id, agent_id) DO UPDATE SET is_primary = 1
 	`, sessionID, toAgentID, now); err != nil {

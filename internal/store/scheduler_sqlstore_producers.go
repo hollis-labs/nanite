@@ -61,7 +61,7 @@ func (s *SchedulerSQLStore) insertAgentSchedule(ctx context.Context, row AgentSc
 	}
 	if ifMissing {
 		var exists bool
-		if writeErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_schedules WHERE (agent_id=? AND name=?) OR id=?)`, row.AgentID, row.Name, row.ID).Scan(&exists); writeErr != nil {
+		if writeErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM actor_schedules WHERE (agent_id=? AND name=?) OR id=?)`, row.AgentID, row.Name, row.ID).Scan(&exists); writeErr != nil {
 			return false, writeErr
 		}
 		if exists {
@@ -75,7 +75,7 @@ func (s *SchedulerSQLStore) insertAgentSchedule(ctx context.Context, row AgentSc
 		return false, writeErr
 	}
 	// Metadata follows enabled updates so a pause is not projected as expiry.
-	_, err = tx.ExecContext(ctx, `INSERT INTO agent_schedules
+	_, err = tx.ExecContext(ctx, `INSERT INTO actor_schedules
  (id,agent_id,session_id,name,schedule_kind,schedule_spec,body,priority,status,expires_at,
  fired_count,last_fired_at,created_at,created_by,max_retries,on_fail,next_run,job_type,job_payload)
  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(NULLIF(?,''),datetime('now')),?,?,?,?,?,?)
@@ -97,7 +97,7 @@ func (s *SchedulerSQLStore) GetAgentSchedule(ctx context.Context, id string) (*A
 	err := scanAgentSchedule(s.shared.DB().QueryRowContext(ctx, `SELECT a.id,a.agent_id,COALESCE(a.session_id,''),a.name,a.schedule_kind,
  a.schedule_spec,a.body,a.priority,a.status,COALESCE(a.expires_at,''),a.fired_count,g.last_run,
  a.created_at,a.created_by,a.max_retries,a.on_fail,g.next_run,a.job_type,a.job_payload
- FROM agent_schedules a JOIN scheduler_schedule_identity i ON i.family='agent' AND i.source_id=a.id
+ FROM actor_schedules a JOIN scheduler_schedule_identity i ON i.family='agent' AND i.source_id=a.id
  JOIN gosched_schedules g ON g.id=i.schedule_id WHERE a.id=?`, id), &row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrAgentScheduleNotFound
@@ -148,7 +148,7 @@ func (s *SchedulerSQLStore) UpdateAgentScheduleStatus(ctx context.Context, id, s
 	if n == 0 {
 		return ErrAgentScheduleNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_schedules SET status=? WHERE id=?`, status, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE actor_schedules SET status=? WHERE id=?`, status, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -173,7 +173,7 @@ func (s *SchedulerSQLStore) DeleteAgentSchedule(ctx context.Context, id string) 
 	}
 	if n == 0 {
 		var exists bool
-		if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_schedules WHERE id=?)`, id).Scan(&exists); queryErr != nil {
+		if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM actor_schedules WHERE id=?)`, id).Scan(&exists); queryErr != nil {
 			return queryErr
 		}
 		if !exists {
@@ -184,7 +184,7 @@ func (s *SchedulerSQLStore) DeleteAgentSchedule(ctx context.Context, id string) 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM gosched_schedules WHERE id=?`, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_schedules WHERE id=?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM actor_schedules WHERE id=?`, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -303,7 +303,7 @@ func (s *SchedulerSQLStore) BumpAgentScheduleFireCount(ctx context.Context, id s
 	if n == 0 {
 		return ErrAgentScheduleNotFound
 	}
-	result, err = tx.ExecContext(ctx, `UPDATE agent_schedules SET fired_count=fired_count+1 WHERE id=?`, id)
+	result, err = tx.ExecContext(ctx, `UPDATE actor_schedules SET fired_count=fired_count+1 WHERE id=?`, id)
 	if err != nil {
 		return err
 	}

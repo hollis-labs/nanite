@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -15,7 +16,9 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/slogx"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // containerGoroutines counts the background loops a service container runs
@@ -92,5 +95,15 @@ func TestModelCatalogOptionsFromEnv(t *testing.T) {
 	t.Setenv(modelsDevURLEnv, "  http://mirror.local/api.json ")
 	if opts := modelCatalogOptionsFromEnv(); len(opts) != 1 {
 		t.Fatalf("set %s: %d options, want WithURL", modelsDevURLEnv, len(opts))
+	}
+}
+
+func TestTeamStartupUnavailableDoesNotHideRecoveryFailures(t *testing.T) {
+	if err := teamStartupRecoveryError(service.TeamRunReconcileReport{Failures: []error{store.ErrVerifiedActorRequired}}); err != nil {
+		t.Fatal(err)
+	}
+	failed := errors.New("private persistence failure")
+	if err := teamStartupRecoveryError(service.TeamRunReconcileReport{Failures: []error{errors.Join(store.ErrVerifiedActorRequired, failed)}}); !errors.Is(err, failed) {
+		t.Fatalf("recovery error=%v", err)
 	}
 }

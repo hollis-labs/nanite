@@ -301,8 +301,8 @@ func TestAssembleAgentSlotContent_appendsDisclosure(t *testing.T) {
 		Slug:         "slot",
 		SystemPrompt: "Slot agent prompt.",
 	}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(t.Context(), s, agent); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 
 	writeCompactionEventForTest(t, s, store.CompactionEvent{

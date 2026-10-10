@@ -16,12 +16,13 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/scheduler"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func createScheduleTestAgent(t *testing.T, a *testAPI, slug string) *store.AgentProfile {
 	t.Helper()
 	agent := &store.AgentProfile{Name: "Schedule Agent " + slug, Slug: slug, SystemPrompt: "x", Class: "advisor"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), a.store, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return agent

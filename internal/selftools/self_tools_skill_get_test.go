@@ -137,8 +137,8 @@ func reinstallSkillGetFixture(t *testing.T, idx *store.Store, vendor *skillvendo
 func makeSkillGetTestAgent(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	a := &store.AgentProfile{Name: "Skill Get Test Agent " + slug, Slug: slug, SystemPrompt: "test"}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(context.Background(), s, a); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 	return a
 }
@@ -152,7 +152,7 @@ func TestCallSkillGet_GrantedSkill_ReturnsMaterializedContentWithMarkerExecuted(
 	sk := installSkillGetFixture(t, idx, vendor, dir)
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-granted-agent")
 
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID:             agent.ID,
 		SkillName:           sk.Slug,
 		ApprovedContentHash: sk.ContentHash,
@@ -218,10 +218,10 @@ func TestCallSkillGet_BareAssignmentGrant_Refused(t *testing.T) {
 	sk := installSkillGetFixture(t, idx, vendor, dir)
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-bare-assignment-agent")
 
-	// Simulates AssignSkillToAgent's own bare INSERT (agent_id, skill_name
+	// Supplies a preexisting bare private assignment (agent_id, skill_name
 	// only) — no grant-state columns, matching gate_test.go's own
 	// TestExecuteGated_BareAssignmentGrant_Refused fixture exactly.
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: sk.Slug,
 	}); err != nil {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
@@ -251,7 +251,7 @@ func TestCallSkillGet_HashMismatch_ReapprovalRequired(t *testing.T) {
 	hash1 := sk.ContentHash
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-stale-hash-agent")
 
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: sk.Slug,
 		ApprovedContentHash: hash1,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
@@ -329,7 +329,7 @@ func TestCallSkillGet_DisabledSkill_Refused(t *testing.T) {
 		t.Fatalf("UpdateSkill (disable): %v", err)
 	}
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-disabled-agent")
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: sk.Slug,
 		ApprovedContentHash: sk.ContentHash,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
@@ -363,7 +363,7 @@ func TestCallSkillGet_MissingRequiredParameter(t *testing.T) {
 	dir := writeSkillGetFixture(t, "skill-get-missing-param")
 	sk := installSkillGetFixture(t, idx, vendor, dir)
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-missing-param-agent")
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: sk.Slug,
 		ApprovedContentHash: sk.ContentHash,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
@@ -438,7 +438,7 @@ func TestCallSkillGet_ForkDependencyWithoutForkRole_ClearError(t *testing.T) {
 	_ = depSk
 
 	agent := makeSkillGetTestAgent(t, idx, "skill-get-fork-root-agent")
-	if err := idx.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{
+	if err := insertPrivatePriorSkillGrant(t, idx, store.AgentKnownSkill{
 		AgentID: agent.ID, SkillName: rootSk.Slug,
 		ApprovedContentHash: rootSk.ContentHash,
 		GrantedAt:           time.Now().UTC().Format(time.RFC3339),
@@ -471,4 +471,15 @@ func newSkillGetTransport(idx *store.Store, vendor *skillvendor.Store) *SelfTool
 	st := newTestSelfToolsTransport(idx)
 	st.SkillVendor = vendor
 	return st
+}
+
+// insertPrivatePriorSkillGrant supplies an already issued private fixture grant;
+// public skill assignment cannot issue authority.
+func insertPrivatePriorSkillGrant(t *testing.T, st *store.Store, grant store.AgentKnownSkill) error {
+	t.Helper()
+	if _, err := st.GetAgentForActor(t.Context(), grant.AgentID); err != nil {
+		return err
+	}
+	_, err := st.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name,approved_content_hash,granted_at,granted_by,capabilities_granted) VALUES(?,?,?,?,?,?)`, grant.AgentID, grant.SkillName, grant.ApprovedContentHash, grant.GrantedAt, grant.GrantedBy, grant.CapabilitiesGranted)
+	return err
 }

@@ -47,11 +47,12 @@ func TestCognitiveRetainedOperationsRefuseDefinedTargets(t *testing.T) {
 	}
 }
 
-func TestCognitiveRetainedCancelProtectsNativeTurnsInLegacyView(t *testing.T) {
+func TestCognitiveRetainedCancelProtectsNativeTurnsInDefinedView(t *testing.T) {
 	hold := make(chan struct{})
 	release := sync.OnceFunc(func() { close(hold) })
 	t.Cleanup(release)
 	f := newHandleMessageFixture(t, []characterizationProviderStep{{events: doneEvents("answer"), hold: hold}})
+	bindTestDefinedConfiguration(t, f)
 	first, err := f.svc.SubmitCognitiveTurn(t.Context(), f.session, "first")
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +210,7 @@ func (s *canceledRequestSessions) Get(ctx context.Context, id string) (*store.Se
 
 func TestCognitiveAdmissionDisconnectAfterCommitStillExecutes(t *testing.T) {
 	f := newHandleMessageFixture(t, []characterizationProviderStep{{events: doneEvents("accepted answer")}})
+	bindTestDefinedConfiguration(t, f)
 	f.svc.streams = NewStreamManager(f.st)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

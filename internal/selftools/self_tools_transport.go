@@ -548,44 +548,7 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 // --- agent handlers ---
 
 func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResult, error) {
-	name, _ := args["name"].(string)
-	slug, _ := args["slug"].(string)
-	prompt, _ := args["system_prompt"].(string)
-	if name == "" || slug == "" || prompt == "" {
-		return mcp.ErrorResult("name, slug, and system_prompt are required"), nil
-	}
-
-	// Task 34: creating an agent whose slug collides with an existing
-	// non-editable (internal/plugin/external) profile must be rejected the
-	// same way an update against one is — otherwise agent_create is a
-	// second, unguarded path to the same overwrite-a-seed-profile gap
-	// (the actual write below would currently hard-fail on the DB's
-	// slug UNIQUE constraint with a raw SQL error; this check runs first
-	// so the caller gets the same clear, classified rejection as
-	// callUpdateAgent instead).
-	if existing, err := at.Store.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug); err == nil && existing != nil {
-		if class := at.classifyAgent(existing); !class.Editable() {
-			return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(existing.Slug, class)), "tool", "agent_create", "id", existing.ID, "slug", slug), nil
-		}
-		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodeConflict, "a managed agent with this slug already exists"), "tool", "agent_create", "id", existing.ID, "slug", slug), nil
-	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent"), "tool", "agent_create", "slug", slug), nil
-	}
-
-	a := &store.AgentProfile{
-		Name:         name,
-		Slug:         slug,
-		SystemPrompt: prompt,
-		Description:  strArg(args, "description", ""),
-		DefaultModel: strArg(args, "default_model", ""),
-	}
-
-	if err := at.Store.CreateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to create agent"), "tool", "agent_create", "slug", slug), nil
-	}
-
-	out, _ := json.Marshal(selfToolAgentProfileToView(a))
-	return mcp.TextResult(fmt.Sprintf("Created agent %q (id=%s)\n%s", a.Name, a.ID, string(out))), nil
+	return mcp.ServiceErrorResult(svcerr.Wrap(store.ErrImmutableAgentProfile, svcerr.CodeUnavailable, store.ErrImmutableAgentProfile.Error()), "tool", "agent_create"), nil
 }
 
 func (at *AgentProfileTools) callListAgents(args map[string]any) (*mcp.ToolResult, error) {
@@ -612,51 +575,8 @@ func (at *AgentProfileTools) callListAgents(args map[string]any) (*mcp.ToolResul
 }
 
 func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResult, error) {
-	id := strArg(args, "id", "")
-	if id == "" {
-		return mcp.ErrorResult("id is required"), nil
-	}
-
-	a, err := at.Store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
-		}
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
-	}
-
-	// Task 34: reject writes against non-editable (internal/plugin/external)
-	// agent profiles before applying any field updates — matches
-	// internal/api/agent_capabilities.go's requireMutableAgent gate at the
-	// REST layer. Classify the target's *current* class (source/source_ref
-	// as loaded, before any of the args below could mutate it).
-	if class := at.classifyAgent(a); !class.Editable() {
-		return mcp.ServiceErrorResult(svcerr.New(svcerr.CodePermission, agentNotEditableError(a.Slug, class)), "tool", "agent_update", "id", strArg(args, "id", "")), nil
-	}
-
-	if v, ok := args["name"].(string); ok && v != "" {
-		a.Name = v
-	}
-	if v, ok := args["slug"].(string); ok && v != "" {
-		a.Slug = v
-	}
-	if v, ok := args["system_prompt"].(string); ok && v != "" {
-		a.SystemPrompt = v
-	}
-	if v, ok := args["description"].(string); ok && v != "" {
-		a.Description = v
-	}
-	if v, ok := args["default_model"].(string); ok && v != "" {
-		a.DefaultModel = v
-	}
-
-	if err := at.Store.UpdateAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, a); err != nil {
-		return mcp.ServiceErrorResult(svcerr.Wrap(err, svcerr.CodeInternal, "failed to update agent"), "tool", "agent_update", "id", strArg(args, "id", "")), nil
-	}
-	return mcp.TextResult(fmt.Sprintf("Updated agent %q (id=%s)", a.Name, a.ID)), nil
+	return mcp.ServiceErrorResult(svcerr.Wrap(store.ErrImmutableAgentProfile, svcerr.CodeUnavailable, store.ErrImmutableAgentProfile.Error()), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 }
-
-// --- builder handlers ---
 
 func (st *SelfToolsTransport) callStartBuilder(args map[string]any) (*mcp.ToolResult, error) {
 	// Use a fixed session key — builders are per-transport, not per-chat-session.

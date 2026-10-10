@@ -18,42 +18,15 @@ import (
 	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
-// fallbackRoleSlug is the agent profile slug used when a requested role
-// slug does not resolve. Mirrors the reflex-catalog pattern (CW-20260509-0050)
-// where researcher / reviewer / documentor / strategist all fall back to
-// the `worker` profile. Surfacing the fallback via slog.Warn so seeding
-// drift is alertable without surprising the caller with a hard failure.
-const fallbackRoleSlug = "worker"
-
-// resolveRoleWithFallback looks up a slug through the resolver. If the
-// slug is unknown (wraps sql.ErrNoRows), retries with fallbackRoleSlug
-// and emits a structured warning. If the fallback also misses, the
-// underlying error is returned wrapped with errRoleResolveFailed.
-//
-// caller identifies the runner emitting the warning (ChatRunner / BootRunner)
-// so alerting can attribute the drift correctly.
-func resolveRoleWithFallback(agents agentSlugResolver, slug, caller string) (*store.AgentProfile, error) {
-	agent, err := agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
-	if err == nil {
-		return agent, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+// resolveRoleWithFallback retains the runner call seam but resolves only the
+// explicitly requested host profile. A missing role never selects another
+// profile or implies actor enrollment.
+func resolveRoleWithFallback(agents agentSlugResolver, slug, _ string) (*store.AgentProfile, error) {
+	agent, err := agents.GetAgentBySlug(context.TODO(), slug)
+	if err != nil {
 		return nil, fmt.Errorf("%w %q: %w", errRoleResolveFailed, slug, err)
 	}
-	// Unknown slug. Try the fallback before surfacing failure.
-	fallback, fbErr := agents.GetAgentBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, fallbackRoleSlug)
-	if fbErr != nil {
-		// Fallback itself missing — the deployment is misconfigured;
-		// surface the ORIGINAL slug so logs point at the user's request.
-		return nil, fmt.Errorf("%w %q: %w (fallback %q also missing: %w)",
-			errRoleResolveFailed, slug, err, fallbackRoleSlug, fbErr)
-	}
-	slog.Warn("subagent: role slug not found, falling back",
-		"requested_slug", slug,
-		"fallback_slug", fallbackRoleSlug,
-		"caller", caller,
-	)
-	return fallback, nil
+	return agent, nil
 }
 
 // errStreamFailure is the sentinel returned by drainCapture when the
@@ -465,10 +438,8 @@ func (r *ChatRunner) persistChild(ctx context.Context, runID, childID string) er
 	return r.persistChildSessionID(ctx, runID, childID)
 }
 
-// resolveRole looks up the role slug in the agent registry, falling back
-// to the `worker` profile when the slug is unknown (sql.ErrNoRows). Other
-// errors wrap with errRoleResolveFailed so callers can use errors.Is for
-// classification. See resolveRoleWithFallback.
+// resolveRole selects the explicitly requested host profile. Unknown roles
+// preserve their cause and never fall back to a different profile.
 func (r *ChatRunner) resolveRole(slug string) (*store.AgentProfile, error) {
 	return resolveRoleWithFallback(r.agents, slug, "ChatRunner")
 }

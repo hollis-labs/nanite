@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -82,35 +81,13 @@ func TestProviderCredentialUnavailable_SafeActionableHTTPError(t *testing.T) {
 	}
 }
 
-func TestValidateReflex_ReportsMatchWithoutExecutingAction(t *testing.T) {
+func TestRetiredValidateReflexCannotExecuteHistoricalAction(t *testing.T) {
 	a, mux := newTestAPI(t)
-	ctx := context.Background()
-	agent := &store.AgentProfile{Name: "Retained", Slug: "retained-reflex", Status: "active", Source: "api"}
-	if err := a.Services.Agents.Create(ctx, agent); err != nil {
-		t.Fatal(err)
+	retiredAPIHistoricalProfile(t, a, "reflex-preview-retained", "user")
+	const query = `SELECT * FROM agent_profiles ORDER BY id`
+	before := retiredAPISnapshot(t, a, query)
+	for _, body := range []string{`{"trigger_kind":"predicate","trigger_spec":"{\"kind\":\"tool_calls_window\",\"window\":2,\"op\":\"=\",\"value\":0}","action_kind":"halt_session","action_spec":"{}"}`, `not json`} {
+		requireRetiredAPI(t, retiredAPIRequest(t, mux, "POST", "/api/reflexes/validate", body))
 	}
-	for _, spec := range []struct {
-		kind, trigger      string
-		supported, matched bool
-	}{
-		{"predicate", `{"kind":"tool_calls_window","window":2,"op":"=","value":0}`, true, true},
-		{"predicate", `{"kind":"tool_calls_window","window":2,"op":"=","value":9}`, true, false},
-		{"event", `{"name":"user_message"}`, false, false},
-		{"predicate", `{"kind":"AND","clauses":[]}`, false, false},
-	} {
-		body, _ := json.Marshal(map[string]any{"trigger_kind": spec.kind, "trigger_spec": spec.trigger, "action_kind": "halt_session", "action_spec": `{}`, "state": map[string]any{"messages": []any{map[string]any{"tool_calls": 0}, map[string]any{"tool_calls": 0}}}})
-		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/reflexes/validate", bytes.NewReader(body)))
-		if response.Code != http.StatusOK {
-			t.Fatal(response.Body.String())
-		}
-		got := decodeObject(t, response.Body.Bytes())
-		if got["valid"] != true || got["matched"] != spec.matched || got["fired"] != spec.matched || got["evaluation_supported"] != spec.supported || got["action_executed"] != false {
-			t.Fatalf("truthful preview: %v", got)
-		}
-	}
-	retained, err := a.Services.Agents.Get(ctx, agent.ID)
-	if err != nil || retained.Status != "active" {
-		t.Fatal("validate executed halt or mutated profile")
-	}
+	retiredAPIHistoryUnchanged(t, a, query, before)
 }

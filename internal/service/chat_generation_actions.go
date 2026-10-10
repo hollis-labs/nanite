@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/effort"
@@ -100,7 +100,7 @@ func (s *chatServiceImpl) settleToolTurn(
 	var resultBlocks []llmtypes.ContentBlock
 	var regularTools []llmtypes.ToolUseBlock
 	for _, tu := range turn.toolUseBlocks {
-		if tu.Name == "request_tools" {
+		if tu.Name == "request_tools" && !isCognitiveTurn(ctx) {
 			resultBlocks, run.loop.toolCallRefs, run.tools = s.handleRequestTools(
 				ctx, agentID, tu, ch, run.tools, run.loop.loadedTools,
 				&run.loop.consecutiveEmptyRequests, &run.loop.totalRequestToolsCalls, run.loop.maxRequestToolsCalls,
@@ -1887,55 +1887,55 @@ func (s *chatServiceImpl) prepareTurn(
 		return prepareTurnResult{directive: runloop.Terminate}
 	}
 
-	// --- Resolve agent ---
-	agent, err := s.agents.ResolveForSession(ctx, sessionID)
-	if err != nil {
-		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to resolve agent", map[string]interface{}{"raw": err.Error()})
-		return prepareTurnResult{directive: runloop.Terminate}
-	}
+	// Defined views execute their verified immutable configuration. They do
+	// not borrow the default profile, its grants, role cascade or enrollment.
+	var agent *store.AgentProfile
 	if isCognitiveTurn(ctx) {
-		copyAgent := *agent
-		agent = &copyAgent
+		reader, ok := s.store.(cognitiveViewReader)
+		if !ok {
+			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Verified definition storage unavailable", nil)
+			return prepareTurnResult{directive: runloop.Terminate}
+		}
+		record, readErr := reader.GetCognitiveView(ctx, sessionID)
+		if readErr != nil {
+			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Verified definition storage unavailable", nil)
+			return prepareTurnResult{directive: runloop.Terminate}
+		}
+		var cfg ChatDefinitionConfig
+		if json.Unmarshal([]byte(record.ChatConfigJSON), &cfg) != nil {
+			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid verified chat configuration", nil)
+			return prepareTurnResult{directive: runloop.Terminate}
+		}
+		policy := agentpolicy.NativePolicy{}.Defaults()
+		if cfg.NativePolicy != nil {
+			if validationErr := cfg.NativePolicy.Validate(); validationErr != nil {
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid verified native policy", nil)
+				return prepareTurnResult{directive: runloop.Terminate}
+			}
+			policy = cfg.NativePolicy.Defaults()
+		}
+		agent = &store.AgentProfile{Name: "Defined chat", SystemPrompt: cfg.Instructions, DefinitionPolicy: &policy, DefinitionReflex: cfg.ReflexBundle, NativeHost: cfg.HostSettings, Class: policy.Class, DefaultProvider: cfg.Model.Provider, DefaultModel: cfg.Model.Model, RuntimeKind: "api", Constraints: "{}", Settings: "{}", Tags: "[]", Tools: "[]"}
+		if cfg.HostSettings != nil {
+			if validationErr := cfg.HostSettings.Validate(); validationErr != nil {
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid host execution settings", nil)
+				return prepareTurnResult{directive: runloop.Terminate}
+			}
+		}
 		copySession := *session
 		session = &copySession
+		session.Provider = cfg.Model.Provider
+		session.Model = cfg.Model.Model
+		session.Metadata = "{}"
 		selected := cognitiveModelFromContext(ctx)
 		if selected.Provider != "" {
 			session.Provider = selected.Provider
 			session.Model = selected.Model
-			agent.RuntimeKind = "api"
 		}
-		session.Metadata = "{}"
-		// Definition content is applied from a dedicated verified record. Mutable
-		// session metadata and retained profile defaults cannot override it.
-		if reader, ok := s.store.(interface {
-			GetCognitiveView(context.Context, string) (store.CognitiveViewRecord, error)
-		}); ok {
-			record, readErr := reader.GetCognitiveView(ctx, sessionID)
-			if readErr == nil {
-				var cfg ChatDefinitionConfig
-				if json.Unmarshal([]byte(record.ChatConfigJSON), &cfg) != nil {
-					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid verified chat configuration", nil)
-					return prepareTurnResult{directive: runloop.Terminate}
-				}
-				copyAgent := *agent
-				agent = &copyAgent
-				agent.SystemPrompt = cfg.Instructions
-				agent.DefaultProvider = cfg.Model.Provider
-				agent.DefaultModel = cfg.Model.Model
-				agent.RuntimeKind = "api"
-				agent.Constraints = "{}"
-				agent.Settings = "{}"
-				agent.Tags = "[]"
-				agent.Tools = "[]"
-				copySession := *session
-				session = &copySession
-				session.Provider = cfg.Model.Provider
-				session.Model = cfg.Model.Model
-				session.Metadata = "{}"
-			} else if !errors.Is(readErr, sql.ErrNoRows) {
-				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to read verified chat configuration", nil)
-				return prepareTurnResult{directive: runloop.Terminate}
-			}
+	} else {
+		agent, err = s.agents.ResolveForSession(ctx, sessionID)
+		if err != nil {
+			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Failed to resolve agent", map[string]interface{}{"raw": err.Error()})
+			return prepareTurnResult{directive: runloop.Terminate}
 		}
 	}
 	agentID := agent.ID
@@ -1999,11 +1999,16 @@ func (s *chatServiceImpl) prepareTurn(
 	// Selected by the session, resolved against the model and the agent's
 	// stored constraints. An unknown or invalid profile ends the turn with the
 	// reason; it is never replaced by a default.
-	harness, harnessErr := s.resolveHarness(ctx, session, constraints, model)
+	var settings harnessSettings
+	if s.store != nil {
+		settings = s.store
+	}
+	harness, harnessErr := resolveHarnessWithHost(ctx, s.harnessProfiles, settings, session, constraints, model, agent.NativeHost)
 	if harnessErr != nil {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, harnessErr.Error(), nil)
 		return prepareTurnResult{directive: runloop.Terminate}
 	}
+	applyDefinitionGuard(harness, agent.DefinitionPolicy)
 
 	// --- Resolve provider ---
 	providerName, prov := s.resolveProvider(sessionID, session.Provider, agent.DefaultProvider, model, agent.RuntimeKind)
@@ -2080,7 +2085,10 @@ func (s *chatServiceImpl) prepareTurn(
 	// exists — SelectForAgent's workspaceID param (toolclient's
 	// Config.WorkspaceOverrides rule-merge hook) has no populated loader in
 	// production today, so this is a no-op change, not a feature removal.
-	selection, err := s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, "", s.contextWindowSize(providerName, model))
+	selection := &ToolSelection{}
+	if !isCognitiveTurn(ctx) {
+		selection, err = s.tools.SelectForAgent(ctx, sessionID, agentID, userContent, "", s.contextWindowSize(providerName, model))
+	}
 	if err != nil {
 		slog.Warn("chat-service: tool selection failed", "err", err)
 		selection = &ToolSelection{}
@@ -2107,7 +2115,9 @@ func (s *chatServiceImpl) prepareTurn(
 	// essential/lazy partition and the no-tools warning check further down
 	// so both see the plugin-filtered list, not the pre-filter one.
 	fctx := pluginpkg.FilterContext{SessionID: sessionID, AgentID: agentID}
-	tools = applyToolSelectionFilter(s.pluginHost, tools, fctx)
+	if !isCognitiveTurn(ctx) {
+		tools = applyToolSelectionFilter(s.pluginHost, tools, fctx)
+	}
 
 	// Phase 0 item 21 ("Cut Modes, in full") deleted the B1 (CW-20260428-0009)
 	// + F1 (CW-20260429-0001) session-mode tool_overrides block that used to
@@ -2230,7 +2240,11 @@ func (s *chatServiceImpl) prepareTurn(
 	// FU-30: evaluate DB-backed agent reflexes for this turn and inject any
 	// staged actions (e.g. inject_reminder) into SlotUserContext. nil-safe via
 	// the engine guard inside evaluateAndInjectReflexes.
-	reflexActions := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult)
+	reflexActions, reflexErr := s.evaluateAndInjectReflexes(ctx, session, agent, slotResult)
+	if reflexErr != nil {
+		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Pinned reflex policy could not be evaluated", nil)
+		return prepareTurnResult{directive: runloop.Terminate}
+	}
 	if len(reflexActions) > 0 {
 		systemPrompt = slotResult.SystemPrompt
 	}

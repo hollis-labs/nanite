@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
@@ -28,23 +29,25 @@ func newTestStore(t *testing.T) *store.Store {
 
 func seedAgent(t *testing.T, st *store.Store, id string) {
 	t.Helper()
-	if err := st.CreateAgent(t.Context(), &store.AgentProfile{
-		ID: id, Slug: id, Name: id, Kind: "internal", Status: "active",
-	}); err != nil {
-		t.Fatalf("CreateAgent(%s): %v", id, err)
+	p := &store.AgentProfile{Slug: strings.TrimPrefix(id, "msg://agent/private-fixture/"), Name: id}
+	if err := storetest.PriorAuthorizedActor(t.Context(), st, p); err != nil {
+		t.Fatal(err)
+	}
+	if p.ID != id {
+		t.Fatalf("fixture actor=%s, want %s", p.ID, id)
 	}
 }
 
 func TestComponents_UsesMigratedSchemaAndPreservesMailboxLifecycle(t *testing.T) {
 	st := newTestStore(t)
-	seedAgent(t, st, "recipient")
+	seedAgent(t, st, "msg://agent/private-fixture/recipient")
 	components := New(st)
 
 	sent, err := components.Service.SendMessage(t.Context(), messaging.SendInput{
 		FromSessionID: "session-1",
 		FromAgentID:   a2a.UserSentinel,
 		ToSessionID:   "session-1",
-		ToAgentID:     "recipient",
+		ToAgentID:     "msg://agent/private-fixture/recipient",
 		Channel:       messaging.ChannelInbox,
 		Kind:          messaging.KindRequest,
 		Body:          "please inspect",
@@ -53,25 +56,25 @@ func TestComponents_UsesMigratedSchemaAndPreservesMailboxLifecycle(t *testing.T)
 		t.Fatalf("SendMessage: %v", err)
 	}
 
-	inbox, err := components.Service.Inbox(t.Context(), "session-1", "recipient",
-		messaging.InboxFilter{Status: messaging.StatusUnread}, "session-1", "recipient")
+	inbox, err := components.Service.Inbox(t.Context(), "session-1", "msg://agent/private-fixture/recipient",
+		messaging.InboxFilter{Status: messaging.StatusUnread}, "session-1", "msg://agent/private-fixture/recipient")
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}
 	if len(inbox) != 1 || inbox[0].ID != sent.ID || inbox[0].Body != "please inspect" {
 		t.Fatalf("inbox = %+v, want sent message", inbox)
 	}
-	if _, inboxErr := components.Service.Inbox(t.Context(), "session-1", "recipient",
+	if _, inboxErr := components.Service.Inbox(t.Context(), "session-1", "msg://agent/private-fixture/recipient",
 		messaging.InboxFilter{}, "session-1", "intruder"); !errors.Is(inboxErr, messaging.ErrForbidden) {
 		t.Fatalf("spoofed Inbox error = %v, want ErrForbidden", inboxErr)
 	}
-	if ackErr := components.Service.Ack(t.Context(), "session-1", "recipient", sent.ID); ackErr != nil {
+	if ackErr := components.Service.Ack(t.Context(), "session-1", "msg://agent/private-fixture/recipient", sent.ID); ackErr != nil {
 		t.Fatalf("Ack: %v", ackErr)
 	}
-	if resolveErr := components.Service.Resolve(t.Context(), "session-1", "recipient", sent.ID); resolveErr != nil {
+	if resolveErr := components.Service.Resolve(t.Context(), "session-1", "msg://agent/private-fixture/recipient", sent.ID); resolveErr != nil {
 		t.Fatalf("Resolve: %v", resolveErr)
 	}
-	count, err := components.Service.UnreadCount(t.Context(), "session-1", "recipient")
+	count, err := components.Service.UnreadCount(t.Context(), "session-1", "msg://agent/private-fixture/recipient")
 	if err != nil {
 		t.Fatalf("UnreadCount: %v", err)
 	}
@@ -101,20 +104,20 @@ func TestComponents_UsesMigratedSchemaAndPreservesMailboxLifecycle(t *testing.T)
 
 func TestComponents_ReadsMessageWrittenBeforeMailboxAdoption(t *testing.T) {
 	st := newTestStore(t)
-	seedAgent(t, st, "recipient")
+	seedAgent(t, st, "msg://agent/private-fixture/recipient")
 	if _, err := st.DB.ExecContext(t.Context(), `
 		INSERT INTO agent_messages (
 			id, from_session_id, from_agent_id, to_session_id, to_agent_id,
 			thread_id, body, status, channel, kind, payload_json, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, "pre-adoption", "old-session", a2a.UserSentinel, "old-session", "recipient",
+	`, "pre-adoption", "old-session", a2a.UserSentinel, "old-session", "msg://agent/private-fixture/recipient",
 		"old-thread", "durable history", messaging.StatusUnread, messaging.ChannelChat,
 		"subagent_result", `{}`, "2026-01-02T03:04:05Z"); err != nil {
 		t.Fatalf("insert pre-adoption row: %v", err)
 	}
 
-	inbox, err := New(st).Service.Inbox(t.Context(), "old-session", "recipient",
-		messaging.InboxFilter{Kind: "subagent_result"}, "old-session", "recipient")
+	inbox, err := New(st).Service.Inbox(t.Context(), "old-session", "msg://agent/private-fixture/recipient",
+		messaging.InboxFilter{Kind: "subagent_result"}, "old-session", "msg://agent/private-fixture/recipient")
 	if err != nil {
 		t.Fatalf("Inbox: %v", err)
 	}
@@ -123,35 +126,23 @@ func TestComponents_ReadsMessageWrittenBeforeMailboxAdoption(t *testing.T) {
 	}
 }
 
-func TestComponents_AutoRegistrationRemainsNanitePolicy(t *testing.T) {
+func TestComponents_ClaimedRegistrationCannotEnrollActor(t *testing.T) {
 	st := newTestStore(t)
-	seedAgent(t, st, "recipient")
+	const recipient = "msg://agent/private-fixture/recipient"
+	seedAgent(t, st, recipient)
 	components := New(st)
-	if _, err := components.Service.SendMessage(t.Context(), messaging.SendInput{
-		FromSessionID: "session-1",
-		FromAgentID:   "CLI.Host/One",
-		ToSessionID:   "session-1",
-		ToAgentID:     "recipient",
-		RegisterAs:    "cli",
-		Body:          "hello",
-	}); err != nil {
-		t.Fatalf("SendMessage: %v", err)
+	if _, err := components.Service.SendMessage(t.Context(), messaging.SendInput{FromSessionID: "session-1", FromAgentID: "CLI.Host/One", ToSessionID: "session-1", ToAgentID: recipient, RegisterAs: "cli", Body: "hello"}); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("claimed registration=%v", err)
 	}
-	profile, err := st.GetAgent(t.Context(), "CLI.Host/One")
-	if err != nil {
-		t.Fatalf("GetAgent: %v", err)
+	var count int
+	if err := st.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM agent_messages`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("refused registration sent message: %d %v", count, err)
 	}
-	if profile.Slug != "cli-host-one" || profile.Source != "auto" || profile.Kind != "cli" {
-		t.Fatalf("auto-registered profile = %+v", profile)
+	if _, err := st.GetAgentForActor(t.Context(), "CLI.Host/One"); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("claim created actor: %v", err)
 	}
-	if _, err := components.Service.SendMessage(t.Context(), messaging.SendInput{
-		FromSessionID: "session-1", FromAgentID: a2a.UserSentinel,
-		ToSessionID: "session-1", ToAgentID: "recipient", Body: "human follow-up",
-	}); err != nil {
-		t.Fatalf("SendMessage(user): %v", err)
-	}
-	if _, err := st.GetAgent(t.Context(), a2a.UserSentinel); err == nil {
-		t.Fatal("reserved user participant unexpectedly has an agent_profiles row")
+	if _, err := components.Service.SendMessage(t.Context(), messaging.SendInput{FromSessionID: "session-1", FromAgentID: a2a.UserSentinel, ToSessionID: "session-1", ToAgentID: recipient, Body: "human follow-up"}); err != nil {
+		t.Fatalf("retained app user participant: %v", err)
 	}
 }
 
@@ -196,25 +187,25 @@ func TestSessionEvents_WritesNaniteRuntimeVocabularyBesideMailboxEvents(t *testi
 
 func TestComponents_HandoffUsesNaniteTransactionAndPolicy(t *testing.T) {
 	st := newTestStore(t)
-	for _, id := range []string{"agent-a", "agent-b", "agent-c"} {
+	for _, id := range []string{"msg://agent/private-fixture/agent-a", "msg://agent/private-fixture/agent-b", "msg://agent/private-fixture/agent-c"} {
 		seedAgent(t, st, id)
 	}
 	session := &store.Session{}
 	if err := st.CreateSession(t.Context(), session); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := st.EnsureSessionAgent(t.Context(), session.ID, "agent-a", "default", true); err != nil {
+	if err := st.EnsureSessionAgent(t.Context(), session.ID, "msg://agent/private-fixture/agent-a", "default", true); err != nil {
 		t.Fatalf("EnsureSessionAgent: %v", err)
 	}
 	service := New(st).Service
-	if _, err := service.RequestHandoff(t.Context(), session.ID, "agent-a", "agent-b", "robot"); !errors.Is(err, messaging.ErrValidation) {
+	if _, err := service.RequestHandoff(t.Context(), session.ID, "msg://agent/private-fixture/agent-a", "msg://agent/private-fixture/agent-b", "robot"); !errors.Is(err, messaging.ErrValidation) {
 		t.Fatalf("invalid requested_by error = %v, want ErrValidation", err)
 	}
-	first, err := service.RequestHandoff(t.Context(), session.ID, "agent-a", "agent-b", "departing")
+	first, err := service.RequestHandoff(t.Context(), session.ID, "msg://agent/private-fixture/agent-a", "msg://agent/private-fixture/agent-b", "departing")
 	if err != nil {
 		t.Fatalf("RequestHandoff(first): %v", err)
 	}
-	second, err := service.RequestHandoff(t.Context(), session.ID, "agent-a", "agent-c", "departing")
+	second, err := service.RequestHandoff(t.Context(), session.ID, "msg://agent/private-fixture/agent-a", "msg://agent/private-fixture/agent-c", "departing")
 	if err != nil {
 		t.Fatalf("RequestHandoff(second): %v", err)
 	}
@@ -232,7 +223,7 @@ func TestComponents_HandoffUsesNaniteTransactionAndPolicy(t *testing.T) {
 	for _, agent := range agents {
 		if agent.IsPrimary {
 			primaryCount++
-			if agent.AgentID != "agent-b" {
+			if agent.AgentID != "msg://agent/private-fixture/agent-b" {
 				t.Fatalf("primary agent = %q, want agent-b", agent.AgentID)
 			}
 		}

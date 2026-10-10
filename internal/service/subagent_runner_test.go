@@ -407,44 +407,21 @@ func (s *stubAgentReaderForRunner) GetAgentBySlug(ctx context.Context, slug stri
 	return a, nil
 }
 
-// TestChatRunner_ResolveRoleFallsBackToWorker — CW-20260512-0002 subtodo (a):
-// unknown slugs should fall back to the `worker` profile rather than
-// hard-erroring. Mirrors the reflex-catalog drift guard.
-func TestChatRunner_ResolveRoleFallsBackToWorker(t *testing.T) {
-	workerProfile := &store.AgentProfile{ID: "ag-worker", Slug: "worker", DefaultProvider: "anthropic", DefaultModel: "m"}
-	r := &ChatRunner{
-		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
-			"worker": workerProfile,
-		}},
-	}
+// Unknown role selection cannot fall back to an unrelated host profile.
+func TestChatRunner_ResolveRoleRefusesImplicitWorkerFallback(t *testing.T) {
+	r := &ChatRunner{agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{
+		"worker": {ID: "host-worker", Slug: "worker"},
+	}}}
 	agent, err := r.resolveRole("researcher")
-	if err != nil {
-		t.Fatalf("resolveRole(\"researcher\"): expected fallback to worker, got error %v", err)
+	if agent != nil || !errors.Is(err, errRoleResolveFailed) || !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("unknown explicit role: agent=%+v err=%v", agent, err)
 	}
-	if agent == nil || agent.Slug != "worker" {
-		t.Errorf("resolveRole(\"researcher\") returned slug=%q, want \"worker\"", agentSlugOrEmpty(agent))
+	if !strings.Contains(err.Error(), "researcher") {
+		t.Fatal(err)
 	}
-}
-
-// TestChatRunner_ResolveRoleFailsWhenFallbackMissing — when even the
-// fallback `worker` profile is missing, the runner surfaces the ORIGINAL
-// slug in the error so the deployment misconfiguration is alertable.
-func TestChatRunner_ResolveRoleFailsWhenFallbackMissing(t *testing.T) {
-	r := &ChatRunner{
-		agents: &stubAgentReaderForRunner{agents: map[string]*store.AgentProfile{}},
-	}
-	_, err := r.resolveRole("nonexistent")
-	if err == nil {
-		t.Fatal("expected error when neither slug nor fallback resolve, got nil")
-	}
-	if !errors.Is(err, errRoleResolveFailed) {
-		t.Errorf("error = %v, want wrapped errRoleResolveFailed", err)
-	}
-	if !strings.Contains(err.Error(), "nonexistent") {
-		t.Errorf("error %v: must surface original slug \"nonexistent\"", err)
-	}
-	if !strings.Contains(err.Error(), "fallback") {
-		t.Errorf("error %v: must mention fallback was also missing", err)
+	worker, err := r.resolveRole("worker")
+	if err != nil || worker == nil || worker.ID != "host-worker" {
+		t.Fatalf("explicit host: %+v %v", worker, err)
 	}
 }
 

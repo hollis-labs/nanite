@@ -64,6 +64,11 @@ func (nilDispatcher) Dispatch(_ context.Context, _, toolName string, _ map[strin
 	return nil, fmt.Errorf("no dispatcher configured")
 }
 
+// These private fixtures admit runner mechanics only. They do not implement
+// the application's verified caller, enrollment or durable execution owner.
+func (*stubDispatcher) AdmitPythonRun(context.Context, string) error { return nil }
+func (nilDispatcher) AdmitPythonRun(context.Context, string) error   { return nil }
+
 // --- basic execution tests ---
 
 func TestRunPythonSandbox_SimpleResult(t *testing.T) {

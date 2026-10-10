@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,6 +21,52 @@ import (
 
 type pythonDispatcherToolService struct {
 	execute func(context.Context, string, string, map[string]any) (*ToolResult, error)
+}
+
+func TestPythonToolDispatcherMissingOwnerRefusesBeforeLaunch(t *testing.T) {
+	calls := 0
+	tools := &pythonDispatcherToolService{execute: func(context.Context, string, string, map[string]any) (*ToolResult, error) {
+		calls++
+		return &ToolResult{Output: "effect"}, nil
+	}}
+	d := NewPythonToolDispatcher(tools)
+	ctx := mcp.WithCallerProfile(mcp.WithSessionID(context.Background(), "real-session"), "claimed-actor")
+	if _, err := d.Dispatch(ctx, "real-session", "write", nil); !errors.Is(err, selftools.ErrPythonExecutionUnavailable) {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	marker := filepath.Join(t.TempDir(), "must-not-run")
+	code := "open(" + strconv.Quote(marker) + ", 'w').write('effect')"
+	// Lookup would fail if run admission were not checked first.
+	t.Setenv("PATH", t.TempDir())
+	_, err := selftools.RunPythonSandbox(ctx, "real-session", code, nil, 0, 0, nil, d)
+	if !errors.Is(err, selftools.ErrPythonExecutionUnavailable) {
+		t.Fatalf("RunPythonSandbox: %v", err)
+	}
+	transport := &selftools.SelfToolsTransport{PythonDispatcher: d}
+	result, err := transport.CallTool(ctx, "python_run", map[string]any{"code": code})
+	if err != nil || result == nil || !result.IsError || !strings.Contains(result.Content[0].Text, selftools.ErrPythonExecutionUnavailable.Error()) {
+		t.Fatalf("CallTool: %+v %v", result, err)
+	}
+	if calls != 0 {
+		t.Fatalf("unsupported authority caused %d tool executions", calls)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("unexpected launch effect: %v", err)
+	}
+}
+
+func TestPythonToolDispatcherRefusesForeignSession(t *testing.T) {
+	calls := 0
+	tools := &pythonDispatcherToolService{execute: func(context.Context, string, string, map[string]any) (*ToolResult, error) {
+		calls++
+		return &ToolResult{}, nil
+	}}
+	d := newPythonFixtureDispatcher(tools)
+	ctx := mcp.WithSessionID(context.Background(), "actual-session")
+	_, err := d.Dispatch(ctx, "claimed-session", "write", nil)
+	if !errors.Is(err, selftools.ErrPythonExecutionUnavailable) || calls != 0 {
+		t.Fatalf("foreign session: %v calls=%d", err, calls)
+	}
 }
 
 func (s *pythonDispatcherToolService) Execute(ctx context.Context, agentID, toolName string, input map[string]any) (*ToolResult, error) {
@@ -40,6 +89,44 @@ func (*pythonDispatcherToolService) GetToolMeta(context.Context, string) (ToolMe
 
 func (*pythonDispatcherToolService) GetToolSchema(string) map[string]any { return nil }
 
+// Private host fixture for adapter composition, not a production issuer.
+type pythonOwnerFixture struct {
+	*pythonDispatcherToolService
+	verify func(context.Context, string) error
+}
+
+func (p *pythonOwnerFixture) VerifyPythonRun(ctx context.Context, session string) error {
+	if p.verify != nil {
+		return p.verify(ctx, session)
+	}
+	return nil
+}
+func (p *pythonOwnerFixture) ExecutePythonTool(ctx context.Context, _ string, name string, args map[string]any) (*ToolResult, error) {
+	return p.Execute(ctx, mcp.CallerProfileFromContext(ctx), name, args)
+}
+func newPythonFixtureDispatcher(tools *pythonDispatcherToolService) *PythonToolDispatcher {
+	return NewPythonToolDispatcher(&pythonOwnerFixture{pythonDispatcherToolService: tools})
+}
+
+func TestPythonToolDispatcherRefusesRevokedHostBinding(t *testing.T) {
+	stale := errors.New("binding revoked: private receipt must-not-disclose")
+	calls := 0
+	tools := &pythonDispatcherToolService{execute: func(context.Context, string, string, map[string]any) (*ToolResult, error) {
+		calls++
+		return &ToolResult{}, nil
+	}}
+	owner := &pythonOwnerFixture{pythonDispatcherToolService: tools, verify: func(context.Context, string) error { return stale }}
+	d := NewPythonToolDispatcher(owner)
+	ctx := mcp.WithSessionID(context.Background(), "actual-session")
+	_, err := d.Dispatch(ctx, "actual-session", "write", nil)
+	if !errors.Is(err, stale) || !errors.Is(err, selftools.ErrPythonExecutionUnavailable) || calls != 0 {
+		t.Fatalf("revoked binding: %v calls=%d", err, calls)
+	}
+	if strings.Contains(err.Error(), "must-not-disclose") {
+		t.Fatal("private host verification detail disclosed")
+	}
+}
+
 func TestPythonToolDispatcher(t *testing.T) {
 	t.Run("success uses caller identity and wraps output", func(t *testing.T) {
 		args := map[string]any{"query": "nanite"}
@@ -57,8 +144,8 @@ func TestPythonToolDispatcher(t *testing.T) {
 				return &ToolResult{Output: "broker result"}, nil
 			},
 		}
-		dispatcher := NewPythonToolDispatcher(tools)
-		ctx := mcp.WithCallerProfile(context.Background(), "agent-profile-1")
+		dispatcher := newPythonFixtureDispatcher(tools)
+		ctx := mcp.WithCallerProfile(mcp.WithSessionID(context.Background(), "session-1"), "agent-profile-1")
 
 		got, err := dispatcher.Dispatch(ctx, "session-1", "search_docs", args)
 		if err != nil {
@@ -77,7 +164,7 @@ func TestPythonToolDispatcher(t *testing.T) {
 			},
 		}
 
-		got, err := NewPythonToolDispatcher(tools).Dispatch(context.Background(), "session-1", "write_file", nil)
+		got, err := newPythonFixtureDispatcher(tools).Dispatch(mcp.WithSessionID(context.Background(), "session-1"), "session-1", "write_file", nil)
 		if got != nil {
 			t.Fatalf("result = %#v, want nil", got)
 		}
@@ -94,7 +181,7 @@ func TestPythonToolDispatcher(t *testing.T) {
 			},
 		}
 
-		got, err := NewPythonToolDispatcher(tools).Dispatch(context.Background(), "session-1", "search_docs", nil)
+		got, err := newPythonFixtureDispatcher(tools).Dispatch(mcp.WithSessionID(context.Background(), "session-1"), "session-1", "search_docs", nil)
 		if got != nil {
 			t.Fatalf("result = %#v, want nil", got)
 		}
@@ -104,7 +191,7 @@ func TestPythonToolDispatcher(t *testing.T) {
 	})
 }
 
-func TestPythonRunProductionCollaborators(t *testing.T) {
+func TestPythonRunHostPortComposition(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not found on PATH")
 	}
@@ -121,7 +208,7 @@ func TestPythonRunProductionCollaborators(t *testing.T) {
 			PythonPermChecker: permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{
 				Rules: []permissionlib.Rule{{Tool: "blocked_tool", Behavior: permissionlib.DecisionDeny}},
 			}),
-			PythonDispatcher: NewPythonToolDispatcher(tools),
+			PythonDispatcher: newPythonFixtureDispatcher(tools),
 		}
 
 		ctx := mcp.WithCallerProfile(mcp.WithSessionID(context.Background(), "session-denied"), "agent-denied")
@@ -168,7 +255,7 @@ except RuntimeError as exc:
 		}
 		transport := &selftools.SelfToolsTransport{
 			PythonPermChecker: permissionlib.NewEngine(permissionlib.ModeDefault, nil),
-			PythonDispatcher:  NewPythonToolDispatcher(tools),
+			PythonDispatcher:  newPythonFixtureDispatcher(tools),
 		}
 
 		ctx := mcp.WithCallerProfile(mcp.WithSessionID(context.Background(), "session-success"), "agent-success")

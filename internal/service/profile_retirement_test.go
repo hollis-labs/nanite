@@ -103,7 +103,10 @@ func TestProtectedProfileRetirementExportsAuditsAndSuppressesBootReingest(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := svc.RetireProtectedProfile(ctx, p.ID, receipt.ExportID, receipt.Digest, ProtectedProfileRetirementRequest{Actor: "test", Reason: "clean break"})
+	req := protectedResidualServiceKeep(t, st)
+	req.Actor = "test"
+	req.Reason = "clean break"
+	result, err := svc.RetireProtectedProfile(ctx, p.ID, receipt.ExportID, receipt.Digest, req)
 	if err != nil || !result.Retired {
 		t.Fatal(result, err)
 	}

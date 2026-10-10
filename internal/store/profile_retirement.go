@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	mesh "github.com/hollis-labs/substrate/mesh"
 )
 
 var (
@@ -18,11 +20,17 @@ var (
 	ErrProfileRetirementSchema    = errors.New("profile export dependency schema is unsupported")
 	ErrProfileRetirementConflict  = errors.New("profile state changed after export")
 	ErrProfileRetirementBound     = errors.New("profile export exceeds its bound")
+	ErrProfileRetirementKeep      = errors.New("protected retirement requires the exact approved historical General Chat")
+	ErrProfileRetirementActive    = errors.New("profile has active or uncertain runtime activity")
 )
 
 const ProfileExportMaxBytes = 16 << 20
 const profileExportMaxRows = 10000
 const profileExportSchemaVersion = 2
+
+// ProtectedProfileExportSchemaVersion includes referenced parent content. Editable format 2 is
+// deliberately unchanged; a protected format-2 archive needs a fresh export.
+const ProtectedProfileExportSchemaVersion = 3
 
 // ProfileRetirementExport contains a consistent, private export of the profile
 // and its affected relational records. It is data, never an import or grant.
@@ -128,6 +136,11 @@ func (s *Store) RetireExportedProfileWithAudit(ctx context.Context, id, digest s
 	}
 	defer rollbackUnlessCommitted(tx)
 	includeProtected := audit.ExportID != ""
+	if includeProtected {
+		if keepErr := checkProtectedRetirementKeep(ctx, tx, id, audit.Keep); keepErr != nil {
+			return keepErr
+		}
+	}
 	snapshot, err := profileRetirementSnapshot(ctx, tx, id, includeProtected)
 	if err != nil {
 		return err
@@ -144,13 +157,34 @@ func (s *Store) RetireExportedProfileWithAudit(ctx context.Context, id, digest s
 		return err
 	}
 	if audit.ExportID != "" {
+		if err := checkProtectedRetirementActivity(ctx, tx, profile); err != nil {
+			return err
+		}
 		audit.Digest = digest
 		if err := insertRetiredAgentProfileTx(ctx, tx, profile, audit); err != nil {
 			return err
 		}
+		// These historical children are included by the snapshot FK walk but
+		// have restrictive FKs. Remove only this profile's exported terminal
+		// links; the referenced teams/workflows and fresh actor graph survive.
+		for _, query := range []string{
+			`DELETE FROM team_run_members WHERE agent_id=?`,
+			`DELETE FROM team_run_member_intents WHERE agent_id=?`,
+		} {
+			if _, err := tx.ExecContext(ctx, query, id); err != nil {
+				return err
+			}
+		}
 	}
 	if err := deleteAgentTx(ctx, tx, profile); err != nil {
 		return err
+	}
+	if includeProtected {
+		// Recheck after cleanup as well: database triggers must not change the
+		// retained row while this transaction records/deletes another profile.
+		if keepErr := checkProtectedRetirementKeep(ctx, tx, id, audit.Keep); keepErr != nil {
+			return keepErr
+		}
 	}
 	return tx.Commit()
 }
@@ -183,6 +217,9 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string, inclu
 		return ProfileRetirementExport{}, ErrProfileRetirementProtected
 	}
 	out := ProfileRetirementExport{SchemaVersion: profileExportSchemaVersion, ProfileID: profile.ID, Slug: profile.Slug, Revision: profile.Revision, Tables: map[string]ProfileExportTable{}}
+	if includeProtected {
+		out.SchemaVersion = ProtectedProfileExportSchemaVersion
+	}
 	// Discover declared children so cascading records are exported as well as
 	// the explicit cleanup list. Schema identifiers come only from SQLite.
 	rows, err := tx.QueryContext(ctx, "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -236,6 +273,13 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string, inclu
 	}
 	predicates["pending_reflexes"] = []string{`"target_agent_id" = ?`}
 	predicates["durable_agent_instances"] = []string{`"profile_id" = ?`}
+	if includeProtected {
+		// Referenced parents survive deletion, but are part of the exported
+		// behavior/provenance and therefore the same-transaction digest CAS.
+		for table, column := range map[string]string{"roles": "role_id", "consumers": "consumer_id", "models": "model_id"} {
+			predicates[table] = []string{`"id" IN (SELECT ` + quoteRetirementName(column) + ` FROM "agent_profiles" WHERE "id" = ?)`}
+		}
+	}
 	// Each path contains one bound profile ID; cycle avoidance and an edge
 	// budget bound both the schema walk and nested query size.
 	paths := 0
@@ -337,6 +381,68 @@ func profileRetirementSnapshot(ctx context.Context, tx *sql.Tx, id string, inclu
 	}
 	_, err = out.Digest()
 	return out, err
+}
+
+func checkProtectedRetirementKeep(ctx context.Context, tx *sql.Tx, target string, keep ProtectedRetirementKeep) error {
+	if keep.ID == "" || keep.Revision == "" || keep.ID == target || keep.DefinitionRef.ID == "" || keep.DefinitionRef.Revision == "" || keep.DefinitionRef.Digest == "" || keep.SystemPrompt == "" {
+		return ErrProfileRetirementKeep
+	}
+	p, err := getHistoricalAgentProfile(ctx, tx, keep.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrProfileRetirementKeep
+	}
+	if err != nil {
+		return err
+	}
+	var settings struct {
+		Pin struct {
+			ID       string `json:"definition_id"`
+			Revision string `json:"revision"`
+			Digest   string `json:"semantic_digest"`
+		} `json:"provisioned_definition_ref"`
+	}
+	if err := json.Unmarshal([]byte(p.Settings), &settings); err != nil {
+		return ErrProfileRetirementKeep
+	}
+	pin := mesh.DefinitionRef{ID: settings.Pin.ID, Revision: settings.Pin.Revision, Digest: settings.Pin.Digest}
+	if p.Revision != keep.Revision || pin != keep.DefinitionRef || p.SystemPrompt != keep.SystemPrompt {
+		return ErrProfileRetirementKeep
+	}
+	return nil
+}
+
+// Historical markers can refuse retirement; they never enroll an actor or
+// authorize execution. Unknown/nonterminal states are not evidence of a stop.
+// The live operator must quiesce the old runtime before deploying the fresh cut.
+func checkProtectedRetirementActivity(ctx context.Context, tx *sql.Tx, p *AgentProfile) error {
+	const sessions = `SELECT session_id FROM session_agents WHERE agent_id=?1
+		UNION SELECT current_session_id FROM durable_agent_instances WHERE profile_id=?1 AND current_session_id<>''
+		UNION SELECT r.session_id FROM durable_agent_instance_sessions r JOIN durable_agent_instances d ON d.id=r.instance_id WHERE d.profile_id=?1
+		UNION SELECT session_id FROM team_run_members WHERE agent_id=?1`
+	queries := []string{
+		`SELECT EXISTS(SELECT 1 FROM durable_agent_instances WHERE profile_id=?1 AND status NOT IN ('sleeping','stopped','failed','archived'))`,
+		`SELECT EXISTS(SELECT 1 FROM agent_runtime WHERE (agent_profile=?1 OR agent_profile=?2 OR id IN (` + sessions + `) OR parent_session_id IN (` + sessions + `)) AND state NOT IN ('done','failed'))`,
+		`SELECT EXISTS(SELECT 1 FROM subagent_runs WHERE (parent_agent_id=?1 OR role=?2 OR parent_session_id IN (` + sessions + `) OR child_session_id IN (` + sessions + `)) AND status NOT IN ('completed','failed','canceled','rejected','over_budget'))`,
+		`SELECT EXISTS(SELECT 1 FROM team_run_members WHERE agent_id=?1 AND status NOT IN ('stopped','failed','replaced'))`,
+		`SELECT EXISTS(SELECT 1 FROM workflow_runs w JOIN team_run_members m ON m.workflow_run_id=w.id WHERE m.agent_id=?1 AND (w.status NOT IN ('completed','failed','canceled') OR (w.runtime_status IS NOT NULL AND w.runtime_status NOT IN ('completed','failed','canceled'))))`,
+		`SELECT EXISTS(SELECT 1 FROM loop_runs l JOIN loop_run_iterations i ON i.loop_run_id=l.id JOIN team_run_members m ON m.workflow_run_id=i.workflow_run_id WHERE m.agent_id=?1 AND l.status NOT IN ('completed','failed','canceled'))`,
+		`SELECT EXISTS(SELECT 1 FROM team_run_member_intents i LEFT JOIN team_run_launches l ON l.idempotency_key=i.idempotency_key LEFT JOIN workflow_runs w ON w.id=l.workflow_run_id WHERE i.agent_id=?1 AND (w.id IS NULL OR w.status NOT IN ('completed','failed','canceled')))`,
+	}
+	for _, query := range queries {
+		var active bool
+		// Numbered parameters reuse the exact historical ID in nested predicates.
+		args := []any{p.ID}
+		if strings.Contains(query, "?2") {
+			args = append(args, p.Slug)
+		}
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&active); err != nil {
+			return fmt.Errorf("check historical retirement activity: %w", err)
+		}
+		if active {
+			return ErrProfileRetirementActive
+		}
+	}
+	return nil
 }
 
 func deleteAgentTx(ctx context.Context, tx *sql.Tx, agent *AgentProfile) error {

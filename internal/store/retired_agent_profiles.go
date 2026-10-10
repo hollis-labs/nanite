@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	mesh "github.com/hollis-labs/substrate/mesh"
 )
 
 var ErrAgentProfileRetired = errors.New("agent profile has been retired")
@@ -29,6 +31,29 @@ type RetireAgentProfileAudit struct {
 	Digest   string
 	Actor    string
 	Reason   string
+	Keep     ProtectedRetirementKeep
+}
+
+// ProtectedRetirementKeep is host-verified historical retention data. The pin
+// and prompt are resolved by the service, never accepted from retirement JSON.
+// This is not a fresh host setting, actor identity or grant.
+type ProtectedRetirementKeep struct {
+	ID            string
+	Revision      string
+	DefinitionRef mesh.DefinitionRef
+	SystemPrompt  string
+}
+
+// GetRetiredAgentProfile retrieves the same durable ledger used by admission.
+// Completion recovery must match ID, export ID and digest, not merely a slug.
+func (s *Store) GetRetiredAgentProfile(ctx context.Context, id string) (*RetiredAgentProfile, error) {
+	var r RetiredAgentProfile
+	err := s.DB.QueryRowContext(ctx, `SELECT id, slug, name, source, plugin_id, class, export_id, digest, actor, reason, retired_at
+		FROM retired_agent_profiles WHERE id = ?`, id).Scan(&r.ID, &r.Slug, &r.Name, &r.Source, &r.PluginID, &r.Class, &r.ExportID, &r.Digest, &r.Actor, &r.Reason, &r.RetiredAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &r, err
 }
 
 func (s *Store) IsAgentProfileRetired(ctx context.Context, id, slug string) (bool, error) {

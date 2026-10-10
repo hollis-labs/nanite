@@ -1,172 +1,119 @@
 package api
 
-// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md).
-
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestAgentContextResolversAPI_CRUD_EndToEnd(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agent := &store.AgentProfile{Name: "Resolver Agent", Slug: "resolver-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
+const retiredMutableAPIMessage = "Mutable profile operations are retired; author a pinned definition and configure host settings"
 
-	// POST /api/agents/{id}/context-resolvers
-	createBody, _ := json.Marshal(CreateAgentContextResolverRequest{
-		SlotName: "weather",
-		Kind:     "cmd",
-		Run:      "printf 72F",
-		Timeout:  "5s",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/context-resolvers", bytes.NewReader(createBody))
+func retiredAPIRequest(t *testing.T, mux http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST context-resolvers: expected 201, got %d; body: %s", w.Code, w.Body.String())
-	}
-	var created store.AgentContextResolver
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created resolver: %v", err)
-	}
-	if created.ID == "" {
-		t.Fatal("expected resolver ID to be set")
-	}
-	if !created.Enabled {
-		t.Error("expected Enabled to default true when omitted from the request")
-	}
+	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(w, r)
+	return w
+}
 
-	// A malformed create (bad kind) is rejected with 400.
-	badBody, _ := json.Marshal(CreateAgentContextResolverRequest{SlotName: "bad", Kind: "role_summary"})
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/context-resolvers", bytes.NewReader(badBody))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("POST context-resolvers (bad kind): expected 400, got %d; body: %s", w.Code, w.Body.String())
+func requireRetiredAPI(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusGone {
+		t.Fatalf("retired public operation returned %d: %s", w.Code, w.Body.String())
 	}
-
-	// GET /api/agents/{id}/context-resolvers
-	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/context-resolvers", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET context-resolvers: expected 200, got %d", w.Code)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
 	}
-	var list []store.AgentContextResolver
-	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(list) != 1 {
-		t.Fatalf("expected 1 resolver, got %d", len(list))
-	}
-
-	// GET /api/agents/{id}/context-resolvers/{resolverId}
-	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/context-resolvers/"+created.ID, nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET context-resolvers/{id}: expected 200, got %d; body: %s", w.Code, w.Body.String())
-	}
-
-	// GET for a nonexistent id -> 404.
-	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/context-resolvers/does-not-exist", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GET context-resolvers/{missing}: expected 404, got %d", w.Code)
-	}
-
-	// PATCH /api/agents/{id}/context-resolvers/{resolverId}
-	patchBody, _ := json.Marshal(map[string]any{"run": "printf 80F", "enabled": false})
-	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agent.ID+"/context-resolvers/"+created.ID, bytes.NewReader(patchBody))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH context-resolvers/{id}: expected 200, got %d; body: %s", w.Code, w.Body.String())
-	}
-	var updated store.AgentContextResolver
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("decode updated resolver: %v", err)
-	}
-	if updated.Run != "printf 80F" || updated.Enabled {
-		t.Errorf("PATCH did not apply: %+v", updated)
-	}
-	// Untouched fields survive the partial update.
-	if updated.SlotName != "weather" {
-		t.Errorf("partial update should not have touched slot_name: got %q", updated.SlotName)
-	}
-
-	// A disabled resolver drops out of the boot-time enabled listing.
-	enabled, err := a.store.ListEnabledAgentContextResolvers(req.Context(), agent.ID)
-	if err != nil {
-		t.Fatalf("ListEnabledAgentContextResolvers: %v", err)
-	}
-	if len(enabled) != 0 {
-		t.Fatalf("expected 0 enabled resolvers after disabling, got %d", len(enabled))
-	}
-
-	// DELETE /api/agents/{id}/context-resolvers/{resolverId}
-	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+agent.ID+"/context-resolvers/"+created.ID, nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DELETE context-resolvers/{id}: expected 200, got %d; body: %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/context-resolvers/"+created.ID, nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GET context-resolvers/{id} after delete: expected 404, got %d", w.Code)
+	if len(body) != 1 || body["error"] != retiredMutableAPIMessage {
+		t.Fatalf("retired operation body=%v", body)
 	}
 }
 
-// TestAgentContextResolversAPI_CrossAgentAccessRejected ensures a resolver
-// created under one agent can't be patched or deleted through a different
-// agent's path segment -- mirrors handlePatchAgentReflex /
-// handleDeleteAgentReflex's own cross-agent guard.
-func TestAgentContextResolversAPI_CrossAgentAccessRejected(t *testing.T) {
+// These private raw rows are retained history, never enrolled fresh actors.
+func retiredAPIHistoricalProfile(t *testing.T, a *testAPI, id, source string) {
+	t.Helper()
+	if _, err := a.store.DB.ExecContext(context.Background(), `INSERT INTO agent_profiles(id,name,slug,system_prompt,source) VALUES(?,?,?,?,?)`, id, "Historical fixture", id, "Retained private historical prompt", source); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func retiredAPISnapshot(t *testing.T, a *testAPI, query string) [][]any {
+	t.Helper()
+	rows, err := a.store.DB.QueryContext(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot [][]any
+	for rows.Next() {
+		cells := make([]any, len(columns))
+		targets := make([]any, len(columns))
+		for i := range cells {
+			targets[i] = &cells[i]
+		}
+		if err = rows.Scan(targets...); err != nil {
+			t.Fatal(err)
+		}
+		for i, cell := range cells {
+			if b, ok := cell.([]byte); ok {
+				cells[i] = append([]byte(nil), b...)
+			}
+		}
+		snapshot = append(snapshot, cells)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func retiredAPIHistoryUnchanged(t *testing.T, a *testAPI, query string, before [][]any) {
+	t.Helper()
+	if after := retiredAPISnapshot(t, a, query); !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused public operation changed %s: before=%v after=%v", query, before, after)
+	}
+}
+
+func TestRetiredContextResolverPublicMuxRefusesAllOperationsAndPreservesHistory(t *testing.T) {
 	a, mux := newTestAPI(t)
-	agentA := &store.AgentProfile{Name: "Agent A", Slug: "resolver-agent-a", SystemPrompt: "x", Class: "advisor"}
-	agentB := &store.AgentProfile{Name: "Agent B", Slug: "resolver-agent-b", SystemPrompt: "x", Class: "advisor"}
-	if err := a.store.CreateAgent(context.Background(), agentA); err != nil {
-		t.Fatalf("CreateAgent A: %v", err)
+	const owner = "historical-resolver-owner"
+	retiredAPIHistoricalProfile(t, a, owner, "user")
+	retiredAPIHistoricalProfile(t, a, "historical-other-owner", "internal")
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_context_resolvers(id,agent_id,slot_name,kind,run,enabled,created_at,updated_at) VALUES('retained-resolver',?,'command','cmd','echo historical-private',1,'retained-created','retained-updated')`, owner); err != nil {
+		t.Fatal(err)
 	}
-	if err := a.store.CreateAgent(context.Background(), agentB); err != nil {
-		t.Fatalf("CreateAgent B: %v", err)
+	const query = `SELECT * FROM agent_context_resolvers ORDER BY id`
+	before := retiredAPISnapshot(t, a, query)
+	for _, agentID := range []string{owner, "historical-other-owner", "missing-agent"} {
+		base := "/api/agents/" + agentID + "/context-resolvers"
+		for _, c := range []struct{ method, path, body string }{
+			{"GET", base, ""}, {"GET", base + "/retained-resolver", ""}, {"GET", base + "/missing", ""},
+			{"POST", base, `{"slot_name":"new","kind":"cmd","run":"echo new"}`},
+			{"POST", base, "not json"}, {"POST", base, `{"kind":"role_summary"}`},
+			{"PATCH", base + "/retained-resolver", `{"run":"changed","enabled":false}`},
+			{"PATCH", base + "/retained-resolver", "not json"}, {"DELETE", base + "/retained-resolver", ""},
+		} {
+			t.Run(agentID+"/"+c.method+c.path, func(t *testing.T) {
+				requireRetiredAPI(t, retiredAPIRequest(t, mux, c.method, c.path, c.body))
+				retiredAPIHistoryUnchanged(t, a, query, before)
+			})
+		}
 	}
-
-	createBody, _ := json.Marshal(CreateAgentContextResolverRequest{SlotName: "weather", Kind: "cmd", Run: "printf hi"})
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentA.ID+"/context-resolvers", bytes.NewReader(createBody))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST context-resolvers: expected 201, got %d; body: %s", w.Code, w.Body.String())
+	// The mux still distinguishes unsupported methods and unregistered paths.
+	if w := retiredAPIRequest(t, mux, "PUT", "/api/agents/"+owner+"/context-resolvers/retained-resolver", `{}`); w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("unregistered resolver method: %d %s", w.Code, w.Body.String())
 	}
-	var created store.AgentContextResolver
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created resolver: %v", err)
-	}
-
-	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agentB.ID+"/context-resolvers/"+created.ID, bytes.NewReader([]byte(`{"run":"printf bye"}`)))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("PATCH cross-agent: expected 400, got %d; body: %s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+agentB.ID+"/context-resolvers/"+created.ID, nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("DELETE cross-agent: expected 400, got %d; body: %s", w.Code, w.Body.String())
+	if w := retiredAPIRequest(t, mux, "GET", "/api/unregistered-context-resolvers", ""); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown route: %d %s", w.Code, w.Body.String())
 	}
 }

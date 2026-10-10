@@ -1,313 +1,48 @@
 package api
 
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
+import "testing"
 
-	"github.com/hollis-labs/nanite/internal/store"
-)
-
-func TestReflexesAPI_CreatePatchDeleteAgentReflex(t *testing.T) {
+func TestRetiredReflexPublicMuxCannotMutateExecuteOrReviewHistoricalRules(t *testing.T) {
 	a, mux := newTestAPI(t)
-	agent := &store.AgentProfile{Name: "Reflex Agent", Slug: "reflex-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	const owner = "historical-reflex-api"
+	retiredAPIHistoricalProfile(t, a, owner, "user")
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_reflexes(id,agent_id,name,trigger_kind,trigger_spec,action_kind,action_spec,status,priority,fired_count,last_fired_at,created_by,opt_out_allowed,provenance_tier,recurrence_override_seconds) VALUES('historical-reflex',?,'edited','event','{"name":"probe"}','inject_reminder','{"body":"private retained rule"}','paused',77,9,'2026-10-01','operator',1,'operator',300)`, owner); err != nil {
+		t.Fatal(err)
 	}
-
-	body := bytes.NewBufferString(`{
-		"name":"custom-reflex",
-		"trigger_kind":"predicate",
-		"trigger_spec":"{\"kind\":\"tool_calls_window\",\"window\":2,\"op\":\"=\",\"value\":0}",
-		"action_kind":"inject_reminder",
-		"action_spec":"{\"body\":\"ground\"}",
-		"priority":5
-	}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes", body)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create reflex = %d body=%s", w.Code, w.Body.String())
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_reflex_opt_outs(agent_id,reflex_id) VALUES(?,'historical-reflex')`, owner); err != nil {
+		t.Fatal(err)
 	}
-	var created store.AgentReflex
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created: %v", err)
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO pending_reflexes(id,proposed_by,target_agent_id,name,trigger_kind,trigger_spec,action_kind,action_spec,rationale) VALUES('historical-pending','private-fixture',?,'pending','event','{"name":"probe"}','inject_reminder','{"body":"private pending"}','retained rationale')`, owner); err != nil {
+		t.Fatal(err)
 	}
-
-	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agent.ID+"/reflexes/"+created.ID, bytes.NewBufferString(`{"priority":9}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("patch reflex = %d body=%s", w.Code, w.Body.String())
+	queries := []string{`SELECT * FROM agent_reflexes ORDER BY id`, `SELECT * FROM agent_reflex_opt_outs ORDER BY agent_id,reflex_id`, `SELECT * FROM pending_reflexes ORDER BY id`, `SELECT * FROM plugin_reflex_seed_bindings ORDER BY plugin_id,seed_id,agent_id`, `SELECT * FROM actor_reflex_state ORDER BY actor_uri,bundle_digest,rule_id`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = retiredAPISnapshot(t, a, q)
 	}
-
-	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+agent.ID+"/reflexes/"+created.ID, nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete reflex = %d body=%s", w.Code, w.Body.String())
-	}
-}
-
-// TestReflexesAPI_RecurrenceOverrideSecondsSetPatchClear pins the create/
-// patch wiring added for migration 124's cascade knob
-// (agent_reflexes.recurrence_override_seconds): a positive value sets an
-// explicit override at create time, PATCH with a different positive value
-// changes it, and PATCH with 0 clears it back to nil ("inherit the
-// kind/system default") -- the documented sentinel, since a zero-second
-// recurrence is never a meaningful override.
-func TestReflexesAPI_RecurrenceOverrideSecondsSetPatchClear(t *testing.T) {
-	a, mux := newTestAPI(t)
-	agent := &store.AgentProfile{Name: "Recurrence Agent", Slug: "recurrence-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.store.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	body := bytes.NewBufferString(`{
-		"name":"recurring-reflex",
-		"trigger_kind":"predicate",
-		"trigger_spec":"{\"kind\":\"tool_calls_window\",\"window\":2,\"op\":\"=\",\"value\":0}",
-		"action_kind":"inject_reminder",
-		"action_spec":"{\"body\":\"ground\"}",
-		"priority":5,
-		"recurrence_override_seconds":300
-	}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes", body)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create reflex = %d body=%s", w.Code, w.Body.String())
-	}
-	var created store.AgentReflex
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created: %v", err)
-	}
-	if created.RecurrenceOverrideSeconds == nil || *created.RecurrenceOverrideSeconds != 300 {
-		t.Fatalf("expected recurrence_override_seconds=300 after create, got %v", created.RecurrenceOverrideSeconds)
-	}
-
-	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agent.ID+"/reflexes/"+created.ID, bytes.NewBufferString(`{"recurrence_override_seconds":600}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("patch reflex = %d body=%s", w.Code, w.Body.String())
-	}
-	var patched store.AgentReflex
-	if err := json.NewDecoder(w.Body).Decode(&patched); err != nil {
-		t.Fatalf("decode patched: %v", err)
-	}
-	if patched.RecurrenceOverrideSeconds == nil || *patched.RecurrenceOverrideSeconds != 600 {
-		t.Fatalf("expected recurrence_override_seconds=600 after patch, got %v", patched.RecurrenceOverrideSeconds)
-	}
-
-	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+agent.ID+"/reflexes/"+created.ID, bytes.NewBufferString(`{"recurrence_override_seconds":0}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("patch reflex (clear) = %d body=%s", w.Code, w.Body.String())
-	}
-	var cleared store.AgentReflex
-	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
-		t.Fatalf("decode cleared: %v", err)
-	}
-	if cleared.RecurrenceOverrideSeconds != nil {
-		t.Fatalf("expected recurrence_override_seconds=nil after patching 0 (clear sentinel), got %v", *cleared.RecurrenceOverrideSeconds)
-	}
-}
-
-// TestReflexesAPI_ListWorksForInternalBuiltinAgent replaces the pre-
-// TASKS/adhoc/01-eliminate-file-based-agent-runtime.md
-// TestReflexesAPI_ListSupportsFileBackedAgent, which asserted
-// GET /api/agents/file-default/reflexes resolved through the now-removed
-// in-memory file-definition registry. The 9 internal builtin profiles
-// (including "default") are real agent_profiles rows with real IDs from
-// boot-time AutoIngestAgents now — there is no more "file-<slug>" alias to
-// address them by, so this pins the equivalent, still-real requirement
-// (listing reflexes for an internal/embedded agent works, same as any
-// other) against the agent's actual ID.
-func TestReflexesAPI_ListWorksForInternalBuiltinAgent(t *testing.T) {
-	a, mux := newTestAPI(t)
-
-	defaultAgent, err := a.store.GetAgentBySlug(context.Background(), "default")
-	if err != nil || defaultAgent == nil {
-		t.Fatalf("GetAgentBySlug(default): %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+defaultAgent.ID+"/reflexes", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("list reflexes for internal builtin agent = %d body=%s", w.Code, w.Body.String())
-	}
-
-	var rows []store.AgentReflex
-	if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
-		t.Fatalf("decode reflexes: %v", err)
-	}
-	if rows == nil {
-		t.Fatal("expected JSON array, got null")
-	}
-}
-
-func TestReflexesAPI_PendingReviewAndValidate(t *testing.T) {
-	a, mux := newTestAPI(t)
-	pendingID, err := a.store.InsertPendingReflex(context.Background(), store.PendingReflex{
-		ProposedBy:  "test",
-		Name:        "proposed",
-		TriggerKind: store.ReflexTriggerPredicate,
-		TriggerSpec: `{"kind":"tool_calls_window","window":2,"op":"=","value":0}`,
-		ActionKind:  store.ReflexActionInjectReminder,
-		ActionSpec:  `{"body":"ground"}`,
-		Rationale:   "test proposal",
-	})
-	if err != nil {
-		t.Fatalf("InsertPendingReflex: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/pending/reflexes?status=pending", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("list pending = %d body=%s", w.Code, w.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/api/pending/reflexes/"+pendingID+"/approve", bytes.NewBufferString(`{"reviewed_by":"operator"}`))
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("approve pending = %d body=%s", w.Code, w.Body.String())
-	}
-
-	body := bytes.NewBufferString(`{
-		"trigger_kind":"predicate",
-		"trigger_spec":"{\"kind\":\"tool_calls_window\",\"window\":2,\"op\":\"=\",\"value\":0}",
-		"action_kind":"inject_reminder",
-		"action_spec":"{\"body\":\"ground\"}",
-		"state":{"messages":[{"tool_calls":0},{"tool_calls":0}]}
-	}`)
-	req = httptest.NewRequest(http.MethodPost, "/api/reflexes/validate", body)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("validate reflex = %d body=%s", w.Code, w.Body.String())
-	}
-	var got struct {
-		Valid bool `json:"valid"`
-		Fired bool `json:"fired"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-		t.Fatalf("decode validate: %v", err)
-	}
-	if !got.Valid || !got.Fired {
-		t.Fatalf("validate = %+v, want valid and fired", got)
-	}
-}
-
-// TestReflexesAPI_OptOutOfClassWideReflex is the Done-means test for
-// CW-20260918-0023: the opt-out store functions (SetAgentReflexOptOut/
-// ClearAgentReflexOptOut) existed with zero callers before this endpoint --
-// this pins the actual write path end to end. Opting out of a class-wide
-// reflex with opt_out_allowed=true removes it from the agent's resolved
-// list; a reflex with opt_out_allowed=false rejects the opt-out with 400;
-// clearing the opt-out restores the reflex to the resolved list.
-func TestReflexesAPI_OptOutOfClassWideReflex(t *testing.T) {
-	a, mux := newTestAPI(t)
-	ctx := context.Background()
-	agent := &store.AgentProfile{Name: "Opt Out Agent", Slug: "opt-out-agent", SystemPrompt: "x", Class: "advisor"}
-	if err := a.store.CreateAgent(ctx, agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	optable, err := a.store.InsertAgentReflex(ctx, store.AgentReflex{
-		ClassTag:      "advisor",
-		Name:          "class-wide-optable",
-		TriggerKind:   store.ReflexTriggerPredicate,
-		TriggerSpec:   `{"kind":"tool_calls_window","window":2,"op":"=","value":0}`,
-		ActionKind:    store.ReflexActionInjectReminder,
-		ActionSpec:    `{"body":"ground"}`,
-		CreatedBy:     "system",
-		OptOutAllowed: true,
-	})
-	if err != nil {
-		t.Fatalf("InsertAgentReflex(optable): %v", err)
-	}
-	notOptable, err := a.store.InsertAgentReflex(ctx, store.AgentReflex{
-		ClassTag:      "advisor",
-		Name:          "class-wide-not-optable",
-		TriggerKind:   store.ReflexTriggerPredicate,
-		TriggerSpec:   `{"kind":"tool_calls_window","window":2,"op":"=","value":0}`,
-		ActionKind:    store.ReflexActionInjectReminder,
-		ActionSpec:    `{"body":"ground"}`,
-		CreatedBy:     "system",
-		OptOutAllowed: false,
-	})
-	if err != nil {
-		t.Fatalf("InsertAgentReflex(notOptable): %v", err)
-	}
-
-	listIncludes := func(id string) bool {
-		req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agent.ID+"/reflexes", nil)
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("list reflexes = %d body=%s", w.Code, w.Body.String())
+	for _, agentID := range []string{owner, "missing-agent", "file-default"} {
+		base := "/api/agents/" + agentID + "/reflexes"
+		for _, c := range []struct{ method, path, body string }{
+			{"GET", base, ""}, {"POST", base, `{"name":"new","trigger_kind":"event","trigger_spec":"{}","action_kind":"inject_reminder","action_spec":"{}","recurrence_override_seconds":300}`},
+			{"PATCH", base + "/historical-reflex", `{"priority":9,"recurrence_override_seconds":600}`},
+			{"PATCH", base + "/historical-reflex", `{"recurrence_override_seconds":0}`},
+			{"PATCH", base + "/historical-reflex", "not json"}, {"DELETE", base + "/historical-reflex", ""},
+			{"POST", base + "/historical-reflex/opt-out", ""}, {"DELETE", base + "/historical-reflex/opt-out", ""},
+		} {
+			requireRetiredAPI(t, retiredAPIRequest(t, mux, c.method, c.path, c.body))
 		}
-		var rows []store.AgentReflex
-		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
-			t.Fatalf("decode reflexes: %v", err)
-		}
-		for _, row := range rows {
-			if row.ID == id {
-				return true
-			}
-		}
-		return false
 	}
-
-	if !listIncludes(optable) {
-		t.Fatalf("expected class-wide optable reflex to be resolved before opt-out")
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/api/pending/reflexes?status=pending", ""},
+		{"POST", "/api/pending/reflexes/historical-pending/approve", `{"reviewed_by":"operator"}`},
+		{"POST", "/api/pending/reflexes/historical-pending/reject", `{"reviewed_by":"operator","reason":"changed"}`},
+		{"POST", "/api/pending/reflexes/missing/approve", "not json"},
+		{"POST", "/api/reflexes/validate", `{"trigger_kind":"predicate","trigger_spec":"{}","action_kind":"dispatch_to_agent","action_spec":"{}","state":{"tool_calls":0}}`},
+		{"POST", "/api/reflexes/validate", "not json"},
+	} {
+		requireRetiredAPI(t, retiredAPIRequest(t, mux, c.method, c.path, c.body))
 	}
-
-	// opt_out_allowed=false rejects the opt-out.
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes/"+notOptable+"/opt-out", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("opt-out of non-optable reflex = %d, want 400; body=%s", w.Code, w.Body.String())
-	}
-
-	// opt_out_allowed=true succeeds and removes it from the resolved list.
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes/"+optable+"/opt-out", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("opt-out of optable reflex = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	if listIncludes(optable) {
-		t.Fatalf("expected class-wide optable reflex to be excluded after opt-out")
-	}
-
-	// Re-opting-out is idempotent.
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/"+agent.ID+"/reflexes/"+optable+"/opt-out", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("repeat opt-out = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-
-	// Clearing the opt-out restores it.
-	req = httptest.NewRequest(http.MethodDelete, "/api/agents/"+agent.ID+"/reflexes/"+optable+"/opt-out", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("clear opt-out = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	if !listIncludes(optable) {
-		t.Fatalf("expected class-wide optable reflex to be resolved again after clearing opt-out")
+	for i, q := range queries {
+		retiredAPIHistoryUnchanged(t, a, q, before[i])
 	}
 }
-
-// TestValidateReflexDefinition_ProvenanceTierGate is the regression test for

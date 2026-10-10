@@ -1,181 +1,191 @@
 package loop
 
-// TASKS/loops/11-loop-event-predicate-trigger.md -- the required
-// end-to-end test (Done-means): a real LoopRun parked in
-// waiting_on_escalation ("WAIT status" -- see this task's own Work Log
-// for why that's the real, collapsed status literal, not a distinct
-// "wait" one) with a real resume_loop_run reflex attached, its event
-// trigger becoming true, and LoopEngine.Resume genuinely being called as
-// a result via the real evaluation entry point
-// (service.EvaluateLoopRunResumeReflexes) -- never by calling
-// eng.Resume/eng.ResumeLoopRun directly from the test itself.
-//
-// Lives in this package (not internal/service, where
-// EvaluateLoopRunResumeReflexes is actually declared) because it needs a
-// real *LoopEngine as the service.LoopRunResumer -- internal/loop already
-// imports internal/service (task 08), so this test file can freely call
-// service.EvaluateLoopRunResumeReflexes and pass a real *LoopEngine value
-// into it; internal/service's own tests cannot do the reverse (that's the
-// entire reason LoopRunResumer is an interface in the first place -- see
-// internal/loop/reflex_resume.go's package doc comment).
-
 import (
 	"context"
-	"log/slog"
+	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
-	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-func TestResumeLoopRunReflex_FiresLoopEngineResume_ViaRealEvaluationCadence(t *testing.T) {
-	ctx := context.Background()
+func TestResumeLoopRunReflex_RetainedRuleCannotResume(t *testing.T) {
+	st, eng, exec, loopRunID := retainedWaitingLoop(t)
+	seedRetainedResumeRule(t, st, loopRunID, store.ReflexTriggerEvent, `{"name":"external_check_passed"}`)
+	before := retainedLoopResumeState(t, st)
+	engine := reflexes.NewEngine(st, nil)
+	for _, state := range []reflexes.State{
+		{},
+		{Events: []reflexes.EventSignal{{EventType: "external_check_passed", Category: "test"}}},
+	} {
+		fired, candidates, err := service.EvaluateLoopRunResumeReflexes(t.Context(), engine, eng, loopRunID, state)
+		if !errors.Is(err, store.ErrImmutableAgentProfile) || fired || candidates {
+			t.Fatalf("retained evaluation: fired=%v candidates=%v err=%v", fired, candidates, err)
+		}
+		if exec.calls != 0 {
+			t.Fatalf("refused evaluation executed %d steps", exec.calls)
+		}
+		assertRetainedLoopResumeState(t, st, before)
+	}
+}
+
+type refusedLoopResumer struct{ calls int }
+
+func (r *refusedLoopResumer) ResumeLoopRun(context.Context, string) error {
+	r.calls++
+	return nil
+}
+
+func TestResumeLoopRunReflex_RefusesBeforeDependencies(t *testing.T) {
+	resumer := &refusedLoopResumer{}
+	for _, runID := range []string{"", "missing-retained-loop"} {
+		fired, candidates, err := service.EvaluateLoopRunResumeReflexes(t.Context(), nil, resumer, runID, reflexes.State{})
+		if !errors.Is(err, store.ErrImmutableAgentProfile) || fired || candidates || resumer.calls != 0 {
+			t.Fatalf("missing dependencies: fired=%v candidates=%v calls=%d err=%v", fired, candidates, resumer.calls, err)
+		}
+	}
+}
+
+func TestResumeLoopRunReflex_EventTriggerRemainsPure(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		state reflexes.State
+		want  bool
+	}{
+		{"absent", reflexes.State{}, false},
+		{"other", reflexes.State{Events: []reflexes.EventSignal{{EventType: "other"}}}, false},
+		{"matched", reflexes.State{Events: []reflexes.EventSignal{{EventType: "external_check_passed"}}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := reflexes.EvaluateTrigger(store.ReflexTriggerEvent, `{"name":"external_check_passed"}`, test.state)
+			if err != nil || got != test.want {
+				t.Fatalf("pure event trigger=%v,%v want %v", got, err, test.want)
+			}
+		})
+	}
+}
+
+// Retained journal rows are constructed in a private DB without launching an
+// actor or enrolling a mutable rule. The real engine remains wired so an
+// accidental resume can change rows or reach the step executor.
+func retainedWaitingLoop(t *testing.T) (*store.Store, *LoopEngine, *fakeStepExecutor, string) {
+	t.Helper()
 	exec := &fakeStepExecutor{}
 	st, registry, eng := newLoopEngineTestFixtures(t, exec)
-	profile := createTestLoopAgentProfile(t, st, "loop-agent-resume-reflex")
-
-	goal := store.Goal{Intent: "a target only confirmable by an external check"}
-	if err := goal.SetAcceptanceCriteria([]string{"tests pass"}); err != nil {
-		t.Fatalf("SetAcceptanceCriteria: %v", err)
-	}
-	if err := st.CreateGoal(ctx, &goal); err != nil {
-		t.Fatalf("CreateGoal: %v", err)
-	}
-
-	// Iteration 3 (the one Resume launches) is what actually produces the
-	// qualifying goal evidence -- mirrors engine_test.go's own
-	// TestLoopEngine_Run_MultiIterationLoop_CompletesOnGoalMet pattern, so
-	// this test can assert real forward progress (waiting_on_escalation ->
-	// completed) as the visible proof that Resume genuinely ran a further
-	// iteration, not just that some function returned true.
-	callCount := 0
-	exec.llmFunc = func(req agentworkflow.LLMStepRequest) (agentworkflow.LLMStepResult, error) {
-		callCount++
-		if callCount == 3 {
-			if err := st.RecordGoalEvidence(ctx, &store.GoalEvidence{
-				GoalID: goal.ID, EvidenceType: store.GoalEvidenceTypeTestSuite,
-				RefTable: "workflow_run_steps", RefID: req.StepID, Summary: "tests pass",
-			}); err != nil {
-				t.Fatalf("RecordGoalEvidence: %v", err)
-			}
-		}
-		return agentworkflow.LLMStepResult{Text: "ok"}, nil
-	}
-
-	wf := oneStepIterationDefinition("test-resume-loop-run-reflex")
+	wf := oneStepIterationDefinition("retained-resume-loop")
 	if err := registry.Register(wf); err != nil {
-		t.Fatalf("Register: %v", err)
+		t.Fatal(err)
 	}
+	goal := &store.Goal{Intent: "retained external check"}
+	if err := goal.SetAcceptanceCriteria([]string{"tests pass"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateGoal(t.Context(), goal); err != nil {
+		t.Fatal(err)
+	}
+	lr := &store.LoopRun{GoalID: goal.ID, DefinitionName: wf.Name, Status: store.LoopRunStatusWaitingOnEscalation, CurrentIteration: 2}
+	if err := lr.SetBudget(store.Budget{MaxIterations: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateLoopRun(t.Context(), lr); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		run := &store.WorkflowRunRow{ID: fmt.Sprintf("retained-iteration-%d", i), DefinitionName: wf.Name, Status: "completed", LoopRunID: &lr.ID, LoopIteration: &i}
+		if err := st.CreateWorkflowRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+		step := &store.WorkflowRunStepRow{ID: fmt.Sprintf("retained-step-%d", i), WorkflowRunID: run.ID, StepID: "work", Kind: "llm", Status: "completed", Output: "retained output"}
+		if err := st.UpsertWorkflowRunStep(t.Context(), step); err != nil {
+			t.Fatal(err)
+		}
+		iteration := &store.LoopRunIteration{LoopRunID: lr.ID, IterationNumber: i, WorkflowRunID: run.ID, Decision: store.LoopRunIterationDecisionWait, ProgressState: store.LoopRunIterationProgressProgress}
+		if err := st.CreateLoopRunIteration(t.Context(), iteration); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return st, eng, exec, lr.ID
+}
 
-	// Budget{MaxIterations: 2} exhausts on iteration 2 (no goal evidence
-	// recorded yet -- callCount is 1 then 2, never 3, during Run) and
-	// escalates -- the same real path
-	// TestLoopEngine_Run_BudgetExhausted_EscalatesThenResumeContinues
-	// already proves reaches store.LoopRunStatusWaitingOnEscalation.
-	result, err := eng.Run(ctx, LoopDefinition{WorkflowName: wf.Name}, LoopInput{
-		GoalID:         goal.ID,
-		AgentProfileID: profile.ID,
-		Budget:         store.Budget{MaxIterations: 2, OnExhausted: store.LoopRunOnExhaustedEscalate},
-	})
+// Direct SQL seeds history only; retired Insert/GetAgentReflex operations must
+// never be used as an authority or compatibility writer.
+func seedRetainedResumeRule(t *testing.T, st *store.Store, loopRunID, kind, spec string) {
+	t.Helper()
+	_, err := st.DB.ExecContext(t.Context(), `INSERT INTO agent_reflexes(id,name,class_tag,trigger_kind,trigger_spec,action_kind,action_spec,created_by,fired_count) VALUES(?,?,?,?,?,?,?,?,?)`, "retained-resume-rule", "Retained resume", "process", kind, spec, store.ReflexActionResumeLoopRun, `{"loop_run_id":"`+loopRunID+`"}`, "system", 7)
 	if err != nil {
-		t.Fatalf("Run: %v", err)
+		t.Fatal(err)
 	}
-	if result.Status != store.LoopRunStatusWaitingOnEscalation {
-		t.Fatalf("Status = %q, want waiting_on_escalation", result.Status)
-	}
-	if result.CurrentIteration != 2 {
-		t.Fatalf("CurrentIteration = %d, want 2", result.CurrentIteration)
-	}
-	loopRunID := result.LoopRunID
+}
 
-	// Attach a real resume_loop_run reflex to this specific LoopRun --
-	// task 08/10's own job in production (see migration 145's doc
-	// comment); this test creates the row directly via InsertAgentReflex,
-	// the same way every other reflex-fixture test in this codebase seeds
-	// a candidate row, since authoring the row itself is out of this
-	// task's "What to do" scope.
-	reflexID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
-		Name:        "resume-" + loopRunID,
-		ClassTag:    "process",
-		TriggerKind: store.ReflexTriggerEvent,
-		TriggerSpec: `{"name":"external_check_passed"}`,
-		ActionKind:  store.ReflexActionResumeLoopRun,
-		ActionSpec:  `{"loop_run_id":"` + loopRunID + `"}`,
-		CreatedBy:   "system",
-	})
+func retainedLoopResumeState(t *testing.T, st *store.Store) map[string][][]any {
+	t.Helper()
+	tables, err := st.DB.QueryContext(t.Context(), `SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'loop_%' OR name LIKE 'workflow_%' OR name LIKE 'goal%' OR name LIKE 'agent_%' OR name LIKE 'actor_%' OR name='session_actor_bindings' OR name='sessions') ORDER BY name`)
 	if err != nil {
-		t.Fatalf("InsertAgentReflex(resume_loop_run): %v", err)
+		t.Fatal(err)
 	}
+	var names []string
+	for tables.Next() {
+		var name string
+		if err := tables.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	if err := tables.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tables.Close(); err != nil {
+		t.Fatal(err)
+	}
+	state := make(map[string][][]any, len(names))
+	for _, name := range names {
+		rows, err := st.DB.QueryContext(t.Context(), fmt.Sprintf(`SELECT * FROM %q ORDER BY rowid`, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state[name] = make([][]any, 0)
+		for rows.Next() {
+			values := make([]any, len(columns))
+			targets := make([]any, len(columns))
+			for i := range values {
+				targets[i] = &values[i]
+			}
+			if err := rows.Scan(targets...); err != nil {
+				t.Fatal(err)
+			}
+			for i, value := range values {
+				if raw, ok := value.([]byte); ok {
+					values[i] = string(raw)
+				}
+			}
+			state[name] = append(state[name], values)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return state
+}
 
-	reflexEngine := reflexes.NewEngine(st, slog.Default())
-
-	// Step 1: the external condition has NOT happened yet -- the real
-	// trigger-spec AST (EvaluateTrigger, unchanged) must evaluate false,
-	// and LoopEngine.Resume must genuinely NOT be called as a result. The
-	// only way to observe this from outside is that the LoopRun's own
-	// persisted state does not move.
-	fired, hadCandidates, err := service.EvaluateLoopRunResumeReflexes(ctx, reflexEngine, eng, loopRunID, reflexes.State{})
-	if err != nil {
-		t.Fatalf("EvaluateLoopRunResumeReflexes (condition not yet true): %v", err)
+func assertRetainedLoopResumeState(t *testing.T, st *store.Store, before map[string][][]any) {
+	t.Helper()
+	after := retainedLoopResumeState(t, st)
+	for table, rows := range before {
+		if !reflect.DeepEqual(rows, after[table]) {
+			t.Fatalf("refused resume changed %s", table)
+		}
 	}
-	if fired {
-		t.Fatal("fired = true before the external condition occurred, want false")
-	}
-	if !hadCandidates {
-		t.Fatal("hadCandidates = false, want true (a resume_loop_run reflex is attached to this loop run)")
-	}
-	stillWaiting, err := st.GetLoopRun(ctx, loopRunID)
-	if err != nil {
-		t.Fatalf("GetLoopRun: %v", err)
-	}
-	if stillWaiting.Status != store.LoopRunStatusWaitingOnEscalation || stillWaiting.CurrentIteration != 2 {
-		t.Fatalf("loop run advanced despite the trigger not firing: status=%q current_iteration=%d", stillWaiting.Status, stillWaiting.CurrentIteration)
-	}
-
-	// Step 2: the external condition becomes true. This call is the "real
-	// evaluation cadence" this task's own item 3 investigation identified
-	// (a scheduled tick's own eventual call, in production) -- the test
-	// never calls eng.Resume or eng.ResumeLoopRun directly.
-	fired, hadCandidates, err = service.EvaluateLoopRunResumeReflexes(ctx, reflexEngine, eng, loopRunID, reflexes.State{
-		Events: []reflexes.EventSignal{{EventType: "external_check_passed", Category: "test"}},
-	})
-	if err != nil {
-		t.Fatalf("EvaluateLoopRunResumeReflexes (condition true): %v", err)
-	}
-	if !fired {
-		t.Fatal("fired = false once the external condition occurred, want true")
-	}
-	if !hadCandidates {
-		t.Fatal("hadCandidates = false, want true")
-	}
-
-	// Prove LoopEngine.Resume genuinely ran a further iteration: the
-	// LoopRun independently re-fetched from the store must have advanced
-	// past waiting_on_escalation to completed (iteration 3's own
-	// evidence-recording llmFunc branch only runs on a real Resume-driven
-	// third iteration).
-	resumed, err := st.GetLoopRun(ctx, loopRunID)
-	if err != nil {
-		t.Fatalf("GetLoopRun (after resume): %v", err)
-	}
-	if resumed.Status != store.LoopRunStatusCompleted {
-		t.Fatalf("loop run status = %q, want completed (LoopEngine.Resume must have genuinely run)", resumed.Status)
-	}
-	if resumed.CurrentIteration != 3 {
-		t.Fatalf("loop run current_iteration = %d, want 3", resumed.CurrentIteration)
-	}
-	if callCount != 3 {
-		t.Fatalf("llmFunc callCount = %d, want 3 (iterations 1, 2, and the resume-driven 3rd)", callCount)
-	}
-
-	// And the reflex's own telemetry (fired_count) reflects the real fire.
-	reflexRow, err := st.GetAgentReflex(ctx, reflexID)
-	if err != nil {
-		t.Fatalf("GetAgentReflex: %v", err)
-	}
-	if reflexRow.FiredCount != 1 {
-		t.Errorf("reflexRow.FiredCount = %d, want 1", reflexRow.FiredCount)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("refused resume changed journal or authority state")
 	}
 }

@@ -435,6 +435,7 @@ func (s *chatServiceImpl) runtimeSessions() *runtimeagent.SessionManager {
 // so a fresh launch can cancel it. The registry uses pointer identity so a
 // predecessor's deregister path cannot clear its successor.
 type inFlightGen struct {
+	userMsgID    string // turnMu; exact accepted native question, never a descriptor body
 	msgID        string
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -467,6 +468,7 @@ type runtimeTurnBinding struct {
 }
 
 type inFlightGenContextKey struct{}
+type queuedHistoryPredecessorsKey struct{}
 
 func generationFromContext(ctx context.Context) *inFlightGen {
 	gen, _ := ctx.Value(inFlightGenContextKey{}).(*inFlightGen)
@@ -1200,7 +1202,7 @@ func (s *chatServiceImpl) cancelGenerationChain(sessionID string, gen *inFlightG
 // deltaMode is the caller's per-turn choice of how text deltas reach the
 // stream (chat.DeltaMode). It is passed explicitly, like callerType, because
 // genCtx below is deliberately detached from the request context.
-func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode, turnEffort effort.Effort, cognitive bool, nativeModel ...ModelSelection) {
+func (s *chatServiceImpl) launchGeneration(sourceCtx context.Context, name, sessionID, assistantMsgID, userContent string, ch chan chat.StreamEvent, callerType dispatcher.CallerType, deltaMode chat.DeltaMode, turnEffort effort.Effort, cognitive bool, nativeModel ...ModelSelection) {
 	// Build cancel BEFORE launching so a near-simultaneous retry cannot
 	// register its own cancel before this one — the window would let the
 	// retry cancel itself. context.Background() is deliberate: lifecycle
@@ -1210,8 +1212,22 @@ func (s *chatServiceImpl) launchGeneration(name, sessionID, assistantMsgID, user
 		selected = nativeModel[0]
 	}
 	genCtx, cancel := context.WithCancel(context.WithValue(context.WithValue(effort.WithContext(context.Background(), turnEffort), cognitiveTurnContextKey{}, cognitive), cognitiveModelContextKey{}, selected))
+	if cognitive {
+		genCtx = copyClientContextSnapshot(sourceCtx, genCtx)
+		genCtx = chat.CopyWorkingHistoryThrough(sourceCtx, genCtx)
+	}
 
 	prev, current := s.registerGeneration(sessionID, assistantMsgID, cancel)
+	if cognitive {
+		current.turnMu.Lock()
+		current.userMsgID = chat.WorkingHistoryMessageID(sourceCtx)
+		current.turnMu.Unlock()
+		var predecessors []*inFlightGen
+		for prior := prev; prior != nil; prior = generationPredecessor(prior) {
+			predecessors = append(predecessors, prior)
+		}
+		genCtx = context.WithValue(genCtx, queuedHistoryPredecessorsKey{}, predecessors)
+	}
 	if prev != nil {
 		slog.Info("chat-service: queuing turn behind in-flight generation for session",
 			"session_id", sessionID, "new_msg_id", assistantMsgID, "prev_msg_id", prev.msgID)
@@ -1269,6 +1285,16 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 			}
 			close(ch)
 			return
+		}
+		if isCognitiveTurn(genCtx) {
+			boundedCtx, historyErr := s.completeWorkingHistory(genCtx, sessionID)
+			if historyErr != nil {
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Accepted turn working-history boundary unavailable", nil)
+				s.streams.CognitiveTurns().Ending(assistantMsgID, genCtx.Err() != nil)
+				close(ch)
+				return
+			}
+			genCtx = boundedCtx
 		}
 		if current != nil && predecessor != nil {
 			// The predecessor finished at a safe boundary. Dropping the
@@ -1495,7 +1521,10 @@ func (s *chatServiceImpl) handleMessage(ctx context.Context, sessionID, content 
 	// The delta mode arrives the same way: stamped on ctx by the API handler,
 	// absent for durable-agent wakes (which get the phased default).
 	if !initialSnapshotFailed {
-		s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx), isCognitiveTurn(ctx), cognitiveModelFromContext(ctx))
+		if isCognitiveTurn(ctx) {
+			ctx = chat.WithWorkingHistoryThrough(ctx, userMsg.ID)
+		}
+		s.launchGeneration(ctx, "handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx), isCognitiveTurn(ctx), cognitiveModelFromContext(ctx))
 	}
 
 	return assistantMsgID, nil
@@ -1547,7 +1576,7 @@ func (s *chatServiceImpl) RetryLastMessage(ctx context.Context, sessionID string
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, sessionID)
 
-	s.launchGeneration("retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat, chat.DeltaModePhased, effort.FromContext(ctx), false)
+	s.launchGeneration(ctx, "retryLastMessage.generateResponse", sessionID, assistantMsgID, userContent, ch, dispatcher.CallerChat, chat.DeltaModePhased, effort.FromContext(ctx), false)
 
 	return assistantMsgID, nil
 }
@@ -1585,7 +1614,7 @@ func (s *chatServiceImpl) SendAgentMessage(ctx context.Context, fromSessionID, t
 	assistantMsgID := uuid.New().String()
 	ch := s.streams.CreateStream(assistantMsgID, toSessionID)
 
-	s.launchGeneration("sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat, chat.DeltaModePhased, effort.FromContext(ctx), false)
+	s.launchGeneration(ctx, "sendAgentMessage.generateResponse", toSessionID, assistantMsgID, content, ch, dispatcher.CallerChat, chat.DeltaModePhased, effort.FromContext(ctx), false)
 
 	return assistantMsgID, nil
 }

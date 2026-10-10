@@ -80,6 +80,73 @@ The response allocates `session_view_id`, `turn_id`, `run_id`,
 events and cancellation. The local run/output/turn identifiers share one opaque
 identifier. They make no fabric URN claim.
 
+### Embedded view observations
+
+An optional `client_context` on this turn request carries an untrusted view
+observation, separate from the question and from all authorization:
+
+```json
+{
+  "version": 1,
+  "view": {
+    "route": "/docs",
+    "active_filters": [{"name": "status", "values": ["open"]}],
+    "search": "release",
+    "selected_ids": ["doc-1"],
+    "visible_rows": [{"id": "doc-1", "summary": "Release notes"}],
+    "available_commands": [{
+      "name": "open_doc",
+      "scope": "ephemeral",
+      "input_schema": {"type": "object"}
+    }]
+  }
+}
+```
+
+`version` and `view.route` are required. Other fields may be omitted or empty;
+null is refused outside descriptive `input_schema` data. Field names are exact
+snake case. Unknown or duplicate keys, invalid Unicode, wrong types, duplicate
+named entries, unsupported versions and overflow return 400 before admission.
+The host refuses oversized input rather than truncating it.
+
+| Projection | UTF-8 byte/count limit |
+|---|---|
+| Complete descriptor, received and normalized JSON | 32,768 bytes |
+| JSON depth / value nodes | 16 / 2,048; root depth 0; containers count, keys do not |
+| Route | 256 bytes; origin-relative pathname without query, fragment or controls |
+| Active filters | 16 unique names, 64 bytes/name; 1–16 string values, 256 bytes/value |
+| Search | 1,024 bytes |
+| Selected IDs | 64 unique IDs, 128 bytes/ID |
+| Visible rows | 32 unique IDs, 128 bytes/ID, 512 bytes/display summary |
+| Commands | 16 unique names, 128 bytes/name; scope `ephemeral` or `url-backed` |
+| Descriptive input schema | JSON object, 2,048 normalized bytes, within global depth/nodes |
+
+Capture a fresh opt-in, minimal display projection for each turn. Exclude
+secrets; validation cannot recognize every secret. Command declarations are
+descriptive data, never installed tools, grants or an executable schema.
+Participant/browser binding and command acknowledgements belong to a separate
+effectful command contract.
+
+The accepted snapshot belongs only to that queued turn and survives HTTP
+detachment. Native working history uses its exact admitted user-message ID;
+future queued questions are excluded, and completed predecessor answers retain
+their host-observed user/output pairing. A cleared, truncated or inconsistent
+working-history boundary refuses enrichment and provider dispatch. Broker intent
+and conversation use the same validated rows; descriptor text never becomes a
+broker query. Cancellation drops that
+turn's observation; a later turn without the field receives none.
+
+Only provider-bound input receives a clearly labeled untrusted user-role message
+immediately before the accepted question, with its tokens reserved in the input
+budget. It stays outside pinned slots, compaction/stash/handoff, inspector input,
+transcript, metadata, status and canonical events. If reductions or filters lose
+the established question anchor, the host refuses rather than rebinding by text.
+Restart does not reconstruct the descriptor or rerun a turn. A retry requires a
+fresh descriptor. The provider receives this data and an assistant may quote it
+in stored output; ephemeral host retention does not promise provider nonretention
+or output secrecy. This carrier conveys no identity, participant, caller grant,
+command execution, streaming proxy or durable approval-resume authority.
+
 Admission serializes one executing turn plus `CognitiveQueuedTurnLimit` waiting
 turns. Overflow returns 429 before writing the user message. The admission
 transaction writes the user row and initial turn snapshot together.

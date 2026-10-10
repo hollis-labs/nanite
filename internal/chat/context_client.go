@@ -157,6 +157,22 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 		attribute.String("nanite.agent.id", agent.ID),
 	)
 
+	// A marked turn owns one validated working-history snapshot. Validate it
+	// before enrichment and use it for both intent and conversation, so a later
+	// queued question cannot influence this turn's broker query.
+	markedHistory := HasWorkingHistoryThrough(ctx)
+	var messages []store.Message
+	if markedHistory {
+		loaded, err := cb.Store.ListWorkingMessages(ctx, session.ID, 200)
+		if err != nil {
+			return nil, err
+		}
+		messages, err = workingHistoryThrough(ctx, loaded)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// System slot — think-tool block. Agent-specific content lives in the
 	// Agent slot; universal rules live in SlotUniversal at position 0
 	// (CW-20260512-0114, see below). v0/v1/v2 think-tool selected by
@@ -195,7 +211,12 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	// selection is now a direct cap (see buildSkillListForSession), so
 	// intent no longer needs to reach the skill-list call. It's still
 	// derived here for the Context Broker step further down.
-	intent := cb.deriveIntent(session, agent)
+	var intent contextbroker.Intent
+	if markedHistory {
+		intent = cb.deriveIntentFromMessages(session, agent, messages)
+	} else {
+		intent = cb.deriveIntent(session, agent)
+	}
 	skillsContent := buildSkillsSlotContent(ctx, cb.Store, agent.ID, session.ID)
 	agentPrompt := assembleAgentSlotContent(cb.Store, agent, session.ID)
 
@@ -258,9 +279,12 @@ func (cb *ContextClient) AssembleSlotSources(ctx context.Context, session *store
 	}
 
 	// Conversation messages.
-	messages, err := cb.Store.ListWorkingMessages(ctx, session.ID, 200)
-	if err != nil {
-		return nil, err
+	if !markedHistory {
+		loaded, err := cb.Store.ListWorkingMessages(ctx, session.ID, 200)
+		if err != nil {
+			return nil, err
+		}
+		messages = loaded
 	}
 	chatMessages := make([]llmtypes.ChatMessage, len(messages))
 	for i, m := range messages {
@@ -521,9 +545,8 @@ func (cb *ContextClient) deriveIntent(session *store.Session, agent *store.Agent
 // deriveIntentFromMessages is the no-DB variant of deriveIntent: callers
 // pass a pre-loaded message slice and the helper scans the tail for the
 // most recent user turn. Identical output to deriveIntent given the same
-// tail. Currently only reached via deriveIntent itself; kept as a separate
-// no-DB entry point for any future hot-path caller that already holds a
-// sufficient message window and wants to avoid a redundant DB round trip.
+// tail. Marked turns pass their validated cutoff-filtered working rows so
+// intent and conversation select the same admitted question.
 //
 // Tail-scan semantics match deriveIntent — newest-to-oldest, first user
 // message wins, no minimum length on the input slice. Empty input is fine

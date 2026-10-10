@@ -11,7 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 

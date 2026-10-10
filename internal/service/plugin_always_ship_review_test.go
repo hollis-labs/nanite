@@ -14,7 +14,7 @@ import (
 	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 func TestAlwaysShipApprovalTransitionConcurrency(t *testing.T) {

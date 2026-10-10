@@ -25,7 +25,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"

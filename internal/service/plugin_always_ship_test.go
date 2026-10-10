@@ -17,7 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 func alwaysShipReply(body string) *sdkprocess.HTTPResponse {

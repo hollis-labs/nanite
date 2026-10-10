@@ -16,8 +16,8 @@ package service
 // functions have teeth — they construct broken assembly plans and
 // confirm the corresponding invariant catches the break.
 //
-// These invariants are documented in internal/context/INVARIANTS.md;
-// each entry there points back to the test name below.
+// The published contextwindow/INVARIANTS.md states mechanism guarantees;
+// this host suite also enforces dispatch, renderer and cache-marker properties.
 // Permission visibility exercises go-permission/summary through ContextClient.
 //
 // The test exercises REAL Dispatcher.WithCallerType + Context Broker +
@@ -38,7 +38,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 

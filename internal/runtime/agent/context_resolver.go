@@ -19,7 +19,7 @@ package agent
 // The actual cmd-exec / HTTP-fetch execution — including every safety
 // property (cmd timeout + hard ceiling, stderr-tail capture, HTTP
 // timeout + body-size cap, status-code validation) — already lives in
-// the shared, already-vendored github.com/hollis-labs/agentkit module's
+// the published github.com/hollis-labs/substrate/agent module's
 // agentcontext/resolvers package. Nanite's boot-profile catalog never
 // reimplemented that logic; it built a thin SlotSpec-conversion adapter
 // on top (internal/bootprofile/agentcontext_adapter.go). This file is
@@ -44,7 +44,7 @@ import (
 
 // ResolveContextBlocks drains a list of DB-configured
 // agent_context_resolvers rows at launch time, executing each cmd/http
-// resolver through the shared go-agent-context resolvers package, and
+// resolver through the published agentcontext/resolvers package, and
 // returns the resolved bodies keyed by slot name.
 //
 // workdir is the base directory cmd resolvers run in (CWD defaulting

@@ -10,7 +10,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // handoffStashToolDefinition returns the handoff_stash self-tool —

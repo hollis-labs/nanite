@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/workspace"
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // mkfs is a tiny helper for these tests — mirrors workspace/walkup_test.go's

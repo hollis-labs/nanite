@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // fakeStasher is a deterministic in-memory SlotStasher for the

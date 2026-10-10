@@ -65,8 +65,8 @@ reason it carries no filter is written in the script's own header.
   leaves the old process running — is quiet.
 - **The envelope catalog lives in a released module**, not in this repo. New
   core types are released there first.
-- **The pinned substrate agent `context/INVARIANTS.md` and its host test
-  change together or not at all.** See `docs/architecture/context-assembly.md` for why the slot shape is
+- **The pinned substrate agent `contextwindow/INVARIANTS.md` mechanism contract
+  and Nanite's host invariants must stay aligned.** See `docs/architecture/context-assembly.md` for why the slot shape is
   less flexible than it looks.
 
 ## What this does not cover

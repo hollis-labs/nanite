@@ -1,23 +1,7 @@
 package selftools
 
-// Regression coverage for TASKS/teams/05-agent-reflexes-run-scoping.md —
-// matchDispatchToAgentReflex's own copy of the run-scoping widening
-// internal/service/chat_reflex_dispatch.go's attemptReflexDispatch
-// applies upstream (see that call site's own equivalent test,
-// chat_reflex_dispatch_run_scoping_test.go, for the full rationale this
-// file mirrors at its own, deliberately-independent call site — see
-// self_tools_dispatch.go's own header comment for why both evaluations
-// run rather than one calling the other).
-//
-// insertTestTeamRunMember inserts a real row into TASKS/teams/
-// 02-team-run-members-table.md's team_run_members table (migration 129,
-// landed on main since this task was originally implemented against a
-// worktree without it — that table is real here, not a test-local
-// stand-in). Only session_id/workflow_run_id vary per call;
-// slot_name/agent_id are fixture values satisfying the table's real
-// NOT NULL/FK constraints, irrelevant to what this test actually exercises
-// (Store.ResolveWorkflowRunIDForSession only reads session_id/
-// workflow_run_id).
+// Retained run membership and mutable routing rules remain historical and inert.
+// Private fixtures use the preserved old tables; they never launch or enroll agents.
 
 import (
 	"context"
@@ -61,166 +45,51 @@ func insertTestTeamRunMember(t *testing.T, s *store.Store, sessionID, runID stri
 	); err != nil {
 		t.Fatalf("insert test session: %v", err)
 	}
-	if _, err := s.InsertTeamRunMember(ctx, store.TeamRunMember{
-		WorkflowRunID: runID,
-		SlotName:      "member",
-		AgentID:       "agent-trm-fixture",
-		SessionID:     sessionID,
-	}); err != nil {
-		t.Fatalf("insert test team_run_members row: %v", err)
+	// Private retained historical membership, never a team launch or enrollment.
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO team_run_members(id,workflow_run_id,slot_name,agent_id,session_id) VALUES(?,?,'member','agent-trm-fixture',?)`, "historical-member-"+sessionID, runID, sessionID); err != nil {
+		t.Fatalf("insert retained historical team_run_members row: %v", err)
 	}
 }
 
-// TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun
-// mirrors chat_reflex_dispatch_run_scoping_test.go's
-// TestAttemptReflexDispatch_RunScopedReflex_IsolatedToItsOwnRun exactly,
-// at this package's own independent call site: a run-scoped
-// dispatch_to_agent reflex fires only for a session team_run_members
-// resolves to its own run, is invisible to a session resolved to a
-// different run and to a plain non-Team session, and a global reflex
-// keeps firing everywhere regardless.
 func TestMatchDispatchToAgentReflex_RunScopedReflex_IsolatedToItsOwnRun(t *testing.T) {
-	ctx := context.Background()
 	s := newTestStore(t)
-
-	if err := s.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:           "agent-run-scope-probe",
-		Name:         "Agent Run Scope Probe",
-		Slug:         "agent-run-scope-probe",
-		Class:        "advisor",
-		SystemPrompt: "test",
-		Source:       "test",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
+	historical := retainedSelftoolsDispatchProfile(t, s, "retained-dispatch-run-scope")
 	insertTestTeamRunMember(t, s, "sess-in-run-a", "run-A")
 	insertTestTeamRunMember(t, s, "sess-in-run-b", "run-B")
-	// "sess-no-run" deliberately gets no team_run_members row.
-
-	if _, err := s.InsertAgentReflex(ctx, store.AgentReflex{
-		AgentID:       "agent-run-scope-probe",
-		Name:          "dispatch_run_scoped_probe_mcp",
-		TriggerKind:   store.ReflexTriggerPredicate,
-		TriggerSpec:   `{"kind":"user_regex_window","window":1,"pattern":"probe-run-scoped-mcp-token"}`,
-		ActionKind:    store.ReflexActionDispatchToAgent,
-		ActionSpec:    `{"agent_slug":"run-a-architect","confidence":0.9,"reason":"run-scoped test"}`,
-		Priority:      50,
-		WorkflowRunID: "run-A",
-	}); err != nil {
-		t.Fatalf("InsertAgentReflex (run-scoped): %v", err)
-	}
-	if _, err := s.InsertAgentReflex(ctx, store.AgentReflex{
-		AgentID:     "agent-run-scope-probe",
-		Name:        "dispatch_global_probe_mcp",
-		TriggerKind: store.ReflexTriggerPredicate,
-		TriggerSpec: `{"kind":"user_regex_window","window":1,"pattern":"probe-global-mcp-token"}`,
-		ActionKind:  store.ReflexActionDispatchToAgent,
-		ActionSpec:  `{"agent_slug":"global-planner","confidence":0.9,"reason":"global test"}`,
-		Priority:    50,
-		// WorkflowRunID left empty — global/agent-bound.
-	}); err != nil {
-		t.Fatalf("InsertAgentReflex (global): %v", err)
-	}
-
+	retainedSelftoolsDispatchRule(t, s, store.AgentReflex{Name: "retained-run-scoped", AgentID: historical.ID, WorkflowRunID: "run-A", Priority: 100, FiredCount: 7})
+	retainedSelftoolsDispatchRule(t, s, store.AgentReflex{Name: "retained-global", Priority: 99, FiredCount: 3})
+	before := selftoolsDispatchSnapshot(t, s)
 	st := newTestSelfToolsTransport(s)
-
-	t.Run("fires for its own run's session", func(t *testing.T) {
-		const msg = "probe-run-scoped-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-a", "agent-run-scope-probe", msg)
-		if hints == nil {
-			t.Fatal("hints = nil, want a match (run-scoped reflex should fire for a session resolved to its own run)")
+	for _, session := range []string{"sess-in-run-a", "sess-in-run-b", "sess-no-run"} {
+		for _, message := range []string{"probe-run-scoped-mcp-token please route this", "probe-global-mcp-token please route this"} {
+			if hints := st.matchDispatchToAgentReflex(t.Context(), session, historical.ID, message); hints != nil {
+				t.Fatalf("historical run/global route selected for %q: %+v", session, hints)
+			}
+			requireSelftoolsDispatchUnchanged(t, s, before)
 		}
-		if hints.AgentSlug != "run-a-architect" {
-			t.Errorf("AgentSlug = %q, want run-a-architect", hints.AgentSlug)
-		}
-	})
-
-	t.Run("invisible to a session in an unrelated run", func(t *testing.T) {
-		const msg = "probe-run-scoped-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-b", "agent-run-scope-probe", msg)
-		if hints != nil {
-			t.Fatalf("hints = %+v, want nil — a reflex scoped to run-A must not fire for a session resolved to run-B", hints)
-		}
-	})
-
-	t.Run("invisible to a non-Team session", func(t *testing.T) {
-		const msg = "probe-run-scoped-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-no-run", "agent-run-scope-probe", msg)
-		if hints != nil {
-			t.Fatalf("hints = %+v, want nil — a reflex scoped to run-A must not fire for a session with no team_run_members row at all", hints)
-		}
-	})
-
-	t.Run("global reflex still fires in a run-A session", func(t *testing.T) {
-		const msg = "probe-global-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-a", "agent-run-scope-probe", msg)
-		if hints == nil || hints.AgentSlug != "global-planner" {
-			t.Fatalf("global reflex did not fire inside a Team-run session: hints=%+v", hints)
-		}
-	})
-
-	t.Run("global reflex still fires in a run-B session", func(t *testing.T) {
-		const msg = "probe-global-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-in-run-b", "agent-run-scope-probe", msg)
-		if hints == nil || hints.AgentSlug != "global-planner" {
-			t.Fatalf("global reflex did not fire inside a different Team-run session: hints=%+v", hints)
-		}
-	})
-
-	t.Run("global reflex still fires in a non-Team session", func(t *testing.T) {
-		const msg = "probe-global-mcp-token please route this"
-		hints := st.matchDispatchToAgentReflex(ctx, "sess-no-run", "agent-run-scope-probe", msg)
-		if hints == nil || hints.AgentSlug != "global-planner" {
-			t.Fatalf("global reflex did not fire in a plain non-Team session: hints=%+v", hints)
-		}
-	})
+	}
 }
 
-// TestMatchDispatchToAgentReflex_NoTeamRunMembersTable_DegradesGracefully
-// mirrors chat_reflex_dispatch_run_scoping_test.go's equivalent test at
-// this package's own call site: for a session with no team_run_members
-// row at all, the ordinary (non-Team) dispatch_to_agent evaluation still
-// works — see that file's own merge note on why this no longer literally
-// exercises a missing team_run_members table (both this task's migration,
-// 131, and TASKS/teams/02-team-run-members-table.md's, 129, are now
-// always present together on a fresh store).
 func TestMatchDispatchToAgentReflex_NoTeamRunMembersTable_DegradesGracefully(t *testing.T) {
-	ctx := context.Background()
 	s := newTestStore(t)
-	// Deliberately no team_run_members row inserted for this session.
-
-	if err := s.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:           "agent-no-team-table-mcp",
-		Name:         "Agent No Team Table MCP",
-		Slug:         "agent-no-team-table-mcp",
-		Class:        "advisor",
-		SystemPrompt: "test",
-		Source:       "test",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	if _, err := s.InsertAgentReflex(ctx, store.AgentReflex{
-		AgentID:     "agent-no-team-table-mcp",
-		Name:        "dispatch_no_team_table_probe_mcp",
-		TriggerKind: store.ReflexTriggerPredicate,
-		TriggerSpec: `{"kind":"user_regex_window","window":1,"pattern":"probe-no-team-table-mcp-token"}`,
-		ActionKind:  store.ReflexActionDispatchToAgent,
-		ActionSpec:  `{"agent_slug":"planner","confidence":0.9,"reason":"no team_run_members table test"}`,
-		Priority:    50,
-	}); err != nil {
-		t.Fatalf("InsertAgentReflex: %v", err)
-	}
-
+	historical := retainedSelftoolsDispatchProfile(t, s, "retained-dispatch-no-run")
+	retainedSelftoolsDispatchRule(t, s, store.AgentReflex{Name: "retained-no-team", AgentID: historical.ID, FiredCount: 5})
+	before := selftoolsDispatchSnapshot(t, s)
 	st := newTestSelfToolsTransport(s)
-
-	const msg = "probe-no-team-table-mcp-token please route this"
-	hints := st.matchDispatchToAgentReflex(ctx, "sess-no-team-table-mcp", "agent-no-team-table-mcp", msg)
-	if hints == nil {
-		t.Fatal("hints = nil, want a match — a missing team_run_members table must not break ordinary global dispatch_to_agent evaluation")
+	for _, id := range []string{historical.ID, historical.Slug, "", "unknown-agent"} {
+		if hints := st.matchDispatchToAgentReflex(t.Context(), "session-without-members", id, "probe-no-team-table-mcp-token please route this"); hints != nil {
+			t.Fatalf("retained rule became fallback for %q: %+v", id, hints)
+		}
 	}
-	if hints.AgentSlug != "planner" {
-		t.Errorf("AgentSlug = %q, want planner", hints.AgentSlug)
+	requireSelftoolsDispatchUnchanged(t, s, before)
+	// Matcher has no historical dependency, even when the private store is unavailable.
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if hints := st.matchDispatchToAgentReflex(t.Context(), "unavailable-store", historical.ID, "Implement a task"); hints != nil {
+		t.Fatalf("unavailable history produced hints: %+v", hints)
+	}
+	if hints := (&SelfToolsTransport{}).matchDispatchToAgentReflex(t.Context(), "no-store", historical.ID, "Implement a task"); hints != nil {
+		t.Fatalf("missing store produced hints: %+v", hints)
 	}
 }

@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +18,32 @@ import (
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
-// newTestAPIWithLoomCurator provisions the profile and durable instance through
-// the normal database-backed service path before boot. That creation path also
-// supplies the canonical builtin schedule; the fixture never inserts it by
-// hand and deliberately has no config-file input.
-func newTestAPIWithLoomCurator(t *testing.T) (*testAPI, *http.ServeMux) {
+func loomAuthoritySnapshot(t *testing.T, a *testAPI) map[string][][]any {
+	t.Helper()
+	out := make(map[string][][]any)
+	for _, q := range []string{
+		`SELECT * FROM agent_profiles ORDER BY id`, `SELECT * FROM agent_profile_revisions ORDER BY sequence`,
+		`SELECT * FROM durable_agent_instances ORDER BY id`, `SELECT * FROM agent_schedules ORDER BY id`,
+		`SELECT * FROM agent_reflexes ORDER BY id`, `SELECT * FROM plugin_reflex_seed_bindings ORDER BY plugin_id,seed_id,agent_id`,
+		`SELECT * FROM agent_host_settings ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`,
+		`SELECT * FROM actor_instances ORDER BY id`, `SELECT * FROM actor_schedules ORDER BY id`, `SELECT * FROM actor_instance_events ORDER BY id`,
+		`SELECT * FROM actor_granted_tools ORDER BY agent_id,tool_id`, `SELECT * FROM actor_known_skills ORDER BY agent_id,skill_name`,
+		`SELECT * FROM sessions ORDER BY id`, `SELECT * FROM session_actor_bindings ORDER BY session_id,agent_id`,
+	} {
+		out[q] = retiredAPISnapshot(t, a, q)
+	}
+	return out
+}
+func assertLoomAuthorityUnchanged(t *testing.T, a *testAPI, before map[string][][]any) {
+	t.Helper()
+	if after := loomAuthoritySnapshot(t, a); !reflect.DeepEqual(before, after) {
+		t.Fatal("Loom operation promoted historical profiles, provisioned authority, or changed retained schedules/adoption state")
+	}
+}
+
+// The pre-boot setup contains retained historical rows only. It does not
+// provision a fresh actor, instance, schedule, binding receipt, or grant.
+func newTestAPIWithHistoricalLoom(t *testing.T) (*testAPI, *http.ServeMux) {
 	t.Helper()
 	root := t.TempDir()
 	for env, dir := range map[string]string{
@@ -29,165 +53,123 @@ func newTestAPIWithLoomCurator(t *testing.T) (*testAPI, *http.ServeMux) {
 	} {
 		t.Setenv(env, dir)
 	}
-
-	dbPath := filepath.Join(root, "test.db")
-	s, err := storetest.New(t, context.Background(), dbPath)
+	t.Setenv("TESSERACT_DB_PATH", filepath.Join(root, "tesseract", "main.db"))
+	t.Setenv("TESSERACT_WORKSPACE", "private-loom-test")
+	st, err := storetest.New(t, t.Context(), filepath.Join(root, "test.db"))
 	if err != nil {
-		t.Fatalf("store.New: %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = s.Close(context.Background()) })
-
-	// A real boot calls Seed after store.New. The wake handler's default
-	// workspace must exist for session creation's FK.
-	if seedErr := s.Seed(context.Background()); seedErr != nil {
-		t.Fatalf("Seed: %v", seedErr)
+	t.Cleanup(func() { _ = st.Close(context.Background()) })
+	if err = st.Seed(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	profile := &store.AgentProfile{
-		Name: "Loom Curator", Slug: "loom-curator", SystemPrompt: "Curate Loom fragments.", Source: "user", Durable: true,
+	for _, slug := range []string{"loom-curator", "loom-weaver"} {
+		p := &store.AgentProfile{ID: "retained-" + slug, Slug: slug, Name: "Retained " + slug, SystemPrompt: "Private edited Loom instructions", Source: "internal"}
+		if err = storetest.HistoricalProfile(t.Context(), st, p); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = st.DB.ExecContext(t.Context(), `UPDATE agent_profiles SET class='process',durable=1,tags='["durable-agent","process"]' WHERE id=?`, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO durable_agent_instances(id,name,slug,profile_id,lifecycle_class,status,metadata_json,urn) VALUES(?,?,?,?,'process','sleeping','{"private_retained":true}',?)`, "retained-instance-"+slug, p.Name, slug, p.ID, "msg://agent/retained/"+slug); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO agent_schedules(id,agent_id,name,schedule_kind,schedule_spec,body,status,next_run) VALUES(?,?,'Edited historical Loom schedule','cron','0 3 * * *','Private edited tool body','active','2020-01-01T00:00:00Z')`, "retained-schedule-"+slug, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO agent_reflexes(id,agent_id,name,trigger_kind,trigger_spec,action_kind,action_spec,status,created_by,provenance_tier,fired_count) VALUES(?,?,'capture_on_discovery','predicate','{"kind":"tool_calls_window","window":1,"op":"=","value":0}','inject_reminder','{"body":"Private edited capture"}','paused','system','system',7)`, "retained-reflex-"+slug, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = st.DB.ExecContext(t.Context(), `INSERT INTO plugin_reflex_seed_bindings(plugin_id,seed_id,agent_id,reflex_id) VALUES('nanite.loom','deleted',?,NULL)`, p.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if createErr := s.CreateAgent(context.Background(), profile); createErr != nil {
-		t.Fatalf("create loom-curator profile: %v", createErr)
-	}
-	instance := &store.DurableAgentInstance{
-		Name: "Loom Curator", Slug: "loom-curator", ProfileID: profile.ID,
-		LifecycleClass: store.DurableAgentClassProcess, RuntimeKind: "api",
-		LaunchSourceType: store.DurableAgentLaunchProcessTick, LaunchSourceID: "loom-curator",
-		Status: store.DurableAgentStatusSleeping, MetadataJSON: `{"provisioned_by":"test"}`,
-	}
-	if createErr := service.NewDurableAgentService(s).Create(context.Background(), instance); createErr != nil {
-		t.Fatalf("create loom-curator instance: %v", createErr)
-	}
-
-	svc, err := service.NewContainer(service.ContainerConfig{
-		ModelCatalogOptions: modelsdevtest.Options(t),
-		Store:               s, Providers: provider.NewRegistry(), WorkingDir: root, DisableEmbeddedTesseract: true,
-	})
+	historical := &testAPI{store: st}
+	before := loomAuthoritySnapshot(t, historical)
+	services, err := service.NewContainer(service.ContainerConfig{ModelCatalogOptions: modelsdevtest.Options(t), Store: st, Providers: provider.NewRegistry(), WorkingDir: root, DisableEmbeddedTesseract: true})
 	if err != nil {
-		t.Fatalf("service.NewContainer: %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { svc.Shutdown() })
-
-	a := newAPIStoreFixture(svc, s)
+	t.Cleanup(func() { services.Shutdown() })
+	a := newAPIStoreFixture(services, st)
+	assertLoomAuthorityUnchanged(t, a, before)
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 	return a, mux
 }
 
-func TestLoomCuratorInstanceProvisionedInDatabase(t *testing.T) {
-	a, _ := newTestAPIWithLoomCurator(t)
-
-	inst, err := a.store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
-	if err != nil {
-		t.Fatalf("loom-curator instance not provisioned: %v", err)
+func TestImmutableLoomBootAndPublicCatalogDoNotProvisionHistoricalCurator(t *testing.T) {
+	a, mux := newTestAPIWithHistoricalLoom(t)
+	before := loomAuthoritySnapshot(t, a)
+	for _, slug := range []string{"loom-curator", "loom-weaver"} {
+		p, err := a.store.GetHistoricalAgentProfile(t.Context(), "retained-"+slug)
+		if err != nil || p.SystemPrompt != "Private edited Loom instructions" {
+			t.Fatalf("historical artifact=%+v,%v", p, err)
+		}
+		if inst, err := a.Services.DurableAgents.GetBySlug(t.Context(), slug); inst != nil || !errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
+			t.Fatalf("historical instance became runtime=%+v,%v", inst, err)
+		}
 	}
-	if inst.ID == "" {
-		t.Fatal("provisioned instance has empty ID")
+	// Listing is a fresh catalog read, not an automatic Loom enrollment sweep.
+	for _, path := range []string{"/api/durable-agents", "/api/agents"} {
+		w := retiredAPIRequest(t, mux, http.MethodGet, path, "")
+		var entries []json.RawMessage
+		decodeErr := json.Unmarshal(w.Body.Bytes(), &entries)
+		if w.Code != http.StatusOK || decodeErr != nil || len(entries) != 0 {
+			t.Fatalf("historical catalog %s=%d %s", path, w.Code, w.Body.String())
+		}
 	}
-	if inst.LifecycleClass != store.DurableAgentClassProcess {
-		t.Fatalf("lifecycle_class = %q, want %q", inst.LifecycleClass, store.DurableAgentClassProcess)
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{
+		{"/api/durable-agents/retained-instance-loom-curator", http.StatusNotFound},
+		{"/api/durable-agents/retained-instance-loom-curator/schedules", http.StatusBadRequest},
+		{"/api/agents/retained-loom-curator", http.StatusNotFound},
+	} {
+		w := retiredAPIRequest(t, mux, http.MethodGet, tc.path, "")
+		if w.Code != tc.status {
+			t.Fatalf("historical runtime lookup %s=%d %s", tc.path, w.Code, w.Body.String())
+		}
+		if strings.HasSuffix(tc.path, "/schedules") && !strings.Contains(w.Body.String(), store.ErrDurableAgentInstanceNotFound.Error()) {
+			t.Fatalf("historical schedules did not refuse missing fresh instance: %s", w.Body.String())
+		}
 	}
-	if inst.Status != store.DurableAgentStatusSleeping {
-		t.Fatalf("status = %q, want %q (fresh instance default)", inst.Status, store.DurableAgentStatusSleeping)
-	}
+	requireRetiredAPI(t, retiredAPIRequest(t, mux, http.MethodPost, "/api/agents", `{"name":"Loom Curator","slug":"loom-curator","durable":true,"tags":"[\"durable-agent\"]"}`))
+	assertLoomAuthorityUnchanged(t, a, before)
 }
 
-// TestLoomCuratorWake_FEPayloadShape proves the purpose-built endpoint
-// accepts FE's exact {generator, fragment} callback body (traced from
-// fragments-engine's CallbackDestinationExecutor.Execute,
-// internal/ingest/destination_writer.go:461-519) and wakes Curator
-// successfully on the very first call — no prior session/workspace
-// bootstrap required.
-func TestLoomCuratorDatabaseScheduleRuns(t *testing.T) {
-	a, _ := newTestAPIWithLoomCurator(t)
-	ctx := context.Background()
-
-	inst, err := a.store.GetDurableAgentInstanceBySlug(context.Background(), "loom-curator")
-	if err != nil {
-		t.Fatalf("loom-curator instance not provisioned: %v", err)
-	}
-	if inst.ProfileID == "" {
-		t.Fatal("seeded instance has empty ProfileID")
-	}
-
-	schedules, err := a.store.ListAgentSchedules(ctx, inst.ProfileID)
-	if err != nil {
-		t.Fatalf("ListAgentSchedules(%s): %v", inst.ProfileID, err)
-	}
-	if len(schedules) != 1 {
-		t.Fatalf("expected exactly 1 schedule for loom-curator's profile, got %d: %+v", len(schedules), schedules)
-	}
-	sched := schedules[0]
-	if sched.AgentID != inst.ProfileID {
-		t.Fatalf("schedule.AgentID = %q, want instance's ProfileID %q", sched.AgentID, inst.ProfileID)
-	}
-	if sched.Name != "lint-and-export" {
-		t.Fatalf("schedule name = %q, want lint-and-export", sched.Name)
-	}
-	if sched.ScheduleKind != store.ScheduleKindCron {
-		t.Fatalf("schedule kind = %q, want %q", sched.ScheduleKind, store.ScheduleKindCron)
-	}
-	if sched.ScheduleSpec != "0 3 * * *" {
-		t.Fatalf("schedule spec = %q, want '0 3 * * *'", sched.ScheduleSpec)
-	}
-	if sched.Status != store.ScheduleStatusActive {
-		t.Fatalf("schedule status = %q, want active", sched.Status)
-	}
-	if !strings.Contains(sched.Body, "loom_bundle_conformance") || !strings.Contains(sched.Body, "loom_export_bundle") {
-		t.Fatalf("schedule body missing expected loom_* tool references: %q", sched.Body)
-	}
-
-	// Due-ness is next_run-based. Simulate after the freshly-computed next run
-	// so ListDue/RunDue reliably exercise dispatch without a hand-written row.
-	if sched.NextRun == "" {
-		t.Fatalf("schedule.NextRun is empty: %+v", sched)
-	}
-	nextRun, err := time.Parse(time.RFC3339, sched.NextRun)
-	if err != nil {
-		t.Fatalf("schedule.NextRun %q does not parse as RFC3339: %v", sched.NextRun, err)
-	}
-	simulatedNow := nextRun.Add(5 * time.Minute)
-	if !nextRun.Before(simulatedNow) {
-		t.Fatalf("schedule.NextRun = %s, want before simulatedNow %s (test's own due-ness assumption)", nextRun, simulatedNow)
-	}
-
-	due, err := a.Services.DurableWake.ListDue(ctx, simulatedNow)
-	if err != nil {
-		t.Fatalf("ListDue: %v", err)
-	}
-	var dueItem *service.DurableAgentWakeDueItem
-	for i := range due {
-		if due[i].InstanceID == inst.ID && due[i].Schedule.ID == sched.ID {
-			dueItem = &due[i]
+func TestImmutableLoomCreateRefusesAndHistoricalSchedulesStayOutsideWake(t *testing.T) {
+	a, mux := newTestAPIWithHistoricalLoom(t)
+	// Explicitly authored static host settings supply a catalog record, never
+	// an actor. Reusing Loom's slug still cannot issue its durable instance.
+	host := capabilityHostWithoutActor(t, a, "loom-curator", "user")
+	before := loomAuthoritySnapshot(t, a)
+	for _, id := range []string{host.ID, "retained-loom-curator", "msg://agent/claimed/loom-curator"} {
+		inst := &store.DurableAgentInstance{Name: "Refused curator", Slug: "loom-curator", ProfileID: id, LifecycleClass: store.DurableAgentClassProcess}
+		if err := a.Services.DurableAgents.Create(t.Context(), inst); !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("create %q=%v", id, err)
 		}
 	}
-	if dueItem == nil {
-		t.Fatalf("loom-curator's lint-and-export schedule not found by ListDue at %s: %+v", simulatedNow, due)
+	w := retiredAPIRequest(t, mux, http.MethodPost, "/api/durable-agents", `{"name":"Loom Curator","slug":"loom-curator","profile_id":"`+host.ID+`","lifecycle_class":"process","metadata_json":"{}"}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), store.ErrVerifiedActorRequired.Error()) {
+		t.Fatalf("host UUID durable creation=%d %s", w.Code, w.Body.String())
 	}
-	if !dueItem.Due {
-		t.Fatalf("due item not marked Due: %+v", dueItem)
-	}
-
-	run, err := a.Services.DurableWake.RunDue(ctx, service.DurableAgentWakeRunRequest{Now: simulatedNow})
-	if err != nil {
-		t.Fatalf("RunDue: %v", err)
-	}
-	var result *service.DurableAgentWakeResult
-	for i := range run.Results {
-		if run.Results[i].ScheduleID == sched.ID {
-			result = &run.Results[i]
+	// Applicable JSON and slug validation remains at the HTTP boundary.
+	for _, body := range []string{"not json", `{"slug":"INVALID SLUG","profile_id":"` + host.ID + `"}`} {
+		w = retiredAPIRequest(t, mux, http.MethodPost, "/api/durable-agents", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("malformed create=%d %s", w.Code, w.Body.String())
 		}
 	}
-	if result == nil {
-		t.Fatalf("RunDue produced no result for schedule %s: %+v", sched.ID, run.Results)
+	now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	due, err := a.Services.DurableWake.ListDue(t.Context(), now)
+	if err != nil || len(due) != 0 {
+		t.Fatalf("historical schedules became due=%+v,%v", due, err)
 	}
-	if result.FailureReason != "" {
-		t.Fatalf("firing loom-curator's scheduled tick errored: %s", result.FailureReason)
+	result, err := a.Services.DurableWake.RunDue(t.Context(), service.DurableAgentWakeRunRequest{Now: now})
+	if err != nil || result == nil || len(result.Results) != 0 {
+		t.Fatalf("historical schedule dispatch=%+v,%v", result, err)
 	}
-	// A fresh instance with no prior attached session legitimately skips
-	// on "workspace unavailable" (same behavior TestDurableWakeListDueAndDryRun
-	// already documents for any freshly-seeded process instance) — RunDue
-	// itself returning without error, with no FailureReason, is the bar
-	// this test is proving: the schedule fires through the real
-	// ListDue -> RunDue -> Wake chain without the pipeline erroring.
-	t.Logf("scheduled tick result: skipped=%v skip_reason=%q", result.Skipped, result.SkipReason)
+	assertLoomAuthorityUnchanged(t, a, before)
 }

@@ -35,6 +35,10 @@ type CreateSessionOpts struct {
 
 // ForkOpts holds the parameters for forking a session.
 type ForkOpts struct {
+	ForkKind string
+	// CodeMode is an internal host-owned port. It is never decoded from a
+	// public fork DTO, and missing verification refuses before all effects.
+	CodeMode        *store.CodeModeForkOptions
 	IncludeMessages bool
 	Provider        string
 	Model           string
@@ -257,6 +261,26 @@ func (s *sessionServiceImpl) Archive(ctx context.Context, id string) error {
 }
 
 func (s *sessionServiceImpl) Fork(ctx context.Context, sourceID string, opts ForkOpts) (*store.Session, error) {
+	if opts.ForkKind == "code_mode" {
+		if opts.CodeMode == nil || opts.CodeMode.Verifier == nil {
+			return nil, store.ErrVerifiedActorRequired
+		}
+		writer, ok := s.writer.(codeModeForkWriter)
+		if !ok {
+			return nil, store.ErrVerifiedActorRequired
+		}
+		options := *opts.CodeMode
+		if opts.Provider != "" {
+			options.Request.Provider = opts.Provider
+		}
+		if opts.Model != "" {
+			options.Request.Model = opts.Model
+		}
+		return writer.ForkCodeModeSession(ctx, sourceID, options)
+	}
+	if opts.CodeMode != nil || (opts.ForkKind != "" && opts.ForkKind != "fork" && opts.ForkKind != "restart") {
+		return nil, store.ErrCodeModeEscalation
+	}
 	overrides := &store.Session{
 		Provider: opts.Provider,
 		Model:    opts.Model,

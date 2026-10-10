@@ -10,7 +10,7 @@ import (
 
 func TestEnginePluginHooksAndActionFilter(t *testing.T) {
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-a",
 		Name:         "Agent A",
 		Slug:         "agent-a",
@@ -20,7 +20,7 @@ func TestEnginePluginHooksAndActionFilter(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	id, err := st.InsertAgentReflex(context.Background(), store.AgentReflex{
+	id, err := declaredFixture(st).InsertAgentReflex(context.Background(), store.AgentReflex{
 		AgentID:     "agent-a",
 		Name:        "test-reflex",
 		TriggerKind: store.ReflexTriggerEvent,
@@ -37,7 +37,7 @@ func TestEnginePluginHooksAndActionFilter(t *testing.T) {
 	engine := NewEngine(st, nil)
 	engine.SetPluginHooks(hooks)
 
-	out, err := engine.EvaluateState(context.Background(), "agent-a", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(context.Background(), "agent-a", "advisor", State{
 		SessionID:       "sess-1",
 		AgentID:         "agent-a",
 		AgentClass:      "advisor",

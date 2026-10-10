@@ -31,8 +31,8 @@ func TestPinnedCompetingToolChoicesCannotClaimAuthority(t *testing.T) {
 				modelCalls++
 				return ModelSelection{"private-provider", "private-model"}, nil
 			})}
-			if view, err := views.Create(ctx, CreateDefinedView{DefinitionRef: DefinitionRefFromMesh(pin), Metadata: `{"grant":"all","tool_name":"tool_one"}`}); view != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
-				t.Fatal(view, err)
+			if view, operationErr := views.Create(ctx, CreateDefinedView{DefinitionRef: DefinitionRefFromMesh(pin), Metadata: `{"grant":"all","tool_name":"tool_one"}`}); view != nil || !errors.Is(operationErr, store.ErrVerifiedActorRequired) {
+				t.Fatal(view, operationErr)
 			}
 			sessions, err := st.ListSessions(ctx, false)
 			if err != nil || len(sessions) != 0 || modelCalls != 0 {

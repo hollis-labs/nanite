@@ -10,7 +10,7 @@ package reflexes
 // per-reflex override. The system-level default stays a Go constant (not a
 // DB row); the kind- and reflex-level overrides are data
 // (reflex_action_kinds.default_recurrence_seconds,
-// agent_reflexes.recurrence_override_seconds — both added by migration
+// private_declared_reflexes.recurrence_override_seconds — both added by migration
 // 124_reflex_action_taxonomy.sql / TASKS/reflex-taxonomy/
 // 01-taxonomy-schema-foundation.md).
 

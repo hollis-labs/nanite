@@ -129,11 +129,11 @@ func TestSelectForAgent_LateAlphabetAllowlistedToolSurvivesCap(t *testing.T) {
 	}
 
 	agent := &store.AgentProfile{Name: "Orchestrator", Slug: "orchestrator", SystemPrompt: "Test."}
-	if err := persistTestActor(context.Background(), st, agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if operationErr := persistTestActor(context.Background(), st, agent); operationErr != nil {
+		t.Fatalf("CreateAgent: %v", operationErr)
 	}
-	if err := grantTestActorTool(ctx, st, agent.ID, wantedTool.ID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
+	if operationErr := grantTestActorTool(ctx, st, agent.ID, wantedTool.ID, "explicit"); operationErr != nil {
+		t.Fatalf("GrantAgentTool: %v", operationErr)
 	}
 
 	svc := NewToolService(tc, nil, st)

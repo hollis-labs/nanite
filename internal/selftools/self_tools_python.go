@@ -46,9 +46,9 @@ type PythonPermissionChecker interface {
 	Check(ctx context.Context, sessionID, toolName string, input map[string]any, meta permissionlib.ToolMeta) permissionlib.CheckResult
 }
 
-// PythonToolDispatcher executes a single tool call on behalf of the sandbox
-// and returns the serialisable result. The production wiring delegates to the
-// same code path as a normal tool call.  Tests stub this.
+// PythonToolDispatcher executes a single tool call through a host-owned
+// execution boundary and returns the serialisable result. The dispatcher must
+// also supply PythonRunAdmission; the current app has no execution owner.
 type PythonToolDispatcher interface {
 	Dispatch(ctx context.Context, sessionID, toolName string, args map[string]any) (any, error)
 }

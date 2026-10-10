@@ -22,6 +22,8 @@ func profileRetirementErrorStatus(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, store.ErrProfileRetirementConflict):
 		return http.StatusConflict
+	case errors.Is(err, store.ErrProfileRetirementKeep), errors.Is(err, store.ErrProfileRetirementActive):
+		return http.StatusConflict
 	case errors.Is(err, store.ErrProfileRetirementBound):
 		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, sql.ErrNoRows):
@@ -66,11 +68,13 @@ func (a *API) handleProfileRetirementExport(w http.ResponseWriter, r *http.Reque
 
 func (a *API) handleProfileRetire(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		ExportID         string `json:"export_id"`
-		Digest           string `json:"digest"`
-		IncludeProtected bool   `json:"include_protected"`
-		Actor            string `json:"actor"`
-		Reason           string `json:"reason"`
+		ExportID            string `json:"export_id"`
+		Digest              string `json:"digest"`
+		IncludeProtected    bool   `json:"include_protected"`
+		Actor               string `json:"actor"`
+		Reason              string `json:"reason"`
+		GeneralChatID       string `json:"general_chat_id"`
+		GeneralChatRevision string `json:"general_chat_revision"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	decoder.DisallowUnknownFields()
@@ -86,7 +90,7 @@ func (a *API) handleProfileRetire(w http.ResponseWriter, r *http.Request) {
 	var receipt service.ProfileRetirementReceipt
 	var err error
 	if request.IncludeProtected {
-		receipt, err = a.Services.AgentConfig.RetireProtectedProfile(r.Context(), r.PathValue("id"), request.ExportID, request.Digest, service.ProtectedProfileRetirementRequest{Actor: request.Actor, Reason: request.Reason})
+		receipt, err = a.Services.AgentConfig.RetireProtectedProfile(r.Context(), r.PathValue("id"), request.ExportID, request.Digest, service.ProtectedProfileRetirementRequest{Actor: request.Actor, Reason: request.Reason, GeneralChatID: request.GeneralChatID, GeneralChatRevision: request.GeneralChatRevision})
 	} else {
 		receipt, err = a.Services.AgentConfig.RetireEditableProfile(r.Context(), r.PathValue("id"), request.ExportID, request.Digest)
 	}

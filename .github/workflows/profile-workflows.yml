@@ -5,6 +5,10 @@ on:
     paths:
       - 'internal/store/agents.go'
       - 'internal/store/profile_retirement*.go'
+      - 'internal/store/retired_agent_profiles.go'
+      - 'internal/store/protected_retirement_residual_test.go'
+      - 'internal/service/protected_retirement_residual_test.go'
+      - 'internal/api/protected_retirement_residual_test.go'
       - 'internal/service/agent_config*.go'
       - 'internal/service/definition_resolver*.go'
       - 'internal/service/logical_agent_provision*.go'
@@ -20,6 +24,10 @@ on:
     paths:
       - 'internal/store/agents.go'
       - 'internal/store/profile_retirement*.go'
+      - 'internal/store/retired_agent_profiles.go'
+      - 'internal/store/protected_retirement_residual_test.go'
+      - 'internal/service/protected_retirement_residual_test.go'
+      - 'internal/api/protected_retirement_residual_test.go'
       - 'internal/service/agent_config*.go'
       - 'internal/service/definition_resolver*.go'
       - 'internal/service/logical_agent_provision*.go'
@@ -66,3 +74,13 @@ jobs:
           go test -race -count=20 -timeout=5m
           ./internal/store ./internal/service ./internal/api
           -run '^(TestProfileRetirement|TestLogicalGeneralChatProvision)'
+      - name: Exercise protected retirement residual behavior once
+        run: >-
+          go test -count=1 -timeout=3m
+          ./internal/store ./internal/service ./internal/api
+          -run '^TestProtectedRetirementResidual'
+      - name: Competing protected retirement CAS
+        run: >-
+          go test -race -count=20 -timeout=3m
+          ./internal/store
+          -run '^TestProtectedRetirementResidualCompeting(Keep)?CAS$'

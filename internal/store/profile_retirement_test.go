@@ -307,7 +307,7 @@ func TestAuditedRetirementSuppressesFreshHostAdmissionAfterReopen(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if operationErr := st.RetireExportedProfileWithAudit(ctx, historical.ID, digest, store.RetireAgentProfileAudit{ExportID: "private-durable-export", Actor: "private-test-operator", Reason: "Explicit private retirement"}); operationErr != nil {
+	if operationErr := st.RetireExportedProfileWithAudit(ctx, historical.ID, digest, store.RetireAgentProfileAudit{ExportID: "private-durable-export", Actor: "private-test-operator", Reason: "Explicit private retirement", Keep: protectedResidualKeepFixture(t, st)}); operationErr != nil {
 		t.Fatal(operationErr)
 	}
 	if operationErr := st.Close(ctx); operationErr != nil {

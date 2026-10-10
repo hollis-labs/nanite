@@ -32,8 +32,29 @@ type profileRetirementArchive struct {
 }
 
 type ProtectedProfileRetirementRequest struct {
-	Actor  string
-	Reason string
+	// Actor is an audit label. HTTP host admission supplies authorization;
+	// this field is not an authenticated principal or actor binding.
+	Actor               string
+	Reason              string
+	GeneralChatID       string
+	GeneralChatRevision string
+}
+
+func protectedRetirementKeep(req ProtectedProfileRetirementRequest) (store.ProtectedRetirementKeep, error) {
+	if req.GeneralChatID == "" || req.GeneralChatRevision == "" {
+		return store.ProtectedRetirementKeep{}, store.ErrProfileRetirementKeep
+	}
+	// Only the embedded, unchanged default is the approved historical keep.
+	// A caller-selected compatible definition or title cannot substitute for it.
+	verified, err := EmbeddedDefinition()
+	if err != nil {
+		return store.ProtectedRetirementKeep{}, err
+	}
+	cfg, err := MapChatDefinition(verified)
+	if err != nil {
+		return store.ProtectedRetirementKeep{}, err
+	}
+	return store.ProtectedRetirementKeep{ID: req.GeneralChatID, Revision: req.GeneralChatRevision, DefinitionRef: verified.Ref.MeshRef(), SystemPrompt: cfg.Instructions}, nil
 }
 
 // retirementArchiveRoot is host-derived, never supplied by an HTTP caller.
@@ -179,9 +200,31 @@ func (s *AgentConfigService) retireProfile(ctx context.Context, id, exportID, di
 	if err != nil || receipt.ExportID != exportID || receipt.ProfileID != id || archive.Export.ProfileID != id || receipt.Revision != archive.Export.Revision || digest == "" || digest != actual || receipt.Digest != actual || receipt.Retired {
 		return ProfileRetirementReceipt{}, store.ErrProfileRetirementConflict
 	}
+	if includeProtected && archive.Export.SchemaVersion != store.ProtectedProfileExportSchemaVersion {
+		return receipt, store.ErrProfileRetirementConflict
+	}
+	if includeProtected {
+		// The committed ledger plus this validated, private export proves the
+		// outcome even if the host died before writing a completion receipt.
+		// Neither a missing historical row nor a matching slug is proof.
+		retired, ledgerErr := s.store.GetRetiredAgentProfile(ctx, id)
+		if ledgerErr != nil {
+			return receipt, ledgerErr
+		}
+		if retired != nil {
+			if retired.ExportID != exportID || retired.Digest != digest || retired.Slug != archive.Export.Slug {
+				return receipt, store.ErrProfileRetirementConflict
+			}
+			return recoverProtectedRetirementReceipt(root, receipt)
+		}
+	}
 	// A previously completed receipt supports an attributable retry without
 	// replaying the deletion or touching any replacement profile.
 	if info, statErr := root.Lstat(exportID + ".retired.json"); statErr == nil {
+		if includeProtected {
+			// A protected completion file alone cannot replace the durable audit.
+			return receipt, store.ErrProfileRetirementConflict
+		}
 		if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > 4096 {
 			return receipt, store.ErrProfileRetirementConflict
 		}
@@ -203,7 +246,11 @@ func (s *AgentConfigService) retireProfile(ctx context.Context, id, exportID, di
 		return receipt, statErr
 	}
 	if includeProtected {
-		err = s.store.RetireExportedProfileWithAudit(ctx, id, digest, store.RetireAgentProfileAudit{ExportID: exportID, Actor: req.Actor, Reason: req.Reason})
+		keep, keepErr := protectedRetirementKeep(req)
+		if keepErr != nil {
+			return receipt, keepErr
+		}
+		err = s.store.RetireExportedProfileWithAudit(ctx, id, digest, store.RetireAgentProfileAudit{ExportID: exportID, Actor: req.Actor, Reason: req.Reason, Keep: keep})
 	} else {
 		err = s.store.RetireExportedProfile(ctx, id, digest)
 	}
@@ -218,6 +265,65 @@ func (s *AgentConfigService) retireProfile(ctx context.Context, id, exportID, di
 	persisted.ReceiptPersisted = true
 	if err := writeRetirementFile(root, exportID+".retired.json", persisted); err != nil {
 		return receipt, fmt.Errorf("profile retired; final receipt persistence failed: %w", err)
+	}
+	return persisted, nil
+}
+
+func recoverProtectedRetirementReceipt(root *os.Root, receipt ProfileRetirementReceipt) (ProfileRetirementReceipt, error) {
+	receipt.Retired = true
+	receipt.ReceiptPersisted = false
+	persisted := receipt
+	persisted.ReceiptPersisted = true
+	name := receipt.ExportID + ".retired.json"
+	if info, err := root.Lstat(name); err == nil {
+		if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > 4096 {
+			return receipt, store.ErrProfileRetirementConflict
+		}
+		file, openErr := root.Open(name)
+		if openErr != nil {
+			return receipt, openErr
+		}
+		var result ProfileRetirementReceipt
+		decoder := json.NewDecoder(io.LimitReader(file, 4097))
+		decoder.DisallowUnknownFields()
+		decodeErr := decoder.Decode(&result)
+		var extra any
+		if decodeErr == nil && decoder.Decode(&extra) != io.EOF {
+			decodeErr = store.ErrProfileRetirementConflict
+		}
+		closeErr := file.Close()
+		if closeErr != nil {
+			return receipt, closeErr
+		}
+		if decodeErr == nil {
+			if result != persisted {
+				return receipt, store.ErrProfileRetirementConflict
+			}
+			return result, nil
+		}
+		// Only an interrupted JSON write is repairable. A complete foreign
+		// receipt or other corruption is not silently replaced.
+		if !errors.Is(decodeErr, io.EOF) && !errors.Is(decodeErr, io.ErrUnexpectedEOF) {
+			return receipt, store.ErrProfileRetirementConflict
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return receipt, err
+	}
+	// Publish atomically, including replacement of an interrupted regular
+	// receipt. Every file remains private and the containing directory is synced.
+	temporary := receipt.ExportID + ".completion-" + uuid.NewString() + ".json"
+	if err := writeRetirementFile(root, temporary, persisted); err != nil {
+		return receipt, err
+	}
+	if err := root.Rename(temporary, name); err != nil {
+		return receipt, err
+	}
+	dir, err := root.Open(".")
+	if err != nil {
+		return receipt, err
+	}
+	if err := errors.Join(dir.Sync(), dir.Close()); err != nil {
+		return receipt, err
 	}
 	return persisted, nil
 }

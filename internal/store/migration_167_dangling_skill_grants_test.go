@@ -12,9 +12,10 @@ func TestMigration167_RetiresDanglingSkillGrants(t *testing.T) {
 	ctx := context.Background()
 	s := newSeededStore(t)
 	agent := &AgentProfile{Name: "Grantee", Slug: "grantee", SystemPrompt: "x"}
-	if err := s.CreateAgent(ctx, agent); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO agent_profiles(id,name,slug,system_prompt) VALUES(?,?,?,?)`, "historical-"+agent.Slug, agent.Name, agent.Slug, agent.SystemPrompt); err != nil {
 		t.Fatal(err)
 	}
+	agent.ID = "historical-" + agent.Slug
 	// A real, installed skill, and one whose slug is on the retire list but IS
 	// installed (its grant must survive).
 	for _, slug := range []string{"capture-decision", "escalate"} {
@@ -73,15 +74,12 @@ func TestMigration167_RetiresDanglingSkillGrants(t *testing.T) {
 func TestListDanglingSkillGrants(t *testing.T) {
 	ctx := context.Background()
 	s := newSeededStore(t)
-	agent := &AgentProfile{Name: "G", Slug: "g", SystemPrompt: "x"}
-	if err := s.CreateAgent(ctx, agent); err != nil {
-		t.Fatal(err)
-	}
+	agent := makeTestAgent(t, s, "dangling-grants")
 	if err := s.CreateSkill(ctx, &Skill{Name: "real", Slug: "real", Description: "d"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, slug := range []string{"real", "ghost-b", "ghost-a"} {
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO agent_known_skills (agent_id, skill_name) VALUES (?, ?)`, agent.ID, slug); err != nil {
+		if _, err := s.DB.ExecContext(ctx, `INSERT INTO actor_known_skills (agent_id, skill_name) VALUES (?, ?)`, agent.ID, slug); err != nil {
 			t.Fatal(err)
 		}
 	}

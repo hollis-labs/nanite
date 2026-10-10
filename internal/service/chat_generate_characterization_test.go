@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -310,6 +311,36 @@ func newCharacterizationFixture(t *testing.T, steps []characterizationProviderSt
 	}
 	svc.dispatcher = dispatcher.New(newChatRunnerAdapter(svc))
 	return &characterizationFixture{svc: svc, st: st, provider: prov, tools: toolSvc, context: contextSvc, session: sessionID}
+}
+
+// bindTestDefinedConfiguration installs and maps an actual immutable pin for
+// an existing private fixture view. It creates no actor, authority or fallback.
+func bindTestDefinedConfiguration(t *testing.T, f *characterizationFixture) {
+	t.Helper()
+	ctx := t.Context()
+	if err := installEmbeddedChatDefinition(ctx, f.st); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := EmbeddedDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := MapChatDefinition(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Model = ModelSelection{"characterization", "characterization-model"}
+	pinJSON, err := json.Marshal(verified.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.st.DB.ExecContext(ctx, `INSERT INTO cognitive_views(session_view_id,definition_ref_json,chat_config_json) VALUES(?,?,?)`, f.session, string(pinJSON), string(cfgJSON)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func forceCompactableWindow(result *SlotAssemblyResult) {

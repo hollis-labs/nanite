@@ -20,7 +20,7 @@ func TestProfileRetirementCapturesCascadeChildrenAndRejectsChangedState(t *testi
 	}
 	t.Cleanup(func() { _ = st.Close(ctx) })
 	p := &store.AgentProfile{Name: "Test", Slug: "cascade-test", SystemPrompt: "x", Source: "user"}
-	if err = st.CreateAgent(ctx, p); err != nil {
+	if err = storetest.HistoricalProfile(ctx, st, p); err != nil {
 		t.Fatal(err)
 	}
 	// Exercise the schema-discovered cascade path with binary data, including a
@@ -78,13 +78,13 @@ func TestProfileRetirementOversizedExportRefusesWithoutDeletion(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close(ctx) })
 	p := &store.AgentProfile{Name: "Large", Slug: "large-export", SystemPrompt: strings.Repeat("x", store.ProfileExportMaxBytes+1), Source: "user"}
-	if err = st.CreateAgent(ctx, p); err != nil {
+	if err = storetest.HistoricalProfile(ctx, st, p); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = st.ExportProfileRetirement(ctx, p.ID); !errors.Is(err, store.ErrProfileRetirementBound) {
 		t.Fatal("oversized export accepted or truncated", err)
 	}
-	if _, err = st.GetAgent(ctx, p.ID); err != nil {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.ID); err != nil {
 		t.Fatal("export refusal changed profile", err)
 	}
 }
@@ -97,7 +97,7 @@ func TestProfileRetirementRejectsChangedSQLiteCellType(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close(ctx) })
 	p := &store.AgentProfile{Name: "Test", Slug: "cell-type-test", SystemPrompt: "x", Source: "user"}
-	if err = st.CreateAgent(ctx, p); err != nil {
+	if err = storetest.HistoricalProfile(ctx, st, p); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = st.DB.ExecContext(ctx, `INSERT INTO agent_procedures(agent_id,name,body) VALUES(?,?,?)`, p.ID, "typed", []byte("foo")); err != nil {
@@ -117,7 +117,7 @@ func TestProfileRetirementRejectsChangedSQLiteCellType(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = st.RetireExportedProfile(ctx, p.ID, digest)
-	_, remainingErr := st.GetAgent(ctx, p.ID)
+	_, remainingErr := st.GetHistoricalAgentProfile(ctx, p.ID)
 	if !errors.Is(err, store.ErrProfileRetirementConflict) || remainingErr != nil {
 		t.Fatalf("changed cell type accepted: outcome=%v; remaining profile error=%v", err, remainingErr)
 	}
@@ -146,7 +146,7 @@ func TestProfileRetirementPreservesSQLiteCellClassesAndBytes(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close(ctx) })
 			p := &store.AgentProfile{Name: "Test", Slug: "typed", SystemPrompt: "x", Source: "user"}
-			if err = st.CreateAgent(ctx, p); err != nil {
+			if err = storetest.HistoricalProfile(ctx, st, p); err != nil {
 				t.Fatal(err)
 			}
 			// No column affinity: retain INTEGER and REAL storage classes.
@@ -212,7 +212,7 @@ func TestProfileRetirementPreservesSQLiteCellClassesAndBytes(t *testing.T) {
 			if err = st.RetireExportedProfile(ctx, p.ID, digest); !errors.Is(err, store.ErrProfileRetirementConflict) {
 				t.Fatal("changed typed cell admitted", err)
 			}
-			if _, err = st.GetAgent(ctx, p.ID); err != nil {
+			if _, err = st.GetHistoricalAgentProfile(ctx, p.ID); err != nil {
 				t.Fatal("conflict deleted profile", err)
 			}
 			fresh, err := st.ExportProfileRetirement(ctx, p.ID)
@@ -238,7 +238,7 @@ func TestProfileRetirementPreservesDeclaredDateAndBooleanStorage(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close(ctx) })
 	p := &store.AgentProfile{Name: "Test", Slug: "declared", SystemPrompt: "x", Source: "user"}
-	if err = st.CreateAgent(ctx, p); err != nil {
+	if err = storetest.HistoricalProfile(ctx, st, p); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = st.DB.Exec(`CREATE TABLE retirement_declared(profile_id TEXT REFERENCES agent_profiles(id) ON DELETE CASCADE, stamp DATETIME, flag BOOLEAN)`); err != nil {
@@ -283,7 +283,7 @@ func TestProfileRetirementPreservesDeclaredDateAndBooleanStorage(t *testing.T) {
 	if err = st.RetireExportedProfile(ctx, p.ID, digest); !errors.Is(err, store.ErrProfileRetirementConflict) {
 		t.Fatal("normalized boolean passed guard", err)
 	}
-	if _, err = st.GetAgent(ctx, p.ID); err != nil {
+	if _, err = st.GetHistoricalAgentProfile(ctx, p.ID); err != nil {
 		t.Fatal("conflict deleted profile", err)
 	}
 }

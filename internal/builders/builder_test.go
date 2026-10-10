@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -24,6 +25,7 @@ func newTestStore(t *testing.T) *store.Store {
 
 func TestAgentBuilder_FullFlow(t *testing.T) {
 	s := newTestStore(t)
+	before := builderBoundarySnapshot(t, s)
 	reg := DefaultRegistry(s)
 	sm := NewSessionManager()
 	sessionKey := "test-session-1"
@@ -85,32 +87,17 @@ func TestAgentBuilder_FullFlow(t *testing.T) {
 				t.Errorf("step %s: expected next=%s, got %s", st.step, steps[i+1].step, result.NextStep)
 			}
 		} else {
-			// Last step should complete.
-			if result.Status != "complete" {
-				t.Errorf("step %s: expected status=complete, got %s (error: %s)", st.step, result.Status, result.Error)
+			if result.Status != "error" || result.Result != nil || result.Error != "create agent: "+store.ErrImmutableAgentProfile.Error() {
+				t.Fatalf("final wire result = %+v, want immutable refusal", result)
 			}
-			if result.Result == nil {
-				t.Fatal("expected non-nil result on completion")
-			}
-			if !strings.Contains(result.Result.Summary, "Test Agent") {
-				t.Errorf("expected summary to contain agent name, got: %s", result.Result.Summary)
+			if sm.Get(sessionKey) != nil {
+				t.Fatal("failed build retained an active session")
 			}
 		}
 	}
 
-	// Verify agent was created in the store.
-	agent, err := s.GetAgentBySlug(context.Background(), "test-agent")
-	if err != nil {
-		t.Fatalf("get agent by slug: %v", err)
-	}
-	if agent.Name != "Test Agent" {
-		t.Errorf("expected name=Test Agent, got %s", agent.Name)
-	}
-	if agent.SystemPrompt != "You are a helpful test agent." {
-		t.Errorf("unexpected system prompt: %s", agent.SystemPrompt)
-	}
-	if agent.DefaultModel != "claude-sonnet-4-20250514" {
-		t.Errorf("unexpected model: %s", agent.DefaultModel)
+	if after := builderBoundarySnapshot(t, s); !reflect.DeepEqual(before, after) {
+		t.Fatalf("builder changed history or authority: %#v -> %#v", before, after)
 	}
 }
 
@@ -121,16 +108,16 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 	sessionKey := "test-session-2"
 
 	// Start the skill builder.
-	out, err := HandleStartBuilder(reg, sm, sessionKey, map[string]any{
+	out, startErr := HandleStartBuilder(reg, sm, sessionKey, map[string]any{
 		"builder_name": "skill",
 	})
-	if err != nil {
-		t.Fatalf("start builder: %v", err)
+	if startErr != nil {
+		t.Fatalf("start builder: %v", startErr)
 	}
 
 	var start StartBuilderResult
-	if err := json.Unmarshal([]byte(out), &start); err != nil {
-		t.Fatalf("unmarshal start: %v", err)
+	if decodeErr := json.Unmarshal([]byte(out), &start); decodeErr != nil {
+		t.Fatalf("unmarshal start: %v", decodeErr)
 	}
 	if start.Builder != "skill" {
 		t.Errorf("expected builder=skill, got %s", start.Builder)
@@ -162,8 +149,8 @@ func TestSkillBuilder_FullFlow(t *testing.T) {
 		}
 
 		var result StepResult
-		if err := json.Unmarshal([]byte(out), &result); err != nil {
-			t.Fatalf("unmarshal step %s: %v", st.step, err)
+		if decodeErr := json.Unmarshal([]byte(out), &result); decodeErr != nil {
+			t.Fatalf("unmarshal step %s: %v", st.step, decodeErr)
 		}
 
 		if i < len(steps)-1 {
@@ -236,8 +223,8 @@ func TestBuilderStep_Validation(t *testing.T) {
 	}
 
 	var result StepResult
-	if err := json.Unmarshal([]byte(out), &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if decodeErr := json.Unmarshal([]byte(out), &result); decodeErr != nil {
+		t.Fatalf("unmarshal: %v", decodeErr)
 	}
 	if result.Status != "error" {
 		t.Errorf("expected status=error for empty required field, got %s", result.Status)
@@ -262,8 +249,8 @@ func TestBuilderStep_Validation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("step slug: %v", err)
 	}
-	if err := json.Unmarshal([]byte(out), &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if decodeErr := json.Unmarshal([]byte(out), &result); decodeErr != nil {
+		t.Fatalf("unmarshal: %v", decodeErr)
 	}
 	if result.Status != "error" {
 		t.Errorf("expected status=error for invalid slug, got %s", result.Status)
@@ -306,40 +293,44 @@ func TestAgentBuilder_DefaultModel(t *testing.T) {
 	reg := DefaultRegistry(s)
 	sm := NewSessionManager()
 	sessionKey := "test-default-model"
-
-	_, _ = HandleStartBuilder(reg, sm, sessionKey, map[string]any{
-		"builder_name": "agent",
-	})
-
-	// Walk through with empty model to test default.
-	steps := []struct {
-		step  string
-		value string
-	}{
-		{"name", "Default Model Agent"},
-		{"slug", ""}, // auto-generate
-		{"system_prompt", "A test prompt."},
-		{"model", ""}, // CW-20260526-0003: blank persists "" so the chat-engine resolver fills it per call
-		{"description", ""},
+	before := builderBoundarySnapshot(t, s)
+	if _, err := HandleStartBuilder(reg, sm, sessionKey, map[string]any{"builder_name": "agent"}); err != nil {
+		t.Fatal(err)
 	}
-
-	for _, st := range steps {
-		_, err := HandleBuilderStep(reg, sm, sessionKey, map[string]any{
-			"builder_name": "agent",
-			"step_name":    st.step,
-			"value":        st.value,
-		})
+	steps := []struct{ step, value string }{
+		{"name", "Default Model Agent"}, {"slug", ""}, {"system_prompt", "A test prompt."}, {"model", ""}, {"description", ""},
+	}
+	for i, step := range steps {
+		out, err := HandleBuilderStep(reg, sm, sessionKey, map[string]any{"builder_name": "agent", "step_name": step.step, "value": step.value})
 		if err != nil {
-			t.Fatalf("step %s: %v", st.step, err)
+			t.Fatal(err)
+		}
+		var result StepResult
+		if decodeErr := json.Unmarshal([]byte(out), &result); decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if i < len(steps)-1 {
+			if result.Status != "next" || result.NextStep != steps[i+1].step {
+				t.Fatalf("interview step %s: %+v", step.step, result)
+			}
+			sess := sm.Get(sessionKey)
+			if sess == nil || sess.Inputs[step.step] != step.value {
+				t.Fatalf("interview lost submitted %s: %+v", step.step, sess)
+			}
+			if step.step == "model" && !strings.Contains(reg.Get("agent").StepByName("model").Prompt, "leave blank") {
+				t.Fatal("blank model interview hint lost")
+			}
+		} else {
+			if result.Status != "error" || result.Result != nil || result.Error != "create agent: "+store.ErrImmutableAgentProfile.Error() {
+				t.Fatalf("blank/default path completed a retired creation: %+v", result)
+			}
 		}
 	}
-
-	agent, err := s.GetAgentBySlug(context.Background(), "default-model-agent")
-	if err != nil {
-		t.Fatalf("get agent: %v", err)
+	if sm.Get(sessionKey) != nil {
+		t.Fatal("refused build retained session")
 	}
-	if agent.DefaultModel != "" {
-		t.Errorf("expected blank DefaultModel (inherits system default at request time), got %q", agent.DefaultModel)
+	if after := builderBoundarySnapshot(t, s); !reflect.DeepEqual(before, after) {
+		t.Fatalf("builder changed history or authority: %#v -> %#v", before, after)
 	}
 }
 
@@ -380,4 +371,60 @@ func TestBuilderStep_NoActiveSession(t *testing.T) {
 	if !strings.Contains(err.Error(), "builder_start") {
 		t.Errorf("expected error to mention builder_start, got: %v", err)
 	}
+}
+
+// builderBoundarySnapshot captures retained history and both authority partitions in the private DB.
+func builderBoundarySnapshot(t *testing.T, st *store.Store) map[string][][]any {
+	t.Helper()
+	out := make(map[string][][]any)
+	for _, query := range []struct{ table, sql string }{
+		{"agent_profiles", "SELECT * FROM agent_profiles ORDER BY rowid"},
+		{"agent_profile_revisions", "SELECT * FROM agent_profile_revisions ORDER BY rowid"},
+		{"agent_procedures", "SELECT * FROM agent_procedures ORDER BY rowid"},
+		{"agent_reflexes", "SELECT * FROM agent_reflexes ORDER BY rowid"},
+		{"agent_tools", "SELECT * FROM agent_tools ORDER BY rowid"},
+		{"agent_known_skills", "SELECT * FROM agent_known_skills ORDER BY rowid"},
+		{"agent_definitions", "SELECT * FROM agent_definitions ORDER BY rowid"},
+		{"agent_definition_resources", "SELECT * FROM agent_definition_resources ORDER BY rowid"},
+		{"agent_definition_resource_refs", "SELECT * FROM agent_definition_resource_refs ORDER BY rowid"},
+		{"agent_host_settings", "SELECT * FROM agent_host_settings ORDER BY rowid"},
+		{"agent_actor_bindings", "SELECT * FROM agent_actor_bindings ORDER BY rowid"},
+		{"actor_granted_tools", "SELECT * FROM actor_granted_tools ORDER BY rowid"},
+		{"actor_known_skills", "SELECT * FROM actor_known_skills ORDER BY rowid"},
+	} {
+		rows, err := st.DB.QueryContext(t.Context(), query.sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			cells := make([]any, len(columns))
+			refs := make([]any, len(columns))
+			for i := range cells {
+				refs[i] = &cells[i]
+			}
+			if err := rows.Scan(refs...); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			for i, cell := range cells {
+				if raw, ok := cell.([]byte); ok {
+					cells[i] = append([]byte(nil), raw...)
+				}
+			}
+			out[query.table] = append(out[query.table], cells)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
 }

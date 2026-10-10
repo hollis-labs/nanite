@@ -2,6 +2,7 @@ package agentimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agent"
 	adapterclaude "github.com/hollis-labs/nanite/internal/plugin/builtin/adapter-claude"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // TestConcurrentImportsShareOneRegistry probes the shape the REST surface
@@ -28,10 +30,10 @@ import (
 //     once. adapterclaude.Adapter carries no per-call state, which is easy
 //     to say and easy to break later; run under -race, this test says it.
 //
-// Each goroutine imports a distinct slug, so the pipeline's own
-// create-or-refuse decision is not what is under test — the shared reads are.
+// Shared reads still parse each distinct source; every retired write must refuse without effects.
 func TestConcurrentImportsShareOneRegistry(t *testing.T) {
 	st := newTestStore(t)
+	before := importBoundarySnapshot(t, st)
 
 	registry := agent.NewAdapterRegistry()
 	registry.Register(adapterclaude.New().Adapter())
@@ -74,21 +76,20 @@ func TestConcurrentImportsShareOneRegistry(t *testing.T) {
 	wg.Wait()
 
 	for i, err := range errs {
-		if err != nil {
-			t.Errorf("import %d: %v", i, err)
+		if !errors.Is(err, store.ErrImmutableAgentProfile) {
+			t.Errorf("import %d: want immutable refusal, got %v", i, err)
 		}
 	}
 	for i := range n {
-		slug := fmt.Sprintf("agent-%02d", i)
-		row, err := st.GetAgentBySlug(context.Background(), slug)
-		if err != nil {
-			t.Errorf("%s missing after concurrent import: %v", slug, err)
-			continue
+		defs, err := chain(registry).Parse(filepath.Join(root, fmt.Sprintf("proj-%02d", i)))
+		if err != nil || len(defs) != 1 {
+			t.Fatalf("parse %d: %+v, %v", i, defs, err)
 		}
-		if row.Source != SourceProvenance || row.OriginSystem != adapterclaude.AdapterName {
-			t.Errorf("%s: source=%q origin=%q", slug, row.Source, row.OriginSystem)
+		if defs[0].Slug != fmt.Sprintf("agent-%02d", i) || defs[0].Source != adapterclaude.AdapterName || defs[0].SystemPrompt != fmt.Sprintf("Prompt %d.", i) {
+			t.Errorf("cross-request parser content: %+v", defs[0])
 		}
 	}
+	requireImportStateUnchanged(t, st, before)
 }
 
 // TestConcurrentRegisterDuringImport is the harsher case: an adapter being
@@ -97,6 +98,7 @@ func TestConcurrentImportsShareOneRegistry(t *testing.T) {
 // copies under the read lock before any I/O begins.
 func TestConcurrentRegisterDuringImport(t *testing.T) {
 	st := newTestStore(t)
+	before := importBoundarySnapshot(t, st)
 	registry := agent.NewAdapterRegistry()
 	registry.Register(adapterclaude.New().Adapter())
 
@@ -118,15 +120,17 @@ func TestConcurrentRegisterDuringImport(t *testing.T) {
 		defer wg.Done()
 		imp := &Importer{Store: st, Parse: RegistryParser{Registry: registry}}
 		for range 50 {
-			if _, err := imp.Import(context.Background(), Source{Path: dir}); err != nil {
-				t.Errorf("import during Register: %v", err)
+			if _, err := imp.Import(context.Background(), Source{Path: dir}); !errors.Is(err, store.ErrImmutableAgentProfile) {
+				t.Errorf("import during Register: want immutable refusal, got %v", err)
 				return
 			}
 		}
 	}()
 	wg.Wait()
 
-	if _, err := st.GetAgentBySlug(context.Background(), "solo"); err != nil {
-		t.Errorf("solo missing: %v", err)
+	defs, err := (RegistryParser{Registry: registry}).Parse(dir)
+	if err != nil || len(defs) != 1 || defs[0].Slug != "solo" || defs[0].SystemPrompt != "Prompt." {
+		t.Fatalf("registry parsing after concurrent registration: %+v, %v", defs, err)
 	}
+	requireImportStateUnchanged(t, st, before)
 }

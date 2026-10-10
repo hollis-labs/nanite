@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestWorkflowContextAssembler_AssembleContext_ResolvesAgentAndSession(t *tes
 		SystemPrompt: "SENTINEL_AGENT_SYSTEM_PROMPT",
 		Status:       "active",
 	}
-	if err := s.CreateAgent(context.Background(), agentProfile); err != nil {
+	if err := persistTestActor(context.Background(), s, agentProfile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -85,13 +86,13 @@ func TestWorkflowContextAssembler_AssembleContext_ResolvesAgentAndSession(t *tes
 }
 
 // TestWorkflowContextAssembler_AssembleContext_NoSessionBinding confirms
-// AssembleContext still succeeds when the session has no primary-agent
-// binding (session_agents row) — unrelated to mode, still real coverage.
+// AssembleContext refuses a missing prior session binding; neither a
+// supplied actor URI nor a host ID can enroll it as a side effect.
 func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding(t *testing.T) {
 	s, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
 
 	agentProfile := &store.AgentProfile{ID: "agent-unbound", Name: "Unbound", Slug: "unbound", SystemPrompt: "unbound agent", Status: "active"}
-	if err := s.CreateAgent(context.Background(), agentProfile); err != nil {
+	if err := persistTestActor(context.Background(), s, agentProfile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{ID: "sess-mode-3", Title: "test"}
@@ -101,7 +102,65 @@ func TestWorkflowContextAssembler_AssembleContext_NoSessionBinding(t *testing.T)
 	// No EnsureSessionAgent call — the session has no primary-agent binding.
 
 	asm := NewWorkflowContextAssembler(sessions, agents, s, ctxSvc)
-	if _, _, err := asm.AssembleContext(context.Background(), sess.ID, agentProfile.ID); err != nil {
-		t.Fatalf("AssembleContext: %v", err)
+	if _, _, err := asm.AssembleContext(context.Background(), sess.ID, agentProfile.ID); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("unbound session admitted: %v", err)
+	}
+}
+
+// The actor and matching session fence runs before session inventory/assembly.
+type workflowAdmissionSessionCounter struct {
+	SessionService
+	reads int
+}
+
+func (s *workflowAdmissionSessionCounter) Get(context.Context, string) (*store.Session, error) {
+	s.reads++
+	return nil, errors.New("session inventory must not be reached")
+}
+func TestWorkflowContextAssemblerRefusesUnverifiedOrForeignBindingBeforeReads(t *testing.T) {
+	for _, kind := range []string{"host-id", "disabled", "empty-receipt", "unbound-session", "different-actor"} {
+		t.Run(kind, func(t *testing.T) {
+			st, sessions, agents, ctxSvc := newWorkflowContextAssemblerTestDeps(t)
+			p := &store.AgentProfile{Name: "Prior workflow", Slug: "prior-workflow-admission"}
+			if err := persistTestActor(t.Context(), st, p); err != nil {
+				t.Fatal(err)
+			}
+			sess := &store.Session{ID: "private-admission-session"}
+			if err := st.CreateSession(t.Context(), sess); err != nil {
+				t.Fatal(err)
+			}
+			if kind != "unbound-session" {
+				if err := st.EnsureSessionAgent(t.Context(), sess.ID, p.ID, "", true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			actor := p.ID
+			switch kind {
+			case "host-id":
+				if err := st.DB.QueryRowContext(t.Context(), `SELECT host_settings_id FROM agent_actor_bindings WHERE actor_uri=?`, p.ID).Scan(&actor); err != nil {
+					t.Fatal(err)
+				}
+			case "disabled":
+				if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_actor_bindings SET enabled=0 WHERE actor_uri=?`, p.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "empty-receipt":
+				if _, err := st.DB.ExecContext(t.Context(), `UPDATE agent_actor_bindings SET binding_receipt='' WHERE actor_uri=?`, p.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "different-actor":
+				other := &store.AgentProfile{Name: "Other prior", Slug: "other-prior-workflow"}
+				if err := persistTestActor(t.Context(), st, other); err != nil {
+					t.Fatal(err)
+				}
+				actor = other.ID
+			}
+			counter := &workflowAdmissionSessionCounter{SessionService: sessions}
+			assembler := NewWorkflowContextAssembler(counter, agents, st, ctxSvc)
+			prompt, messages, err := assembler.AssembleContext(t.Context(), sess.ID, actor)
+			if !errors.Is(err, store.ErrVerifiedActorRequired) || prompt != "" || len(messages) != 0 || counter.reads != 0 {
+				t.Fatalf("admission reached session/context effects: %q %v %v reads=%d", prompt, messages, err, counter.reads)
+			}
+		})
 	}
 }

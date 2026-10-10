@@ -395,7 +395,7 @@ func validateEditableAgent(p *store.AgentProfile) error {
 }
 
 func (s *AgentConfigService) ListRevisions(ctx context.Context, id string, limit, offset int) ([]store.AgentRevision, error) {
-	if _, err := s.store.GetAgent(ctx, id); err != nil {
+	if _, err := s.store.GetHistoricalAgentProfile(ctx, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
 		}
@@ -412,45 +412,5 @@ func (s *AgentConfigService) ListRevisions(ctx context.Context, id string, limit
 // and composition/ACP assignments, never capability children, grants, trust,
 // provenance, registry identity or plugin/system ownership.
 func (s *AgentConfigService) RestoreRevision(ctx context.Context, id, historicalID, revision string) (*AgentConfigResult, error) {
-	current, err := s.store.GetAgent(ctx, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
-		}
-		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent")
-	}
-	if class := s.Classify(current); !class.Editable() {
-		return nil, notManagedError(current, class, "restore")
-	}
-	if revision != "" && revision != current.Revision {
-		return nil, agentRevisionConflict()
-	}
-	historical, err := s.store.GetAgentRevision(ctx, id, historicalID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent revision not found")
-		}
-		return nil, svcerr.Wrap(err, svcerr.CodeInternal, "failed to read agent revision")
-	}
-	p := *current
-	old := historical.Profile
-	p.Name, p.Slug, p.Avatar, p.SystemPrompt, p.Description = old.Name, old.Slug, old.Avatar, old.SystemPrompt, old.Description
-	p.Modes, p.DefaultModel, p.DefaultProvider, p.MCPServers = old.Modes, old.DefaultModel, old.DefaultProvider, old.MCPServers
-	p.ToolPermissions, p.CanExecute, p.Settings, p.Tools = old.ToolPermissions, old.CanExecute, old.Settings, old.Tools
-	p.Directories, p.Constraints, p.Tags, p.Status, p.Icon = old.Directories, old.Constraints, old.Tags, old.Status, old.Icon
-	p.ParentDispatchAllowlist, p.RoleTools, p.RoleSkills, p.ContextPolicy = old.ParentDispatchAllowlist, old.RoleTools, old.RoleSkills, old.ContextPolicy
-	p.Durable, p.ActivationMode, p.Class, p.DefaultState = old.Durable, old.ActivationMode, old.Class, old.DefaultState
-	p.RoleID, p.ConsumerID, p.ModelID, p.RuntimeKind = old.RoleID, old.ConsumerID, old.ModelID, old.RuntimeKind
-	p.Protocol, p.Transport = old.Protocol, old.Transport
-	// TetherURN is identity, while TetherManaged is an editable opt-in setting.
-	p.TetherManaged = old.TetherManaged
-	if err = validateEditableAgent(&p); err != nil {
-		return nil, err
-	}
-	saved, err := s.store.UpdateAgentConfigRevision(ctx, &p, AgentAssignments{}, store.AgentConfigSeeds{}, current.Revision, historicalID)
-	if err != nil {
-		return nil, agentConfigWriteError(err, "failed to restore agent revision")
-	}
-	s.emit(saved.Slug, "restored_partial")
-	return &AgentConfigResult{Profile: saved, Class: s.Classify(saved), Revision: saved.Revision}, nil
+	return nil, store.ErrImmutableAgentProfile
 }

@@ -89,6 +89,12 @@ func TestManagerTransportFollowsSupervisedRestart(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	// A call carrying the pre-restart catalog binding must not be retargeted
+	// to this replacement. The exit tool proves no bytes reached the new child.
+	_, staleErr := transport.Call(WithExpectedIncarnation(ctx, oldOwner), MethodMCPCallTool, MCPCallRequest{ToolName: "exit"})
+	if !errors.Is(staleErr, ErrStaleBinding) {
+		t.Fatalf("old catalog binding reached replacement: %v", staleErr)
+	}
 	result, callErr := CallResult[MCPCallResult](transport, ctx, MethodMCPCallTool, MCPCallRequest{ToolName: "echo", Arguments: map[string]any{"message": "after-restart"}})
 	if callErr != nil {
 		t.Fatal(callErr)

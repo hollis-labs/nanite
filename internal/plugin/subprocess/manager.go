@@ -242,7 +242,7 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 			}
 		},
 		OnExit: func(info pluginhost.ExitInfo, restarting bool) {
-			m.endGrantLease()
+			m.endGrantLease(true)
 			if m.cfg.OnDisconnect != nil {
 				m.cfg.OnDisconnect()
 			}
@@ -266,7 +266,7 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 	m.transport = transport
 	m.mu.Unlock()
 	if err := supervisor.Start(ctx); err != nil {
-		m.endGrantLease()
+		m.endGrantLease(false)
 		m.recordCrash(err)
 		return nil, redactPluginError(err, m.secretValues())
 	}
@@ -372,7 +372,22 @@ func (m *Manager) acquireDispatch(ctx context.Context) (*pluginhost.Conn, contex
 	m.mu.Lock()
 	lease, conn := m.grantLease, m.connection
 	running := m.state == StateRunning
+	crashed := m.state == StateCrashed
+	if expected, bound := expectedIncarnation(ctx); bound && expected != m.incarnation {
+		m.mu.Unlock()
+		return nil, nil, nil, ErrStaleBinding
+	}
 	m.mu.Unlock()
+	if crashed {
+		return nil, nil, nil, ErrSubprocessGone
+	}
+	if running && conn != nil {
+		select {
+		case <-conn.Done():
+			return nil, nil, nil, ErrSubprocessGone
+		default:
+		}
+	}
 	if !running || lease == nil || conn == nil {
 		return nil, nil, nil, ErrGrantLeaseEnded
 	}
@@ -386,17 +401,31 @@ func (m *Manager) acquireDispatch(ctx context.Context) (*pluginhost.Conn, contex
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if err := validateDispatch(permit); err != nil {
+		release()
+		return nil, nil, nil, err
+	}
 	m.mu.Lock()
 	current := m.state == StateRunning && m.grantLease == lease && m.connection == conn
+	expected, bound := expectedIncarnation(ctx)
+	stale := bound && expected != m.incarnation
 	m.mu.Unlock()
-	if !current {
+	if !current || stale {
 		release()
+		if stale {
+			return nil, nil, nil, ErrStaleBinding
+		}
 		return nil, nil, nil, ErrGrantLeaseEnded
 	}
 	return conn, permit, release, nil
 }
-func (m *Manager) endGrantLease() {
+func (m *Manager) endGrantLease(crashed bool) {
 	m.mu.Lock()
+	// Publish proven process death together with connection/lease removal.
+	// A callback cannot expose a gap classified as an authorization expiry.
+	if crashed && m.state != StateStopping && m.state != StateStopped {
+		m.state = StateCrashed
+	}
 	lease := m.grantLease
 	m.grantLease = nil
 	m.connection = nil

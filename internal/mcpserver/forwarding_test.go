@@ -74,8 +74,8 @@ func callText(res *mcp.CallToolResult) string {
 	return ""
 }
 
-// The tools a forwarding server advertises are pinned to what each launch
-// advertised before CW-20261001-0188 moved it off the database:
+// Forwarding retains each launch's core surface, excluding recursive
+// executors that lack verified bridge authority:
 //   - ScopeStore (subagent, background, one-shot launches): exactly what a
 //     local `nanite mcp` over a bare store lists;
 //   - ScopeHarness (chat launches): every self tool, the harness's cache
@@ -83,6 +83,9 @@ func callText(res *mcp.CallToolResult) string {
 func TestForwardingServer_AdvertisesTodaysSetPerScope(t *testing.T) {
 	t.Run("store scope lists the bare-store set", func(t *testing.T) {
 		want := listedSorted(t, newAllowlistedTestServer(t, nil))
+		want = slices.DeleteFunc(want, func(name string) bool {
+			return name == "python_run" || name == "workflow_execute_tool_step"
+		})
 		got := listedSorted(t, NewForwarding("s1", nil, "", "http://127.0.0.1:1", ScopeStore, nil))
 		if !slices.Equal(got, want) {
 			t.Errorf("store scope lists %v\nlocal bare-store server lists %v", got, want)
@@ -99,6 +102,9 @@ func TestForwardingServer_AdvertisesTodaysSetPerScope(t *testing.T) {
 		self, _ := service.NewSelfToolsTransport(s).ListTools(context.Background())
 		dev, _ := condmcp.NewDevToolsTransport(nil).ListTools(context.Background())
 		for _, tool := range append(self, dev...) {
+			if tool.Name == "python_run" || tool.Name == "workflow_execute_tool_step" {
+				continue
+			}
 			want = append(want, tool.Name)
 		}
 		want = append(want, "fetch_tool_result", "search_tool_result")

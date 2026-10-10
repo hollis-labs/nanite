@@ -39,7 +39,8 @@ func (f *manifestEnvelopeFixture) Deliver(session string, envelopes []sdkplugin.
 	return true
 }
 func declaredFixtureTool(name, effect string) manifest.Tool {
-	return manifest.Tool{Name: name, Description: "Reviewed tool", Effect: effect, InputSchema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}}}`)}
+	readOnly, destructive, _ := pluginapi.ToolEffectHints(effect)
+	return manifest.Tool{Name: name, Description: "Reviewed tool", Effect: effect, InputSchema: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}}}`), Annotations: &manifest.ToolAnnotations{ReadOnlyHint: &readOnly, DestructiveHint: &destructive}}
 }
 
 func TestManifestToolsUseOnlyReviewedDeclarationsAndCanonicalCalls(t *testing.T) {

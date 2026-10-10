@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
+	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
@@ -733,7 +734,8 @@ func (m *Manager) LookupToolInputSchema(uniformName string) (map[string]any, boo
 	return entry.tool.InputSchema, true
 }
 
-// ToolBehavior returns the MCP behavior hints a server declared for a tool,
+// ToolBehavior returns a manifest-owned tool's reviewed effect classification,
+// or the MCP behavior hints a remote server declared for a tool,
 // given its uniform agent-facing name. ok=false when the name is not a
 // registered MCP tool, or when the server declared no annotations at all —
 // callers must treat that as "unknown", not as "safe".
@@ -741,7 +743,16 @@ func (m *Manager) ToolBehavior(uniformName string) (readOnly, destructive, ok bo
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	entry, found := m.uniformIndex[uniformName]
-	if !found || len(entry.tool.Annotations) == 0 {
+	if !found {
+		return false, false, false
+	}
+	if effects, owned := m.servers[entry.serverName].(interface{ ReviewedToolEffect(string) (string, bool) }); owned {
+		if effect, accepted := effects.ReviewedToolEffect(entry.tool.Name); accepted {
+			readOnly, destructive, err := pluginapi.ToolEffectHints(effect)
+			return readOnly, destructive, err == nil
+		}
+	}
+	if len(entry.tool.Annotations) == 0 {
 		return false, false, false
 	}
 	boolHint := func(key string) bool {
@@ -755,7 +766,9 @@ func (m *Manager) ToolBehavior(uniformName string) (readOnly, destructive, ok bo
 	return boolHint("readOnlyHint"), boolHint("destructiveHint"), true
 }
 
-// ToolDeclaredHints reports which behavior hints a server actually declared for
+// ToolDeclaredHints returns policy declarations for approval classification.
+// Manifest-owned tools use the accepted effect, independently of public hints.
+// Other tools report which behavior hints a server actually declared for
 // a tool, as pointers: nil means the hint was absent (or not a boolean), which
 // ToolBehavior flattens to false. A caller that must tell "declared not
 // read-only" from "declared nothing" uses this.
@@ -765,6 +778,14 @@ func (m *Manager) ToolDeclaredHints(uniformName string) (readOnly, destructive *
 	entry, found := m.uniformIndex[uniformName]
 	if !found {
 		return nil, nil
+	}
+	if effects, owned := m.servers[entry.serverName].(interface{ ReviewedToolEffect(string) (string, bool) }); owned {
+		if effect, accepted := effects.ReviewedToolEffect(entry.tool.Name); accepted {
+			readOnly, destructive, err := pluginapi.ToolEffectHints(effect)
+			if err == nil {
+				return &readOnly, &destructive
+			}
+		}
 	}
 	hint := func(key string) *bool {
 		if b, isBool := entry.tool.Annotations[key].(bool); isBool {

@@ -147,7 +147,7 @@ func (s *Store) LastNAssistantMessages(ctx context.Context, sessionID string, n 
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
-		        COALESCE(parent_id,''), is_compacted, created_at
+		        COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT)
 		   FROM messages
 		  WHERE session_id = ? AND role = 'assistant'
 		  ORDER BY created_at DESC, id DESC

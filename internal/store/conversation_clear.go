@@ -104,7 +104,7 @@ func (s *Store) ListWorkingMessages(ctx context.Context, sessionID string, limit
 	if err = s.DB.QueryRowContext(ctx, `SELECT rowid FROM messages WHERE session_id = ? AND id = ?`, sessionID, cut.MessageID).Scan(&boundary); err != nil {
 		return nil, fmt.Errorf("resolve clear boundary: %w", err)
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, session_id, COALESCE(agent_id,''), role, content, COALESCE(envelope,''), COALESCE(metadata,'{}'), COALESCE(parent_id,''), is_compacted, created_at FROM messages WHERE session_id = ? AND rowid > ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, sessionID, boundary, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, session_id, COALESCE(agent_id,''), role, content, COALESCE(envelope,''), COALESCE(metadata,'{}'), COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT) FROM messages WHERE session_id = ? AND rowid > ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, sessionID, boundary, limit)
 	if err != nil {
 		return nil, err
 	}

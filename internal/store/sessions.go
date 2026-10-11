@@ -464,7 +464,7 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
-		        COALESCE(parent_id,''), is_compacted, created_at
+		        COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT)
 		 FROM messages WHERE session_id = ?
 		 ORDER BY created_at DESC, rowid DESC LIMIT ?`,
 		sessionID, limit,
@@ -516,7 +516,7 @@ func (s *Store) ListMessagesPaginated(ctx context.Context, sessionID string, lim
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
-		        COALESCE(parent_id,''), is_compacted, created_at
+		        COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT)
 		 FROM messages WHERE session_id = ?
 		 ORDER BY created_at ASC, rowid ASC
 		 LIMIT ? OFFSET ?`,
@@ -555,7 +555,7 @@ func (s *Store) ListMessagesAroundID(ctx context.Context, sessionID, messageID s
 	// Get the target message's created_at for windowing.
 	var targetCreatedAt string
 	if err := s.DB.QueryRowContext(ctx,
-		`SELECT created_at FROM messages WHERE id = ? AND session_id = ?`,
+		`SELECT CAST(created_at AS TEXT) FROM messages WHERE id = ? AND session_id = ?`,
 		messageID, sessionID,
 	).Scan(&targetCreatedAt); err != nil {
 		return nil, fmt.Errorf("get target message: %w", err)
@@ -572,7 +572,7 @@ func (s *Store) ListMessagesAroundID(ctx context.Context, sessionID, messageID s
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
-		        COALESCE(parent_id,''), is_compacted, created_at
+		        COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT)
 		 FROM messages WHERE session_id = ? AND created_at >= (
 		     SELECT created_at FROM (
 		         SELECT created_at FROM messages
@@ -626,7 +626,7 @@ func (s *Store) GetMessage(ctx context.Context, id string) (*Message, error) {
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT id, session_id, COALESCE(agent_id,''), role, content,
 		        COALESCE(envelope,''), COALESCE(metadata,'{}'),
-		        COALESCE(parent_id,''), is_compacted, created_at
+		        COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT)
 		 FROM messages WHERE id = ?`, id,
 	).Scan(
 		&m.ID, &m.SessionID, &m.AgentID, &m.Role, &m.Content,

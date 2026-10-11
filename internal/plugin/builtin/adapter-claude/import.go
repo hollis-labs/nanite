@@ -163,11 +163,11 @@ func parseSubagentFile(path string) (*agent.Definition, error) {
 
 	// `model` is left blank, deliberately and always. A Claude alias
 	// ("sonnet") is not a Nanite model ID, and even a real ID belongs blank
-	// so store.ResolveProviderAndModel re-resolves per request — see
+	// so the model is chosen per session or launch — see
 	// internal/agent/parser.go's Model doc comment (CW-20260815-0021: ten
 	// profiles independently pinned a model and each one is a future 404).
 	if strings.TrimSpace(fm.Model) != "" {
-		slog.Warn("adapter-claude: dropping the source's model on import — Nanite resolves provider and model per request (ResolveProviderAndModel); a pinned alias would silently break when it is retired",
+		slog.Warn("adapter-claude: dropping the source's model on import — Nanite chooses provider and model per session or launch; a pinned alias would silently break when it is retired",
 			"path", path, "slug", slug, "dropped_model", fm.Model)
 	}
 

@@ -376,22 +376,15 @@ func cmdServeWithInitializers(
 	// Set up activity emitter for external GUI event consumers.
 	activity := chat.NewActivityEmitter("")
 
-	// Resolve utility provider/model. user_settings.utility_* first, then
-	// the default-resolver (user_settings.default_* → providers.default_
-	// model). CW-20260526-0003: empty result on resolver error is accepted
-	// here so the harness boots with utility wiring degraded rather than
-	// crashing — the chat-service config still validates each utility call
-	// site individually.
+	// Utility provider/model come from user_settings.utility_* only; there is
+	// no default to fall back on (CW-20261011-0031). Empty is accepted so the
+	// harness boots with utility wiring degraded rather than crashing — the
+	// chat-service config still validates each utility call site
+	// individually.
 	utilityProvider, utilityModel := "", ""
 	if settings, err := s.GetUserSettings(envelopeCtx); err == nil {
 		utilityProvider = settings.UtilityProvider
 		utilityModel = settings.UtilityModel
-	}
-	if utilityProvider == "" || utilityModel == "" {
-		if rp, rm, err := s.ResolveProviderAndModel(envelopeCtx, utilityProvider, utilityModel); err == nil {
-			utilityProvider = rp
-			utilityModel = rm
-		}
 	}
 
 	// CLI process concurrency limit.

@@ -296,36 +296,23 @@ func TestBootRunner_DowngradeLogsWarning(t *testing.T) {
 	}
 }
 
-// A parent with no provider of its own: use the app's default provider and
-// model; with no usable default, fail saying why. Never an empty override.
+// A parent with no provider of its own: there is no app default to fall back
+// on (CW-20261011-0031), so the downgrade fails saying why. Never an empty
+// override.
 func TestBootRunner_DowngradeWithEmptyParentProvider(t *testing.T) {
-	t.Run("uses the app default provider and model", func(t *testing.T) {
-		h := newRuntimeHarness(t, "", "anthropic", "", "")
-		h.store.parents["sess-p"].Model = ""
-		h.store.settings.DefaultProvider, h.store.settings.DefaultModel = "openai", "default-model"
-		if _, err := h.runner.Run(context.Background(), spawnRun("pty-claude")); err != nil {
-			t.Fatalf("Run: %v", err)
+	h := newRuntimeHarness(t, "", "anthropic", "", "")
+	h.store.parents["sess-p"].Provider = ""
+	h.store.parents["sess-p"].Model = ""
+	_, err := h.runner.Run(context.Background(), spawnRun("pty-claude"))
+	if err == nil {
+		t.Fatal("want an error, got none")
+	}
+	for _, want := range []string{"no API provider", "subagent_runtime"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
 		}
-		if !h.legacy.hasOver || h.legacy.override.provider != "openai" || h.legacy.override.model != "default-model" {
-			t.Errorf("override = %+v (present=%v), want openai/default-model", h.legacy.override, h.legacy.hasOver)
-		}
-	})
-	for name, def := range map[string]string{"no default provider": "", "default provider is a CLI provider": "pty-claude"} {
-		t.Run("fails clearly: "+name, func(t *testing.T) {
-			h := newRuntimeHarness(t, "", "anthropic", "", "")
-			h.store.settings.DefaultProvider = def
-			_, err := h.runner.Run(context.Background(), spawnRun("pty-claude"))
-			if err == nil {
-				t.Fatal("want an error, got none")
-			}
-			for _, want := range []string{"no provider", "default_provider", "subagent_runtime"} {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error %q missing %q", err, want)
-				}
-			}
-			if *h.boots != 0 || h.legacy.called != 0 {
-				t.Errorf("boots=%d harness=%d, want neither to run", *h.boots, h.legacy.called)
-			}
-		})
+	}
+	if *h.boots != 0 || h.legacy.called != 0 {
+		t.Errorf("boots=%d harness=%d, want neither to run", *h.boots, h.legacy.called)
 	}
 }

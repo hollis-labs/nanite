@@ -361,7 +361,7 @@ func (i *Importer) write(ctx context.Context, def *agent.Definition) (Outcome, e
 	// silently dropping the value — an import that quietly edited the
 	// content it imported would be its own kind of drift.
 	if profile.DefaultModel != "" {
-		slog.Warn("agentimport: imported agent profile hardcodes a model, opting out of the system default (ResolveProviderAndModel) — leave `model:` blank unless there is a deliberate, documented reason to pin it",
+		slog.Warn("agentimport: imported agent profile hardcodes a model — leave `model:` blank unless there is a deliberate, documented reason to pin it",
 			"slug", def.Slug, "hardcoded_model", profile.DefaultModel, "source_ref", def.SourceRef)
 	}
 

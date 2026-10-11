@@ -19,7 +19,7 @@ import (
 var userSettingsViewKeys = []string{
 	"auto_repair_pref", "compaction_strategy",
 	"context_budget_pct", "context_overflow_recovery", "context_window_tokens",
-	"default_agent", "default_model", "default_provider", "developer_mode",
+	"default_agent", "developer_mode",
 	"embedding_mode", "embedding_model", "embedding_provider", "embedding_status",
 	"ext_settings", "provider_fallback_chain", "recover_mode",
 	"subagent_approval_required", "subagent_approval_timeout_seconds",
@@ -170,6 +170,16 @@ func TestSettings_PutFirstFieldErrorWins(t *testing.T) {
 	// A decode error on an earlier field beats an enum error on a later one.
 	w = doJSON(mux, "PUT", "/api/settings", `{"tool_drawer_retention":7,"tool_stream_behavior":42}`)
 	assertErrorBody(t, w, http.StatusBadRequest, "invalid value for field 'tool_stream_behavior'")
+}
+
+// Nanite has no user-level default provider or model (CW-20261011-0031): the
+// retired fields are refused loudly, never accepted and ignored.
+func TestSettings_PutRefusesRetiredDefaultModelFields(t *testing.T) {
+	_, mux := newSettingsTestAPI(t)
+	for _, field := range []string{"default_provider", "default_model"} {
+		w := doJSON(mux, "PUT", "/api/settings", `{"`+field+`":"x"}`)
+		assertErrorBody(t, w, http.StatusBadRequest, "field '"+field+"' is retired: choose a provider and model on the agent or the launch request")
+	}
 }
 
 func TestSettings_PutResponseMatchesGet(t *testing.T) {

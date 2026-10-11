@@ -150,71 +150,6 @@ func TestResolveProvider_FallbackChainCLI_ShortCircuits(t *testing.T) {
 	}
 }
 
-// TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain pins the
-// live production bug found during the CW-20260812-0001 investigation:
-// user_settings.default_provider="anthropic" alongside a stale
-// user_settings.provider_fallback_chain=["pty"] must resolve to the
-// registered "anthropic" provider, not short-circuit on the fallback
-// chain's CLI alias. Reproduces the exact settings shape found on the
-// live instance (default_provider correctly configured, fallback_chain
-// left over from before this app's API-first default).
-func TestResolveProvider_DefaultProviderWinsOverStaleFallbackChain(t *testing.T) {
-	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings(context.Background())
-	if err != nil {
-		t.Fatalf("GetUserSettings: %v", err)
-	}
-	us.DefaultProvider = "anthropic"
-	us.ProviderFallbackChain = []string{"pty"}
-	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
-		t.Fatalf("UpdateUserSettings: %v", err)
-	}
-
-	s := &chatServiceImpl{
-		providers: newRegistryWithAnthropicStub(),
-		store:     st,
-	}
-
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929", "api")
-	if name != "anthropic" {
-		t.Fatalf("resolveProvider returned name=%q, want %q (default_provider must win over stale fallback-chain CLI alias)", name, "anthropic")
-	}
-	if prov == nil {
-		t.Fatalf("resolveProvider returned nil prov for a registered default_provider — must be non-nil")
-	}
-}
-
-// TestResolveProvider_DefaultProviderCLI_ShortCircuits confirms the new
-// default_provider step gets the same CLI short-circuit treatment as
-// every other step in the chain: if an operator deliberately sets
-// default_provider to a CLI alias, resolveProvider must return (name,
-// nil) so classifyNilProvider can route to driveBootSession, not fall
-// through to a registered HTTP provider.
-func TestResolveProvider_DefaultProviderCLI_ShortCircuits(t *testing.T) {
-	st := mustNewStoreForResolveTest(t)
-	us, err := st.GetUserSettings(context.Background())
-	if err != nil {
-		t.Fatalf("GetUserSettings: %v", err)
-	}
-	us.DefaultProvider = "pty"
-	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
-		t.Fatalf("UpdateUserSettings: %v", err)
-	}
-
-	s := &chatServiceImpl{
-		providers: newRegistryWithAnthropicStub(),
-		store:     st,
-	}
-
-	name, prov := s.resolveProvider("sess-1", "", "", "claude-sonnet-4-5-20250929", "api")
-	if name != "pty" {
-		t.Fatalf("resolveProvider returned name=%q, want %q (CLI-shaped default_provider must short-circuit before anthropic stub)", name, "pty")
-	}
-	if prov != nil {
-		t.Fatalf("resolveProvider returned non-nil prov for CLI default_provider; must be nil")
-	}
-}
-
 func TestResolveProvider_InferredCLI_ShortCircuits(t *testing.T) {
 	// model="claude-cli" → InferProvider returns "pty". Registry has
 	// an "anthropic" provider but no "pty". Defense-in-depth: even if
@@ -338,7 +273,6 @@ func TestResolveProvider_CLIRuntimeKind_BareDefaultProvider_NeverRoutesHTTP(t *t
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
-	us.DefaultProvider = "anthropic"
 	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
@@ -370,7 +304,6 @@ func TestResolveProvider_CLIRuntimeKind_NoAgentProviderAtAll_StillCLI(t *testing
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
-	us.DefaultProvider = "anthropic"
 	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
@@ -401,7 +334,6 @@ func TestResolveProvider_APIRuntimeKind_BareDefaultProvider_StillResolvesHTTP(t 
 	if err != nil {
 		t.Fatalf("GetUserSettings: %v", err)
 	}
-	us.DefaultProvider = "anthropic"
 	if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
 	}
@@ -413,7 +345,7 @@ func TestResolveProvider_APIRuntimeKind_BareDefaultProvider_StillResolvesHTTP(t 
 
 	name, prov := s.resolveProvider("sess-1", "", "claude", "claude-sonnet-4-5-20250929", "api")
 	if name != "anthropic" {
-		t.Fatalf("resolveProvider returned name=%q, want %q (runtime_kind='api' must still fall through to user_settings.default_provider)", name, "anthropic")
+		t.Fatalf("resolveProvider returned name=%q, want %q (runtime_kind='api' must still route by the model string)", name, "anthropic")
 	}
 	if prov == nil {
 		t.Fatalf("resolveProvider returned nil prov for a runtime_kind='api' agent that should resolve to the registered anthropic provider")

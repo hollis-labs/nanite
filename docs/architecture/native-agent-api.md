@@ -62,10 +62,11 @@ actors, grants, or dispatch authority. Unsupported required effects are refused
 before admission.
 
 `model_selection`, when supplied, is exactly `{provider, model}`. It is a request
-to `ModelAuthorizer`, independent of definition extensions. The standalone host
-allows its configured default provider/model only, and requires a registered
-native provider. An embedding host may supply a different authorizer. Unsupported
-selections return 422 before rows. Definition claims and caller `metadata`
+to `ModelAuthorizer`, independent of definition extensions. There is no
+user-level or app-level default provider or model: the selection comes from the
+agent's host settings or this request, and a view with neither is refused. The
+standalone host requires a registered native provider. An embedding host may
+supply a different authorizer. Unsupported selections return 422 before rows. Definition claims and caller `metadata`
 cannot authorize a model, change harness settings, or grant tools. Verified pin
 and chat configuration have dedicated storage, separate from mutable metadata.
 `agent_id`, legacy model/provider fields and runtime selectors are refused on

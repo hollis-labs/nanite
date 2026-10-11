@@ -70,7 +70,7 @@ func (c *Container) CompactSession(ctx context.Context, sessionID string) (*Manu
 		}
 	}
 
-	summarizer := BuildSummarizer(c.Providers, c.ProviderDefaults, settings)
+	summarizer := BuildSummarizer(c.Providers, settings)
 	mode := ClassifyCompactionMode(agent)
 	pipeline := &ctxpkg.CompactionPipeline{
 		Window:                result.Window,

@@ -69,9 +69,9 @@ accepts the override on both `POST /api/sessions` and the harness v1 create. A
 model-supplied `provider` argument and a role's `DefaultProvider` never count as
 the opt-in. When either names a CLI provider without it, the child runs on the
 parent's provider and model, the log records a warning, and the result the
-parent reads opens with a note saying so. A parent session with no provider of
-its own falls back to the app's default provider and model; if there is none, or
-it is itself a CLI provider, the spawn fails saying so rather than running with
+parent reads opens with a note saying so. Nanite has no default provider or
+model, so a parent session with no API provider of its own, or one that is
+itself a CLI provider, makes the spawn fail saying so rather than running with
 an empty provider. A CLI-driven parent keeps booting CLI children. The parent's
 dispatch interface is the same either way.
 

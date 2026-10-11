@@ -76,7 +76,7 @@ func TestImport_DropsForeignModelAndTools(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 	if defs[0].Model != "" {
-		t.Errorf("Model = %q, want blank — ResolveProviderAndModel re-resolves per request", defs[0].Model)
+		t.Errorf("Model = %q, want blank — the model is chosen per session or launch", defs[0].Model)
 	}
 	if len(defs[0].Tools) != 0 {
 		t.Errorf("Tools = %v, want none — Claude tool names would produce grants that never resolve", defs[0].Tools)

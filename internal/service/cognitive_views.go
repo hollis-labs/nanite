@@ -62,20 +62,21 @@ type ModelAuthorizerFunc func(context.Context, DefinitionRef, *ModelSelection) (
 func (f ModelAuthorizerFunc) AuthorizeModel(ctx context.Context, p DefinitionRef, m *ModelSelection) (ModelSelection, error) {
 	return f(ctx, p, m)
 }
-func configuredNativeModel(st *store.Store, registry *provider.Registry) ModelAuthorizer {
-	return ModelAuthorizerFunc(func(ctx context.Context, _ DefinitionRef, requested *ModelSelection) (ModelSelection, error) {
-		p, m, err := st.ResolveProviderAndModel(ctx, "", "")
-		if err != nil {
-			return ModelSelection{}, fmt.Errorf("%w: configure the host default provider and model", ErrUnsupportedModel)
+
+// configuredNativeModel authorizes the selection the agent's host settings or
+// the launch request carry. There is no user-level or app-level default to
+// fall back on (CW-20261011-0031): a native API view without a provider and
+// model is refused, naming what is missing, and a provider the host has not
+// registered is refused.
+func configuredNativeModel(registry *provider.Registry) ModelAuthorizer {
+	return ModelAuthorizerFunc(func(_ context.Context, _ DefinitionRef, requested *ModelSelection) (ModelSelection, error) {
+		if requested == nil || strings.TrimSpace(requested.Provider) == "" || strings.TrimSpace(requested.Model) == "" {
+			return ModelSelection{}, fmt.Errorf("%w: select a provider and model in the agent's host settings or the launch request", ErrUnsupportedModel)
 		}
-		configured := ModelSelection{p, m}
-		if _, ok := registry.Get(p); !ok || strings.TrimSpace(m) == "" {
-			return ModelSelection{}, fmt.Errorf("%w: host default must be a registered native provider with a model", ErrUnsupportedModel)
+		if _, ok := registry.Get(requested.Provider); !ok {
+			return ModelSelection{}, fmt.Errorf("%w: provider %q is not a registered native provider", ErrUnsupportedModel, requested.Provider)
 		}
-		if requested != nil && *requested != configured {
-			return ModelSelection{}, ErrUnsupportedModel
-		}
-		return configured, nil
+		return *requested, nil
 	})
 }
 

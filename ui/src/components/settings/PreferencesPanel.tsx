@@ -164,13 +164,6 @@ export function PreferencesPanel() {
     return providers.filter((p) => p.is_enabled).map((p) => ({ value: p.provider_type, label: p.name }))
   }, [providers])
 
-  const modelOptionsForProvider = useMemo(() => {
-    if (!models) return []
-    const provider = settings?.default_provider
-    const filtered = provider ? models.filter((m) => m.provider_type === provider) : models
-    return filtered.map((m) => ({ value: m.model_id, label: m.display_name }))
-  }, [models, settings?.default_provider])
-
   const utilityModelOptions = useMemo(() => {
     if (!models) return []
     const provider = settings?.utility_provider
@@ -191,27 +184,7 @@ export function PreferencesPanel() {
 
   return (
     <div className="space-y-0">
-      <SCard title="Session Defaults" description="Defaults applied when creating new chat sessions">
-        <SRow label="Provider" description="Provider for new sessions">
-          <SSelect
-            value={settings?.default_provider ?? ''}
-            options={providerOptions}
-            onChange={(v) => {
-              mutation.mutate(settings?.default_model
-                ? { default_provider: v, default_model: '' }
-                : { default_provider: v })
-            }}
-            allowNone
-          />
-        </SRow>
-        <SRow label="Model" description="Model for new sessions">
-          <SSelect
-            value={settings?.default_model ?? ''}
-            options={modelOptionsForProvider}
-            onChange={(v) => handleChange('default_model', v)}
-            allowNone
-          />
-        </SRow>
+      <SCard title="Session Defaults" description="Defaults applied when creating new chat sessions. Provider and model are set per agent or per launch, never globally.">
         <SRow label="Agent" description="Agent profile for new sessions">
           <SSelect
             value={settings?.default_agent ?? ''}

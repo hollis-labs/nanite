@@ -25,12 +25,6 @@ func TestGetUserSettings_Default(t *testing.T) {
 	if len(us.ProviderFallbackChain) != 0 {
 		t.Errorf("expected empty fallback chain, got %v", us.ProviderFallbackChain)
 	}
-	if us.DefaultProvider != "" {
-		t.Errorf("expected empty default provider, got %q", us.DefaultProvider)
-	}
-	if us.DefaultModel != "" {
-		t.Errorf("expected empty default model, got %q", us.DefaultModel)
-	}
 }
 
 func TestUpdateUserSettings(t *testing.T) {
@@ -38,8 +32,6 @@ func TestUpdateUserSettings(t *testing.T) {
 
 	us := &UserSettings{
 		ProviderFallbackChain: []string{"anthropic", "ollama", "pty-claude"},
-		DefaultProvider:       "anthropic",
-		DefaultModel:          "claude-sonnet-4-20250514",
 	}
 	if err := s.UpdateUserSettings(context.Background(), us); err != nil {
 		t.Fatalf("UpdateUserSettings: %v", err)
@@ -57,12 +49,6 @@ func TestUpdateUserSettings(t *testing.T) {
 	}
 	if got.ProviderFallbackChain[2] != "pty-claude" {
 		t.Errorf("expected third in chain to be pty-claude, got %q", got.ProviderFallbackChain[2])
-	}
-	if got.DefaultProvider != "anthropic" {
-		t.Errorf("expected default provider anthropic, got %q", got.DefaultProvider)
-	}
-	if got.DefaultModel != "claude-sonnet-4-20250514" {
-		t.Errorf("expected default model claude-sonnet-4-20250514, got %q", got.DefaultModel)
 	}
 }
 

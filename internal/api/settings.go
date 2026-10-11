@@ -76,15 +76,11 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Merge each provided field into existing settings.
-	if v, ok := raw["default_provider"]; ok {
-		if err := json.Unmarshal(v, &existing.DefaultProvider); err != nil {
-			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'default_provider'")
-			return
-		}
-	}
-	if v, ok := raw["default_model"]; ok {
-		if err := json.Unmarshal(v, &existing.DefaultModel); err != nil {
-			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'default_model'")
+	// Nanite has no user-level default provider or model (CW-20261011-0031).
+	// Refuse the retired fields loudly rather than accepting and ignoring them.
+	for _, retired := range []string{"default_provider", "default_model"} {
+		if _, ok := raw[retired]; ok {
+			a.errorResp(w, http.StatusBadRequest, "field '"+retired+"' is retired: choose a provider and model on the agent or the launch request")
 			return
 		}
 	}

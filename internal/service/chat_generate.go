@@ -824,7 +824,7 @@ func (s *chatServiceImpl) enforceBudgetOrCompact(
 
 // buildSummarizer is the chat-service-bound form of BuildSummarizer.
 func (s *chatServiceImpl) buildSummarizer(settings *store.UserSettings) ctxpkg.Summarizer {
-	return BuildSummarizer(s.providers, s.store, settings)
+	return BuildSummarizer(s.providers, settings)
 }
 
 // storeCompactionEventReader bridges CompactionEventStore to
@@ -908,25 +908,16 @@ func NewCompactionEventWriter(s CompactionEventStore) ctxpkg.CompactionEventWrit
 }
 
 // BuildSummarizer resolves the provider+model used to summarize compacted
-// conversation spans. UserSettings.summarizer_* take precedence; gaps are
-// filled by the default-resolver (user_settings.default_* → providers.
-// default_model). Returns nil when the chosen provider is not registered
-// OR when the resolver chain is dry — Stage 2 of the compaction pipeline
-// is nil-safe and skips. CW-20260526-0003 removed the Go-literal terminal
-// fallback; an operator who hasn't configured a default sees compaction
-// skip (with a log line) instead of routing to a stale hardcoded model.
-func BuildSummarizer(registry *provider.Registry, resolver DefaultResolver, settings *store.UserSettings) ctxpkg.Summarizer {
+// conversation spans from UserSettings.summarizer_* and nothing else; there
+// is no default to fall back on (CW-20261011-0031). Returns nil when either
+// is unset or the provider is not registered — Stage 2 of the compaction
+// pipeline is nil-safe and skips, with a log line.
+func BuildSummarizer(registry *provider.Registry, settings *store.UserSettings) ctxpkg.Summarizer {
 	provName := ""
 	model := ""
 	if settings != nil {
 		provName = settings.SummarizerProvider
 		model = settings.SummarizerModel
-	}
-	if (provName == "" || model == "") && resolver != nil {
-		if rp, rm, err := resolver.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, provName, model); err == nil {
-			provName = rp
-			model = rm
-		}
 	}
 	if provName == "" || model == "" {
 		slog.Warn("summarizer provider/model not configured; compaction Stage 2 will skip")

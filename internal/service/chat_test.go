@@ -442,12 +442,6 @@ func (stubProviderStore) ListModels(ctx context.Context) ([]store.Model, error) 
 func (stubProviderStore) UpdateProvider(context.Context, string, store.ProviderUpdate) error {
 	return nil
 }
-func (stubProviderStore) DefaultModelForProvider(context.Context, string) (string, error) {
-	return "", nil
-}
-func (stubProviderStore) ResolveProviderAndModel(ctx context.Context, explicitProvider, explicitModel string) (string, string, error) {
-	return explicitProvider, explicitModel, nil
-}
 
 type stubTodoStore struct{}
 
@@ -513,7 +507,8 @@ func TestInferProvider(t *testing.T) {
 		// which is dead-letter behavior. Coverage retained for the
 		// surviving live cases only.
 		{"claude-sonnet-4-20250514", "anthropic"},
-		{"unknown-model", "anthropic"},
+		{"unknown-model", ""}, // no default provider (CW-20261011-0031)
+		{"claude-opus-5-5", "anthropic"},
 	}
 
 	for _, tt := range tests {

@@ -148,9 +148,6 @@ type Container struct {
 	SkillResolvers      skill.AgentContextResolverStore
 	AgentImportProfiles agentimport.ProfileStore
 	AgentImportSeeder   agentimport.ChildSeeder
-	// ProviderDefaults resolves default providers and models, for
-	// BuildSummarizer.
-	ProviderDefaults DefaultResolver
 	// CompactionEvents records compaction events for a compaction pipeline.
 	CompactionEvents ctxpkg.CompactionEventWriter
 	// CompactionHandoffs supplies the same Glass-4 persistence used by chat.
@@ -514,7 +511,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	}
 	models := cfg.ModelAuthorizer
 	if models == nil {
-		models = configuredNativeModel(cfg.Store, cfg.Providers)
+		models = configuredNativeModel(cfg.Providers)
 	}
 	cognitiveViews := &CognitiveViews{Store: cfg.Store, Resolver: resolver, Models: models, DefaultDefinitionRef: defaultRef}
 	workingDir := cfg.WorkingDir
@@ -1374,19 +1371,12 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	// Memory extraction hooks + agent tools.
 	if memorySvc != nil && cfg.Plugins != nil {
-		// Utility call provider/model resolves through the store so
-		// user_settings → providers.default_model is honored
-		// (CW-20260526-0003). If the chain is dry, the utilityCall stays
-		// nil below and memory extraction falls through silently — same
-		// behavior the unregistered-provider branch already produces.
+		// The utility call uses the configured utility provider/model and
+		// nothing else: there is no default to fall back on
+		// (CW-20261011-0031). If either is unset the utilityCall stays nil
+		// below and memory extraction falls through silently.
 		utilityProvider := cfg.UtilityProvider
 		utilityModel := cfg.UtilityModel
-		if utilityProvider == "" || utilityModel == "" {
-			if rp, rm, err := cfg.Store.ResolveProviderAndModel(catalogCtx, utilityProvider, utilityModel); err == nil {
-				utilityProvider = rp
-				utilityModel = rm
-			}
-		}
 
 		var utilityCall memory.UtilityCallFunc
 		if cfg.Providers != nil && utilityProvider != "" {
@@ -1521,7 +1511,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SkillResolvers:      cfg.Store,
 		AgentImportProfiles: cfg.Store,
 		AgentImportSeeder:   SeedImportedAgentChildren(cfg.Store),
-		ProviderDefaults:    cfg.Store,
 		CompactionEvents:    NewCompactionEventWriter(cfg.Store),
 		CompactionHandoffs:  cfg.Store,
 		stopModelCatalog:    stopCatalog,

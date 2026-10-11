@@ -28,16 +28,13 @@ type Definition struct {
 
 	// Behavior
 	//
-	// Model: leave blank. A blank value means "inherit whatever the system
-	// default is at request time" — the chat-engine resolver
-	// (store.ResolveProviderAndModel, CW-20260526-0003) re-evaluates it on
-	// every call, walking explicit request → user_settings.default_model →
-	// providers.default_model. Hardcoding a specific model ID here bypasses
-	// that SSOT and *will* eventually 404 once the pinned model is retired
-	// (CW-20260815-0021 — ten profiles independently made this mistake).
-	// Only set Model when a profile has a genuine, deliberate reason to run
-	// on something other than the system default; AutoIngestAgents logs a
-	// loud warning for every profile that does.
+	// Model: optional. Nanite has no user-level or app-level default model
+	// (CW-20261011-0031): a blank value means the session or launch names one,
+	// or the runtime that receives the agent chooses its own. Pinning a model
+	// ID here *will* eventually 404 once that model is retired
+	// (CW-20260815-0021 — ten profiles independently made this mistake), so
+	// only set Model when a profile has a genuine, deliberate reason to;
+	// AutoIngestAgents logs a loud warning for every profile that does.
 	Model          string           `yaml:"model"`
 	Tools          []string         `yaml:"tools"`
 	PermissionMode string           `yaml:"permissionMode"`

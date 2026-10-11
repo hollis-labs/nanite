@@ -14,8 +14,6 @@ import (
 func TestBuildRepairConfig_ProviderResolution(t *testing.T) {
 	type settings struct {
 		utilityProvider string
-		defaultProvider string
-		defaultModel    string
 	}
 	tests := []struct {
 		name              string
@@ -32,10 +30,8 @@ func TestBuildRepairConfig_ProviderResolution(t *testing.T) {
 			utilityProvider: "caller-utility",
 			settings: &settings{
 				utilityProvider: "settings-utility",
-				defaultProvider: "settings-default",
-				defaultModel:    "settings-model",
 			},
-			registered:        []string{"operator", "caller-utility", "settings-utility", "settings-default"},
+			registered:        []string{"operator", "caller-utility", "settings-utility"},
 			wantProvider:      "operator",
 			wantSettingsStore: true,
 		},
@@ -44,39 +40,18 @@ func TestBuildRepairConfig_ProviderResolution(t *testing.T) {
 			utilityProvider: "caller-utility",
 			settings: &settings{
 				utilityProvider: "settings-utility",
-				defaultProvider: "settings-default",
-				defaultModel:    "settings-model",
 			},
-			registered:        []string{"caller-utility", "settings-utility", "settings-default"},
+			registered:        []string{"caller-utility", "settings-utility"},
 			wantProvider:      "caller-utility",
 			wantSettingsStore: true,
 		},
 		{
-			name: "stored utility overrides resolver default",
+			name: "stored utility is used when the caller names none",
 			settings: &settings{
 				utilityProvider: "settings-utility",
-				defaultProvider: "settings-default",
-				defaultModel:    "settings-model",
 			},
-			registered:        []string{"settings-utility", "settings-default"},
+			registered:        []string{"settings-utility"},
 			wantProvider:      "settings-utility",
-			wantSettingsStore: true,
-		},
-		{
-			name: "resolver uses user default",
-			settings: &settings{
-				defaultProvider: "settings-default",
-				defaultModel:    "settings-model",
-			},
-			registered:        []string{"settings-default"},
-			wantProvider:      "settings-default",
-			wantSettingsStore: true,
-		},
-		{
-			name:              "resolver uses seeded platform default",
-			settings:          &settings{},
-			registered:        []string{"anthropic"},
-			wantProvider:      "anthropic",
 			wantSettingsStore: true,
 		},
 	}
@@ -96,8 +71,6 @@ func TestBuildRepairConfig_ProviderResolution(t *testing.T) {
 					t.Fatalf("GetUserSettings: %v", err)
 				}
 				us.UtilityProvider = tc.settings.utilityProvider
-				us.DefaultProvider = tc.settings.defaultProvider
-				us.DefaultModel = tc.settings.defaultModel
 				if err := st.UpdateUserSettings(context.Background(), us); err != nil {
 					t.Fatalf("UpdateUserSettings: %v", err)
 				}
@@ -122,6 +95,20 @@ func TestBuildRepairConfig_ProviderResolution(t *testing.T) {
 				t.Fatalf("SettingsReader present = %v, want %v", got, tc.wantSettingsStore)
 			}
 		})
+	}
+}
+
+// There is no default provider (CW-20261011-0031): with nothing named by the
+// operator env, the caller, or user_settings.utility_provider, the repair
+// pipeline declines even when a provider happens to be registered.
+func TestBuildRepairConfig_NoDefaultProvider(t *testing.T) {
+	t.Setenv("NANITE_AUTO_REPAIR", "true")
+	t.Setenv("NANITE_REPAIR_PROVIDER", "")
+	st := newRepairConfigTestStore(t)
+	reg := provider.NewRegistry()
+	reg.Register("anthropic", &repairStubProvider{})
+	if rc := buildRepairConfig(reg, st, ""); rc != nil {
+		t.Fatalf("buildRepairConfig = %#v, want nil when no provider is named", rc)
 	}
 }
 

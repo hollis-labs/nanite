@@ -254,12 +254,10 @@ func durableAgentInstanceFromProfile(profile store.AgentProfile) *store.DurableA
 	}
 
 	// CW-20260526-0003: Provider/Model are left as the profile's literal
-	// values (which may be empty). Resolution to the runtime default
-	// happens at request time via store.ResolveProviderAndModel — keeping
-	// instance rows empty when the profile is empty means a later operator
-	// edit to user_settings or providers.default_model is honored without
-	// re-seeding the instance. The previous bare-literal fallbacks here
-	// were the source of the `claude-sonnet-4` 404 bug.
+	// values (which may be empty). There is no default model
+	// (CW-20261011-0031): an empty value stays empty and the runtime that
+	// receives it decides. The previous bare-literal fallbacks here were the
+	// source of the `claude-sonnet-4` 404 bug.
 	return &store.DurableAgentInstance{
 		ID:               "legacy-profile-" + profile.ID,
 		Name:             profile.Name,

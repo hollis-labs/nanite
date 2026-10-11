@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/hollis-labs/nanite/internal/store/seedcatalog"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -36,31 +35,14 @@ func (s *Store) Seed(ctx context.Context) error {
 	// See internal/agent/builtin/default.md for the built-in default agent.
 
 	// --- Provider: Anthropic ---
-	// default_model is sourced from seedcatalog so the canonical seed value
-	// for "anthropic" lives in exactly one place; runtime resolution reads
-	// from the providers row, not from a Go literal (CW-20260526-0003).
+	// No default model is seeded: a model is chosen per agent or launch.
 	providerID := "anthropic-001"
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO providers (id, name, provider_type, default_model)
-		 VALUES (?, ?, ?, ?)`,
-		providerID, "Anthropic", seedcatalog.DefaultProviderType,
-		seedcatalog.ProviderDefaultModels[seedcatalog.DefaultProviderType],
+		`INSERT INTO providers (id, name, provider_type)
+		 VALUES (?, ?, ?)`,
+		providerID, "Anthropic", "anthropic",
 	); err != nil {
 		return fmt.Errorf("insert provider: %w", err)
-	}
-
-	// --- Model: Claude Sonnet 4.5 (default) ---
-	// Pulled from the canonical registry so seed data can never drift from
-	// the pricing/capabilities map consumed by usage.go, cost_monitor, etc.
-	if def, ok := models.ByModelID(seedcatalog.DefaultChatModelID); ok {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO models (id, provider_id, model_id, display_name, context_window, max_output, supports_tools)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			def.ID, providerID, def.ModelID, def.DisplayName,
-			def.ContextWindow, def.MaxOutput, def.Capabilities.SupportsToolCalling,
-		); err != nil {
-			return fmt.Errorf("insert model: %w", err)
-		}
 	}
 
 	// --- Provider: PTY (Claude CLI) ---
@@ -219,24 +201,11 @@ func (s *Store) SeedProviders(ctx context.Context) error {
 
 	for _, p := range providers {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO providers (id, name, provider_type, default_model)
-			 VALUES (?, ?, ?, ?)`,
-			p.id, p.name, p.provType, seedcatalog.ProviderDefaultModels[p.provType],
+			`INSERT OR IGNORE INTO providers (id, name, provider_type)
+			 VALUES (?, ?, ?)`,
+			p.id, p.name, p.provType,
 		); err != nil {
 			return fmt.Errorf("upsert provider %s: %w", p.id, err)
-		}
-		// Backfill default_model for providers seeded before the column
-		// existed (CW-20260526-0003 migration 086 added it). The UPDATE
-		// only runs when the cell is empty AND we know a seed value for
-		// the provider_type — operator overrides are preserved.
-		if def, ok := seedcatalog.ProviderDefaultModels[p.provType]; ok {
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE providers SET default_model = ?
-				 WHERE id = ? AND COALESCE(default_model, '') = ''`,
-				def, p.id,
-			); err != nil {
-				return fmt.Errorf("backfill default_model for %s: %w", p.id, err)
-			}
 		}
 	}
 

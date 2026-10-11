@@ -52,8 +52,14 @@ func TestMigration172PreservesCatalogsAndSettings(t *testing.T) {
 	if settingsErr != nil {
 		t.Fatal(settingsErr)
 	}
-	if settings.DefaultModel != "operator-model" {
-		t.Fatalf("model = %q", settings.DefaultModel)
+	// The retired default_model column is no longer read by the store, but the
+	// migration must leave its stored value untouched.
+	var storedModel string
+	if err := s.DB.QueryRowContext(ctx, `SELECT default_model FROM user_settings WHERE id = 1`).Scan(&storedModel); err != nil {
+		t.Fatal(err)
+	}
+	if storedModel != "operator-model" {
+		t.Fatalf("model = %q", storedModel)
 	}
 	if err := s.UpdateUserSettings(ctx, settings); err != nil {
 		t.Fatal(err)

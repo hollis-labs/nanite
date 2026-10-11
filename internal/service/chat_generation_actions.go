@@ -1980,36 +1980,21 @@ func (s *chatServiceImpl) prepareTurn(
 	constraints := chat.ParseAgentConstraints(agent.Constraints)
 
 	// --- Resolve model ---
-	// CW-20260526-0003: model resolution walks session → agent →
-	// store.ResolveProviderAndModel (user_settings.default_model →
-	// providers.default_model). The previous chain dead-ended on a Go
-	// literal which silently masked misconfiguration (the bare-alias
-	// `claude-sonnet-4` 404 bug).
-	//
-	// Provider routing is handled separately by resolveProvider /
-	// chat.InferProvider below — we only invoke the resolver when model
-	// is empty, and we use the model-derived provider as a hint for the
-	// per-provider default_model lookup (the resolver returns it for
-	// free). Calling the resolver when an explicit model is already
-	// present would risk masking provider routing the downstream knows
-	// better than we do.
+	// Model resolution walks session → agent. There is no user-level or
+	// app-level default (CW-20261011-0031): a turn with neither is refused
+	// below, naming what is missing. Provider routing is handled separately
+	// by resolveProvider / chat.InferProvider.
 	model := session.Model
 	if model == "" && agent.DefaultModel != "" {
 		model = agent.DefaultModel
 	}
 	if model == "" {
-		explicitProvider := session.Provider
-		if explicitProvider == "" {
-			explicitProvider = agent.DefaultProvider
-		}
-		_, resolved, resolveErr := s.store.ResolveProviderAndModel(ctx, explicitProvider, "")
-		if resolveErr != nil {
-			ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
-				"No default model configured. Set providers.default_model or user_settings.default_model.",
-				map[string]interface{}{"raw": resolveErr.Error()})
-			return prepareTurnResult{directive: runloop.Terminate}
-		}
-		model = resolved
+		// Nanite has no user-level or app-level default model
+		// (CW-20261011-0031): the session or the agent must name one.
+		ch <- chat.ErrorEvent(chat.ErrorCodeProviderError,
+			"No model selected. Choose a model for this session, or set one on the agent.",
+			nil)
+		return prepareTurnResult{directive: runloop.Terminate}
 	}
 
 	// --- Resolve harness profile (D-33) ---

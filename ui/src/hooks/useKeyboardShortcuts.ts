@@ -89,16 +89,13 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
 
   const handleNewSession = useCallback(async () => {
     try {
-      const newSession = await api.createSession({
-        provider: userSettings?.default_provider || undefined,
-        model: userSettings?.default_model || undefined,
-      })
+      const newSession = await api.createSession({})
       void queryClient.invalidateQueries({ queryKey: ['sessions'] })
       setActiveSession(newSession.id)
     } catch (err) {
       console.error('Failed to create session:', err)
     }
-  }, [queryClient, setActiveSession, userSettings])
+  }, [queryClient, setActiveSession])
 
   const navigateSession = useCallback(
     (direction: 'next' | 'prev') => {

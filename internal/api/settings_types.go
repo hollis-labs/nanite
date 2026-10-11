@@ -18,8 +18,6 @@ type UserSettingsView struct {
 	ContextOverflowRecovery        bool              `json:"context_overflow_recovery"`
 	ContextWindowTokens            int               `json:"context_window_tokens"`
 	DefaultAgent                   string            `json:"default_agent"`
-	DefaultModel                   string            `json:"default_model"`
-	DefaultProvider                string            `json:"default_provider"`
 	DeveloperMode                  bool              `json:"developer_mode"`
 	EmbeddingMode                  string            `json:"embedding_mode"`
 	EmbeddingModel                 string            `json:"embedding_model"`
@@ -59,8 +57,6 @@ func userSettingsToView(us *store.UserSettings, embeddingStatus string) UserSett
 		ContextOverflowRecovery:        us.ContextOverflowRecovery,
 		ContextWindowTokens:            us.ContextWindowTokens,
 		DefaultAgent:                   us.DefaultAgent,
-		DefaultModel:                   us.DefaultModel,
-		DefaultProvider:                us.DefaultProvider,
 		DeveloperMode:                  us.DeveloperMode,
 		EmbeddingMode:                  us.EmbeddingMode,
 		EmbeddingModel:                 us.EmbeddingModel,

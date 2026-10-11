@@ -10,8 +10,6 @@ import (
 // UserSettings holds global user-level configuration.
 type UserSettings struct {
 	ProviderFallbackChain []string          `json:"provider_fallback_chain"`
-	DefaultProvider       string            `json:"default_provider"`
-	DefaultModel          string            `json:"default_model"`
 	DefaultAgent          string            `json:"default_agent"`
 	UtilityProvider       string            `json:"utility_provider"`
 	UtilityModel          string            `json:"utility_model"`
@@ -112,7 +110,7 @@ func ValidSubagentRuntime(v string) bool {
 
 // GetUserSettings returns the singleton user settings row.
 func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
-	var chainJSON, provider, model, agent string
+	var chainJSON, agent string
 	var utilProvider, utilModel, toolMode, settingsJSON string
 	var toolStreamBehavior string
 	var toolDrawerRetention int
@@ -132,7 +130,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	var subagentApprovalTimeoutSeconds int
 	var autoRepairPref, subagentRuntime string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT provider_fallback_chain, default_provider, default_model,
+		`SELECT provider_fallback_chain,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
 		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
 		        tool_load_preferences, task_backend,
@@ -147,7 +145,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		        subagent_approval_required, subagent_approval_timeout_seconds,
 		        auto_repair_pref, subagent_runtime
 		 FROM user_settings WHERE id = 1`,
-	).Scan(&chainJSON, &provider, &model,
+	).Scan(&chainJSON,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
 		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
 		&toolLoadPrefsJSON, &taskBackend,
@@ -165,8 +163,6 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	}
 
 	us := &UserSettings{
-		DefaultProvider:                provider,
-		DefaultModel:                   model,
 		DefaultAgent:                   agent,
 		UtilityProvider:                utilProvider,
 		UtilityModel:                   utilModel,
@@ -328,8 +324,6 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 	_, err = s.DB.ExecContext(ctx,
 		`UPDATE user_settings SET
 			provider_fallback_chain = ?,
-			default_provider = ?,
-			default_model = ?,
 			default_agent = ?,
 			utility_provider = ?,
 			utility_model = ?,
@@ -365,7 +359,7 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 			subagent_runtime = ?,
 			updated_at = ?
 		 WHERE id = 1`,
-		string(chainJSON), us.DefaultProvider, us.DefaultModel,
+		string(chainJSON),
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
 		string(extJSON), us.DeveloperMode, us.RecoverMode,
 		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),

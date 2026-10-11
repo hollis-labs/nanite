@@ -18,6 +18,9 @@ type Handlers struct {
 	// OperatorTokenPath, when set, is rewritten when the operator
 	// credential is rotated through the API.
 	OperatorTokenPath string
+	// SecureCookies sets the Secure attribute on the session cookie (the
+	// operator's statement that browsers reach Nanite over HTTPS).
+	SecureCookies bool
 }
 
 // Register mounts the credential API on mux.
@@ -76,8 +79,11 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func (h *Handlers) setCookie(w http.ResponseWriter, value string, expires time.Time) {
-	// #nosec G124 -- Secure is not set: Nanite serves loopback HTTP and does not trust forwarded headers, so it cannot tell when a proxy fronts it with HTTPS
-	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires})
+	// Secure follows the operator's http.secure_cookies setting, not the
+	// request: Nanite serves plain HTTP behind a proxy and does not trust
+	// forwarded headers, so it cannot infer an external HTTPS scheme.
+	// #nosec G124 -- Secure is operator-controlled for the reason above
+	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: value, Path: "/", HttpOnly: true, Secure: h.SecureCookies, SameSite: http.SameSiteStrictMode, Expires: expires})
 }
 
 // login exchanges an operator or client credential for a UI session cookie.

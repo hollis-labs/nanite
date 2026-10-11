@@ -700,7 +700,10 @@ func slotBlocksFor(result *SlotAssemblyResult) []llmtypes.SlotBlock {
 	}
 	out := make([]llmtypes.SlotBlock, 0, len(result.Blocks))
 	for _, b := range result.Blocks {
-		if b.Content == "" {
+		// Conversation history travels in the messages payload. Shipping
+		// the slot as well sends every turn twice, once as raw "role: text"
+		// system prose (CW-20261011-0040).
+		if b.Content == "" || b.SlotName == ctxpkg.SlotConversation {
 			continue
 		}
 		out = append(out, llmtypes.SlotBlock{

@@ -36,6 +36,10 @@ func copySubmittedBy(from, into context.Context) context.Context {
 	return into
 }
 
+// nativeAskEachTime lists tools a native view never runs without an in-band,
+// once-only approval, even when the permission engine would allow them.
+var nativeAskEachTime = map[string]bool{"dev_bash": true, "python_run": true}
+
 // nativeToolGate adapts a live capability to toolclient.NativeToolGate.
 type nativeToolGate struct {
 	grants *NativeGrants

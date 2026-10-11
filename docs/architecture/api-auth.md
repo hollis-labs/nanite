@@ -3,8 +3,8 @@
 Every `/api/` route is authenticated (CW-20261011-0036). There is no
 unauthenticated mode except the explicit `nanite serve --insecure-no-auth`
 development flag, which warns at every start and never runs under the service
-unit. Nanite binds loopback only; non-loopback binds are refused until it has
-TLS (CW-20261011-0043).
+unit. Nanite binds loopback only and refuses every non-loopback bind; off-box access
+is described in [remote-access.md](remote-access.md).
 
 Code: `internal/apiauth` (credentials, store, guard, handlers, route rules),
 wired in `internal/server` and `cmd/nanite/auth_wiring.go`.

@@ -170,7 +170,7 @@ func cmdServeWithInitializers(
 ) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
-	bindAddress := fs.String("bind-address", "", "HTTP bind host or raw IP override, without port or brackets (loopback only: 127.0.0.1, ::1 or localhost; non-loopback binds are refused until Nanite has TLS, CW-20261011-0043)")
+	bindAddress := fs.String("bind-address", "", "HTTP bind host or raw IP override, without port or brackets (loopback only: 127.0.0.1, ::1 or localhost; non-loopback binds are always refused, so reach Nanite through an SSH forward, Tailscale Serve or a TLS-terminating proxy)")
 	// --db default is empty: an unset flag resolves the database path via
 	// go-apppaths (CW-20260517-0061). A non-empty flag becomes an explicit
 	// WithDBOverride. The retired "./nanite.db" CWD-relative default is the

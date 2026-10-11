@@ -19,9 +19,10 @@ type Auth struct {
 	OperatorTokenPath string
 }
 
-// validateBind refuses every non-loopback bind. Nanite has no TLS, and a
-// bearer credential must never cross a network in the clear, so there is no
-// off-box mode until the TLS task (CW-20261011-0043) lands.
+// validateBind refuses every non-loopback bind. Nanite does not terminate TLS,
+// and a bearer credential must never cross a network in the clear, so off-box
+// access goes through an SSH forward, Tailscale Serve or a TLS-terminating
+// proxy on the same machine (docs/architecture/remote-access.md).
 func validateBind(bind string) error {
 	if bind == "localhost" {
 		return nil
@@ -30,5 +31,5 @@ func validateBind(bind string) error {
 	if ip != nil && ip.IsLoopback() {
 		return nil
 	}
-	return fmt.Errorf("refusing to bind %q: Nanite listens on loopback only until it has TLS (see CW-20261011-0043); reach it through an SSH forward or a TLS-terminating proxy on the same machine", bind)
+	return fmt.Errorf("refusing to bind %q: Nanite listens on loopback only and does not terminate TLS; reach it through an SSH forward, Tailscale Serve or a TLS-terminating proxy on the same machine (docs/architecture/remote-access.md)", bind)
 }

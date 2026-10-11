@@ -769,14 +769,14 @@ func TestIsUploadPath(t *testing.T) {
 	}
 }
 
-// Nanite has no TLS, so every non-loopback bind is refused outright
-// (CW-20261011-0043 is the task that can lift this).
+// Nanite does not terminate TLS, so every non-loopback bind is refused outright
+// and the refusal names the supported ways to reach it.
 func TestNewRefusesNonLoopbackBind(t *testing.T) {
 	for _, bind := range []string{"0.0.0.0", "::", "192.168.1.20", "example.com", "10.0.0.5"} {
 		if _, err := New(nil, nil, 0, false, nil, config.HTTPConfig{BindAddress: bind}, Auth{}); err == nil {
 			t.Errorf("New accepted non-loopback bind %q", bind)
-		} else if !strings.Contains(err.Error(), "CW-20261011-0043") {
-			t.Errorf("refusal for %q does not point at the TLS task: %v", bind, err)
+		} else if !strings.Contains(err.Error(), "docs/architecture/remote-access.md") {
+			t.Errorf("refusal for %q does not point at the remote-access doc: %v", bind, err)
 		}
 	}
 	for _, bind := range []string{"127.0.0.1", "::1", "localhost", ""} {

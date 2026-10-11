@@ -73,8 +73,10 @@ import (
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
 	AgentDefinitions *AgentDefinitions
-	discoverMCP      func(context.Context) (*mcp.DiscoveryDiff, error)
-	PluginQueries    *PluginQueryService
+	// NativeAuthority is the operator-only writer of native-view tool authority.
+	NativeAuthority *NativeAuthorityAdmin
+	discoverMCP     func(context.Context) (*mcp.DiscoveryDiff, error)
+	PluginQueries   *PluginQueryService
 
 	// HarnessProfiles selects and resolves named harness profiles; used by the
 	// session-create handlers to reject an unknown profile early.
@@ -1420,6 +1422,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Sessions:            sessions,
 		CognitiveViews:      cognitiveViews,
 		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
+		NativeAuthority:     &NativeAuthorityAdmin{Writer: cfg.Store.LocalAuthority()},
 		Agents:              agents,
 		Skills:              skills,
 		SkillVendor:         skillVendor,

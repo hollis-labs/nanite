@@ -54,6 +54,8 @@ var routeRules = []routeRule{
 	rule("POST", `^/api/auth/logout$`, ScopeRead),
 	rule("", `^/api/auth(/|$)`, ScopeAdmin),
 	rule("", `^/api/admin(/|$)`, ScopeAdmin),
+	// Native-view tool authority: reading it and changing it are both admin.
+	rule("", `^/api/native-authority(/|$)`, ScopeAdmin),
 
 	// Code execution, credentials, retirement and posture: admin.
 	rule("!GET", `^/api/agents/\{[^}]+\}/(retire|retirement-export)$`, ScopeAdmin),

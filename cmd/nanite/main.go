@@ -125,6 +125,8 @@ func main() {
 		cmdPath(os.Args[2:])
 	case "auth":
 		cmdAuth(os.Args[2:])
+	case "authority":
+		cmdAuthority(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:

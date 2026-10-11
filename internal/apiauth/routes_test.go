@@ -120,3 +120,19 @@ func TestScopeForKeyRoutes(t *testing.T) {
 		t.Errorf("unknown write: scope %s matched=%v, want admin and unmatched", got, matched)
 	}
 }
+
+func TestNativeAuthorityRoutesAreAdminOnly(t *testing.T) {
+	for _, tc := range []struct{ method, pattern string }{
+		{"GET", "GET /api/native-authority"},
+		{"GET", "GET /api/native-authority/{id}"},
+		{"POST", "POST /api/native-authority"},
+		{"POST", "POST /api/native-authority/{id}/revoke"},
+		{"PUT", "PUT /api/native-authority/{id}/tools/{tool}"},
+		{"DELETE", "DELETE /api/native-authority/{id}/tools/{tool}"},
+	} {
+		scope, named := ScopeFor(tc.method, tc.pattern)
+		if !named || scope != ScopeAdmin {
+			t.Errorf("%s = %v (named %v), want admin", tc.pattern, scope, named)
+		}
+	}
+}

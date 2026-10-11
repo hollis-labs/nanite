@@ -284,3 +284,33 @@ func (l *LocalAuthority) ResolveToolNames(ctx context.Context, hostSettingsID st
 	}
 	return out, rows.Err()
 }
+
+// ListAuthorities returns every authority for a host settings id, newest first,
+// revoked ones included (history stays readable).
+func (l *LocalAuthority) ListAuthorities(ctx context.Context, hostSettingsID string) ([]NativeAuthority, error) {
+	rows, err := l.s.DB.QueryContext(ctx, `SELECT id FROM native_authorities WHERE host_settings_id=? ORDER BY created_at DESC, rowid DESC`, hostSettingsID)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows)
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]NativeAuthority, 0, len(ids))
+	for _, id := range ids {
+		a, gerr := l.GetAuthority(ctx, id)
+		if gerr != nil {
+			return nil, gerr
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}

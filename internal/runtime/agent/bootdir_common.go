@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -18,11 +19,28 @@ import (
 // this prefix; keeping the scheme app-side preserves that affordance.
 func makeBootDir(provider string, params SetupParams) (string, error) {
 	prefix := fmt.Sprintf("nanite-boot-%s-%s-r%s-", provider, params.SessionID, defaultIfEmpty(params.RunID, "0"))
-	dir, err := os.MkdirTemp("", prefix+"*")
+	dir, err := mkdirTempCanonical(prefix + "*")
 	if err != nil {
 		return "", fmt.Errorf("agent: mkdir boot dir for %s: %w", provider, err)
 	}
 	return dir, nil
+}
+
+// mkdirTempCanonical is os.MkdirTemp in the default temp directory, returning
+// the symlink-resolved path. The Harness workspace authority (InspectRoot)
+// refuses any root that is not already in physical form, so a TMPDIR reached
+// through a symlink must not leak into the root it is handed.
+func mkdirTempCanonical(pattern string) (string, error) {
+	dir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		_ = os.Remove(dir)
+		return "", err
+	}
+	return canonical, nil
 }
 
 // agentSlug returns a filesystem-safe identifier derived from the profile.

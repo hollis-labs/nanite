@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -63,7 +62,7 @@ func makeAuthorizedBootDir(provider string, params SetupParams) (string, agentla
 	if err != nil {
 		return "", nil, nil, err
 	}
-	controlPath, err := os.MkdirTemp("", "nanite-boot-control-*")
+	controlPath, err := mkdirTempCanonical("nanite-boot-control-*")
 	if err != nil {
 		return "", nil, nil, &BootArtifactFailure{BootDir: rootPath, Cause: err}
 	}

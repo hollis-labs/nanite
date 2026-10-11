@@ -42,6 +42,7 @@ type executionCapability struct {
 	subjectViewID      string // the view this capability executes for
 	turnID, runID      string
 	hostSettingsID     string // whose reviewed grants apply
+	admittedRevision   string // the host settings revision the view was created under
 	submittedBy        string // credential id; looked up on every dispatch (R1)
 	parentCapabilityID string // provenance: which execution spawned it (child only)
 	parentViewID       string // history/snapshot relationship (child only)
@@ -52,12 +53,12 @@ type executionCapability struct {
 // issueRoot is the only way a root capability comes into being. The chat
 // service calls it when it starts a generation whose view has a native
 // authority.
-func (r *capabilityRegistry) issueRoot(subjectViewID, turnID, runID, hostSettingsID, submittedBy string, narrowing ToolNarrowing) (*executionCapability, error) {
-	if subjectViewID == "" || turnID == "" || hostSettingsID == "" || submittedBy == "" {
-		return nil, errors.New("a capability needs a view, turn, host settings and submitting credential")
+func (r *capabilityRegistry) issueRoot(subjectViewID, turnID, runID, hostSettingsID, admittedRevision, submittedBy string, narrowing ToolNarrowing) (*executionCapability, error) {
+	if subjectViewID == "" || turnID == "" || hostSettingsID == "" || admittedRevision == "" || submittedBy == "" {
+		return nil, errors.New("a capability needs a view, turn, host settings, admitted revision and submitting credential")
 	}
 	c := &executionCapability{id: uuid.NewString(), subjectViewID: subjectViewID, turnID: turnID, runID: runID,
-		hostSettingsID: hostSettingsID, submittedBy: submittedBy, narrowing: copyNarrowing(narrowing), reg: r}
+		hostSettingsID: hostSettingsID, admittedRevision: admittedRevision, submittedBy: submittedBy, narrowing: copyNarrowing(narrowing), reg: r}
 	r.mu.Lock()
 	r.live[c.id] = c
 	r.mu.Unlock()
@@ -111,7 +112,7 @@ func (c *executionCapability) child(childViewID, turnID, runID string, narrowing
 		}
 	}
 	k := &executionCapability{id: uuid.NewString(), subjectViewID: childViewID, turnID: turnID, runID: runID,
-		hostSettingsID: c.hostSettingsID, submittedBy: c.submittedBy,
+		hostSettingsID: c.hostSettingsID, admittedRevision: c.admittedRevision, submittedBy: c.submittedBy,
 		parentCapabilityID: c.id, parentViewID: c.subjectViewID, narrowing: copyNarrowing(narrowing), reg: c.reg}
 	c.reg.mu.Lock()
 	c.reg.live[k.id] = k
@@ -152,5 +153,5 @@ func (g *NativeGrants) AuthorizeCapability(ctx context.Context, c *executionCapa
 	if !c.isLive() {
 		return false, "execution capability has ended"
 	}
-	return g.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: c.hostSettingsID, SubmittedBy: c.submittedBy}, c.narrowing, tool)
+	return g.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: c.hostSettingsID, AdmittedRevision: c.admittedRevision, SubmittedBy: c.submittedBy}, c.narrowing, tool)
 }

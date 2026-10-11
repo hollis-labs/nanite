@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 )
 
 // Native-view tool authority (CW-20261011-0037). This decides whether a tool may
@@ -32,24 +33,56 @@ type CallerStandingReader interface {
 // NativeToolGrantReader resolves the grants of the live local authority that
 // matches the host settings revision and pin now in force.
 type NativeToolGrantReader interface {
-	ResolveToolNames(ctx context.Context, hostSettingsID string) ([]string, error)
+	ResolveToolNames(ctx context.Context, hostSettingsID, admittedRevision string) ([]string, error)
 }
 
 // NativeSubject names the view and the credential that submitted the turn. The
 // credential id is looked up on every decision, never trusted as a verdict.
+// AdmittedRevision is the host settings revision the view was created under.
 type NativeSubject struct {
-	HostSettingsID string
-	SubmittedBy    string
+	HostSettingsID   string
+	AdmittedRevision string
+	SubmittedBy      string
 }
 
 // ToolNarrowing restricts a turn to a subset of the baseline grants. A nil
 // narrowing leaves the baseline as it is; an empty non-nil one allows nothing.
 type ToolNarrowing map[string]bool
 
-// NativeGrants decides native-view tool authority.
+// NativeGrants decides native-view tool authority. The caller-standing reader
+// is installed once the credential store exists (SetCallers); until then every
+// decision fails closed.
 type NativeGrants struct {
 	Grants  NativeToolGrantReader
-	Callers CallerStandingReader
+	callers atomic.Pointer[callerReaderBox]
+}
+
+type callerReaderBox struct{ r CallerStandingReader }
+
+// NewNativeGrants builds the decider. callers may be nil and set later.
+func NewNativeGrants(grants NativeToolGrantReader, callers CallerStandingReader) *NativeGrants {
+	g := &NativeGrants{Grants: grants}
+	if callers != nil {
+		g.SetCallers(callers)
+	}
+	return g
+}
+
+// SetCallers installs the credential-standing reader.
+func (g *NativeGrants) SetCallers(r CallerStandingReader) {
+	if g != nil && r != nil {
+		g.callers.Store(&callerReaderBox{r: r})
+	}
+}
+
+func (g *NativeGrants) callerReader() CallerStandingReader {
+	if g == nil {
+		return nil
+	}
+	if b := g.callers.Load(); b != nil {
+		return b.r
+	}
+	return nil
 }
 
 const (
@@ -63,10 +96,11 @@ const (
 // effective returns the tools the view may use right now for this caller, and
 // the reason when there are none because of the caller.
 func (g *NativeGrants) effective(ctx context.Context, subj NativeSubject, narrow ToolNarrowing) ([]string, string, error) {
-	if g == nil || g.Grants == nil || g.Callers == nil || subj.HostSettingsID == "" || subj.SubmittedBy == "" {
+	callers := g.callerReader()
+	if g == nil || g.Grants == nil || callers == nil || subj.HostSettingsID == "" || subj.AdmittedRevision == "" || subj.SubmittedBy == "" {
 		return nil, nativeDenyUnready, errors.New("native grants are not fully wired")
 	}
-	standing, err := g.Callers.CallerStanding(ctx, subj.SubmittedBy)
+	standing, err := callers.CallerStanding(ctx, subj.SubmittedBy)
 	if err != nil {
 		return nil, nativeDenyUnready, fmt.Errorf("caller standing: %w", err)
 	}
@@ -76,7 +110,7 @@ func (g *NativeGrants) effective(ctx context.Context, subj NativeSubject, narrow
 	if !standing.Tools {
 		return nil, nativeDenyScope, nil
 	}
-	names, err := g.Grants.ResolveToolNames(ctx, subj.HostSettingsID)
+	names, err := g.Grants.ResolveToolNames(ctx, subj.HostSettingsID, subj.AdmittedRevision)
 	if err != nil {
 		return nil, nativeDenyUnready, err
 	}

@@ -66,6 +66,27 @@ relationship. `nativeForkVerifier` implements `store.CodeModeForkVerifier` by
 authenticating the capability in the context and treating the id argument only
 as a consistency check.
 
+## How a native turn gets tools
+
+A view records the host settings id and revision it was admitted under in its
+chat configuration. When a turn starts, the chat service issues a root execution
+capability only if the view has that record, the turn has a submitting credential
+(`service.WithSubmittedBy`, set from the authenticated principal at turn
+admission) and `NativeGrants` is wired. Otherwise the turn is tool-free.
+
+With a capability the turn is offered exactly what `NativeGrants.Offered` returns,
+minus `dev_*` tools while developer mode is off. At dispatch the chat loop asks
+`NativeGrants.AuthorizeCapability`, and `ToolClient.CallTool` honors a
+`toolclient.NativeToolGate` carried in the context in place of the fabric grant
+check for that call. A gate that refuses is final; nothing falls through to the
+fabric tables. The developer-mode backstop still runs first. Only the chat
+service installs a gate (`TestNativeToolGateIsInstalledOnlyByTheChatService`).
+
+The credential-standing reader is the credential store itself, queried on each
+call (`credentialStanding` in `cmd/nanite`). The existing permission engine still
+decides whether a granted tool runs, asks for approval, or is refused; a grant
+makes a tool available, it does not approve its use.
+
 ## Attaching to the mesh
 
 A native view that joins the fabric is a separate, deliberate step. Attaching

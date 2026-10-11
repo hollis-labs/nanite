@@ -75,8 +75,11 @@ type Container struct {
 	AgentDefinitions *AgentDefinitions
 	// NativeAuthority is the operator-only writer of native-view tool authority.
 	NativeAuthority *NativeAuthorityAdmin
-	discoverMCP     func(context.Context) (*mcp.DiscoveryDiff, error)
-	PluginQueries   *PluginQueryService
+	// NativeGrants decides native-view tool authority per call; the credential
+	// store is attached with NativeGrants.SetCallers at startup.
+	NativeGrants  *NativeGrants
+	discoverMCP   func(context.Context) (*mcp.DiscoveryDiff, error)
+	PluginQueries *PluginQueryService
 
 	// HarnessProfiles selects and resolves named harness profiles; used by the
 	// session-create handlers to reject an unknown profile early.
@@ -1091,6 +1094,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	cognitiveApprovals := approval.New(permissions)
 	resultCache := buildResultCache(cfg.Store)
+	// Native-view tool authority. The credential-standing reader is installed
+	// once the credential store exists (SetCallers); until then native turns
+	// are tool-free.
+	nativeGrants := NewNativeGrants(cfg.Store.LocalAuthority(), nil)
 	chatSvc := NewChatService(ChatServiceConfig{
 		HarnessProfiles:    cfg.HarnessProfiles,
 		Sessions:           sessions,
@@ -1111,6 +1118,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		UtilityModel:       cfg.UtilityModel,
 		Permissions:        permissions,
 		CognitiveApprovals: cognitiveApprovals,
+		NativeGrants:       nativeGrants,
 		PathGrants:         pathGrants,
 		Tasks:              tasks,
 		ResultCache:        resultCache,
@@ -1423,6 +1431,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		CognitiveViews:      cognitiveViews,
 		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
 		NativeAuthority:     &NativeAuthorityAdmin{Writer: cfg.Store.LocalAuthority()},
+		NativeGrants:        nativeGrants,
 		Agents:              agents,
 		Skills:              skills,
 		SkillVendor:         skillVendor,

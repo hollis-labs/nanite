@@ -13,8 +13,11 @@ type fakeGrants struct {
 	calls int
 }
 
-func (f *fakeGrants) ResolveToolNames(_ context.Context, host string) ([]string, error) {
+func (f *fakeGrants) ResolveToolNames(_ context.Context, host, admitted string) ([]string, error) {
 	f.calls++
+	if admitted != "rev-1" { // the fixture reviewed revision rev-1 only
+		return nil, f.err
+	}
 	return append([]string(nil), f.names[host]...), f.err
 }
 
@@ -33,10 +36,10 @@ func nativeGrantsFixture() (*NativeGrants, *fakeGrants, *fakeCallers) {
 		"operator": {Valid: true, Tools: true},
 		"embedded": {Valid: true, Tools: false}, // operate only
 	}}
-	return &NativeGrants{Grants: g, Callers: c}, g, c
+	return NewNativeGrants(g, c), g, c
 }
 
-var subjA = NativeSubject{HostSettingsID: "view-a", SubmittedBy: "operator"}
+var subjA = NativeSubject{HostSettingsID: "view-a", AdmittedRevision: "rev-1", SubmittedBy: "operator"}
 
 func TestNativeGrantsRefuseWhatTheFixtureDoesNotGrant(t *testing.T) {
 	ng, _, _ := nativeGrantsFixture()
@@ -45,11 +48,11 @@ func TestNativeGrantsRefuseWhatTheFixtureDoesNotGrant(t *testing.T) {
 		t.Fatalf("ungranted tool: %v %q", ok, why)
 	}
 	// A grant for view A is not honored for view B.
-	if ok, _ := ng.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: "view-b", SubmittedBy: "operator"}, nil, "dev_read"); ok {
+	if ok, _ := ng.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: "view-b", AdmittedRevision: "rev-1", SubmittedBy: "operator"}, nil, "dev_read"); ok {
 		t.Fatal("view A's grant honored for view B")
 	}
 	// An unknown view has nothing.
-	if ok, _ := ng.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: "nobody", SubmittedBy: "operator"}, nil, "dev_read"); ok {
+	if ok, _ := ng.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: "nobody", AdmittedRevision: "rev-1", SubmittedBy: "operator"}, nil, "dev_read"); ok {
 		t.Fatal("unknown view authorized")
 	}
 }
@@ -57,7 +60,7 @@ func TestNativeGrantsRefuseWhatTheFixtureDoesNotGrant(t *testing.T) {
 func TestNativeGrantsOperateOnlyCallerGetsToolFreeTurns(t *testing.T) { // R3
 	ng, _, _ := nativeGrantsFixture()
 	ctx := context.Background()
-	subj := NativeSubject{HostSettingsID: "view-a", SubmittedBy: "embedded"}
+	subj := NativeSubject{HostSettingsID: "view-a", AdmittedRevision: "rev-1", SubmittedBy: "embedded"}
 	if got := ng.Offered(ctx, subj, nil); len(got) != 0 {
 		t.Fatalf("operate-only caller was offered tools: %v", got)
 	}
@@ -81,7 +84,7 @@ func TestNativeGrantsRevokedOrUnknownCredentialRefusedAtEveryDispatch(t *testing
 		t.Fatalf("revoked credential still offered tools: %v", got)
 	}
 	// A credential id the host does not know is not valid.
-	if ok, _ := ng.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: "view-a", SubmittedBy: "made-up"}, nil, "dev_read"); ok {
+	if ok, _ := ng.AuthorizeDispatch(ctx, NativeSubject{HostSettingsID: "view-a", AdmittedRevision: "rev-1", SubmittedBy: "made-up"}, nil, "dev_read"); ok {
 		t.Fatal("unknown credential authorized")
 	}
 }
@@ -117,12 +120,12 @@ func TestNativeGrantsFailClosed(t *testing.T) {
 		t.Fatal("authorized while the grant lookup failed")
 	}
 	grants.err = nil
-	for name, bad := range map[string]*NativeGrants{"nil": nil, "no grants": {Callers: callers}, "no callers": {Grants: grants}} {
+	for name, bad := range map[string]*NativeGrants{"nil": nil, "no grants": NewNativeGrants(nil, callers), "no callers": NewNativeGrants(grants, nil)} {
 		if ok, _ := bad.AuthorizeDispatch(ctx, subjA, nil, "dev_read"); ok {
 			t.Errorf("%s: authorized by an unwired resolver", name)
 		}
 	}
-	for name, subj := range map[string]NativeSubject{"no host": {SubmittedBy: "operator"}, "no caller": {HostSettingsID: "view-a"}} {
+	for name, subj := range map[string]NativeSubject{"no host": {AdmittedRevision: "rev-1", SubmittedBy: "operator"}, "no caller": {HostSettingsID: "view-a", AdmittedRevision: "rev-1"}, "no admitted revision": {HostSettingsID: "view-a", SubmittedBy: "operator"}, "view admitted under another revision": {HostSettingsID: "view-a", AdmittedRevision: "rev-0", SubmittedBy: "operator"}} {
 		if ok, _ := ng.AuthorizeDispatch(ctx, subj, nil, "dev_read"); ok {
 			t.Errorf("%s: authorized", name)
 		}

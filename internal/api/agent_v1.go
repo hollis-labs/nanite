@@ -13,6 +13,7 @@ import (
 	agentservice "github.com/hollis-labs/substrate/agent/service"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/clientcontext"
@@ -321,6 +322,11 @@ func (a *API) handleAgentV1SendTurn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ctx = service.WithClientContextSnapshot(ctx, snapshot)
+	}
+	// The credential that submitted the turn rides along as an id only; the host
+	// looks it up again on every tool dispatch.
+	if p, authed := apiauth.FromContext(ctx); authed && p.CredentialID != "" {
+		ctx = service.WithSubmittedBy(ctx, p.CredentialID)
 	}
 	admission, ok := a.Services.Chat.(service.CognitiveTurnAdmission)
 	if !ok {

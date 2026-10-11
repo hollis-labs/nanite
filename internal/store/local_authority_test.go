@@ -297,18 +297,18 @@ func TestResolveToolNamesYieldsNothingUnlessTheReviewedStateIsStillInForce(t *te
 	ctx := context.Background()
 	s, host, a := resolveFixture(t)
 	la := s.LocalAuthority()
-	names, err := la.ResolveToolNames(ctx, host.ID)
+	names, err := la.ResolveToolNames(ctx, host.ID, host.Revision)
 	if err != nil || strings.Join(names, ",") != "dev_grep,dev_read" {
 		t.Fatalf("baseline = %v, %v", names, err)
 	}
-	if names, _ = la.ResolveToolNames(ctx, "some-other-host"); len(names) != 0 {
+	if names, _ = la.ResolveToolNames(ctx, "some-other-host", host.Revision); len(names) != 0 {
 		t.Fatalf("another host resolved grants: %v", names)
 	}
 	// A tool that becomes unavailable stops resolving.
 	if _, err = s.UpsertKnownTool(ctx, "dev_grep", "builtin", "removed", "x"); err != nil {
 		t.Fatal(err)
 	}
-	if names, _ = la.ResolveToolNames(ctx, host.ID); strings.Join(names, ",") != "dev_read" {
+	if names, _ = la.ResolveToolNames(ctx, host.ID, host.Revision); strings.Join(names, ",") != "dev_read" {
 		t.Fatalf("unavailable tool still resolved: %v", names)
 	}
 	if _, err = s.UpsertKnownTool(ctx, "dev_grep", "builtin", "available", "x"); err != nil {
@@ -318,7 +318,7 @@ func TestResolveToolNamesYieldsNothingUnlessTheReviewedStateIsStillInForce(t *te
 	if err = la.RevokeTool(ctx, "cred-1", a.ID, "dev_read", "r"); err != nil {
 		t.Fatal(err)
 	}
-	if names, _ = la.ResolveToolNames(ctx, host.ID); strings.Join(names, ",") != "dev_grep" {
+	if names, _ = la.ResolveToolNames(ctx, host.ID, host.Revision); strings.Join(names, ",") != "dev_grep" {
 		t.Fatalf("revoked grant still resolved: %v", names)
 	}
 	// Settings changed since the review: the old authority no longer applies.
@@ -326,7 +326,7 @@ func TestResolveToolNamesYieldsNothingUnlessTheReviewedStateIsStillInForce(t *te
 	if _, err = s.UpdateAgentHostSettings(ctx, host, host.Revision); err != nil {
 		t.Fatal(err)
 	}
-	if names, _ = la.ResolveToolNames(ctx, host.ID); len(names) != 0 {
+	if names, _ = la.ResolveToolNames(ctx, host.ID, host.Revision); len(names) != 0 {
 		t.Fatalf("grants survived a settings revision change: %v", names)
 	}
 }
@@ -338,7 +338,7 @@ func TestResolveToolNamesStopsOnRevokedAuthorityAndDisabledHost(t *testing.T) {
 	if err := la.RevokeAuthority(ctx, "cred-1", a.ID, "r"); err != nil {
 		t.Fatal(err)
 	}
-	if names, _ := la.ResolveToolNames(ctx, host.ID); len(names) != 0 {
+	if names, _ := la.ResolveToolNames(ctx, host.ID, host.Revision); len(names) != 0 {
 		t.Fatalf("revoked authority resolved: %v", names)
 	}
 	s2, host2, _ := resolveFixture(t)
@@ -346,7 +346,39 @@ func TestResolveToolNamesStopsOnRevokedAuthorityAndDisabledHost(t *testing.T) {
 	if _, err := s2.UpdateAgentHostSettings(ctx, host2, host2.Revision); err != nil {
 		t.Fatal(err)
 	}
-	if names, _ := s2.LocalAuthority().ResolveToolNames(ctx, host2.ID); len(names) != 0 {
+	if names, _ := s2.LocalAuthority().ResolveToolNames(ctx, host2.ID, host2.Revision); len(names) != 0 {
 		t.Fatalf("disabled host resolved: %v", names)
+	}
+}
+
+func TestResolveToolNamesRequiresTheViewToHaveBeenAdmittedUnderTheReviewedRevision(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	host := nativeHost(t, s, "admitted")
+	nativeTool(t, s, "dev_read")
+	older := host.Revision
+	host.Settings.Model = "second-revision"
+	updated, err := s.UpdateAgentHostSettings(ctx, host, older)
+	if err != nil {
+		t.Fatal(err)
+	}
+	la := s.LocalAuthority()
+	a, err := la.CreateAuthority(ctx, "cred-1", host.ID, "reviewed the second revision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = la.GrantTool(ctx, "cred-1", a.ID, "dev_read", "r"); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := la.ResolveToolNames(ctx, host.ID, updated.Revision); strings.Join(names, ",") != "dev_read" {
+		t.Fatalf("view admitted under the reviewed revision: %v", names)
+	}
+	if names, _ := la.ResolveToolNames(ctx, host.ID, older); len(names) != 0 {
+		t.Fatalf("a view admitted under an older revision inherited a later review: %v", names)
+	}
+	for _, blank := range [][2]string{{"", updated.Revision}, {host.ID, ""}} {
+		if names, err := la.ResolveToolNames(ctx, blank[0], blank[1]); err != nil || len(names) != 0 {
+			t.Fatalf("blank input %v resolved %v, %v", blank, names, err)
+		}
 	}
 }

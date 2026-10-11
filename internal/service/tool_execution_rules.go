@@ -37,6 +37,11 @@ func (s *chatServiceImpl) enforceExecutionRules(ctx context.Context, agentID, to
 		if s.resultCache != nil && (toolName == "fetch_tool_result" || toolName == "search_tool_result") {
 			return true, ""
 		}
+		// A native view is decided by its live execution capability: the
+		// submitting credential, grants and narrowing are re-checked now.
+		if c, ok := executionCapabilityFrom(ctx); ok && s.nativeGrants != nil {
+			return s.nativeGrants.AuthorizeCapability(ctx, c, toolName)
+		}
 		return false, "verified actor tool grants are unavailable for this native view"
 	}
 	if s.tools == nil {

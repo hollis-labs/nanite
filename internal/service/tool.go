@@ -1164,3 +1164,13 @@ func parseJSONStrings(raw string, out *[]string) error {
 	}
 	return json.Unmarshal([]byte(raw), out)
 }
+
+// NativeToolDefinitions returns the definitions of the named tools for a native
+// turn, without dev tools that developer mode would refuse. Granting is decided
+// elsewhere; this only resolves schemas.
+func (s *toolServiceImpl) NativeToolDefinitions(names []string) []llmtypes.ToolDefinition {
+	if s.toolClient == nil {
+		return nil
+	}
+	return s.toolClient.OmitUnavailableDevTools(s.toolClient.GetToolsByNames(names))
+}

@@ -135,6 +135,7 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		}
 		req.ModelSelection = &selected
 		cfg.HostSettings = &h.Settings
+		cfg.HostSettingsRef = &HostSettingsRef{ID: h.ID, Revision: h.Revision}
 	}
 	cfg.Model, err = v.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
 	if err != nil {

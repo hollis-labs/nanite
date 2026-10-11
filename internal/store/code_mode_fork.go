@@ -133,7 +133,7 @@ func loadCodeModeSnapshot(ctx context.Context, db codeModeQueryer, parentID stri
 	if snapshot.Session.Status == "archived" {
 		return snapshot, nil, ErrCodeModeSnapshot
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id,session_id,COALESCE(agent_id,''),role,content,COALESCE(envelope,''),COALESCE(metadata,'{}'),COALESCE(parent_id,''),is_compacted,created_at FROM messages WHERE session_id=? ORDER BY created_at,rowid LIMIT ?`, parentID, limits.HistoryMaxMessages+1)
+	rows, err := db.QueryContext(ctx, `SELECT id,session_id,COALESCE(agent_id,''),role,content,COALESCE(envelope,''),COALESCE(metadata,'{}'),COALESCE(parent_id,''),is_compacted,CAST(created_at AS TEXT) FROM messages WHERE session_id=? ORDER BY created_at,rowid LIMIT ?`, parentID, limits.HistoryMaxMessages+1)
 	if err != nil {
 		return snapshot, nil, err
 	}

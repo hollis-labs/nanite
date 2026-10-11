@@ -49,7 +49,7 @@ func (s *Store) ListCognitiveSessionPage(ctx context.Context, beforeCreated, bef
 // order. The ID tie-breaker keeps equal timestamps deterministic.
 func (s *Store) ListCognitiveMessagePage(ctx context.Context, sessionID, beforeCreated, beforeID string, limit int) ([]Message, error) {
 	query := `SELECT id, session_id, COALESCE(agent_id,''), role, content,
- COALESCE(envelope,''), COALESCE(metadata,'{}'), COALESCE(parent_id,''), is_compacted, created_at
+ COALESCE(envelope,''), COALESCE(metadata,'{}'), COALESCE(parent_id,''), is_compacted, CAST(created_at AS TEXT)
  FROM messages WHERE session_id = ?`
 	args := []any{sessionID}
 	if beforeID != "" {

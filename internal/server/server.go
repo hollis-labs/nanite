@@ -117,7 +117,15 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 		if hh, _, err := net.SplitHostPort(host); err == nil {
 			h = hh
 		}
-		return h == bindHost
+		if h == bindHost {
+			return true
+		}
+		for _, allowed := range resolvedHTTPConfig.AllowedHosts {
+			if strings.EqualFold(h, strings.TrimSpace(allowed)) {
+				return true
+			}
+		}
+		return false
 	}
 
 	// Set the router on the plugin host if it exists

@@ -1531,6 +1531,17 @@ streamLoop:
 				"stop_reason": "max_tokens", "iteration": run.loop.iteration, "model": model,
 			})
 		}
+		if stopReason == "refusal" {
+			// A declined turn is not a completed one: surface it as an error so
+			// the client can tell it from an answer that happens to be empty.
+			slog.Warn("chat-service: model declined the turn", "iter", run.loop.iteration)
+			s.store.LogEvent(context.WithoutCancel(ctx), sessionID, "model_refusal", "warning",
+				fmt.Sprintf("iteration %d: model stopped with stop_reason=refusal", run.loop.iteration),
+				fmt.Sprintf(`{"model":%q,"iteration":%d}`, model, run.loop.iteration))
+			ch <- chat.ErrorEnvelopeDelta(chat.ErrorCodeProviderError, "The model declined to respond (stop_reason: refusal)", map[string]interface{}{
+				"stop_reason": "refusal", "iteration": run.loop.iteration, "model": model,
+			})
+		}
 		diagLogLoopExit(sessionID, assistantMsgID, run.loop.iteration, "done:stop_reason="+stopReason, len(run.loop.toolCallRefs), ch)
 		return consumeProviderIterationResult{directive: runloop.Finish}
 	}

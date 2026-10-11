@@ -407,6 +407,9 @@ type ContainerConfig struct {
 	// forwards self-tool calls back to this running harness. Empty leaves
 	// CLI launches in local-only self-tool mode.
 	APIBaseURL string
+	// AgentCredential mints a per-session agent credential planted into the
+	// launch's `nanite mcp` environment (CW-20261011-0036).
+	AgentCredential func(sessionID string) (string, error)
 
 	// Optional subsystems — nil-safe.
 	Activity     *chat.ActivityEmitter
@@ -1069,6 +1072,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		MCP:              cfg.MCP,
 		Providers:        cfg.Providers,
 		APIBaseURL:       cfg.APIBaseURL,
+		AgentCredential:  cfg.AgentCredential,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
 		ControlPlane:     cfg.AgentControlPlane,
 		Permissions:      permissions,

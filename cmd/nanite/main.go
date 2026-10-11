@@ -38,6 +38,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/api"
+	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/filter"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
@@ -122,6 +123,8 @@ func main() {
 		cmdAdmin(os.Args[2:])
 	case "path":
 		cmdPath(os.Args[2:])
+	case "auth":
+		cmdAuth(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:
@@ -167,13 +170,14 @@ func cmdServeWithInitializers(
 ) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 8090, "HTTP listen port")
-	bindAddress := fs.String("bind-address", "", "HTTP bind host or raw IP override, without port or brackets (default: 127.0.0.1; use 0.0.0.0 for all IPv4 interfaces)")
+	bindAddress := fs.String("bind-address", "", "HTTP bind host or raw IP override, without port or brackets (loopback only: 127.0.0.1, ::1 or localhost; non-loopback binds are refused until Nanite has TLS, CW-20261011-0043)")
 	// --db default is empty: an unset flag resolves the database path via
 	// go-apppaths (CW-20260517-0061). A non-empty flag becomes an explicit
 	// WithDBOverride. The retired "./nanite.db" CWD-relative default is the
 	// data-loss failure mode this migration removes.
 	dbFlag := fs.String("db", "", "SQLite database path (default: go-apppaths XDG layout — run `nanite path`)")
 	dev := fs.Bool("dev", false, "Development mode (skip embedded SPA)")
+	insecure := fs.Bool("insecure-no-auth", false, "DEVELOPMENT ONLY: turn API authentication off (loud, loopback only)")
 	fs.Usage = func() {
 		out := fs.Output()
 		_, _ = fmt.Fprintf(out, "Usage of %s serve:\n", brand.BinaryName)
@@ -481,6 +485,12 @@ func cmdServeWithInitializers(
 		slog.Error("load harness profiles", "err", err)
 		os.Exit(1)
 	}
+	serveAuthState, authErr := initServeAuth(context.Background(), *dbFlag, s, *insecure)
+	if authErr != nil {
+		return fmt.Errorf("initialize API authentication: %w", authErr)
+	}
+	defer func() { _ = serveAuthState.store.Close() }()
+
 	container, err := service.NewContainer(service.ContainerConfig{
 		HarnessProfiles:          harnessProfiles,
 		Store:                    s,
@@ -490,6 +500,7 @@ func cmdServeWithInitializers(
 		Plugins:                  pluginHost,
 		AppConfig:                appCfg,
 		APIBaseURL:               apiBaseURL,
+		AgentCredential:          serveAuthState.agentCredential,
 		Activity:                 activity,
 		OutputFilter:             outputFilters,
 		UtilityProvider:          utilityProvider,
@@ -944,10 +955,7 @@ func cmdServeWithInitializers(
 	}
 	a.SetWorkflowSurface(workflowSurface)
 	a.SetWorkflowExternalExecutionAdmin(workflowSurface)
-	a.SetWorkflowResponderAuthenticator(api.NewBasicWorkflowResponderAuthenticator(
-		os.Getenv("NANITE_AUTH_USER"),
-		os.Getenv("NANITE_AUTH_PASSWORD"),
-	))
+	a.SetWorkflowResponderAuthenticator(apiauth.AdminAuthenticator(apiauth.ScopeOperate))
 	// Back POST /api/tools/call with the fully-wired self-tools transport
 	// so a CLI-launched chat agent's `nanite mcp` subprocess can forward
 	// self-tool calls into this running harness.
@@ -984,7 +992,7 @@ func cmdServeWithInitializers(
 	})
 
 	// Start HTTP server.
-	srv, serverErr := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)
+	srv, serverErr := server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP, server.Auth{Guard: serveAuthState.guard, OperatorTokenPath: serveAuthState.paths.token})
 	if serverErr != nil {
 		return fmt.Errorf("construct HTTP server: %w", serverErr)
 	}

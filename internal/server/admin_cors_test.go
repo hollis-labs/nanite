@@ -68,7 +68,7 @@ func TestAdminFiniteCORS(t *testing.T) {
 			s := &Server{httpCfg: config.HTTPConfig{CORSAllowedOrigins: allowed}, adminAllowedOrigins: allowed}
 			for _, origin := range []string{"http://localhost:5173", "http://foreign.test", "null", ""} {
 				called := false
-				r := httptest.NewRequest("OPTIONS", "http://nanite.test"+path, nil)
+				r := httptest.NewRequest("OPTIONS", "http://127.0.0.1"+path, nil)
 				r.Header.Set("Origin", origin)
 				r.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type, If-Match")
 				w := httptest.NewRecorder()

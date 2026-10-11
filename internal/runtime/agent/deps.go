@@ -318,6 +318,14 @@ type MCPConfig struct {
 	// subprocess in local-only mode (store-backed self-tools, no live
 	// services).
 	APIBaseURL string
+
+	// AgentCredential mints a short-lived credential bound to one session
+	// (the agent kind: tools scope only). When set together with APIBaseURL it
+	// is planted as NANITE_AUTH_TOKEN in the launch's .mcp.json env so the
+	// spawned `nanite mcp` can authenticate its self-tool calls
+	// (CW-20261011-0036). The credential expires on its own, slides while the
+	// session is live, and is refused once the session ends.
+	AgentCredential func(sessionID string) (string, error)
 }
 
 // Telemetry is the observability sink. The production composition root

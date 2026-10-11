@@ -444,7 +444,7 @@ func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
 // to note rather than silently assume it's fine): this codebase's REST API
 // has exactly ONE caller-authentication mechanism gating the whole /api/
 // surface — internal/server's optional, coarse HTTP Basic Auth
-// (NANITE_AUTH_USER/PASSWORD; a no-op "local dev mode" when unset, per
+// (the API credential guard; see internal/apiauth, per
 // basicAuthMiddleware's own doc comment) — a single on/off switch for
 // whether anyone unauthenticated may call at all, not anything specific to
 // agent-mutating endpoints. No comparable agent-mutating endpoint in this

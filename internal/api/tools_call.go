@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 )
@@ -84,6 +85,13 @@ func (a *API) handleSelfToolCall(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" {
 		a.errorResp(w, http.StatusBadRequest, "missing tool name")
+		return
+	}
+
+	// An agent credential is bound to one session: it may not run tools for
+	// another (CW-20261011-0036).
+	if p, ok := apiauth.FromContext(r.Context()); ok && p.Kind == apiauth.KindAgent && p.BoundSessionID != req.SessionID {
+		a.errorResp(w, http.StatusForbidden, "credential is bound to a different session")
 		return
 	}
 

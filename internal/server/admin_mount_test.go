@@ -6,42 +6,48 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/config"
 )
 
+// The admin mount fails closed: no credential, or a credential without the
+// admin scope, never reaches it; an operator does.
 func TestAdminMountedFailClosed(t *testing.T) {
-	for _, cfg := range []struct{ name, user, password string }{{"off", "", ""}, {"user-only", "operator", ""}, {"password-only", "", "fixture-password"}, {"complete", "operator", "fixture-password"}} {
-		t.Run(cfg.name, func(t *testing.T) {
-			t.Setenv("NANITE_AUTH_USER", cfg.user)
-			t.Setenv("NANITE_AUTH_PASSWORD", cfg.password)
-			server, err := New(nil, nil, 0, false, nil, config.HTTPConfig{})
-			if err != nil {
-				t.Fatal(err)
+	auth, operator := enforcedAuth(t)
+	server, err := New(nil, nil, 0, false, nil, config.HTTPConfig{}, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, client, err := auth.Guard.Store.Create(t.Context(), apiauth.CreateParams{Kind: apiauth.KindClient, Label: "reader", Scopes: []apiauth.Scope{apiauth.ScopeRead}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/admin", "/api/admin/manifest", "/api/admin/unknown"} {
+		for _, tc := range []struct {
+			name, bearer string
+			status       int
+		}{{"no credential", "", 401}, {"garbage", "nope", 401}, {"read-only client", client, 403}, {"operator", operator, 0}} {
+			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1"+path, nil)
+			request.RemoteAddr = "127.0.0.1:12345"
+			if tc.bearer != "" {
+				request.Header.Set("Authorization", "Bearer "+tc.bearer)
 			}
-			for _, path := range []string{"/api/admin", "/api/admin/manifest", "/api/admin/unknown"} {
-				for _, authenticated := range []bool{false, true} {
-					request := httptest.NewRequest(http.MethodGet, path, nil)
-					request.RemoteAddr = "127.0.0.1:12345"
-					if authenticated {
-						request.SetBasicAuth(cfg.user, cfg.password)
-					}
-					request.Header.Set("X-Nanite-Caller-Agent", "operator")
-					response := httptest.NewRecorder()
-					server.handlerChain().ServeHTTP(response, request)
-					allowed := cfg.user != "" && cfg.password != "" && authenticated
-					if !allowed {
-						if response.Code != 401 || response.Header().Get("Content-Type") != "application/json" || response.Header().Get("WWW-Authenticate") != `Basic realm="nanite"` {
-							t.Fatalf("admin failed open: %s %d %s", path, response.Code, response.Body.String())
-						}
-					} else if path == "/api/admin/manifest" {
-						if response.Code != 200 || !strings.Contains(response.Body.String(), `"id":"nanite"`) {
-							t.Fatal("manifest not mounted")
-						}
-					} else if response.Code != 404 {
-						t.Fatal("unknown admin fell through to SPA or redirect")
-					}
+			request.Header.Set("X-Nanite-Caller-Agent", "operator")
+			response := httptest.NewRecorder()
+			server.handlerChain().ServeHTTP(response, request)
+			if tc.status != 0 {
+				if response.Code != tc.status || response.Header().Get("Content-Type") != "application/json" {
+					t.Fatalf("admin failed open: %s as %s: %d %s", path, tc.name, response.Code, response.Body.String())
 				}
+				continue
 			}
-		})
+			if path == "/api/admin/manifest" {
+				if response.Code != 200 || !strings.Contains(response.Body.String(), `"id":"nanite"`) {
+					t.Fatalf("manifest not mounted for the operator: %d %s", response.Code, response.Body.String())
+				}
+			} else if response.Code != 404 {
+				t.Fatalf("unknown admin %s fell through to SPA or redirect: %d", path, response.Code)
+			}
+		}
 	}
 }

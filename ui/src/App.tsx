@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppGate } from "./components/AppGate";
+import { AuthGate } from "./components/AuthGate";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ThemeEffect } from "./hooks/useTheme";
 
@@ -17,7 +18,9 @@ function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ThemeEffect />
-        <AppGate />
+        <AuthGate>
+          <AppGate />
+        </AuthGate>
       </QueryClientProvider>
     </ErrorBoundary>
   );

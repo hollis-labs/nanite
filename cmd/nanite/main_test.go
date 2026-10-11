@@ -204,7 +204,7 @@ func TestCmdServeLoadsPluginsBeforeRecoveryAndBackgroundWorkers(t *testing.T) {
 	}
 	body := string(source)
 
-	serverNew := strings.Index(body, "server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP)")
+	serverNew := strings.Index(body, "server.New(s, a, *port, *dev, pluginHost, appCfg.HTTP, server.Auth{")
 	discover := strings.Index(body, "discoverAndLoadPlugins(pluginHost, mcpManager, s)")
 	teamRecovery := strings.Index(body, "container.TeamRunLauncher.ReconcileTeamRuns(context.Background(), 100)")
 	workflowRecovery := strings.Index(body, "sharedWorkflowEngine.RecoverActive(context.Background(), workflowStepExecutor, 100)")

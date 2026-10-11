@@ -14,7 +14,6 @@ import (
 	"time"
 
 	localdaemon "github.com/hollis-labs/libs/util/localdaemon"
-	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 )
 
@@ -111,12 +110,7 @@ func checkHealth(ctx context.Context, baseURL string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// Same NANITE_AUTH_USER/NANITE_AUTH_PASSWORD convention as
-	// agentClient.newRequest — a no-op when unset, since basicAuthMiddleware
-	// is also a no-op then.
-	if user := os.Getenv(brand.Env("AUTH_USER")); user != "" {
-		req.SetBasicAuth(user, os.Getenv(brand.Env("AUTH_PASSWORD")))
-	}
+	// /api/health is public; it needs no credential.
 	resp, err := autostartHTTPClient.Do(req)
 	if err != nil {
 		return false, err

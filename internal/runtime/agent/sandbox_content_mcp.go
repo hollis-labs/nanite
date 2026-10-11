@@ -15,6 +15,10 @@ const SelfToolsScopeEnv = "NANITE_MCP_SELF_TOOLS"
 // SelfToolsScopeStore is SelfToolsScopeEnv's value for the bare-store set.
 const SelfToolsScopeStore = "store"
 
+// AuthTokenEnv names the credential the spawned `nanite mcp` presents to the
+// API (the same variable the CLI reads).
+const AuthTokenEnv = "NANITE_AUTH_TOKEN" // #nosec G101 -- an environment variable name, not a credential
+
 // renderMCPJSON returns the .mcp.json body for cfg + sessionID, or an
 // empty string when MCP planting is disabled (zero-value cfg.DBPath).
 //
@@ -53,6 +57,13 @@ func renderMCPJSON(cfg MCPConfig, sessionID string, storeScope bool) (string, er
 		env["NANITE_API_URL"] = cfg.APIBaseURL
 		if storeScope {
 			env[SelfToolsScopeEnv] = SelfToolsScopeStore
+		}
+		if cfg.AgentCredential != nil && sessionID != "" {
+			token, err := cfg.AgentCredential(sessionID)
+			if err != nil {
+				return "", fmt.Errorf("agent: mint session credential: %w", err)
+			}
+			env[AuthTokenEnv] = token
 		}
 	}
 

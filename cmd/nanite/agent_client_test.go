@@ -49,8 +49,8 @@ func newTestAgentServer(t *testing.T) (*httptest.Server, *string) {
 		json.NewEncoder(w).Encode(map[string]any{"default_definition_ref": d.Ref})
 	})
 	mux.HandleFunc("POST /api/agent/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		if u, _, ok := r.BasicAuth(); ok {
-			lastAuth = u
+		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			lastAuth = token
 		}
 		var req agentCreateSessionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -311,10 +311,13 @@ func TestAgentClient_Cancel(t *testing.T) {
 	}
 }
 
-func TestAgentClient_BasicAuth(t *testing.T) {
+// The CLI presents the operator credential as a bearer: the NANITE_AUTH_TOKEN
+// override, else the operator token file. Basic auth is gone.
+func TestAgentClient_PresentsTheOperatorBearer(t *testing.T) {
 	srv, lastAuth := newTestAgentServer(t)
 	defer srv.Close()
 
+	t.Setenv("NANITE_AUTH_TOKEN", "nan_operator_override-for-test")
 	t.Setenv("NANITE_AUTH_USER", "alice")
 	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
 
@@ -322,8 +325,8 @@ func TestAgentClient_BasicAuth(t *testing.T) {
 	if _, err := client.CreateSession(context.Background(), agentCreateSessionRequest{}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if *lastAuth != "alice" {
-		t.Fatalf("expected request to carry basic auth user 'alice', got %q", *lastAuth)
+	if *lastAuth != "nan_operator_override-for-test" {
+		t.Fatalf("expected the bearer override, got %q", *lastAuth)
 	}
 }
 

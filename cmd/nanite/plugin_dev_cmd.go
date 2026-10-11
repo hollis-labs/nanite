@@ -32,9 +32,8 @@ func apiBaseURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
-// apiPost sends a JSON POST to the local nanite API with optional basic-auth
-// pulled from NANITE_AUTH_USER and NANITE_AUTH_PASSWORD. When unset, the server's
-// basicAuthMiddleware is a no-op (dev default), so this still works.
+// apiPost sends a JSON POST to the local nanite API, presenting the operator
+// credential (NANITE_AUTH_TOKEN, else the operator token file).
 func apiPost(path string, payload any) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -45,9 +44,7 @@ func apiPost(path string, payload any) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if user := os.Getenv(brand.Env("AUTH_USER")); user != "" {
-		req.SetBasicAuth(user, os.Getenv(brand.Env("AUTH_PASSWORD")))
-	}
+	applyClientAuth(req)
 	client := &http.Client{Timeout: 30 * time.Second}
 	return client.Do(req)
 }

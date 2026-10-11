@@ -323,8 +323,9 @@ capability grants no profile edits, provisioning or scheduling. Init receives
 of any read grant. The fixed POST `/api/plugin-host/durable-wake` route checks
 the live connection, strict bounded input and target scope before calling the
 existing durable-agent wake service. Unload cancels its lease and in-flight
-requests. Both scoped routes enforce their own credentials when Basic Auth is
-enabled; plugin bundles never receive the user's broader password.
+requests. Both scoped routes enforce their own per-plugin credentials and are
+exempt from the API credential guard; plugin bundles never receive an operator
+credential.
 
 The plugin supplies translation into a bounded nonempty prompt and optional
 identity facts. Core owns instance resolution, session creation and prompt

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 
 	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
 	"github.com/hollis-labs/libs/ui-go/chatstream/framing"
-	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -142,14 +140,7 @@ func (c *agentClient) newRequest(ctx context.Context, method, path string, body 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	// Same NANITE_AUTH_USER/NANITE_AUTH_PASSWORD convention as apiPost in
-	// plugin_dev_cmd.go; no-op when unset since basicAuthMiddleware is also
-	// a no-op then (local dev default).
-	if token := os.Getenv(brand.Env("AUTH_TOKEN")); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	} else if user := os.Getenv(brand.Env("AUTH_USER")); user != "" {
-		req.SetBasicAuth(user, os.Getenv(brand.Env("AUTH_PASSWORD")))
-	}
+	applyClientAuth(req)
 	return req, nil
 }
 

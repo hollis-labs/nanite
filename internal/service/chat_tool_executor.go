@@ -227,6 +227,12 @@ func (s *chatServiceImpl) preCheckTools(
 					permResult = intrinsic
 				}
 			}
+			if isCognitiveTurn(ctx) && nativeAskEachTime[tu.Name] && permResult.Decision == permissionlib.DecisionAllow {
+				// A native view asks before every use of these tools, whatever
+				// the engine's mode or rules say (owner decision for the first
+				// native tool set). It can only make the turn stricter.
+				permResult = permissionlib.CheckResult{Decision: permissionlib.DecisionAsk, Reason: "native views ask before each use of this tool"}
+			}
 			switch permResult.Decision {
 			case permissionlib.DecisionAllow:
 				// Allow: fall through to tool execution below.

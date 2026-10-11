@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/substrate/agent/approval"
 	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
@@ -36,9 +38,13 @@ type nativeE2E struct {
 }
 
 func toolUseThenAnswer(onFirst func()) []characterizationProviderStep {
+	return toolUseNamedThenAnswer("fixture_tool", onFirst)
+}
+
+func toolUseNamedThenAnswer(tool string, onFirst func()) []characterizationProviderStep {
 	return []characterizationProviderStep{
 		// A native turn needs the provider's terminal marker after the tool use.
-		{events: append(terminationToolEvents("fixture_tool"), llmtypes.StreamEvent{Type: "done"}), beforeReturn: onFirst},
+		{events: append(terminationToolEvents(tool), llmtypes.StreamEvent{Type: "done"}), beforeReturn: onFirst},
 		{events: doneEvents("done")},
 	}
 }
@@ -48,8 +54,15 @@ func toolUseThenAnswer(onFirst func()) []characterizationProviderStep {
 // credential store (the apiauth adapter is covered separately).
 func newNativeE2E(t *testing.T, steps []characterizationProviderStep) *nativeE2E {
 	t.Helper()
+	return newNativeE2EWithTools(t, steps, "fixture_tool")
+}
+
+// newNativeE2EWithTools grants every named tool and lets the permission engine
+// allow it, so any prompt that appears comes from the native-view floor.
+func newNativeE2EWithTools(t *testing.T, steps []characterizationProviderStep, tools ...string) *nativeE2E {
+	t.Helper()
 	ctx := t.Context()
-	f := newCharacterizationFixture(t, steps, "fixture_tool")
+	f := newCharacterizationFixture(t, steps, tools...)
 	f.svc.activeGen = make(map[string]*inFlightGen)
 	f.svc.lifecycle = lifecycle.NewManager("test.native-turn")
 	t.Cleanup(func() { _ = f.svc.lifecycle.Shutdown(5 * time.Second) })
@@ -73,12 +86,17 @@ func newNativeE2E(t *testing.T, steps []characterizationProviderStep) *nativeE2E
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = e.la.GrantTool(ctx, "cred-admin", e.authority.ID, "fixture_tool", "workspace helper"); err != nil {
-		t.Fatal(err)
+	rules := make([]permissionlib.Rule, 0, len(tools))
+	for _, tool := range tools {
+		if err = e.la.GrantTool(ctx, "cred-admin", e.authority.ID, tool, "workspace helper"); err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, permissionlib.Rule{Tool: tool, Behavior: permissionlib.DecisionAllow})
 	}
 	f.svc.nativeGrants = NewNativeGrants(e.la, e.callers)
 	f.svc.capabilities = newCapabilityRegistry()
-	f.svc.permissions = permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{Rules: []permissionlib.Rule{{Tool: "fixture_tool", Behavior: permissionlib.DecisionAllow}}})
+	f.svc.permissions = permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{Rules: rules})
+	f.svc.cognitiveApprovals = approval.New(f.svc.permissions)
 	return e
 }
 
@@ -243,5 +261,76 @@ func TestNativeTurnRunsAGrantedToolForACredentialThatMayRunTools(t *testing.T) {
 	e.f.svc.capabilities.mu.Unlock()
 	if live != 0 {
 		t.Fatalf("%d capabilities still live after the turn", live)
+	}
+}
+
+// --- ask-each-time floor ------------------------------------------------------
+
+// answerApproval submits a native turn and answers the first approval prompt it
+// raises (or none). It returns whether a prompt was raised and which tool.
+func (e *nativeE2E) turnAnswering(t *testing.T, decision permissionlib.Decision) (asked bool, tool string) {
+	t.Helper()
+	ctx := WithSubmittedBy(chat.WithDeltaMode(t.Context(), chat.DeltaModeLive), "operator")
+	id, err := e.f.svc.SubmitCognitiveTurn(ctx, e.f.session, "use the tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, _ := e.f.svc.streams.GetStream(id)
+	deadline := time.After(20 * time.Second)
+	for {
+		select {
+		case ev, open := <-stream:
+			if !open {
+				return asked, tool
+			}
+			if ev.Type == "approval_request" && !asked {
+				var payload chat.ApprovalRequestPayload
+				if err := json.Unmarshal([]byte(ev.Data), &payload); err != nil {
+					t.Fatal(err)
+				}
+				asked, tool = true, payload.Tool
+				if _, err := e.f.svc.cognitiveApprovals.Respond(t.Context(), e.f.session, payload.RequestID, decision, permissionlib.ScopeOnce); err != nil {
+					t.Fatalf("respond: %v", err)
+				}
+			}
+		case <-deadline:
+			t.Fatal("turn did not finish")
+		}
+	}
+}
+
+func TestNativeTurnAsksBeforeEachUseOfPythonRunAndDevBash(t *testing.T) {
+	for _, tool := range []string{"python_run", "dev_bash"} {
+		t.Run(tool+" denied", func(t *testing.T) {
+			e := newNativeE2EWithTools(t, toolUseNamedThenAnswer(tool, nil), tool)
+			asked, who := e.turnAnswering(t, permissionlib.DecisionDeny)
+			if !asked || who != tool {
+				t.Fatalf("no approval prompt for %s (asked=%v for %q)", tool, asked, who)
+			}
+			if calls := e.f.tools.calls(); len(calls) != 0 {
+				t.Fatalf("%s ran after the prompt was denied: %v", tool, calls)
+			}
+		})
+		t.Run(tool+" allowed once", func(t *testing.T) {
+			e := newNativeE2EWithTools(t, toolUseNamedThenAnswer(tool, nil), tool)
+			asked, _ := e.turnAnswering(t, permissionlib.DecisionAllow)
+			if !asked {
+				t.Fatalf("no approval prompt for %s", tool)
+			}
+			if calls := e.f.tools.calls(); len(calls) != 1 || calls[0] != tool {
+				t.Fatalf("%s did not run after approval: %v", tool, calls)
+			}
+		})
+	}
+}
+
+func TestNativeTurnDoesNotAskForOrdinaryGrantedTools(t *testing.T) {
+	e := newNativeE2E(t, toolUseThenAnswer(nil))
+	asked, _ := e.turnAnswering(t, permissionlib.DecisionAllow)
+	if asked {
+		t.Fatal("an ordinary granted tool raised a prompt")
+	}
+	if calls := e.f.tools.calls(); len(calls) != 1 {
+		t.Fatalf("calls = %v", calls)
 	}
 }

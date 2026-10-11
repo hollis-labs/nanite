@@ -188,12 +188,16 @@ returned as raw diagnostic details.
 
 ## Host authentication
 
-The host binds loopback by default. Off-box bind requires configured bearer
-credentials. When `NANITE_AUTH_TOKEN` is set, native API calls require it even on
-loopback. CLI JSON and event requests disable redirects and use explicitly
-configured credentials. The self-tool proxy forwards an explicitly available
-token only to its authenticated loopback host endpoint, without redirects.
-Subprocess credential provisioning is separate host adoption work.
+The host binds loopback only and authenticates every `/api/` route, including
+`/api/agent/v1/*`, with a scoped bearer credential (see
+[api-auth.md](api-auth.md)); `initialize` is the one public document. An
+embedded client such as the Tangent backend uses a `client` credential with the
+`read` and `operate` scopes (`nanite auth create --kind client --label tangent
+--scope read,operate`). CLI JSON and event requests disable redirects and use
+the operator token file or `NANITE_AUTH_TOKEN`. The planted `nanite mcp`
+subprocess receives a short-lived `agent` credential bound to its session (tools
+scope only) in its environment and forwards it only to the loopback host
+endpoint, without redirects.
 
 Snapshot storage failures produce a live `persistence_failed` terminal and the
 host logs the typed library mutation error once per turn. This includes initial

@@ -85,13 +85,12 @@ wait completion each have durable replay records. Startup and the normal Team
 reconciliation cadence repair any committed intermediate state; operators must
 not create replacement runs for a returned `workflow_run_id`.
 
-Callback and approval responses use the server's existing HTTP Basic Auth
-credentials, `NANITE_AUTH_USER` and `NANITE_AUTH_PASSWORD`. Clients also send
-the wait capability in `resume_token` and a stable `Idempotency-Key`. The
-authenticated Basic Auth user is persisted as responder provenance and must
-match the immutable wait authority. When either credential is unset these
-mutation endpoints fail closed; ordinary workflow launch/read/SSE traffic is
-unaffected.
+Callback and approval responses require a credential with the `operate` scope
+(an operator or a suitably scoped client credential). Clients also send the
+wait capability in `resume_token` and a stable `Idempotency-Key`. The
+credential's label (for the bootstrap operator, `operator`) is persisted as
+responder provenance and must match the immutable wait authority. An
+unauthenticated request is refused with 401.
 
 ### Ambiguous external-framework effects
 
@@ -108,7 +107,7 @@ Authenticated operators list redacted ambiguous receipts with
 receipt, run, node, engine, workflow, request digest, and ambiguity reason; it
 never includes params, session identity, or output. After checking the external
 framework's authoritative audit log, resolve one receipt with
-`POST /api/workflows/external-executions/{receiptId}/resolve`, HTTP Basic Auth,
+`POST /api/workflows/external-executions/{receiptId}/resolve`, an `operate` credential,
 an `Idempotency-Key` header, and this body:
 
 ```json

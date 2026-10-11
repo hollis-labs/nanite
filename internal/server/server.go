@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hollis-labs/nanite/internal/api"
+	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/config"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -70,6 +71,8 @@ type Server struct {
 	// healthWarnings are reported by /api/health, such as agent sandbox
 	// protection being turned off (CW-20261001-0143).
 	healthWarnings []string
+	// guard authenticates every /api/ request (CW-20261011-0036).
+	guard *apiauth.Guard
 }
 
 // New creates a new Server wired to the given store and API.
@@ -77,13 +80,13 @@ type Server struct {
 // httpCfg is consulted for the bind address, timeouts, and body-size caps.
 // Empty/zero fields are replaced with conservative defaults — see
 // resolveHTTPConfig and the default* constants above.
-func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host, httpCfg config.HTTPConfig) (*Server, error) {
+func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugin.Host, httpCfg config.HTTPConfig, auth Auth) (*Server, error) {
 	adminAllowedOrigins := append([]string(nil), httpCfg.CORSAllowedOrigins...)
 	resolvedHTTPConfig, err := resolveHTTPConfig(httpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve HTTP config: %w", err)
 	}
-	if err := validateAgentBind(resolvedHTTPConfig.BindAddress, agentAuthToken()); err != nil {
+	if err := validateBind(resolvedHTTPConfig.BindAddress); err != nil {
 		return nil, err
 	}
 	resolvedHTTPConfig.CORSAllowedOrigins = append([]string(nil), resolvedHTTPConfig.CORSAllowedOrigins...)
@@ -97,6 +100,24 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 		pluginHost:          pluginHost,
 		httpCfg:             resolvedHTTPConfig,
 		adminAllowedOrigins: adminAllowedOrigins,
+		guard:               auth.Guard,
+	}
+	if srv.guard == nil {
+		// Fail closed: a Guard with no credential store refuses every
+		// protected request.
+		srv.guard = apiauth.NewGuard(nil)
+	}
+	srv.guard.Pattern = func(r *http.Request) string { _, pattern := mux.Handler(r); return pattern }
+	bindHost := resolvedHTTPConfig.BindAddress
+	srv.guard.HostAllowed = func(host string) bool {
+		if apiauth.LoopbackHost(host) {
+			return true
+		}
+		h := host
+		if hh, _, err := net.SplitHostPort(host); err == nil {
+			h = hh
+		}
+		return h == bindHost
 	}
 
 	// Set the router on the plugin host if it exists
@@ -107,13 +128,13 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 		a.SetPluginHost(pluginHost)
 	}
 
-	user, password, _ := basicAuthCredentials()
-	adminHandler, adminErr := a.NewAdminHandler(api.NewBasicWorkflowResponderAuthenticator(user, password), adminAllowedOrigins...)
+	adminHandler, adminErr := a.NewAdminHandler(apiauth.AdminAuthenticator(apiauth.ScopeAdmin), adminAllowedOrigins...)
 	if adminErr != nil {
 		return nil, fmt.Errorf("configure admin handler: %w", adminErr)
 	}
 	mux.Handle("/api/admin", adminHandler)
 	mux.Handle("/api/admin/", adminHandler)
+	(&apiauth.Handlers{Guard: srv.guard, OperatorTokenPath: auth.OperatorTokenPath}).Register(mux)
 	srv.routes()
 	return srv, nil
 }
@@ -178,7 +199,7 @@ func (s *Server) SetPluginsDir(dir string) {
 //
 // Middleware chain (outer -> inner):
 //
-//	recover -> logging -> CORS -> basicAuth -> callerIdentity -> bodyLimit -> mux
+//	recover -> logging -> CORS -> auth guard -> callerIdentity -> bodyLimit -> mux
 //
 // CORS is outside basicAuth so that preflight (OPTIONS) requests succeed for
 // allowed origins even when the caller has not yet sent credentials — auth
@@ -203,16 +224,21 @@ func (s *Server) SetPluginsDir(dir string) {
 // own Cache-Control still wins; see api_cache.go for why that is a default
 // rather than an override.
 func (s *Server) handlerChain() http.Handler {
+	guard := s.guard
+	if guard == nil {
+		// Fail closed: no store means every protected request is refused.
+		guard = apiauth.NewGuard(nil)
+	}
 	return s.recoverMiddleware(
 		s.loggingMiddleware(
 			s.corsMiddleware(
-				agentAuthMiddleware(basicAuthMiddleware(
+				guard.Middleware(
 					callerIdentityMiddleware(
 						s.apiCacheMiddleware(
 							s.bodyLimitMiddleware(s.mux),
 						),
 					),
-				)),
+				),
 			),
 		),
 	)
@@ -239,18 +265,17 @@ func (s *Server) listenAddress() string {
 }
 
 func (s *Server) logStartupPosture(addr string) {
-	if basicAuthEnabled() {
-		slog.Info("nanite listening", "addr", addr, "dev", s.dev, "auth", "enabled")
+	if s.guard != nil && s.guard.Insecure {
+		slog.Warn(
+			"nanite listening WITHOUT AUTHENTICATION (--insecure-no-auth)",
+			"addr", addr,
+			"dev", s.dev,
+			"auth", "disabled",
+			"warning", "development only: any local process or web page can act as you",
+		)
 		return
 	}
-
-	slog.Warn(
-		"nanite listening without authentication",
-		"addr", addr,
-		"dev", s.dev,
-		"auth", "disabled",
-		"warning", "configure NANITE_AUTH_USER and NANITE_AUTH_PASSWORD before exposing Nanite beyond a trusted host",
-	)
+	slog.Info("nanite listening", "addr", addr, "dev", s.dev, "auth", "enforced")
 }
 
 // newHTTPServer is exposed to tests so they can spin up an httptest server

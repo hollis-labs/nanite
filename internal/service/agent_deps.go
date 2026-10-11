@@ -70,6 +70,10 @@ type AgentDepsConfig struct {
 	// running harness. Empty = subprocess runs self-tools locally.
 	APIBaseURL string
 
+	// AgentCredential mints a per-session agent credential for the planted
+	// `nanite mcp` (runtimeagent.MCPConfig.AgentCredential).
+	AgentCredential func(sessionID string) (string, error)
+
 	// MCP, when non-nil, wires the recovery broker's MCP-transport
 	// remediation adapter (broker.MCPControl). The adapter forwards
 	// RestartTransport to mcp.Manager.RestartStdioTransports so the broker
@@ -228,6 +232,8 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 			DBPath:     dbPath,
 			ServerID:   brand.ID,
 			APIBaseURL: cfg.APIBaseURL,
+
+			AgentCredential: cfg.AgentCredential,
 		},
 		WorkspacesRoot:     workspacesRoot,
 		CLIWritableRoots:   cfg.CLIWritableRoots,

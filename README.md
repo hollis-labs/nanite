@@ -138,10 +138,9 @@ should follow
 
 ## Admin preferences API
 
-The admin API at `/api/admin/manifest` is off unless both `NANITE_AUTH_USER`
-and `NANITE_AUTH_PASSWORD` are configured. Every request requires matching
-Basic credentials, including requests from loopback. Caller identity headers
-never grant admin access. Follow [the deployment boundary](SECURITY.md) when
+The admin API at `/api/admin/manifest` requires a credential with the `admin`
+scope (the operator credential), including requests from loopback. Caller
+identity headers never grant admin access. Follow [the deployment boundary](SECURITY.md) when
 exposing Nanite beyond loopback.
 
 The preferences group reads, validates, updates and resets only tool stream

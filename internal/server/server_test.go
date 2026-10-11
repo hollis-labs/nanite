@@ -31,6 +31,7 @@ func newTestServer(t *testing.T, cfg config.HTTPConfig) *Server {
 		mux:     mux,
 		port:    0,
 		httpCfg: resolvedConfig,
+		guard:   openGuard(),
 	}
 	// Minimal routes so the handler chain has something to hit.
 	mux.HandleFunc("POST /api/echo", func(w http.ResponseWriter, r *http.Request) {
@@ -319,10 +320,8 @@ func TestBodyLimitMiddleware(t *testing.T) {
 // header is present and basic-auth is enabled. This is the fix for
 // audit finding 09-medium (CORS inside auth).
 func TestCORSPreflightNoAuth(t *testing.T) {
-	t.Setenv("NANITE_AUTH_USER", "admin")
-	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
-
 	srv := newTestServer(t, config.HTTPConfig{})
+	srv.enforce(t)
 
 	ts := httptest.NewServer(srv.testChain())
 	defer ts.Close()
@@ -370,10 +369,8 @@ func TestCORSPreflightNoAuth(t *testing.T) {
 // did not accidentally punch a hole for real requests — GET /api/ping with
 // auth configured but no credentials must still 401.
 func TestAuthStillEnforcedOnNonPreflight(t *testing.T) {
-	t.Setenv("NANITE_AUTH_USER", "admin")
-	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
-
 	srv := newTestServer(t, config.HTTPConfig{})
+	srv.enforce(t)
 	ts := httptest.NewServer(srv.testChain())
 	defer ts.Close()
 
@@ -433,7 +430,7 @@ func TestNewRejectsInvalidBindAddressBeforeStartupLog(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previous)
 
-	srv, err := New(nil, nil, 8090, true, nil, config.HTTPConfig{BindAddress: "localhost:8090"})
+	srv, err := New(nil, nil, 8090, true, nil, config.HTTPConfig{BindAddress: "localhost:8090"}, Auth{})
 	if err == nil {
 		t.Fatal("New accepted bind address carrying a port")
 	}
@@ -506,39 +503,39 @@ func TestListenAddressPosture(t *testing.T) {
 func TestStartupLogAlwaysAnnouncesAuthPosture(t *testing.T) {
 	tests := []struct {
 		name      string
-		user      string
-		password  string
+		insecure  bool
 		wantLevel string
 		wantAuth  string
 		wantMsg   string
 	}{
 		{
-			name:      "unconfigured warns",
+			name:      "the explicit development flag warns loudly",
+			insecure:  true,
 			wantLevel: "WARN",
 			wantAuth:  "disabled",
-			wantMsg:   "nanite listening without authentication",
+			wantMsg:   "nanite listening WITHOUT AUTHENTICATION (--insecure-no-auth)",
 		},
 		{
-			name:      "configured reports enabled without warning",
-			user:      "operator",
-			password:  "secret",
+			name:      "enforced reports enforced without warning",
 			wantLevel: "INFO",
-			wantAuth:  "enabled",
+			wantAuth:  "enforced",
 			wantMsg:   "nanite listening",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("NANITE_AUTH_USER", tt.user)
-			t.Setenv("NANITE_AUTH_PASSWORD", tt.password)
-
 			var buf bytes.Buffer
 			previous := slog.Default()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 			defer slog.SetDefault(previous)
 
 			srv := newTestServer(t, config.HTTPConfig{})
+			if tt.insecure {
+				srv.guard = openGuard()
+			} else {
+				srv.enforce(t)
+			}
 			srv.logStartupPosture(srv.listenAddress())
 
 			var record map[string]any
@@ -558,19 +555,13 @@ func TestStartupLogAlwaysAnnouncesAuthPosture(t *testing.T) {
 				t.Errorf("addr = %v, want 127.0.0.1:0", got)
 			}
 			_, hasWarning := record["warning"]
-			if tt.wantAuth == "disabled" && !hasWarning {
-				t.Error("unauthenticated startup log is missing warning detail")
-			}
-			if tt.wantAuth == "enabled" && hasWarning {
-				t.Error("authenticated startup log unexpectedly contains a warning")
+			if hasWarning != tt.insecure {
+				t.Errorf("warning present = %v, want %v", hasWarning, tt.insecure)
 			}
 		})
 	}
 }
 
-// newTestServerWithHost wires a minimal Server with a real plugin.Host so
-// handlers that depend on the host (handleEmitEvent) can be exercised
-// without the full bootstrap sequence.
 func newTestServerWithHost(t *testing.T) *Server {
 	t.Helper()
 	host := naniteplugin.NewHostWithStore(nil)
@@ -583,6 +574,7 @@ func newTestServerWithHost(t *testing.T) *Server {
 		mux:        mux,
 		pluginHost: host,
 		httpCfg:    resolvedConfig,
+		guard:      openGuard(),
 	}
 	mux.HandleFunc("POST /api/plugins/events", s.handleEmitEvent)
 	return s
@@ -773,6 +765,23 @@ func TestIsUploadPath(t *testing.T) {
 	for _, p := range no {
 		if isUploadPath(p) {
 			t.Errorf("did not expect %q to be an upload path", p)
+		}
+	}
+}
+
+// Nanite has no TLS, so every non-loopback bind is refused outright
+// (CW-20261011-0043 is the task that can lift this).
+func TestNewRefusesNonLoopbackBind(t *testing.T) {
+	for _, bind := range []string{"0.0.0.0", "::", "192.168.1.20", "example.com", "10.0.0.5"} {
+		if _, err := New(nil, nil, 0, false, nil, config.HTTPConfig{BindAddress: bind}, Auth{}); err == nil {
+			t.Errorf("New accepted non-loopback bind %q", bind)
+		} else if !strings.Contains(err.Error(), "CW-20261011-0043") {
+			t.Errorf("refusal for %q does not point at the TLS task: %v", bind, err)
+		}
+	}
+	for _, bind := range []string{"127.0.0.1", "::1", "localhost", ""} {
+		if _, err := New(nil, nil, 0, false, nil, config.HTTPConfig{BindAddress: bind}, Auth{}); err != nil && strings.Contains(err.Error(), "refusing to bind") {
+			t.Errorf("New refused loopback bind %q: %v", bind, err)
 		}
 	}
 }

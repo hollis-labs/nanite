@@ -16,7 +16,20 @@ import (
 // the SPA fallback answer with its placeholder page.
 func newFallbackTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newFallbackTestServerWith(t, false)
+}
+
+func newFallbackTestServerEnforced(t *testing.T) *httptest.Server {
+	t.Helper()
+	return newFallbackTestServerWith(t, true)
+}
+
+func newFallbackTestServerWith(t *testing.T, enforced bool) *httptest.Server {
+	t.Helper()
 	srv := newTestServer(t, config.HTTPConfig{})
+	if enforced {
+		srv.enforce(t)
+	}
 	srv.dev = true
 	ok := func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }
 	srv.mux.HandleFunc("GET /api/items/{id}", ok)
@@ -132,9 +145,7 @@ func TestAPIFallback_RegisteredRoutesAndSPAUnaffected(t *testing.T) {
 // Auth runs before the mux, so an unauthenticated request for an unknown
 // /api path is still refused before it can learn whether the path exists.
 func TestAPIFallback_AuthStillFirst(t *testing.T) {
-	t.Setenv("NANITE_AUTH_USER", "admin")
-	t.Setenv("NANITE_AUTH_PASSWORD", "secret")
-	ts := newFallbackTestServer(t)
+	ts := newFallbackTestServerEnforced(t)
 	if resp, _ := do(t, ts, http.MethodGet, "/api/nope"); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
 	}

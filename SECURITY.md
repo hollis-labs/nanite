@@ -17,7 +17,7 @@ privately through a contact channel published on the Hollis Labs organization
 or maintainer profile. Include:
 
 - the affected commit and operating system
-- how `nanite serve` was bound (address, port) and whether basic auth was set
+- how `nanite serve` was bound (address, port) and whether `--insecure-no-auth` was used
 - reproduction steps and the security impact
 - whether credentials, transcripts or project files may have been exposed
 - a safe way to contact you about coordination
@@ -29,29 +29,50 @@ disclosure. Response times are best effort.
 
 Nanite is a single-user desktop application, not a multi-tenant service. The
 safe default is `nanite serve` on its own machine, bound to `127.0.0.1:8090`.
-`--port` changes the port; `--bind-address` or `http.bind_address` in
-`config/nanite.yaml` changes the host.
+`--port` changes the port.
 
-**Authentication is off by default.** Setting `NANITE_AUTH_USER` and
-`NANITE_AUTH_PASSWORD` enables HTTP Basic Auth on `/api/` routes, with these
-exemptions:
+**Nanite refuses every non-loopback bind.** It has no TLS, and a bearer
+credential must not cross a network in the clear. `--bind-address` and
+`http.bind_address` accept only `127.0.0.1`, `::1` or `localhost` until the TLS
+work lands (CW-20261011-0043). To reach Nanite from another machine, use an SSH
+forward or a TLS-terminating proxy on the same host.
 
-- `GET /api/health`
-- `/api/tools/call`, which the handler itself restricts to loopback callers
+**Authentication is on for every `/api/` route, loopback included.**
+Loopback is not authentication: any local process, and any web page through a
+drive-by request or DNS rebinding, can reach a loopback listener. See
+[docs/architecture/api-auth.md](docs/architecture/api-auth.md) for the model.
+In short:
 
-Non-API paths (the embedded web UI) are not covered by basic auth. Nanite
-does not refuse a non-loopback bind without auth; it logs a warning at startup
-and serves anyway.
+- Credentials are bearer secrets (`nan_<kind>_…`), stored only as SHA-256
+  hashes in a separate auth database, and carry scopes (`read`, `operate`,
+  `tools`, `maintain`, `admin`). Kinds: `operator` (you), `client` (an embedded
+  client, never admin) and `agent` (minted per session, `tools` only, expires,
+  dies with the session).
+- The first start creates the operator credential and writes its secret once to
+  a mode-0600 file (`nanite auth token-path`). The CLI reads it; the browser
+  signs in with it, or with a one-time link from `nanite auth login-link`, and
+  then holds an HttpOnly, SameSite=Strict session cookie with CSRF protection.
+- Every route maps to a required scope; a route no rule names is admin-only for
+  writes. Revoking a credential closes its open streams.
+- Caller identity comes from the credential. The `X-Nanite-Caller-*` headers
+  are honored only for an agent credential bound to that exact session.
+- The `Host` header is validated on every request.
+- Public: `GET /api/health`, `GET /api/agent/v1/initialize`, the agent card,
+  the static UI shell (no data), `POST /api/auth/login` and
+  `GET /api/auth/link` (which do their own checking). Plugin host query and
+  wake routes carry their own per-plugin bearer.
+- `nanite serve --insecure-no-auth` turns authentication off for development.
+  It warns loudly at every start; it is never used by the service unit.
+- `NANITE_AUTH_TOKEN` is an explicit operator-credential override for headless
+  runs; it must be a `nan_operator_…` secret.
 
-**Anyone who can reach the API can act as you.** The API launches agent
-sessions, runs shell commands in a session's working directory, installs and
-starts plugins, and reads conversation history. Treat network access to the
-listener as equivalent to a shell on the machine.
+**The operator token file is readable by processes that run as you.** The
+database holds only hashes, but the file holds the secret. The agent sandbox
+does not currently hide it from an agent CLI running as your user.
 
-Nanite does not provide TLS. Basic-auth credentials sent over plaintext HTTP
-can be read by anyone able to observe the connection. If you expose Nanite
-beyond the local machine, put it behind TLS, a trusted TLS-terminating reverse
-proxy, a VPN, or an SSH tunnel, and restrict it with firewall rules.
+**Anyone holding an operator credential can act as you.** The API launches
+agent sessions, runs shell commands in a session's working directory, installs
+and starts plugins, and reads conversation history.
 
 **Legacy route CORS.** With no `http.cors_allowed_origins` configured, only
 `http://localhost:5173` and `http://127.0.0.1:5173` (the Vite dev server) are
@@ -64,8 +85,9 @@ validate the `Host` header on legacy routes.
 for same-origin requests or exact operator-configured `cors_allowed_origins`
 entries only. The injected port-5173 dev defaults and `*` grant no admin
 access. Every admin POST, including validate, update and reset, requires one
-well-formed HTTP(S) Origin before body decoding, as well as operator Basic
-Auth; missing, null, malformed, duplicate and foreign Origins are rejected.
+well-formed HTTP(S) Origin before body decoding, as well as an operator
+credential (the `admin` scope); missing, null, malformed, duplicate and foreign
+Origins are rejected.
 Same-origin uses the actual request authority and TLS scheme, without trusting
 forwarded headers. CLI clients must send an approved Origin; a TLS-terminating
 proxy's external HTTPS Origin must be explicitly configured. Admin CORS
@@ -225,9 +247,9 @@ machine:
 
 ## Current security limitations
 
-- authentication is off by default, and when enabled it is a single shared
-  Basic Auth credential
-- no built-in TLS
+- no built-in TLS, so Nanite listens on loopback only (CW-20261011-0043)
+- the operator token file is readable by anything running as your user; the
+  agent sandbox does not hide the auth directory from an agent CLI
 - no at-rest encryption; MCP server secrets are plaintext in the database
 - subprocess plugins run with your user's privileges
 - no sandbox for plugins or for the agent CLIs Nanite launches

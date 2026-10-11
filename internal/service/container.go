@@ -903,18 +903,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		// PCCSource — reads filesystem, always available.
 		sources = append(sources, contextbroker.NewPCCSource(".nanite/pcc/global"))
 
-		// SessionSource — reads message history, always available.
-		sources = append(sources, contextbroker.NewSessionSource(func(sessionID string, limit int) ([]contextbroker.MessageSummary, error) {
-			msgs, err := cfg.Store.ListMessages(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID, limit)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]contextbroker.MessageSummary, len(msgs))
-			for i, m := range msgs {
-				out[i] = contextbroker.MessageSummary{Role: m.Role, Content: m.Content}
-			}
-			return out, nil
-		}))
+		// No SessionSource: the chat path sends the live session as messages,
+		// so retrieving it again as system "Context" duplicated every turn
+		// (in reverse, with raw stored assistant envelopes). CW-20261011-0040.
 
 		if cfg.Plugins != nil {
 			adapter := NewPluginContextSources()

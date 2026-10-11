@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,5 +134,22 @@ func TestSessionHarnessProfileEndpoint(t *testing.T) {
 	a.handleGetSessionHarnessProfile(nf, req)
 	if nf.Code != http.StatusNotFound {
 		t.Errorf("missing session: %d", nf.Code)
+	}
+}
+
+type unsupportedModelSessions struct{ service.SessionService }
+
+func (unsupportedModelSessions) Create(context.Context, service.CreateSessionOpts) (*store.Session, error) {
+	return nil, fmt.Errorf("%w: select a provider and model in the agent's host settings or the launch request", service.ErrUnsupportedModel)
+}
+
+// A new chat with no provider and model is the caller's to fix: it is a 422
+// naming what to select, not a 500 (CW-20261011-0044).
+func TestCreateSession_MissingModelIs422(t *testing.T) {
+	a, _ := newToolCallTestAPI(t)
+	a.Services.Sessions = unsupportedModelSessions{a.Services.Sessions}
+	rec := postCreateSession(t, a, map[string]any{"title": "no model"})
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "select a provider and model") {
+		t.Fatalf("status %d body %s, want 422 naming what to select", rec.Code, rec.Body.String())
 	}
 }

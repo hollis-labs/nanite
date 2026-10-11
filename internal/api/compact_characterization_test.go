@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -43,6 +45,24 @@ type compactResponse struct {
 	Mode          string   `json:"mode"`
 }
 
+// seedCompactEnrichment gives a session real retrieved context to drop. The
+// project-context source reads .nanite/pcc/global relative to the working
+// directory, so the test runs in a directory that has one project file. (The
+// session's own messages are no longer re-injected as context, so they cannot
+// stand in for enrichment.)
+func seedCompactEnrichment(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	project := filepath.Join(dir, ".nanite", "pcc", "global", "characterization")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "00_project.md"), []byte(strings.Repeat("Project context line. ", 60)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+}
+
 func seedCompactSession(t *testing.T, a *testAPI, id string, messages int) {
 	t.Helper()
 	ctx := context.Background()
@@ -76,6 +96,7 @@ func TestCompactCharacterization_ResponseEventsBroadcastAndRecord(t *testing.T) 
 	a, mux := newTestAPI(t)
 	const sid = "compact-char"
 	seedCompactSession(t, a, sid, 12)
+	seedCompactEnrichment(t)
 
 	rec := &compactRecorder{EventEmitter: a.Services.Events}
 	a.Services.Events = rec
@@ -180,6 +201,7 @@ func TestCompactCharacterization_NoEventsOrStreams(t *testing.T) {
 	a, mux := newTestAPI(t)
 	const sid = "compact-char-bare"
 	seedCompactSession(t, a, sid, 12)
+	seedCompactEnrichment(t)
 	events, streams := a.Services.Events, a.Services.Streams
 	a.Services.Events, a.Services.Streams = nil, nil
 	t.Cleanup(func() { a.Services.Events, a.Services.Streams = events, streams })

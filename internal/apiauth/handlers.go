@@ -76,7 +76,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func (h *Handlers) setCookie(w http.ResponseWriter, value string, expires time.Time) {
-	// #nosec G124 -- Secure cannot be set: Nanite serves loopback HTTP until the TLS task (CW-20261011-0043) lands
+	// #nosec G124 -- Secure is not set: Nanite serves loopback HTTP and does not trust forwarded headers, so it cannot tell when a proxy fronts it with HTTPS
 	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires})
 }
 

@@ -31,11 +31,12 @@ Nanite is a single-user desktop application, not a multi-tenant service. The
 safe default is `nanite serve` on its own machine, bound to `127.0.0.1:8090`.
 `--port` changes the port.
 
-**Nanite refuses every non-loopback bind.** It has no TLS, and a bearer
-credential must not cross a network in the clear. `--bind-address` and
-`http.bind_address` accept only `127.0.0.1`, `::1` or `localhost` until the TLS
-work lands (CW-20261011-0043). To reach Nanite from another machine, use an SSH
-forward or a TLS-terminating proxy on the same host.
+**Nanite refuses every non-loopback bind.** It does not terminate TLS, and a
+bearer credential must not cross a network in the clear. `--bind-address` and
+`http.bind_address` accept only `127.0.0.1`, `::1` or `localhost`. To reach
+Nanite from another machine, use an SSH forward, Tailscale Serve or a
+TLS-terminating proxy on the same host; see
+[docs/architecture/remote-access.md](docs/architecture/remote-access.md).
 A proxy that forwards a DNS name (for example a tailnet hostname) must have that
 name listed in `http.allowed_hosts`; the Host check otherwise answers 403.
 
@@ -249,7 +250,9 @@ machine:
 
 ## Current security limitations
 
-- no built-in TLS, so Nanite listens on loopback only (CW-20261011-0043)
+- no built-in TLS, so Nanite listens on loopback only
+- the browser session cookie is not marked `Secure`, including when a
+  TLS-terminating proxy serves the UI over HTTPS
 - the operator token file is readable by anything running as your user; the
   agent sandbox does not hide the auth directory from an agent CLI
 - no at-rest encryption; MCP server secrets are plaintext in the database

@@ -643,7 +643,7 @@ func (s *Store) CreateMessage(ctx context.Context, msg *Message) error {
 	if msg.ID == "" {
 		msg.ID = uuid.New().String()
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := messageTimestamp()
 	if msg.Metadata == "" {
 		msg.Metadata = "{}"
 	}
@@ -842,6 +842,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 	// but all under a single tx + single final message_count update.
 	if copyMessages && len(msgs) > 0 {
 		copiedIDs := make(map[string]string, len(msgs))
+		copiedAt := messageTimestamp() // message rows only; rowid keeps the copied order
 		for _, m := range msgs {
 			m = contextOnlyMessage(m)
 			copiedID := uuid.NewString()
@@ -850,7 +851,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceID string, overrides *Ses
 				`INSERT INTO messages (id, session_id, agent_id, role, content, envelope, metadata, parent_id, is_compacted, created_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				copiedID, newSess.ID, nullIfEmpty(m.AgentID), m.Role, m.Content,
-				nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, now,
+				nullIfEmpty(m.Envelope), m.Metadata, nullIfEmpty(m.ParentID), m.IsCompacted, copiedAt,
 			); err != nil {
 				return nil, fmt.Errorf("copy message: %w", err)
 			}
@@ -918,7 +919,7 @@ func (s *Store) CopyMessages(ctx context.Context, sourceSessionID, targetSession
 	}
 	defer rollbackUnlessCommitted(tx)
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := messageTimestamp()
 	copiedIDs := make(map[string]string, len(msgs))
 	for _, m := range msgs {
 		copiedID := uuid.NewString()

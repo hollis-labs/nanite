@@ -66,7 +66,7 @@ func (s *Store) ClearConversation(ctx context.Context, sessionID string, keepHan
 		return nil, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, session_id, role, content, metadata, is_compacted, created_at) VALUES (?, ?, 'system', 'Conversation cleared here', ?, 0, ?)`, cut.MessageID, sessionID, string(metadata), now); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, session_id, role, content, metadata, is_compacted, created_at) VALUES (?, ?, 'system', 'Conversation cleared here', ?, 0, ?)`, cut.MessageID, sessionID, string(metadata), messageTimestamp()); err != nil {
 		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO session_events (id, session_id, event_type, envelope_pointer_json, created_at) VALUES (?, ?, 'conversation_cleared', ?, ?)`, uuid.NewString(), sessionID, string(raw), now); err != nil {

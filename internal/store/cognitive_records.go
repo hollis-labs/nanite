@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 )
 
 type CognitiveViewRecord struct {
@@ -31,7 +30,7 @@ func (s *Store) CreateCognitiveTurn(ctx context.Context, user *Message, turnID, 
 		return err
 	}
 	defer rollbackUnlessCommitted(tx)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := messageTimestamp()
 	if _, err = tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,metadata,created_at) VALUES(?,?,'user',?,'{}',?)`, user.ID, user.SessionID, user.Content, now); err != nil {
 		return fmt.Errorf("create cognitive input: %w", err)
 	}

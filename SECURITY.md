@@ -251,8 +251,9 @@ machine:
 ## Current security limitations
 
 - no built-in TLS, so Nanite listens on loopback only
-- the browser session cookie is not marked `Secure`, including when a
-  TLS-terminating proxy serves the UI over HTTPS
+- the browser session cookie is marked `Secure` only when you set
+  `http.secure_cookies: true`; Nanite does not infer HTTPS from forwarded
+  headers
 - the operator token file is readable by anything running as your user; the
   agent sandbox does not hide the auth directory from an agent CLI
 - no at-rest encryption; MCP server secrets are plaintext in the database

@@ -163,6 +163,13 @@ type HTTPConfig struct {
 	// DNS name, e.g. a tailnet hostname; the Host check is the DNS-rebinding
 	// defense, so list only names you control.
 	AllowedHosts []string `yaml:"allowed_hosts"`
+	// SecureCookies marks the browser session cookie Secure. Set it when
+	// browsers reach Nanite over HTTPS through a TLS-terminating proxy or
+	// Tailscale Serve: Nanite sees plain HTTP from the proxy and does not
+	// trust forwarded headers, so it cannot infer the external scheme. Leave
+	// it off for direct loopback HTTP, where some browsers refuse to store a
+	// Secure cookie.
+	SecureCookies bool `yaml:"secure_cookies"`
 }
 
 // DefaultHTTPBindAddress keeps an unconfigured server local to the host.

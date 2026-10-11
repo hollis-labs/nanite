@@ -29,9 +29,14 @@ Both live under `http:` in the configuration file.
 - `cors_allowed_origins` must contain the proxy's external HTTPS origin for
   admin writes, which require a well-formed `Origin` that matches exactly.
 
+- `secure_cookies: true` marks the browser session cookie `Secure`. Set it when
+  browsers reach Nanite over HTTPS through a proxy or Tailscale Serve. Leave it
+  off for direct loopback HTTP, where a browser may refuse to store a `Secure`
+  cookie.
+
 Nanite does not read `X-Forwarded-*` or `Forwarded` headers. It sees plain HTTP
-from the proxy, so it cannot tell when the browser is on HTTPS, and nothing it
-decides depends on that.
+from the proxy and cannot tell when the browser is on HTTPS, which is why the
+cookie attribute is an explicit setting rather than something it infers.
 
 ## Credentials off-box
 

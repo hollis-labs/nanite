@@ -142,7 +142,7 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 	}
 	mux.Handle("/api/admin", adminHandler)
 	mux.Handle("/api/admin/", adminHandler)
-	(&apiauth.Handlers{Guard: srv.guard, OperatorTokenPath: auth.OperatorTokenPath}).Register(mux)
+	(&apiauth.Handlers{Guard: srv.guard, OperatorTokenPath: auth.OperatorTokenPath, SecureCookies: resolvedHTTPConfig.SecureCookies}).Register(mux)
 	srv.routes()
 	return srv, nil
 }

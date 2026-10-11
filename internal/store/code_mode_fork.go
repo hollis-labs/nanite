@@ -367,8 +367,9 @@ func (s *Store) ForkCodeModeSession(ctx context.Context, parentID string, option
 	for _, m := range selected {
 		copiedIDs[m.ID] = uuid.NewString()
 	}
+	messageAt := messageTimestamp() // message rows only; rowid keeps the copied order
 	for _, m := range selected {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,metadata,parent_id,created_at) VALUES(?,?,?,?,?,?,?)`, copiedIDs[m.ID], view.ID, m.Role, m.Content, "{}", nullIfEmpty(copiedIDs[m.ParentID]), now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,metadata,parent_id,created_at) VALUES(?,?,?,?,?,?,?)`, copiedIDs[m.ID], view.ID, m.Role, m.Content, "{}", nullIfEmpty(copiedIDs[m.ParentID]), messageAt); err != nil {
 			return nil, err
 		}
 	}
@@ -377,7 +378,7 @@ func (s *Store) ForkCodeModeSession(ctx context.Context, parentID string, option
 			return nil, operationErr
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,metadata,created_at) VALUES(?,?,'user',?,'{}',?)`, uuid.NewString(), view.ID, string(bootstrap), now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id,session_id,role,content,metadata,created_at) VALUES(?,?,'user',?,'{}',?)`, uuid.NewString(), view.ID, string(bootstrap), messageAt); err != nil {
 		return nil, err
 	}
 	if operationErr := tx.Commit(); operationErr != nil {

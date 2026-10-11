@@ -52,6 +52,10 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 		return nil, fmt.Errorf("anthropic: marshal request: %w", marshalErr)
 	}
 
+	if dumped := dumpRequest(model, payload); dumped != "" {
+		slog.Info("provider: request body dumped", "provider", "anthropic", "model", model, "path", dumped)
+	}
+
 	// Circuit breaker pre-check: same gate the deleted adapter applied.
 	if c.CircuitBreaker != nil && c.CircuitBreaker.IsOpen() {
 		return nil, errors.New("circuit breaker open: provider rate limited after multiple retries")

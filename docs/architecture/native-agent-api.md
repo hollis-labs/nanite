@@ -169,6 +169,9 @@ committed outcomes and fails unfinished native turns with `process_lost`.
 Per-turn SSE uses only `chatstream/v1` with a complete canonical event per frame.
 The numeric `Last-Event-ID` names the last applied event; malformed cursors fail
 before SSE headers. Explicit gap events cover retention and ahead-of-log cursors.
+After 15 seconds with no event the stream writes an SSE comment line
+(`: keepalive`); it carries no id and is not an event, so clients ignore it.
+A turn queued behind a running one stays silent apart from these comments.
 Status/snapshot is the recovery source. A subscriber disconnect or transport EOF
 does not prove completion and cannot cancel the execution. There is no
 session-level event route, mesh envelope or negotiated legacy dialect.

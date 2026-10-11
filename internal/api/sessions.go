@@ -59,6 +59,13 @@ func (a *API) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	// the real "default" row) and binds it best-effort.
 	sess, err := a.Services.Sessions.Create(r.Context(), opts)
 	if err != nil {
+		// A view with no provider and model is the caller's to fix, not an
+		// internal failure: there is no default to fall back on
+		// (CW-20261011-0031).
+		if errors.Is(err, service.ErrUnsupportedModel) || errors.Is(err, service.ErrUnsupportedDefinition) {
+			a.errorResp(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -224,6 +224,22 @@ async function readAPIError(res: Response, fallback: string): Promise<Error> {
   return new Error(fallback);
 }
 
+/**
+ * The server's own message for a failed request when it sent one (the typed
+ * `{error:{message}}` envelope or a plain `{error}` string), else the status.
+ * A 422 such as "select a provider and model" is something the user can act on.
+ */
+export async function apiErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await res.clone().json()) as { error?: string | { message?: string } };
+    const message = typeof body.error === "string" ? body.error : body.error?.message;
+    if (message) return `${fallback}: ${message}`;
+  } catch {
+    // not JSON; fall through to the status
+  }
+  return `${fallback}: ${res.status}`;
+}
+
 export const api = {
   getAgentInitialize: async (): Promise<AgentInitializeResponse> => {
     const res = await fetch(`${API_BASE}/agent/v1/initialize`);
@@ -243,7 +259,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to create agent session: ${res.status}`);
+    if (!res.ok) throw new Error(await apiErrorMessage(res, "Failed to create agent session"));
     return res.json();
   },
 

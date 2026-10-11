@@ -250,3 +250,37 @@ func (l *LocalAuthority) ListTools(ctx context.Context, authorityID string) ([]N
 	}
 	return out, rows.Err()
 }
+
+// ResolveToolNames returns the tools a native view may be offered or run: the
+// grants of the live authority whose reviewed host settings revision AND
+// definition pin still equal what is in force now. Settings that changed since
+// the review, a disabled host, a revoked authority and a tool that is no longer
+// available all yield nothing for that tool. It is read on every dispatch, so a
+// revocation reaches a turn already running.
+func (l *LocalAuthority) ResolveToolNames(ctx context.Context, hostSettingsID string) ([]string, error) {
+	rows, err := l.s.DB.QueryContext(ctx, `
+		SELECT k.name
+		  FROM agent_host_settings h
+		  JOIN native_authorities a ON a.host_settings_id = h.id
+		   AND a.host_settings_revision = h.revision
+		   AND a.definition_id = h.definition_id
+		   AND a.definition_revision = h.definition_revision
+		   AND a.semantic_digest = h.semantic_digest
+		  JOIN native_authority_tools t ON t.authority_id = a.id
+		  JOIN known_tools k ON k.id = t.tool_id
+		 WHERE h.id = ? AND h.enabled = 1 AND a.enabled = 1 AND a.revoked_at IS NULL AND k.status = 'available'
+		 ORDER BY k.name`, hostSettingsID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve native tool grants: %w", err)
+	}
+	defer closeRows(rows)
+	out := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}

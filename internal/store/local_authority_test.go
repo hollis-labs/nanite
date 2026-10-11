@@ -270,3 +270,83 @@ func TestLocalAuthoritiesAreIsolatedAndPinnedToWhatWasReviewed(t *testing.T) {
 		t.Fatalf("authority revision moved with the settings: %+v (settings now %s)", again, updated.Revision)
 	}
 }
+
+// --- resolver (slice 2) -----------------------------------------------------
+
+func resolveFixture(t *testing.T) (*Store, AgentHostSettings, NativeAuthority) {
+	t.Helper()
+	s := newTestStore(t)
+	ctx := context.Background()
+	host := nativeHost(t, s, "resolver")
+	nativeTool(t, s, "dev_read")
+	nativeTool(t, s, "dev_grep")
+	la := s.LocalAuthority()
+	a, err := la.CreateAuthority(ctx, "cred-1", host.ID, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"dev_read", "dev_grep"} {
+		if err = la.GrantTool(ctx, "cred-1", a.ID, tool, "r"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s, host, a
+}
+
+func TestResolveToolNamesYieldsNothingUnlessTheReviewedStateIsStillInForce(t *testing.T) {
+	ctx := context.Background()
+	s, host, a := resolveFixture(t)
+	la := s.LocalAuthority()
+	names, err := la.ResolveToolNames(ctx, host.ID)
+	if err != nil || strings.Join(names, ",") != "dev_grep,dev_read" {
+		t.Fatalf("baseline = %v, %v", names, err)
+	}
+	if names, _ = la.ResolveToolNames(ctx, "some-other-host"); len(names) != 0 {
+		t.Fatalf("another host resolved grants: %v", names)
+	}
+	// A tool that becomes unavailable stops resolving.
+	if _, err = s.UpsertKnownTool(ctx, "dev_grep", "builtin", "removed", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ = la.ResolveToolNames(ctx, host.ID); strings.Join(names, ",") != "dev_read" {
+		t.Fatalf("unavailable tool still resolved: %v", names)
+	}
+	if _, err = s.UpsertKnownTool(ctx, "dev_grep", "builtin", "available", "x"); err != nil {
+		t.Fatal(err)
+	}
+	// A revoked tool grant stops resolving.
+	if err = la.RevokeTool(ctx, "cred-1", a.ID, "dev_read", "r"); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ = la.ResolveToolNames(ctx, host.ID); strings.Join(names, ",") != "dev_grep" {
+		t.Fatalf("revoked grant still resolved: %v", names)
+	}
+	// Settings changed since the review: the old authority no longer applies.
+	host.Settings.Model = "changed"
+	if _, err = s.UpdateAgentHostSettings(ctx, host, host.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ = la.ResolveToolNames(ctx, host.ID); len(names) != 0 {
+		t.Fatalf("grants survived a settings revision change: %v", names)
+	}
+}
+
+func TestResolveToolNamesStopsOnRevokedAuthorityAndDisabledHost(t *testing.T) {
+	ctx := context.Background()
+	s, host, a := resolveFixture(t)
+	la := s.LocalAuthority()
+	if err := la.RevokeAuthority(ctx, "cred-1", a.ID, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := la.ResolveToolNames(ctx, host.ID); len(names) != 0 {
+		t.Fatalf("revoked authority resolved: %v", names)
+	}
+	s2, host2, _ := resolveFixture(t)
+	host2.Enabled = false
+	if _, err := s2.UpdateAgentHostSettings(ctx, host2, host2.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := s2.LocalAuthority().ResolveToolNames(ctx, host2.ID); len(names) != 0 {
+		t.Fatalf("disabled host resolved: %v", names)
+	}
+}

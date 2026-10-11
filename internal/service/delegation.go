@@ -173,14 +173,9 @@ func (s *chatServiceImpl) DelegateTask(ctx context.Context, req chat.DelegationR
 		model = parentSession.Model
 	}
 	if model == "" {
-		// CW-20260526-0003: resolver walks user_settings →
-		// providers.default_model. Worker sessions inherit the system
-		// default if neither the request nor the parent set one.
-		if _, rm, err := s.store.ResolveProviderAndModel(ctx, "", ""); err == nil {
-			model = rm
-		} else {
-			return nil, fmt.Errorf("delegation: %w", err)
-		}
+		// No system default exists (CW-20261011-0031): a worker inherits the
+		// request's or the parent session's model, or the delegation is refused.
+		return nil, fmt.Errorf("delegation: no model selected: neither the request nor parent session %s names one", req.ParentSessionID)
 	}
 	// Create worker session.
 	workerSession := &store.Session{

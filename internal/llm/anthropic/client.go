@@ -51,12 +51,11 @@ const DefaultRateLimitTPM = 50000
 const DefaultBreakerThreshold = 3
 
 // ErrModelRequired is returned by StreamChat / Complete when the caller
-// supplies an empty ChatRequest.Model. CW-20260526-0003 removed the
-// in-package default fallback — every caller must resolve a model via
-// store.ResolveProviderAndModel before invoking the SDK. A silent
-// default here was load-bearing in the original bug (a stale bare alias
-// hit Anthropic and returned 404).
-var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (resolve via store.ResolveProviderAndModel)")
+// supplies an empty ChatRequest.Model. There is no default model anywhere in
+// Nanite (CW-20260526-0003, CW-20261011-0031): every caller must name one
+// before invoking the SDK. A silent default here was load-bearing in the
+// original bug (a stale bare alias hit Anthropic and returned 404).
+var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (select a model on the agent, session or launch)")
 
 // InterleavedThinkingBetaHeader is the beta header value that enables
 // interleaved thinking (thinking_delta blocks). Supported on Claude
@@ -324,8 +323,8 @@ func shouldEnableInterleavedThinking(cfg llmcontracts.ReasoningConfig, model str
 }
 
 // resolveModel returns the model to use for a request. CW-20260526-0003
-// removed the in-package default fallback — callers must resolve a model
-// via store.ResolveProviderAndModel before invoking StreamChat / Complete.
+// removed the in-package default fallback — callers must name a model
+// before invoking StreamChat / Complete.
 // An empty Model now produces ErrModelRequired at the SDK boundary.
 func resolveModel(req llmtypes.ChatRequest) (string, error) {
 	if req.Model == "" {

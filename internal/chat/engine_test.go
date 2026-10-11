@@ -70,13 +70,16 @@ func TestInferProvider(t *testing.T) {
 		{"o3-mini", "openai"},
 		// Ollama routing was removed 2026-08-18 (TASKS/phase-0/
 		// 05-remove-ollama-routing.md) — it resolved to a provider that was
-		// never registered. These now fall through to the default floor.
-		{"llama3", "anthropic"},
-		{"mistral-7b", "anthropic"},
-		{"gemma-2b", "anthropic"},
-		{"custom-model:latest", "anthropic"},
+		// never registered. Nanite has no default provider (CW-20261011-0031),
+		// so a model nothing recognizes routes nowhere.
+		{"llama3", ""},
+		{"mistral-7b", ""},
+		{"gemma-2b", ""},
+		{"custom-model:latest", ""},
 		{"claude-sonnet-4-20250514", "anthropic"},
-		{"", "anthropic"},
+		// A Claude model the registry does not list yet still routes.
+		{"claude-opus-5-5", "anthropic"},
+		{"", ""},
 	}
 
 	for _, tt := range tests {

@@ -8,7 +8,6 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/truncate"
 
-	"github.com/hollis-labs/nanite/internal/store/seedcatalog"
 	"github.com/hollis-labs/nanite/internal/toolclient"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
@@ -370,19 +369,13 @@ func NormalizeCLIProvider(name string) string {
 //  1. Exact lookup in the canonical registry (pkg/models).
 //  2. Gateway-prefix helper for bare prefixed IDs not yet registered.
 //  3. Prefix-routing fallback for unregistered OpenAI families.
-//  4. seedcatalog.DefaultProviderType as the routing floor.
+//  4. The "claude-" family prefix routes to anthropic, so a newly released
+//     Claude model works before the registry lists it.
 //
-// Note: this is a ROUTING decision (which provider should handle this
-// model string?), not a USER-DEFAULT decision (which model should we
-// pick when none was selected?). User defaults flow through
-// store.ResolveProviderAndModel — see CW-20260526-0003.
-//
-// The seedcatalog dependency at step 4 is intentional and documented
-// alongside the package: seedcatalog is the SSOT for compile-time
-// floors consumed by both the seeder and a few routing-floor sites
-// like this one. Nothing relies on this returning a model that actually
-// exists at the resolved provider — the floor is just "if we had to
-// pick *some* provider, pick the same one the seeder uses."
+// There is NO default provider: a model string nothing recognizes returns
+// "" and the caller must refuse with a configuration error. Nanite has no
+// user-level or app-level default provider or model (CW-20261011-0031);
+// a selection belongs to the agent or launch.
 func InferProvider(model string) string {
 	if p := models.ProviderFor(model); p != "" {
 		return p
@@ -402,16 +395,18 @@ func InferProvider(model string) string {
 	// never registered in cmd/nanite/main.go's initProviders — Step 6.5
 	// (SP-20260508-0001) had already deliberately dropped Ollama from the
 	// provider catalog (see internal/store/seed.go, pkg/models/registry.go).
-	// Model names matching that old pattern set now fall through to the
-	// DefaultProviderType floor below, same as any other unrecognized name.
+	// Model names matching that old pattern set now return "" like any other
+	// unrecognized name.
 	switch {
 	case strings.HasPrefix(model, "gpt-"),
 		strings.HasPrefix(model, "o1-"),
 		strings.HasPrefix(model, "o3-"),
 		strings.HasPrefix(model, "o4-"):
 		return "openai"
+	case strings.HasPrefix(model, "claude-"):
+		return "anthropic"
 	}
-	return seedcatalog.DefaultProviderType
+	return ""
 }
 
 // TruncateStr truncates a string to maxLen, appending "..." if truncated.

@@ -39,7 +39,6 @@ func TestNewContainer_WiresStoreCollaborators(t *testing.T) {
 		"SkillGrants":         c.SkillGrants,
 		"SkillResolvers":      c.SkillResolvers,
 		"AgentImportProfiles": c.AgentImportProfiles,
-		"ProviderDefaults":    c.ProviderDefaults,
 	} {
 		if got, ok := v.(*store.Store); !ok || got != st {
 			t.Errorf("%s = %T %v, want the container's store", name, v, v)

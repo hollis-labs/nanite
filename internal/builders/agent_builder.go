@@ -29,27 +29,11 @@ func nameToSlug(name string) string {
 
 // NewAgentBuilder returns a Builder that creates AgentProfile records.
 //
-// The default-model UX hint and post-blank fill go through the resolver
-// (CW-20260526-0003), so the prompt always reflects the operator's
-// current default (user_settings → providers.default_model) rather than
-// a compiled-in literal. A blank submission persists "" on the profile,
-// meaning "use whatever the system default is at request time" — which
-// the chat-engine resolver then re-evaluates per call.
+// The model is optional. A blank submission persists "" on the profile;
+// Nanite has no system default, so a blank model is resolved by the
+// runtime that runs the agent (CW-20261011-0031).
 func NewAgentBuilder(s *store.Store) *Builder {
-	// Resolver returns (provider, model, err) — we use the model for the
-	// UX hint. PR #220 review note: a previous draft showed the provider
-	// here, which was wrong.
-	resolvedProvider, resolvedModel, resolveErr := s.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, "", "")
-	var modelHint string
-	switch {
-	case resolveErr == nil && resolvedModel != "":
-		modelHint = resolvedModel
-	case resolvedProvider != "":
-		modelHint = fmt.Sprintf("(set providers.default_model for %s)", resolvedProvider)
-	default:
-		modelHint = "(set user_settings.default_model or providers.default_model)"
-	}
-	modelPrompt := fmt.Sprintf("Default model (leave blank to inherit system default %s):", modelHint)
+	modelPrompt := "Model (optional; leave blank to let the runtime choose):"
 	return &Builder{
 		Name:        "agent",
 		Description: "Create a new agent profile with a name, system prompt, model, and description.",
@@ -117,7 +101,7 @@ func NewAgentBuilder(s *store.Store) *Builder {
 
 			modelDesc := agent.DefaultModel
 			if modelDesc == "" {
-				modelDesc = "inherits system default"
+				modelDesc = "(none; chosen per session or launch)"
 			}
 			return &BuildResult{
 				Resource: agent,

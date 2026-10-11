@@ -48,7 +48,7 @@ func manualHandoffFixture(t *testing.T) (*characterizationFixture, *Container, *
 	f.svc.events = events
 	c := &Container{
 		Sessions: f.svc.sessions, Agents: f.svc.agents, Settings: NewUserSettingsService(f.st),
-		Context: f.context, Providers: f.svc.providers, ProviderDefaults: f.st,
+		Context: f.context, Providers: f.svc.providers,
 		CompactionEvents: NewCompactionEventWriter(f.st), CompactionHandoffs: f.st,
 		Events: events, Streams: f.svc.streams,
 	}

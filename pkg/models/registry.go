@@ -61,13 +61,9 @@ type Model struct {
 }
 
 // Default-model and default-provider constants were removed from this
-// package in CW-20260526-0003. Runtime callers MUST resolve defaults
-// through store.ResolveProviderAndModel (or the service-layer
-// DefaultResolver interface that exposes it), which walks
-// explicit args → user_settings.default_{provider,model} →
-// providers.default_model. Seeders read the compile-time defaults from
-// internal/store/seedcatalog, which is also the routing-floor for
-// chat.InferProvider when no other heuristic identifies a provider.
+// package in CW-20260526-0003 and the resolver that replaced them was
+// removed in CW-20261011-0031: Nanite has no default provider or model. A
+// provider and model are chosen per agent or per launch.
 //
 // Background: a single Go literal terminating every "what model?"
 // fallback chain hid the bare-alias `claude-sonnet-4` 404 bug — the bad
@@ -130,6 +126,18 @@ var allModels = []Model{
 	// never adds one, so a wrong identifier here reaches a user as a provider
 	// error at the first token (CW-20260912-0107).
 	{
+		// models.dev, fetched 2026-10-11: claude-opus-5-5, 1M context, 128k
+		// output, $4/$20 per M tokens.
+		ID: "claude-opus-5-5", ModelID: "claude-opus-5-5",
+		DisplayName: "Claude Opus 5.5", Provider: "anthropic",
+		ContextWindow: 1000000, MaxOutput: 128000,
+		InputPricePerM: 4.0, OutputPricePerM: 20.0,
+		Capabilities: Capabilities{
+			SupportsToolCalling: true, SupportsStreaming: true,
+			SupportsVision: true, SupportsSystemPromptCaching: true,
+		},
+	},
+	{
 		// models.dev 2026-07-24; catalog fetched 2026-09-12.
 		ID: "claude-opus-5", ModelID: "claude-opus-5",
 		DisplayName: "Claude Opus 5", Provider: "anthropic",
@@ -171,7 +179,7 @@ var allModels = []Model{
 		// end-to-end through this app against a real Anthropic key the same day.
 		ID: "claude-sonnet", ModelID: "claude-sonnet-4-5-20250929",
 		DisplayName: "Claude Sonnet 4.5", Provider: "anthropic",
-		ContextWindow: 1000000, MaxOutput: 64000,
+		ContextWindow: 200000, MaxOutput: 64000,
 		InputPricePerM: 3.0, OutputPricePerM: 15.0,
 		Capabilities: Capabilities{
 			SupportsToolCalling: true, SupportsStreaming: true,

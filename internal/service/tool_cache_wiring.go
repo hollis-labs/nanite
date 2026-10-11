@@ -70,17 +70,6 @@ func buildToolIntentClassifier(reg *provider.Registry, s *store.Store) intent.Cl
 	if model == "" {
 		model = us.SummarizerModel
 	}
-	// Resolver fills any remaining gap from user_settings →
-	// providers.default_model (CW-20260526-0003). Empty result on error
-	// is intentional — the registry lookup below treats unknown providers
-	// as "no LLM classifier," and the broker-only path still works.
-	if provName == "" || model == "" {
-		if rp, rm, err := s.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, provName, model); err == nil {
-			provName = rp
-			model = rm
-		}
-	}
-
 	var llm intent.Classifier
 	if reg != nil {
 		if prov, ok := reg.Get(provName); ok && prov != nil {
@@ -123,11 +112,9 @@ func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider s
 	}
 
 	// Provider resolution. NANITE_REPAIR_PROVIDER → caller's
-	// utility provider → user_settings.utility_provider →
-	// resolver (user_settings.default_provider → providers.default_model
-	// keyed provider). CW-20260526-0003: terminal Go-literal fallback
-	// removed; if the chain is dry, the repair pipeline declines rather
-	// than guessing.
+	// utility provider → user_settings.utility_provider. There is no default
+	// provider (CW-20261011-0031): if none is named, the repair pipeline
+	// declines rather than guessing.
 	provName := os.Getenv("NANITE_REPAIR_PROVIDER")
 	if provName == "" {
 		provName = utilityProvider
@@ -137,11 +124,6 @@ func buildRepairConfig(reg *provider.Registry, s *store.Store, utilityProvider s
 			if us.UtilityProvider != "" {
 				provName = us.UtilityProvider
 			}
-		}
-	}
-	if provName == "" && s != nil {
-		if rp, _, err := s.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, "", ""); err == nil {
-			provName = rp
 		}
 	}
 	if provName == "" {

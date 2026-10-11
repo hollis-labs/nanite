@@ -32,8 +32,6 @@ export function NavRail() {
 
   const createSessionMutation = useMutation({
     mutationFn: () => api.createSession({
-      provider: userSettings?.default_provider || undefined,
-      model: userSettings?.default_model || undefined,
       agent_id: userSettings?.default_agent || undefined,
     }),
     onSuccess: (newSession) => {

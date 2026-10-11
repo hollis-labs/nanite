@@ -1451,8 +1451,6 @@ export interface ModelRecord {
 // --- User Settings ---
 
 export interface UserSettings {
-  default_provider: string;
-  default_model: string;
   default_agent: string;
   utility_provider: string;
   utility_model: string;

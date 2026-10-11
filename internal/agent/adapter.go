@@ -45,8 +45,7 @@ type CLIAgentAdapter interface {
 	//   - Never write to path. Import is one-way; the source is read and
 	//     forgotten. See internal/agentimport's package doc.
 	//   - Leave Definition.Model blank unless the source names a real
-	//     Nanite model ID. A foreign format's model alias is not one, and
-	//     store.ResolveProviderAndModel re-resolves per request anyway
+	//     Nanite model ID. A foreign format's model alias is not one
 	//     (parser.go's Model doc comment: ten profiles made this mistake).
 	//
 	// Definition.Source names the ecosystem the definition came FROM (e.g.

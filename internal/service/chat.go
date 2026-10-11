@@ -570,18 +570,10 @@ func (s *chatServiceImpl) trackedDone() <-chan struct{} {
 
 // NewChatService creates a ChatService from its dependencies.
 func NewChatService(cfg ChatServiceConfig) ChatService {
-	// Utility provider/model default to the system default when not
-	// configured. Resolution goes through the store so user_settings and
-	// providers.default_model are honored (CW-20260526-0003). If the chain
-	// is dry, leave both empty — utility callers handle the missing case.
+	// Utility provider/model are used exactly as configured. There is no
+	// default to fall back to; utility callers handle the missing case.
 	up := cfg.UtilityProvider
 	um := cfg.UtilityModel
-	if (up == "" || um == "") && cfg.Store != nil {
-		if resolvedProv, resolvedModel, err := cfg.Store.ResolveProviderAndModel(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, up, um); err == nil {
-			up = resolvedProv
-			um = resolvedModel
-		}
-	}
 	activeSessions := cfg.AgentSessionManager
 	if activeSessions == nil && cfg.AgentDeps != nil {
 		activeSessions = cfg.AgentDeps.Manager
@@ -1902,8 +1894,7 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 // runtime_kind='cli' agent configured with a bare (non-"pty-"/"sub-"-
 // prefixed) default_provider — e.g. "claude" instead of the legacy
 // "pty-claude" alias shape — could walk all the way to a real, registered
-// HTTP provider (via user_settings.default_provider, the fallback chain,
-// or chat.InferProvider(model)) and never reach chat_generate.go's
+// HTTP provider (via the fallback chain, or chat.InferProvider(model)) and never reach chat_generate.go's
 // classifyNilProvider at all, where runtime_kind is otherwise consulted.
 // The turn then silently routed through the HTTP/API path with no error.
 //
@@ -1927,28 +1918,12 @@ func (s *chatServiceImpl) CloseAgentSession(ctx context.Context, sessionID strin
 //     pre-existing row, since none have role_id/model_id/a non-empty
 //     default_provider set — see this task's Work Log for the real-data
 //     check)
-//  3. user_settings.default_provider (operator-level installation-wide
-//     default — NOT part of the role->agent->task composition cascade;
-//     kept as a narrow, still-load-bearing fallback tier rather than
-//     declared dead, because every one of the 28 real rows in the
-//     production DB backup resolves through this step today. See Work
-//     Log for the full rationale.)
-//  4. user_settings.ProviderFallbackChain (resilience list, same tier as 3)
-//  5. chat.InferProvider(model) — the genuine "no resolvable composition
-//     anywhere" floor
+//  3. user_settings.ProviderFallbackChain (operator-listed resilience list)
+//  4. chat.InferProvider(model) — routing by the model string; "" when the
+//     model is not recognized (there is no default provider,
+//     CW-20261011-0031)
 //
-// Steps 3-5 are UNREACHABLE whenever runtimeKind=="cli" — see above.
-//
-// CW-20260812-0001 investigation: step 3 was missing entirely before that
-// fix. user_settings.default_provider was never consulted here — it's a
-// separate resolver used only for the *model* dimension elsewhere (see
-// store.ResolveProviderAndModel in chat_generate.go). A session with no
-// explicit provider fell straight through to step 4
-// (ProviderFallbackChain), so a stale/legacy CLI-shaped entry left there
-// from before this app's API-first default (e.g. "pty") won over the
-// operator's real default_provider setting — silently routing ordinary
-// API sessions into a CLI boot attempt that then crashed downstream
-// (bootdir for provider "" — see applyLegacyCLIProviderToBootOpts).
+// Steps 3-4 are UNREACHABLE whenever runtimeKind=="cli" — see above.
 //
 // The unconditional "if all else fails, try anthropic" catch-all that
 // used to follow step 5 has been removed: a fully unconfigured
@@ -2084,24 +2059,9 @@ func (s *chatServiceImpl) resolveProvider(sessionID, sessionProvider, agentProvi
 		return name, nil
 	}
 
-	// --- Steps 3/4: user_settings.default_provider / ProviderFallbackChain
-	// — operator-level, installation-wide floor. Not part of the
-	// role->agent->task composition cascade (roles/agent_profiles have no
-	// equivalent of this — it's a single global preference, not a
-	// per-role/per-agent value), but deliberately kept as a real,
-	// documented fallback rather than declared dead: see this task's Work
-	// Log for the real production-data check that every one of the 28
-	// existing agent rows resolves through this tier today (all have
-	// default_provider=""), so removing it would be a behavior change,
-	// not a resolution-mechanism swap. ---
+	// --- Step 3: user_settings.ProviderFallbackChain — an operator-listed
+	// resilience list. There is no default provider (CW-20261011-0031). ---
 	if us, err := s.store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil {
-		if us.DefaultProvider != "" {
-			if name, p, ok := s.tryProviderCandidate(sessionID, requested, us.DefaultProvider,
-				"chat-service: user_settings.default_provider not registered, falling through"); ok {
-				return name, p
-			}
-		}
-
 		for _, name := range us.ProviderFallbackChain {
 			if resolvedName, p, ok := s.tryProviderCandidate(sessionID, requested, name,
 				"chat-service: fallback-chain provider not registered, skipping"); ok {

@@ -236,15 +236,11 @@ func (r *BootRunner) subagentRuntime(ctx context.Context, parent *store.Session)
 func (r *BootRunner) runDowngraded(ctx context.Context, run *subagent.Run, agent *store.AgentProfile, parent *store.Session) (*subagent.Result, error) {
 	requested := r.effectiveProvider(agent, run)
 	provider, model := parent.Provider, parent.Model
-	if provider == "" {
-		// A parent with no provider of its own would leave the child with an
-		// empty one. Use the app's default provider unless that is itself a CLI
-		// provider, or fail saying why.
-		provider, model = r.defaultProviderModel(ctx, model)
-		if provider == "" || runtimeagent.CanLaunch(provider) {
-			return nil, fmt.Errorf("subagent BootRunner: role %q resolves to CLI provider %q but subagent_runtime is api, and parent session %q has no provider and no default_provider is set to run the subagent on; set default_provider or subagent_runtime=cli",
-				run.Role, requested, run.ParentSessionID)
-		}
+	if provider == "" || runtimeagent.CanLaunch(provider) {
+		// Nanite has no default provider: a parent with no API provider of its
+		// own leaves nothing to run the child on. Fail saying why.
+		return nil, fmt.Errorf("subagent BootRunner: role %q resolves to CLI provider %q but subagent_runtime is api, and parent session %q has no API provider to run the subagent on; select a provider on the parent session or set subagent_runtime=cli",
+			run.Role, requested, run.ParentSessionID)
 	}
 	slog.Warn("subagent BootRunner: CLI subagent request downgraded to API",
 		"run_id", run.ID, "role", run.Role, "requested_provider", requested,
@@ -256,23 +252,6 @@ func (r *BootRunner) runDowngraded(ctx context.Context, run *subagent.Run, agent
 	res.Summary = fmt.Sprintf("[note: this subagent was requested on CLI provider %q, but subagent_runtime is api; it ran on %s/%s through the Nanite harness]\n\n%s",
 		requested, provider, model, res.Summary)
 	return res, nil
-}
-
-// defaultProviderModel is the app default provider and model, for a downgrade
-// whose parent session names none. model is the parent's, kept when set.
-func (r *BootRunner) defaultProviderModel(ctx context.Context, model string) (string, string) {
-	src, ok := r.store.(subagentRuntimeSource)
-	if !ok {
-		return "", model
-	}
-	us, err := src.GetUserSettings(ctx)
-	if err != nil || us == nil {
-		return "", model
-	}
-	if model == "" {
-		model = us.DefaultModel
-	}
-	return us.DefaultProvider, model
 }
 
 // resolveRole looks up the role slug. Mirrors ChatRunner.resolveRole —

@@ -1,7 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useSettings } from "@/hooks/useSettings";
 import { api } from "@/lib/api";
 import type {
   AgentHostSettings,
@@ -21,7 +20,6 @@ export function AgentProfileManager() {
     queryKey: ["agent-host-settings"],
     queryFn: api.listAgentHostSettings,
   });
-  const { data: defaults } = useSettings();
   const [selected, setSelected] = useState<AgentHostSettings | null>(null);
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
@@ -72,8 +70,8 @@ export function AgentProfileManager() {
           : {
               version: "1",
               runtime: "api",
-              provider: defaults?.default_provider ?? "",
-              model: defaults?.default_model ?? "",
+              provider: "",
+              model: "",
               native_loop: {},
             },
       },
@@ -163,8 +161,8 @@ export function AgentProfileManager() {
               {
                 version: "1",
                 runtime: "api",
-                provider: defaults?.default_provider ?? "",
-                model: defaults?.default_model ?? "",
+                provider: "",
+                model: "",
                 native_loop: {},
               },
               null,

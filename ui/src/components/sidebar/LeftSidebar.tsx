@@ -502,8 +502,6 @@ export function LeftSidebar() {
         open={startOpen}
         onOpenChange={setStartOpen}
         projectId={activeProjectId}
-        defaultProvider={userSettings?.default_provider}
-        defaultModel={userSettings?.default_model}
         defaultAgent={userSettings?.default_agent}
         onSessionStarted={setActiveSession}
       />

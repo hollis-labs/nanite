@@ -336,7 +336,7 @@ func TestAdminPreferenceLegacyWriterBoundary(t *testing.T) {
 	}
 	// Reproduce the accepted limit: a stale legacy row commits after admin success.
 	snapshot, etag = preferencesRead(t, h)
-	delayed := &legacyDelayedBody{reader: strings.NewReader(`{"default_model":"unrelated-model"}`), read: make(chan struct{}), release: make(chan struct{})}
+	delayed := &legacyDelayedBody{reader: strings.NewReader(`{"utility_model":"unrelated-model"}`), read: make(chan struct{}), release: make(chan struct{})}
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		done <- adminRequest(http.HandlerFunc(a.handleUpdateSettings), "PUT", "/api/settings", delayed, true)

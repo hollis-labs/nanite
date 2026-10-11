@@ -157,6 +157,12 @@ type HTTPConfig struct {
 	//     disables Access-Control-Allow-Credentials. Opt in explicitly by
 	//     listing "*" as a sole entry when credentials are not required.
 	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
+	// AllowedHosts lists extra Host header values (name only, port ignored,
+	// case-insensitive) the API accepts beyond loopback and the bind address.
+	// Set it when a reverse proxy on a trusted network fronts Nanite under a
+	// DNS name, e.g. a tailnet hostname; the Host check is the DNS-rebinding
+	// defense, so list only names you control.
+	AllowedHosts []string `yaml:"allowed_hosts"`
 }
 
 // DefaultHTTPBindAddress keeps an unconfigured server local to the host.

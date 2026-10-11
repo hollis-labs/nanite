@@ -36,6 +36,8 @@ credential must not cross a network in the clear. `--bind-address` and
 `http.bind_address` accept only `127.0.0.1`, `::1` or `localhost` until the TLS
 work lands (CW-20261011-0043). To reach Nanite from another machine, use an SSH
 forward or a TLS-terminating proxy on the same host.
+A proxy that forwards a DNS name (for example a tailnet hostname) must have that
+name listed in `http.allowed_hosts`; the Host check otherwise answers 403.
 
 **Authentication is on for every `/api/` route, loopback included.**
 Loopback is not authentication: any local process, and any web page through a

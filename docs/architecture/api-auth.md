@@ -50,7 +50,7 @@ add the CSRF header and shows the login screen on a 401.
 - Identity is the credential. `X-Nanite-Caller-*` headers are honored only for
   an agent credential bound to that session; `/api/tools/call` refuses an agent
   credential for another session.
-- The `Host` header must name loopback (or the bind address): DNS-rebinding
+- The `Host` header must name loopback (the bind address, or a name in `http.allowed_hosts`): DNS-rebinding
   defense.
 - Revoking a credential or logging out cancels its in-flight requests, closing
   open SSE streams. Expiry bounds a request's context the same way.

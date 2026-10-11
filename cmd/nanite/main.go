@@ -1281,11 +1281,7 @@ func initMCP(s *store.Store, cfg *config.RuntimeConfig, appCfg *config.TunablesC
 func startBackgroundWorkers(lc *lifecycle.Manager, container *service.Container, s *store.Store) {
 	if container.TeamRunLauncher != nil {
 		lc.Go("team-workflow-reconcile", func(ctx context.Context) {
-			container.TeamRunLauncher.RunReconciler(ctx, 5*time.Second, 100, func(report service.TeamRunReconcileReport) {
-				for _, err := range report.Failures {
-					slog.Warn("Team workflow reconciliation failed", "err", err)
-				}
-			})
+			container.TeamRunLauncher.RunReconciler(ctx, 5*time.Second, 100, newReconcileFailureLogger("Team workflow reconciliation").observe)
 		})
 	}
 

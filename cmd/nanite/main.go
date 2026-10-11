@@ -532,7 +532,10 @@ func cmdServeWithInitializers(
 	if err != nil {
 		slog.Error("failed to create service container", "err", err)
 		return fmt.Errorf("failed to create service container: %w", err)
-	}
+	} // Native turns run tools only for a credential that is still valid and holds
+	// the tools scope, looked up on every dispatch.
+	container.NativeGrants.SetCallers(credentialStanding{store: serveAuthState.store})
+
 	// CW-20260930-0105: every error return below would otherwise run the
 	// deferred store close with all of the container's goroutines still live.
 	// Mirror the signal path's order: daemons stop, then the container; the

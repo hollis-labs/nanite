@@ -2,13 +2,16 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/apiauth"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -200,5 +203,42 @@ func TestNativeAuthorityLifecycleOverTheAPI(t *testing.T) {
 	want := fmt.Sprint([]string{"authority_created:cred-operator", "tool_granted:cred-operator", "tool_revoked:cred-operator", "authority_revoked:cred-operator"})
 	if fmt.Sprint(actions) != want {
 		t.Fatalf("audit = %v, want %s", actions, want)
+	}
+}
+
+// The submitting credential reaches turn admission from the authenticated
+// principal only; a request body cannot name one.
+func TestAgentV1TurnCarriesTheAuthenticatedSubmitter(t *testing.T) {
+	a, mux := newTestAPI(t)
+	session := &store.Session{Provider: "fixture", Model: "model"}
+	if err := a.store.CreateSession(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	a.Services.Chat = &agentChatStub{handleMessageFn: func(ctx context.Context, _, _ string) (string, error) {
+		seen = append(seen, service.SubmittedByFromContext(ctx))
+		return "turn", nil
+	}}
+	post := func(p *apiauth.Principal, extra string) int {
+		body := `{"content":[{"kind":"text","text":"question"}],"delivery":"at_idle"` + extra + `}`
+		r := httptest.NewRequest("POST", agentV1RoutePrefix+"/sessions/"+session.ID+"/turns", strings.NewReader(body))
+		if p != nil {
+			r = r.WithContext(apiauth.WithPrincipal(r.Context(), *p))
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w.Code
+	}
+	if code := post(&clientPrincipal, ""); code != 202 {
+		t.Fatalf("authenticated turn = %d", code)
+	}
+	if code := post(nil, ""); code != 202 {
+		t.Fatalf("unauthenticated turn (no guard in this harness) = %d", code)
+	}
+	if code := post(&clientPrincipal, `,"submitted_by":"cred-operator"`); code != 400 {
+		t.Fatalf("a body naming a submitter = %d, want 400", code)
+	}
+	if len(seen) != 2 || seen[0] != clientPrincipal.CredentialID || seen[1] != "" {
+		t.Fatalf("submitters seen = %q", seen)
 	}
 }

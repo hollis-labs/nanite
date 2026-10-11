@@ -2107,6 +2107,10 @@ func (s *chatServiceImpl) prepareTurn(
 		selection = &ToolSelection{}
 	}
 	tools := selection.Tools
+	if isCognitiveTurn(ctx) {
+		// A native view is offered only what its live capability allows right now.
+		tools = s.nativeOfferedTools(ctx)
+	}
 
 	// Filter: tool_selection — a plugin may add, remove, or reshape the
 	// tool list offered to the model this turn. Applied here, immediately

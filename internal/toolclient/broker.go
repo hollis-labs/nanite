@@ -559,6 +559,13 @@ func (tb *ToolClient) HandleRequestToolsForAgent(ctx context.Context, agentID st
 // the always_included escape hatch — fail closed, matching
 // filterToolsByAgentTools' own default.
 func (tb *ToolClient) isToolGrantedToAgent(ctx context.Context, agentID, toolName string) bool {
+	// A native view is decided by its gate on every call; it is not a fabric
+	// actor, so the grant tables below cannot speak for it. Nothing falls
+	// through to them: a gate that says no is final.
+	if gate, ok := nativeToolGateFrom(ctx); ok {
+		allowed, _ := gate.AuthorizeNativeTool(ctx, toolName)
+		return allowed
+	}
 	if tb.Store == nil {
 		return true
 	}

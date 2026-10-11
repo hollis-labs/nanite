@@ -164,6 +164,9 @@ type ChatDefinitionConfig struct {
 	NativePolicy      *agentpolicy.NativePolicy `json:"native_policy,omitempty"`
 	ReflexBundle      *agentpolicy.ReflexBundle `json:"reflex_bundle,omitempty"`
 	HostSettings      *store.NativeHostSettings `json:"host_settings,omitempty"`
+	// HostSettingsRef records which host settings revision the view was admitted
+	// under; native tool authority is looked up against it.
+	HostSettingsRef *HostSettingsRef `json:"host_settings_ref,omitempty"`
 }
 
 func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error) {

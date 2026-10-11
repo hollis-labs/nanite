@@ -253,11 +253,16 @@ func (l *LocalAuthority) ListTools(ctx context.Context, authorityID string) ([]N
 
 // ResolveToolNames returns the tools a native view may be offered or run: the
 // grants of the live authority whose reviewed host settings revision AND
-// definition pin still equal what is in force now. Settings that changed since
+// definition pin still equal what is in force now, and only when the view was
+// admitted with that same revision (a view created under older settings keeps
+// running under those settings and does not inherit a later review). Settings that changed since
 // the review, a disabled host, a revoked authority and a tool that is no longer
 // available all yield nothing for that tool. It is read on every dispatch, so a
 // revocation reaches a turn already running.
-func (l *LocalAuthority) ResolveToolNames(ctx context.Context, hostSettingsID string) ([]string, error) {
+func (l *LocalAuthority) ResolveToolNames(ctx context.Context, hostSettingsID, admittedRevision string) ([]string, error) {
+	if hostSettingsID == "" || admittedRevision == "" {
+		return []string{}, nil
+	}
 	rows, err := l.s.DB.QueryContext(ctx, `
 		SELECT k.name
 		  FROM agent_host_settings h
@@ -268,8 +273,8 @@ func (l *LocalAuthority) ResolveToolNames(ctx context.Context, hostSettingsID st
 		   AND a.semantic_digest = h.semantic_digest
 		  JOIN native_authority_tools t ON t.authority_id = a.id
 		  JOIN known_tools k ON k.id = t.tool_id
-		 WHERE h.id = ? AND h.enabled = 1 AND a.enabled = 1 AND a.revoked_at IS NULL AND k.status = 'available'
-		 ORDER BY k.name`, hostSettingsID)
+		 WHERE h.id = ? AND h.revision = ? AND h.enabled = 1 AND a.enabled = 1 AND a.revoked_at IS NULL AND k.status = 'available'
+		 ORDER BY k.name`, hostSettingsID, admittedRevision)
 	if err != nil {
 		return nil, fmt.Errorf("resolve native tool grants: %w", err)
 	}

@@ -148,6 +148,8 @@ type ChatServiceConfig struct {
 	// Permissions engine — nil-safe (permissions disabled).
 	Permissions        *permissionlib.Engine
 	CognitiveApprovals *approval.Registry
+	// NativeGrants decides native-view tool authority (nil: native turns stay tool-free).
+	NativeGrants *NativeGrants
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). nil-safe.
@@ -260,7 +262,12 @@ type chatServiceImpl struct {
 	utilityModel       string
 	permissions        *permissionlib.Engine
 	cognitiveApprovals *approval.Registry
-	pathGrants         *permission.PathGrants
+	// nativeGrants decides native-view tool authority; capabilities holds the
+	// live execution capabilities of running native turns. A nil nativeGrants
+	// leaves native turns tool-free.
+	nativeGrants *NativeGrants
+	capabilities *capabilityRegistry
+	pathGrants   *permission.PathGrants
 
 	// argValidator caches compiled JSON Schemas for tool InputSchema validation.
 	argValidator *argValidator
@@ -601,6 +608,8 @@ func NewChatService(cfg ChatServiceConfig) ChatService {
 		utilityModel:           um,
 		permissions:            cfg.Permissions,
 		cognitiveApprovals:     cfg.CognitiveApprovals,
+		nativeGrants:           cfg.NativeGrants,
+		capabilities:           newCapabilityRegistry(),
 		pathGrants:             cfg.PathGrants,
 		argValidator:           newArgValidator(),
 		resultCache:            cfg.ResultCache,
@@ -1206,6 +1215,7 @@ func (s *chatServiceImpl) launchGeneration(sourceCtx context.Context, name, sess
 	genCtx, cancel := context.WithCancel(context.WithValue(context.WithValue(effort.WithContext(context.Background(), turnEffort), cognitiveTurnContextKey{}, cognitive), cognitiveModelContextKey{}, selected))
 	if cognitive {
 		genCtx = copyClientContextSnapshot(sourceCtx, genCtx)
+		genCtx = copySubmittedBy(sourceCtx, genCtx)
 		genCtx = chat.CopyWorkingHistoryThrough(sourceCtx, genCtx)
 	}
 
@@ -1309,6 +1319,10 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 		// caller's defer doesn't deadlock waiting for a stream that
 		// will never come.
 		dispatchCtx := context.WithValue(genCtx, inFlightGenContextKey{}, current)
+		// A native turn's execution capability lives exactly as long as its run.
+		var endCapability func()
+		dispatchCtx, endCapability = s.issueNativeCapability(dispatchCtx, sessionID, assistantMsgID)
+		defer endCapability()
 		// The delta mode rides ctx here rather than on dispatcher.Request:
 		// Request is deliberately narrow, and this is a delivery choice, not
 		// something the dispatcher or its CallerType acts on.

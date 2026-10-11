@@ -12,7 +12,7 @@ import (
 
 func rootCap(t *testing.T, reg *capabilityRegistry, view string, narrow ToolNarrowing) *executionCapability {
 	t.Helper()
-	c, err := reg.issueRoot(view, "turn-"+view, "run-"+view, "view-a", "operator", narrow)
+	c, err := reg.issueRoot(view, "turn-"+view, "run-"+view, "view-a", "rev-1", "operator", narrow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ var testLimits = store.CodeModeContextLimits{DefaultLastN: 1, MaxLastN: 8, MaxMe
 func TestACapabilityCannotBeForgedOrKeptAfterItEnds(t *testing.T) {
 	reg := newCapabilityRegistry()
 	real := rootCap(t, reg, "parent", nil)
-	forged := &executionCapability{id: real.id, subjectViewID: "parent", turnID: "t", hostSettingsID: "view-a", submittedBy: "operator", reg: reg}
+	forged := &executionCapability{id: real.id, subjectViewID: "parent", turnID: "t", hostSettingsID: "view-a", admittedRevision: "rev-1", submittedBy: "operator", reg: reg}
 	var zero executionCapability
 	for name, c := range map[string]*executionCapability{"copy with the same id": forged, "zero value": &zero, "nil": nil} {
 		if c.isLive() {
@@ -47,10 +47,10 @@ func TestACapabilityCannotBeForgedOrKeptAfterItEnds(t *testing.T) {
 	if _, ok := executionCapabilityFrom(withExecutionCapability(context.Background(), real)); ok {
 		t.Fatal("ended capability accepted from context")
 	}
-	if _, err := reg.issueRoot("", "t", "r", "h", "c", nil); err == nil {
+	if _, err := reg.issueRoot("", "t", "r", "h", "rev", "c", nil); err == nil {
 		t.Fatal("issued a capability with no view")
 	}
-	if _, err := reg.issueRoot("v", "t", "r", "h", "", nil); err == nil {
+	if _, err := reg.issueRoot("v", "t", "r", "h", "rev", "", nil); err == nil {
 		t.Fatal("issued a capability with no submitting credential")
 	}
 }
@@ -242,7 +242,7 @@ func TestCapabilityVerifierThroughTheRealForkAndHistoryPaths(t *testing.T) {
 	}
 	reg := newCapabilityRegistry()
 	v := newNativeForkVerifier(testLimits)
-	root, err := reg.issueRoot(parent.ID, "turn", "run", "view-a", "operator", nil)
+	root, err := reg.issueRoot(parent.ID, "turn", "run", "view-a", "rev-1", "operator", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

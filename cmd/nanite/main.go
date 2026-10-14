@@ -346,20 +346,15 @@ func cmdServeWithInitializers(
 	plugin.SetEnvelopeTypeRegistrar(chat.RegisterEnvelopeType)
 	plugin.SetEnvelopeTypeUnregistrar(chat.UnregisterEnvelopeType)
 
-	// B.11 strict envelope validation: cache developer_mode once at startup
-	// rather than querying the settings store on every FilterPluginEnvelopes
-	// call. Envelope filtering runs on every plugin command / event / MCP
-	// response, so a DB hit per envelope would be avoidable latency. Changes
-	// to developer_mode require a process restart to take effect in the
-	// envelope validator — acceptable because this is a developer-tooling
-	// knob, not a runtime-tunable behavior.
-	envelopeValidatorDevMode := false
+	// Plugin envelope validation is always strict: invalid envelopes are dropped.
+	// cliDeveloperMode is the interim source for Claude's developer launch variant
+	// (CW-20261014-0151: pending the owner's answer on how that variant is selected).
+	cliDeveloperMode := false
 	if settings, err := s.GetUserSettings(envelopeCtx); err != nil {
-		slog.Warn("envelope validator dev mode: failed to read user settings at startup; defaulting to production-strict", "error", err)
+		slog.Warn("failed to read user settings at startup; native Claude launches use the standard variant", "error", err)
 	} else {
-		envelopeValidatorDevMode = settings.DeveloperMode
+		cliDeveloperMode = settings.DeveloperMode
 	}
-	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
 
 	// Set up provider registry (API keys, CLI adapters).
 	registry, providerCatalog := initProviders()
@@ -510,7 +505,7 @@ func cmdServeWithInitializers(
 		MaxCLIProcesses:          maxCLIProcs,
 		CoordStore:               coord,
 		Worktrees:                wtMgr,
-		CLIDeveloperMode:         envelopeValidatorDevMode,
+		CLIDeveloperMode:         cliDeveloperMode,
 		ProviderCatalog:          providerCatalog,
 		DisableEmbeddedTesseract: externalTesseract,
 		TesseractServerName:      tesseractServerName,

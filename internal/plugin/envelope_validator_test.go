@@ -83,8 +83,6 @@ func TestFilterPluginEnvelopes_ProdDropsInvalid(t *testing.T) {
 	if err := h.RegisterPluginEnvelopeSchema("p1", "card", []byte(objectSchema)); err != nil {
 		t.Fatalf("RegisterPluginEnvelopeSchema: %v", err)
 	}
-	// Ensure prod mode (default).
-	SetEnvelopeValidatorDevModeFunc(nil)
 	envs := []sdkplugin.EnvelopeOut{
 		{Type: "card", Data: map[string]interface{}{"title": "ok"}},
 		{Type: "card", Data: map[string]interface{}{"nope": true}}, // missing "title" → invalid
@@ -96,29 +94,6 @@ func TestFilterPluginEnvelopes_ProdDropsInvalid(t *testing.T) {
 	}
 	if out[0].Data["title"] != "ok" {
 		t.Fatalf("expected valid payload to pass, got %+v", out[0])
-	}
-}
-
-func TestFilterPluginEnvelopes_DevPassesWithWarning(t *testing.T) {
-	h := testHost(t)
-	if err := h.RegisterEnvelope(EnvelopeRegistryEntry{Type: "card", PluginID: "p1", Component: "C", Version: 1}); err != nil {
-		t.Fatalf("RegisterEnvelope: %v", err)
-	}
-	if err := h.RegisterPluginEnvelopeSchema("p1", "card", []byte(objectSchema)); err != nil {
-		t.Fatalf("RegisterPluginEnvelopeSchema: %v", err)
-	}
-	SetEnvelopeValidatorDevModeFunc(func() bool { return true })
-	t.Cleanup(func() { SetEnvelopeValidatorDevModeFunc(nil) })
-
-	envs := []sdkplugin.EnvelopeOut{
-		{Type: "card", Data: map[string]interface{}{"nope": true}},
-	}
-	out := h.FilterPluginEnvelopes("p1", envs)
-	if len(out) != 1 {
-		t.Fatalf("dev mode should pass invalid through, got %d", len(out))
-	}
-	if _, ok := out[0].Data["__nanite_validation_warning"]; !ok {
-		t.Fatalf("expected dev-mode warning marker, got %+v", out[0].Data)
 	}
 }
 

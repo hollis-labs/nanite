@@ -3,37 +3,10 @@ package plugin
 import (
 	"fmt"
 	"os"
-	"sync/atomic"
 
 	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/libs/ui-go/envelopes"
 )
-
-// envelopeValidatorDevModeFn returns whether the host should treat envelope
-// validation failures as dev-mode warnings (pass-through) instead of prod-mode
-// drops. Wired from main.go via SetEnvelopeValidatorDevModeFunc; defaults to
-// nil (strict/prod behavior).
-var envelopeValidatorDevModeFn atomic.Pointer[func() bool]
-
-// SetEnvelopeValidatorDevModeFunc installs the runtime developer-mode signal
-// used by plugin envelope validation. The function is called once per
-// FilterPluginEnvelopes invocation; callers should make it cheap (cache the
-// settings read if needed). Passing nil clears the override and reverts to
-// production-strict behavior.
-func SetEnvelopeValidatorDevModeFunc(fn func() bool) {
-	if fn == nil {
-		envelopeValidatorDevModeFn.Store(nil)
-		return
-	}
-	envelopeValidatorDevModeFn.Store(&fn)
-}
-
-func isEnvelopeValidatorDevMode() bool {
-	if p := envelopeValidatorDevModeFn.Load(); p != nil {
-		return (*p)()
-	}
-	return false
-}
 
 // pluginRegistryName is the key under which a plugin envelope type lives
 // in the shared go-envelopes Registry. The lib's RegisterTypeFromManifest
@@ -125,11 +98,8 @@ func (h *Host) ValidatePluginEnvelope(pluginID, envType string, data any) error 
 }
 
 // FilterPluginEnvelopes validates each emitted envelope against its plugin's
-// declared schema and returns the list that should flow downstream. In
-// production mode (default) invalid envelopes are dropped with an error log;
-// in developer mode (set via SetEnvelopeValidatorDevModeFunc) they pass
-// through with a warning log and a "__nanite_validation_warning" marker
-// injected into Data so the UI layer can surface the fault during development.
+// declared schema and returns the list that should flow downstream. Invalid
+// envelopes are always dropped with an error log; there is no pass-through mode.
 //
 // Core-generated envelopes (e.g. from a tool's <!--ENVELOPE_DATA:...-->
 // marker, captured by captureEnvelopeData in internal/service/chat_generate.go)
@@ -139,22 +109,11 @@ func (h *Host) FilterPluginEnvelopes(pluginID string, envs []sdkplugin.EnvelopeO
 	if len(envs) == 0 {
 		return envs
 	}
-	dev := isEnvelopeValidatorDevMode()
 	out := make([]sdkplugin.EnvelopeOut, 0, len(envs))
 	for _, env := range envs {
 		if err := h.ValidatePluginEnvelope(pluginID, env.Type, env.Data); err != nil {
-			if dev {
-				h.logger.Warn("envelope validation failed (dev-mode pass-through)",
-					"plugin", pluginID, "type", env.Type, "error", err.Error())
-				if env.Data == nil {
-					env.Data = map[string]interface{}{}
-				}
-				env.Data["__nanite_validation_warning"] = err.Error()
-				out = append(out, env)
-			} else {
-				h.logger.Error("envelope validation failed — dropped",
-					"plugin", pluginID, "type", env.Type, "error", err.Error())
-			}
+			h.logger.Error("envelope validation failed — dropped",
+				"plugin", pluginID, "type", env.Type, "error", err.Error())
 			continue
 		}
 		out = append(out, env)

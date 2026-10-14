@@ -114,12 +114,6 @@ func (a *API) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if v, ok := raw["developer_mode"]; ok {
-		if err := json.Unmarshal(v, &existing.DeveloperMode); err != nil {
-			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'developer_mode'")
-			return
-		}
-	}
 	if v, ok := raw["subagent_runtime"]; ok {
 		if uerr := json.Unmarshal(v, &existing.SubagentRuntime); uerr != nil {
 			a.errorResp(w, http.StatusBadRequest, "invalid value for field 'subagent_runtime'")

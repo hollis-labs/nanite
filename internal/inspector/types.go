@@ -1,5 +1,5 @@
 // Package inspector provides the I1 per-turn event aggregator for the
-// developer-mode context inspector (CW-20260426-0004, Phase 8).
+// context inspector (CW-20260426-0004, Phase 8).
 //
 // All data is ephemeral — stored in an in-memory ring buffer keyed by
 // session_id. Nothing is persisted to SQLite; this is debug-mode only.

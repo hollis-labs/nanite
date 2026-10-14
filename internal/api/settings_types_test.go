@@ -19,7 +19,7 @@ import (
 var userSettingsViewKeys = []string{
 	"auto_repair_pref", "compaction_strategy",
 	"context_budget_pct", "context_overflow_recovery", "context_window_tokens",
-	"default_agent", "developer_mode",
+	"default_agent",
 	"embedding_mode", "embedding_model", "embedding_provider", "embedding_status",
 	"ext_settings", "provider_fallback_chain", "recover_mode",
 	"subagent_approval_required", "subagent_approval_timeout_seconds",

@@ -176,7 +176,7 @@ type ChatServiceConfig struct {
 	AdapterRegistry *agent.AdapterRegistry
 
 	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
-	// nil-safe: when nil the inspector is disabled. Set when developer_mode=true.
+	// nil-safe: when nil the inspector is disabled.
 	Inspector *inspectsvc.Service
 
 	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
@@ -284,7 +284,7 @@ type chatServiceImpl struct {
 	adapterRegistry *agent.AdapterRegistry
 
 	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
-	// nil-safe: wired only when developer_mode=true.
+	// nil-safe: the inspector service is always wired in production.
 	inspector *inspectsvc.Service
 
 	// loopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).

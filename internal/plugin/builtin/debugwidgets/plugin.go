@@ -34,7 +34,7 @@ func init() {
 }
 
 // DebugWidgetsPlugin provides developer-only debug widgets: slot inspector
-// and turn snapshots. Activates only when developer_mode is true.
+// and turn snapshots.
 //
 // The former "broker decisions" widget (SQL-backed via the now-dropped
 // broker_decisions table) was removed by
@@ -51,7 +51,7 @@ func (p *DebugWidgetsPlugin) ID() string      { return "debug-widgets" }
 func (p *DebugWidgetsPlugin) Name() string    { return "Debug Widgets" }
 func (p *DebugWidgetsPlugin) Version() string { return "1.0.0" }
 func (p *DebugWidgetsPlugin) Description() string {
-	return "Slot inspector and turn snapshot widgets (developer_mode only)"
+	return "Slot inspector and turn snapshot widgets"
 }
 func (p *DebugWidgetsPlugin) Dependencies() []string { return nil }
 

@@ -311,8 +311,7 @@ type Container struct {
 	// the field is left nil and the cancel endpoint returns 503.
 	Recovery *broker.Broker
 
-	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
-	// nil when developer_mode is false.
+	// Inspector is the I1 per-turn aggregator (CW-20260426-0004).
 	Inspector *inspectsvc.Service
 
 	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
@@ -1126,7 +1125,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SubagentInbox:      messagingSvc,
 		DBPath:             cfg.Store.DBPath(catalogCtx),
 		AdapterRegistry:    adapterRegistry,
-		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
+		// I1 (CW-20260426-0004): inspector.
 		Inspector: inspectorSvc,
 		// I2 (CW-20260420-0029): loop detector — always-on.
 		LoopDetector: loopDetector,

@@ -1688,13 +1688,6 @@ export const api = {
     if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`);
   },
 
-  // E1: returns whether dev-mode is active (env var or developer_mode setting).
-  getDevMode: async (): Promise<{ dev_mode: boolean; env_flag: boolean }> => {
-    const res = await fetch(`${API_BASE}/dev-mode`);
-    if (!res.ok) throw new Error(`Failed to get dev mode: ${res.status}`);
-    return res.json();
-  },
-
   // Agent Skills (returns Skill[], not a join-table type)
   listAgentSkills: async (agentId: string): Promise<Skill[]> => {
     const res = await fetch(`${API_BASE}/agents/${agentId}/skills`);

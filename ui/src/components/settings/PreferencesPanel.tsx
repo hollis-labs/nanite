@@ -267,12 +267,6 @@ export function PreferencesPanel() {
       </SCard>
 
       <SCard title="Advanced">
-        <SRow label="Developer Mode" description="Allow plugins to register custom React components">
-          <SToggle
-            checked={settings?.developer_mode ?? false}
-            onChange={(v) => mutation.mutate({ developer_mode: v })}
-          />
-        </SRow>
         <SRow label="Recover Mode" description="Disable all plugin UI overrides">
           <SToggle
             checked={settings?.recover_mode ?? false}

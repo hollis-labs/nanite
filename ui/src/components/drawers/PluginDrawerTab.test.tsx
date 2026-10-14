@@ -11,7 +11,7 @@ import { ChatWorkingDrawer } from "./ChatWorkingDrawer";
 import { type PluginDrawerTab, PluginDrawerTabBody } from "./PluginDrawerTab";
 
 vi.mock("@/hooks/useSettings", () => ({
-  useSettings: () => ({ data: { developer_mode: false } }),
+  useSettings: () => ({ data: {} }),
 }));
 
 afterEach(async () => {

@@ -1,10 +1,10 @@
 /**
  * InspectorPanel — I1 (CW-20260426-0004)
  *
- * Dev-mode per-turn context inspector. Surfaces slot snapshots, LLM messages,
+ * Per-turn context inspector. Surfaces slot snapshots, LLM messages,
  * broker decisions, and tool calls for every chat turn within a session.
  *
- * Gated behind developer_mode — never rendered for standard users.
+ * Served by the inspector API, which sits behind the normal API auth.
  */
 
 import { useState } from "react";
@@ -570,7 +570,7 @@ export function InspectorPanel({ sessionId: propSessionId }: InspectorPanelProps
             )}
             {!isLoading && turns.length === 0 && (
               <p className="text-[11px] text-fg-muted italic">
-                No turns recorded. Start a chat turn with developer_mode enabled.
+                No turns recorded. Start a chat turn to record snapshots.
               </p>
             )}
             <ScrollArea className="h-[560px]">

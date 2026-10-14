@@ -117,12 +117,6 @@ export const DEFAULT_WIDGET_ORDER: string[] = [
   "turn-snapshots",
 ];
 
-/** Widget IDs that require developer_mode to be visible. */
-export const DEVELOPER_ONLY_WIDGETS: Set<string> = new Set([
-  "slot-inspector",
-  "turn-snapshots",
-]);
-
 /** Validate a widget ID format. */
 export function isValidWidgetId(id: string): boolean {
   return WIDGET_ID_PATTERN.test(id);

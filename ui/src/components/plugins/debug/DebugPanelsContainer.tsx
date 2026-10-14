@@ -4,7 +4,7 @@ import { TurnSnapshotPanel } from './TurnSnapshotPanel'
 
 /**
  * Container for all debug panels. Renders in the right rail "Debug" tab
- * or anywhere debug visibility is needed. Only shown in developer_mode.
+ * or anywhere debug visibility is needed.
  */
 export function DebugPanelsContainer() {
   const activeSessionId = useAppStore((s) => s.activeSessionId)

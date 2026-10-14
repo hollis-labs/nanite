@@ -61,7 +61,6 @@ import { PluginPanelBody } from '@/components/plugins/PluginPanelBody'
 import { useAppStore } from '@/stores/useAppStore'
 import type { UserSettings } from '@/lib/types'
 import { WidgetRenderer } from './widgets/WidgetRenderer'
-import { DEVELOPER_ONLY_WIDGETS } from '@/lib/builtin-widgets'
 import { buildWidgetOrder, filterVisibleWidgets } from '@/lib/widget-order'
 import { ArtifactsContent } from './drawers/ArtifactsContent'
 import { InboxContent } from './messaging/InboxContent'
@@ -171,11 +170,10 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
     widgetMap.set(w.id, w)
   }
 
-  const developerMode = settings?.developer_mode ?? false
   const visibility = settings?.ext_settings?.widget_visibility as Record<string, boolean> | undefined
   const userOrder = settings?.ext_settings?.widget_order as string[] | undefined
   const orderedWidgetIds = buildWidgetOrder(userOrder, allWidgets, { skipPluginAppend: recoverMode })
-  const visibleWidgetIds = filterVisibleWidgets(orderedWidgetIds, developerMode, visibility)
+  const visibleWidgetIds = filterVisibleWidgets(orderedWidgetIds, visibility)
 
   const renderWidgetList: PluginUIComponent[] = visibleWidgetIds.map((id) =>
     widgetMap.get(id) ?? { id, type: 'widget' as const, name: id, description: '' },
@@ -197,7 +195,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
   const handleWidgetDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) return
-    const editIds = orderedWidgetIds.filter((id) => !DEVELOPER_ONLY_WIDGETS.has(id) || developerMode)
+    const editIds = orderedWidgetIds
     const oldIdx = editIds.indexOf(String(active.id))
     const newIdx = editIds.indexOf(String(over.id))
     if (oldIdx === -1 || newIdx === -1) return
@@ -207,7 +205,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
     settingsMutation.mutate({
       ext_settings: { ...settings?.ext_settings, widget_order: newOrder },
     } as Partial<UserSettings>)
-  }, [orderedWidgetIds, developerMode, settings?.ext_settings, settingsMutation])
+  }, [orderedWidgetIds, settings?.ext_settings, settingsMutation])
 
   // Register built-in panels on mount
   useEffect(() => {
@@ -332,7 +330,7 @@ export function RightRailV2({ inboxAgentId = 'file-default' }: RightRailV2Props)
             <div className="p-3 space-y-3">
               {editMode ? (
                 (() => {
-                  const editIds = orderedWidgetIds.filter((id) => !DEVELOPER_ONLY_WIDGETS.has(id) || developerMode)
+                  const editIds = orderedWidgetIds
                   return (
                     <DndContext sensors={dragSensors} collisionDetection={closestCenter} onDragEnd={handleWidgetDragEnd}>
                       <SortableContext items={editIds} strategy={verticalListSortingStrategy}>

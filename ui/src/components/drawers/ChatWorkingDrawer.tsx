@@ -35,7 +35,6 @@ import type { ChatDrawerTab } from '@/components/chat/ChatDrawerTabStrip'
 import { EnvelopeRenderer } from '@/components/chat/envelopes/EnvelopeRenderer'
 import { ArtifactsContent } from '@/components/drawers/ArtifactsContent'
 import { useHostRuntimeFeed } from '@/hooks/useHostRuntimeFeed'
-import { useSettings } from '@/hooks/useSettings'
 import { api, DrawerPinCapError } from '@/lib/api'
 import { resolveIcon } from '@/lib/icons'
 import { PluginDrawerTabBody, usePluginDrawerTabs } from './PluginDrawerTab'
@@ -47,10 +46,10 @@ import { useChatStore } from '@/stores/useChatStore'
 import { useLayoutStore } from '@/stores/useLayoutStore'
 import { useShellStore } from '@/stores/useShellStore'
 
-const FIXED_TABS: { id: string; label: string; devOnly?: boolean }[] = [
+const FIXED_TABS: { id: string; label: string }[] = [
   { id: 'scratchpad', label: 'Scratchpad' },
   { id: 'terminal-1', label: 'Terminal 1' },
-  { id: 'terminal-2', label: 'Terminal 2', devOnly: true },
+  { id: 'terminal-2', label: 'Terminal 2' },
   { id: 'artifacts', label: 'Artifacts' },
   { id: 'runtime', label: 'Runtime' },
   { id: 'session-context', label: 'Session Context' },
@@ -104,8 +103,6 @@ export function ChatWorkingDrawer({
   const clearPanelEnvelopes = useLayoutStore((s) => s.clearPanelEnvelopes)
   const queryClient = useQueryClient()
   const pluginTabs = usePluginDrawerTabs('drawer.working.tabs')
-  const { data: settings } = useSettings()
-  const developerMode = settings?.developer_mode ?? false
   // Lazy subscription: only connect when the drawer is open and the runtime tab is active.
   // When the drawer is closed or another tab (Scratchpad, Terminal, Artifacts) is viewed,
   // we do not consume an HTTP/1.1 socket connection.
@@ -135,9 +132,7 @@ export function ChatWorkingDrawer({
     clearPanelEnvelopes('bottom_chat_drawer', activeSessionId)
   }, [activeSessionId, panelEnvelopes, appendCardTab, clearPanelEnvelopes])
 
-  const visibleFixedTabs = developerMode
-    ? FIXED_TABS
-    : FIXED_TABS.filter((t) => !t.devOnly)
+  const visibleFixedTabs = FIXED_TABS
 
   const tabs: ChatDrawerTab[] = useMemo(() => {
     const fixed: ChatDrawerTab[] = visibleFixedTabs.map((t) => ({
@@ -663,7 +658,7 @@ function Terminal1Tab() {
 }
 
 // ── Terminal 2 tab ───────────────────────────────────────────────────────────
-// Full interactive shell — gated by developer_mode. Real implementation
+// Full interactive shell. Real implementation
 // (xterm.js or similar) deferred to a follow-up task; ship with a placeholder
 // per the plan's Step 1.
 

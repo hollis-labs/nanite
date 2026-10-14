@@ -9,7 +9,7 @@ import { registryFixture } from "@/test/plugin-registry-fixture";
 import { RightRailV2 } from "./RightRailV2";
 
 vi.mock("@/hooks/useSettings", () => ({
-  useSettings: () => ({ data: { developer_mode: false } }),
+  useSettings: () => ({ data: {} }),
   useSettingsMutation: () => ({ mutate: vi.fn() }),
 }));
 vi.mock("./widgets/WidgetRenderer", () => ({ WidgetRenderer: () => null }));

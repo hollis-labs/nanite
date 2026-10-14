@@ -1458,7 +1458,6 @@ export interface UserSettings {
   tool_stream_behavior: ToolStreamBehavior;
   tool_drawer_retention: number;
   provider_fallback_chain: string[];
-  developer_mode: boolean;
   recover_mode: boolean;
   ext_settings: Record<string, unknown> & {
     widget_visibility?: Record<string, boolean>;
@@ -1734,19 +1733,6 @@ export interface Envelope {
    * may consolidate with `EnvelopeRouting` per W1D's follow-up note.
    */
   cancel_token?: string;
-  /**
-   * CW-20260517-0008 — wrap-level marker for envelopes that are ONLY emitted
-   * when developer mode is enabled, gated behind `devModeEnabled()` in the
-   * backend (the original example, `chat-loop-budget-soft-warning`, was
-   * removed by Phase 0 item 12, 2026-08-18 — soft/telemetry-only, never
-   * gated the loop). When true, the FE renders
-   * a small "DEV" badge so operators recognize the card as dev-mode telemetry
-   * rather than a real alert. Lives at wrap level (sibling of id/type/data),
-   * stamped by `buildPluginEnvelopeWrap`. Omitted (falsy) for normal
-   * envelopes. Intentionally type-agnostic — any future dev-only envelope
-   * type gets the badge for free.
-   */
-  dev_mode_only?: boolean;
 }
 
 export interface Proposal {

@@ -264,7 +264,7 @@ func TestNativeTurnRunsAGrantedToolForACredentialThatMayRunTools(t *testing.T) {
 	}
 }
 
-// --- ask-each-time floor ------------------------------------------------------
+// --- approval prompts follow the permission engine ----------------------------
 
 // answerApproval submits a native turn and answers the first approval prompt it
 // raises (or none). It returns whether a prompt was raised and which tool.
@@ -299,26 +299,47 @@ func (e *nativeE2E) turnAnswering(t *testing.T, decision permissionlib.Decision)
 	}
 }
 
-func TestNativeTurnAsksBeforeEachUseOfPythonRunAndDevBash(t *testing.T) {
+// withToolRule replaces the e2e engine with one whose only rule for tool has
+// the given behavior, so the policy data (not the tool name) decides the outcome.
+func (e *nativeE2E) withToolRule(tool string, behavior permissionlib.Decision) {
+	e.f.svc.permissions = permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{
+		Rules: []permissionlib.Rule{{Tool: tool, Behavior: behavior}},
+	})
+	e.f.svc.cognitiveApprovals = approval.New(e.f.svc.permissions)
+}
+
+func TestNativeTurnPythonRunAndDevBashFollowPolicy(t *testing.T) {
 	for _, tool := range []string{"python_run", "dev_bash"} {
-		t.Run(tool+" denied", func(t *testing.T) {
+		t.Run(tool+" allow rule runs without a prompt", func(t *testing.T) {
 			e := newNativeE2EWithTools(t, toolUseNamedThenAnswer(tool, nil), tool)
+			asked, _ := e.turnAnswering(t, permissionlib.DecisionDeny)
+			if asked {
+				t.Fatalf("%s prompted although policy allows it", tool)
+			}
+			if calls := e.f.tools.calls(); len(calls) != 1 || calls[0] != tool {
+				t.Fatalf("%s did not run under an allow rule: %v", tool, calls)
+			}
+		})
+		t.Run(tool+" ask rule prompts and honors a denial", func(t *testing.T) {
+			e := newNativeE2EWithTools(t, toolUseNamedThenAnswer(tool, nil), tool)
+			e.withToolRule(tool, permissionlib.DecisionAsk)
 			asked, who := e.turnAnswering(t, permissionlib.DecisionDeny)
 			if !asked || who != tool {
-				t.Fatalf("no approval prompt for %s (asked=%v for %q)", tool, asked, who)
+				t.Fatalf("no approval prompt for %s under an ask rule (asked=%v for %q)", tool, asked, who)
 			}
 			if calls := e.f.tools.calls(); len(calls) != 0 {
 				t.Fatalf("%s ran after the prompt was denied: %v", tool, calls)
 			}
 		})
-		t.Run(tool+" allowed once", func(t *testing.T) {
+		t.Run(tool+" deny rule wins", func(t *testing.T) {
 			e := newNativeE2EWithTools(t, toolUseNamedThenAnswer(tool, nil), tool)
+			e.withToolRule(tool, permissionlib.DecisionDeny)
 			asked, _ := e.turnAnswering(t, permissionlib.DecisionAllow)
-			if !asked {
-				t.Fatalf("no approval prompt for %s", tool)
+			if asked {
+				t.Fatalf("%s prompted under a deny rule", tool)
 			}
-			if calls := e.f.tools.calls(); len(calls) != 1 || calls[0] != tool {
-				t.Fatalf("%s did not run after approval: %v", tool, calls)
+			if calls := e.f.tools.calls(); len(calls) != 0 {
+				t.Fatalf("%s ran under a deny rule: %v", tool, calls)
 			}
 		})
 	}

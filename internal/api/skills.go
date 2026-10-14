@@ -14,16 +14,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// devModeEnabled reports UserSettingsService.DevModeEnabled: NANITE_DEVMODE
-// or user_settings.developer_mode. E1 (CW-20260428-0016) gates the
-// inline-edit affordances on internal skills behind this check.
-func (a *API) devModeEnabled(r *http.Request) bool {
-	if a.Services.Settings == nil {
-		return service.EnvDevModeOn()
-	}
-	return a.Services.Settings.DevModeEnabled(r.Context())
-}
-
 func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	var skills []store.Skill
 	var err error
@@ -267,16 +257,6 @@ func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-// handleGetDevMode returns whether the dev-mode editor affordances are
-// active. E1 (CW-20260428-0016): the FE checks this on render to decide
-// whether to surface the "edit internal skill" path.
-func (a *API) handleGetDevMode(w http.ResponseWriter, r *http.Request) {
-	a.jsonResp(w, http.StatusOK, map[string]any{
-		"dev_mode": a.devModeEnabled(r),
-		"env_flag": service.EnvDevModeOn(),
-	})
 }
 
 // TASKS/skills/05: install/sync REST surface — the operator-facing trigger

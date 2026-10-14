@@ -457,7 +457,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// (POST /api/skills/{id}/fork-to-user) is removed along with
 	// handleForkSkillToUser and ForkSkillToUserRequest — see
 	// internal/api/skills.go's doc comment at the old handler's site.
-	mux.HandleFunc("GET /api/dev-mode", a.handleGetDevMode)
 	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleRetiredAgentMutation)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRetiredAgentMutation)

@@ -39,35 +39,6 @@ func (f *fakeUserSettingsStore) UpdateUserSettings(_ context.Context, us *store.
 	return nil
 }
 
-func TestUserSettingsDevModeEnabled(t *testing.T) {
-	loadErr := errors.New("db down")
-	for _, tc := range []struct {
-		name    string
-		env     string
-		devMode bool
-		getErr  error
-		want    bool
-	}{
-		{name: "env on, setting off", env: "yes", want: true},
-		{name: "env on, load error", env: " TRUE ", getErr: loadErr, want: true},
-		{name: "env off, setting on", devMode: true, want: true},
-		{name: "env off, setting off", want: false},
-		{name: "env off, load error", getErr: loadErr, want: false},
-		{name: "env not truthy, setting off", env: "0", want: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("NANITE_DEVMODE", tc.env)
-			svc := NewUserSettingsService(&fakeUserSettingsStore{
-				us:     &store.UserSettings{DeveloperMode: tc.devMode},
-				getErr: tc.getErr,
-			})
-			if got := svc.DevModeEnabled(context.Background()); got != tc.want {
-				t.Fatalf("DevModeEnabled = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestUserSettingsUpdateToolLoadPreferences(t *testing.T) {
 	ctx := context.Background()
 
@@ -178,49 +149,4 @@ func TestAgentCapabilitiesListAlwaysAllowedToolNames(t *testing.T) {
 
 func (f *fakeUserSettingsStore) GetAdminPreferences(context.Context) (*store.AdminPreferences, error) {
 	return nil, errors.New("settings unavailable")
-}
-
-func TestUserSettingsFreshInstallDeveloperModeOffAndOptInSurvivesReopen(t *testing.T) {
-	t.Setenv("NANITE_DEVMODE", "")
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "fresh.db")
-	st, err := store.New(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close(ctx) })
-	if seedErr := st.Seed(ctx); seedErr != nil {
-		t.Fatal(seedErr)
-	}
-	settings, err := st.GetUserSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if settings.DeveloperMode || NewUserSettingsService(st).DevModeEnabled(ctx) {
-		t.Fatal("fresh fully migrated/seeded install enabled developer mode")
-	}
-	if closeErr := st.Close(ctx); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	st, err = store.New(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if NewUserSettingsService(st).DevModeEnabled(ctx) {
-		t.Fatal("reopen enabled developer mode without opt-in")
-	}
-	settings.DeveloperMode = true
-	if updateErr := st.UpdateUserSettings(ctx, settings); updateErr != nil {
-		t.Fatal(updateErr)
-	}
-	if closeErr := st.Close(ctx); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	st, err = store.New(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !NewUserSettingsService(st).DevModeEnabled(ctx) {
-		t.Fatal("reopen discarded stored developer-mode opt-in")
-	}
 }

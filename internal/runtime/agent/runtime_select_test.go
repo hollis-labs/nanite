@@ -106,8 +106,8 @@ func TestCanLaunch(t *testing.T) {
 }
 
 // With no injected adapter, selectAdapter builds the registry's own
-// go-providers adapter in Nanite's mode; DeveloperMode turns on Claude's
-// --dangerously-skip-permissions.
+// go-providers adapter in Nanite's mode; yolo permission mode turns on
+// Claude's --dangerously-skip-permissions.
 func TestSelectAdapter_RegistryNative(t *testing.T) {
 	for _, tc := range []struct {
 		provider string
@@ -123,7 +123,7 @@ func TestSelectAdapter_RegistryNative(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a, err := selectAdapter(&Dependencies{DeveloperMode: tc.dev}, sel, "", "")
+		a, err := selectAdapter(withYolo(&Dependencies{}, tc.dev), sel, "", "")
 		if err != nil {
 			t.Fatalf("selectAdapter(%s): %v", tc.provider, err)
 		}
@@ -142,7 +142,7 @@ func TestSelectAdapter_RegistryNative(t *testing.T) {
 		if !tc.dev {
 			for _, arg := range args {
 				if arg == "--dangerously-skip-permissions" {
-					t.Errorf("%s argv = %q carries the developer flag without DeveloperMode", tc.provider, args)
+					t.Errorf("%s argv = %q carries the developer flag outside yolo mode", tc.provider, args)
 				}
 			}
 		}
@@ -154,7 +154,7 @@ func TestSelectAdapter_RegistryNative(t *testing.T) {
 // It pins the c200/c202 regression chain: Nanite's Claude is the
 // streaming-stdio shape (`-p --input-format stream-json --output-format
 // stream-json --verbose`), never print mode's empty `-p ""` nor the PTY
-// TUI's bare argv, and developer mode adds --dangerously-skip-permissions
+// TUI's bare argv, and yolo mode adds --dangerously-skip-permissions
 // exactly once.
 func TestSelectAdapter_ClaudeIsStreamingStdioShape(t *testing.T) {
 	sel, err := selectRuntime("claude", nil)
@@ -162,7 +162,7 @@ func TestSelectAdapter_ClaudeIsStreamingStdioShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, dev := range []bool{false, true} {
-		a, err := selectAdapter(&Dependencies{DeveloperMode: dev}, sel, "", "")
+		a, err := selectAdapter(withYolo(&Dependencies{}, dev), sel, "", "")
 		if err != nil {
 			t.Fatalf("selectAdapter(dev=%v): %v", dev, err)
 		}

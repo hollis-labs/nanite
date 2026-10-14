@@ -3,12 +3,14 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/harness/adapters"
 	"github.com/hollis-labs/substrate/harness/adapters/launch"
 	"github.com/hollis-labs/substrate/harness/adapters/registry"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
@@ -142,7 +144,7 @@ func launchSupported(sel RuntimeSelection) bool {
 
 // selectAdapter builds the wrapper adapter for sel through launch.Select.
 // Native: the registry's own go-providers adapter, Claude's developer variant
-// when deps.DeveloperMode is set, with workRootArgs at the convention's extra
+// when the permission engine is in yolo mode, with workRootArgs at the convention's extra
 // slot. ACP: the shipped protocol adapter for the mode. deps.NativeCLIAdapter
 // and deps.ACPAdapterFactory are test seams; production leaves both nil.
 //
@@ -179,7 +181,16 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 		}
 	}
 	if selection.CLIAdapter == nil {
-		selection.DeveloperMode = deps.DeveloperMode && sel.Runtime == runtimes.Claude
+		if sel.Runtime == runtimes.Claude && deps.yoloMode() {
+			selection.DeveloperMode = true
+			slog.Warn("AUDIT agent launch: Claude developer variant (--dangerously-skip-permissions) because the permission mode is yolo")
+		}
 	}
 	return launch.Select(selection)
+}
+
+// yoloMode reports whether the permission engine is in yolo mode right now. It
+// is the only thing that selects Claude's developer launch variant.
+func (d *Dependencies) yoloMode() bool {
+	return d != nil && d.Permissions != nil && d.Permissions.Mode() == permissionlib.ModeYolo
 }

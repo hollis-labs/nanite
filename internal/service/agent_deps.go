@@ -38,15 +38,14 @@ import (
 // runner and (eventually) the background dispatcher without re-creating the
 // shared wrapper session registry.
 type AgentDepsConfig struct {
-	Store            *store.Store
-	PathGrants       *permission.PathGrants
-	Streams          *StreamManager
-	CLIDeveloperMode bool
-	WorkspacesRoot   string
-	BinaryPath       string
-	DBPath           string
-	SandboxBaseProf  sandbox.Profile
-	Permissions      *permissionlib.Engine
+	Store           *store.Store
+	PathGrants      *permission.PathGrants
+	Streams         *StreamManager
+	WorkspacesRoot  string
+	BinaryPath      string
+	DBPath          string
+	SandboxBaseProf sandbox.Profile
+	Permissions     *permissionlib.Engine
 	// RuntimeFeed is the session-scoped, durable public projection of the
 	// canonical wrapper event stream. Nil keeps focused dependency tests and
 	// embedding callers on the legacy-only path.
@@ -226,7 +225,6 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		TypedEventCallback:  bridge.typedCallback,
 		Permissions:         cfg.Permissions,
 		ApprovalRequestSink: approvalRequestSink,
-		DeveloperMode:       cfg.CLIDeveloperMode,
 		MCPConfig: runtimeagent.MCPConfig{
 			BinaryPath: binPath,
 			DBPath:     dbPath,

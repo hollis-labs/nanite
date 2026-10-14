@@ -79,12 +79,10 @@ type Dependencies struct {
 	Permissions         *permissionlib.Engine
 	ApprovalRequestSink func(*permissionlib.ApprovalRequest)
 
-	// DeveloperMode selects Claude's native developer variant
-	// (--dangerously-skip-permissions) for every native Claude launch.
-	// Adapters come from the go-providers registry through
-	// go-agent-wrapper's launch.Select (runtime_select.go); there is no
-	// adapter index to register (CW-20260930-0113).
-	DeveloperMode bool
+	// Claude's native developer variant (--dangerously-skip-permissions) is
+	// selected only while Permissions is in yolo mode (runtime_select.go);
+	// there is no separate flag. Adapters come from the go-providers registry
+	// through go-agent-wrapper's launch.Select (CW-20260930-0113).
 
 	// NativeCLIAdapter is a test seam: when it returns non-nil for a
 	// runtime, that adapter is used instead of the registry's for a

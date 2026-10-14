@@ -33,6 +33,7 @@ import (
 	gosched "github.com/hollis-labs/libs/util/scheduler"
 	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -347,13 +348,20 @@ func cmdServeWithInitializers(
 	plugin.SetEnvelopeTypeUnregistrar(chat.UnregisterEnvelopeType)
 
 	// Plugin envelope validation is always strict: invalid envelopes are dropped.
-	// cliDeveloperMode is the interim source for Claude's developer launch variant
-	// (CW-20261014-0151: pending the owner's answer on how that variant is selected).
-	cliDeveloperMode := false
-	if settings, err := s.GetUserSettings(envelopeCtx); err != nil {
-		slog.Warn("failed to read user settings at startup; native Claude launches use the standard variant", "error", err)
+	// The permission engine's boot mode is explicit (env or config), never derived
+	// from another setting; yolo is logged as an audit line by the container.
+	bootPermissionMode := permissionlib.ModeDefault
+	var permConfigValue string
+	if cfg != nil {
+		permConfigValue = cfg.PermissionMode
+	}
+	if mode, source, err := service.ResolveBootPermissionMode(permConfigValue, os.Getenv(service.PermissionModeEnv)); err != nil {
+		slog.Warn("ignoring invalid permission mode; using default", "err", err)
 	} else {
-		cliDeveloperMode = settings.DeveloperMode
+		bootPermissionMode = mode
+		if mode != permissionlib.ModeDefault {
+			slog.Info("permission mode set at boot", "mode", string(mode), "source", source)
+		}
 	}
 
 	// Set up provider registry (API keys, CLI adapters).
@@ -505,7 +513,7 @@ func cmdServeWithInitializers(
 		MaxCLIProcesses:          maxCLIProcs,
 		CoordStore:               coord,
 		Worktrees:                wtMgr,
-		CLIDeveloperMode:         cliDeveloperMode,
+		PermissionMode:           bootPermissionMode,
 		ProviderCatalog:          providerCatalog,
 		DisableEmbeddedTesseract: externalTesseract,
 		TesseractServerName:      tesseractServerName,

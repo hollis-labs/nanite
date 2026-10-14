@@ -61,6 +61,11 @@ type RuntimeConfig struct {
 	// self-tool calls fail with "unknown workflow" but nothing else changes
 	// ("no catalog → no behavior change").
 	WorkflowDefinitionsPath string `yaml:"workflow_definitions_path"`
+	// PermissionMode is the permission engine's mode at boot: default,
+	// accept-edits, plan or yolo. Empty means default. The environment
+	// variable NANITE_PERMISSION_MODE overrides it. Yolo is only ever set
+	// explicitly; nothing derives it from another setting.
+	PermissionMode string `yaml:"permission_mode"`
 	// Tesseract is the optional Tesseract v0.9 stdio MCP process. A non-empty
 	// command registers it under the tesseract server name.
 	Tesseract TesseractConfig `yaml:"tesseract"`

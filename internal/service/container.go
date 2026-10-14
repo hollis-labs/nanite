@@ -436,11 +436,10 @@ type ContainerConfig struct {
 	// CLI process concurrency limit (0 = unlimited).
 	MaxCLIProcesses int
 
-	// CLIDeveloperMode runs native Claude agents in Claude's developer
-	// variant (--dangerously-skip-permissions). Adapters themselves come
-	// from the go-providers registry through launch.Select
-	// (CW-20260930-0113); there is no adapter slice to thread.
-	CLIDeveloperMode bool
+	// PermissionMode is the permission engine's mode at boot (see
+	// ResolveBootPermissionMode). Empty means default. Claude's developer
+	// launch variant follows the engine's effective mode, not a separate flag.
+	PermissionMode permissionlib.Mode
 
 	// ProviderCatalog is the registry-backed dropdown catalog
 	// (CW-20260526-0001). nil-safe — when nil, handleListProviders falls
@@ -976,14 +975,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	orchestrator := chat.NewOrchestrator(cfg.Providers, cfg.MCP)
 
-	// Permission engine. Yolo mode when developer_mode=1 so dev-mode sessions
-	// never hit approval prompts.
+	// Permission engine. The mode is explicit: default unless the operator set
+	// NANITE_PERMISSION_MODE or permission_mode, or changes it at runtime
+	// through PUT /api/permissions/mode. Nothing else selects yolo.
 	permissions := permissionlib.NewEngine(permissionlib.ModeDefault, nil,
 		permissionlib.WithFileEditTools("dev_edit", "dev_write"),
 		permissionlib.WithAuditor(permissionlib.SlogAuditor{}),
 	)
-	if us, err := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us.DeveloperMode {
-		permissions.SetMode(permissionlib.ModeYolo)
+	if cfg.PermissionMode != "" && cfg.PermissionMode != permissionlib.ModeDefault {
+		permissions.SetMode(cfg.PermissionMode)
+	}
+	if permissions.Mode() == permissionlib.ModeYolo {
+		slog.Warn("AUDIT service container: permission mode is YOLO; approval prompts are bypassed and Claude CLI agents launch with --dangerously-skip-permissions")
+	} else {
+		slog.Info("service container: permission mode", "mode", string(permissions.Mode()))
 	}
 
 	// (pathGrants is constructed earlier and shared with ContextClient so the
@@ -1029,13 +1034,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 	}()
 
-	// I1 (CW-20260426-0004): inspector service — dev-mode only.
-	// Created unconditionally but only populated/queried when developer_mode=true.
-	var inspectorSvc *inspectsvc.Service
-	if us, err := cfg.Store.GetUserSettings(catalogCtx); err == nil && us.DeveloperMode {
-		inspectorSvc = inspectsvc.NewService()
-		slog.Info("service container: inspector service enabled (developer_mode=true)")
-	}
+	// I1 (CW-20260426-0004): inspector service — always on; its endpoints sit
+	// behind the normal API auth like every other route.
+	inspectorSvc := inspectsvc.NewService()
 
 	// I2 (CW-20260420-0029): loop detector — always-on, per-session windows.
 	// Instantiated once at container boot; shared across all sessions.
@@ -1063,7 +1064,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Store:            cfg.Store,
 		PathGrants:       pathGrants,
 		Streams:          streams,
-		CLIDeveloperMode: cfg.CLIDeveloperMode,
 		DBPath:           cfg.Store.DBPath(catalogCtx),
 		MCP:              cfg.MCP,
 		Providers:        cfg.Providers,
@@ -1087,7 +1087,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentBridge := agentDepsBundle.Bridge
 	agentBootDir := agentDepsBundle.BootDirAdapter
 	slog.Info("service container: agent runtime dependencies built",
-		"cli_developer_mode", cfg.CLIDeveloperMode,
 		"workspaces_root", agentDeps.WorkspacesRoot,
 		"agent_protected_dirs", cfg.AgentControlPlane.Dirs,
 		"agent_writable_exceptions", cfg.AgentControlPlane.Writable)

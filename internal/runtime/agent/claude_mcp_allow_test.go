@@ -71,7 +71,7 @@ func TestSelectAdapter_ClaudeArgvCarriesTheMCPAllowRule(t *testing.T) {
 	boot := plantedBootDir(t)
 	planted := filepath.Join(boot, ".mcp.json")
 	deps := func(dev bool) *Dependencies {
-		return &Dependencies{DeveloperMode: dev, MCPConfig: testMCPConfig}
+		return withYolo(&Dependencies{MCPConfig: testMCPConfig}, dev)
 	}
 
 	for _, tc := range []struct {
@@ -81,7 +81,7 @@ func TestSelectAdapter_ClaudeArgvCarriesTheMCPAllowRule(t *testing.T) {
 		strict string
 	}{
 		{"streaming", runtimes.ModeStreamingStdio, false, ""},
-		{"streaming, developer mode", runtimes.ModeStreamingStdio, true, ""},
+		{"streaming, yolo mode", runtimes.ModeStreamingStdio, true, ""},
 		{"per turn, whose prompt follows a --", runtimes.ModeSubprocessPerTurn, false, ""},
 		{"streaming, strict MCP off", runtimes.ModeStreamingStdio, false, "0"},
 		{"per turn, strict MCP off", runtimes.ModeSubprocessPerTurn, false, "0"},

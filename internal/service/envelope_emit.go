@@ -37,13 +37,6 @@ type EnvelopeRouting struct {
 	RenderTargetBlocked string
 	Mode                string
 	DisplayClass        EnvelopeDisplayClass
-	// DevModeOnly marks an envelope that is only emitted when developer mode
-	// is enabled (the original example, chat-loop-budget-soft-warning, was
-	// removed by Phase 0 item 12, 2026-08-18). The FE renders a small "DEV"
-	// badge so operators recognize it as dev-mode telemetry rather than a
-	// real alert. Wire field `dev_mode_only`; omitted when false
-	// (CW-20260517-0008).
-	DevModeOnly bool
 }
 
 // Emit persists an EnvelopeInstance and pushes a "plugin_envelope" StreamEvent
@@ -81,7 +74,7 @@ func (e *ApprovalEmitterImpl) Emit(ctx context.Context, sessionID, envelopeType 
 }
 
 // buildPluginEnvelopeWrap produces the {id, type, data, target, render_target,
-// mode, render_target_blocked, display_class, dev_mode_only} wire shape
+// mode, render_target_blocked, display_class} wire shape
 // consumed by useChat's plugin_envelope handler. Routing fields come from the caller (not from inside
 // `payload`, which is the envelope's `data` blob — routing lives at
 // envelope-level, not inside `data`). Empty optional fields are omitted so
@@ -112,9 +105,6 @@ func buildPluginEnvelopeWrap(id, envelopeType string, payload []byte, routing En
 	}
 	if routing.DisplayClass != "" {
 		wrap["display_class"] = string(routing.DisplayClass)
-	}
-	if routing.DevModeOnly {
-		wrap["dev_mode_only"] = true
 	}
 	return json.Marshal(wrap)
 }

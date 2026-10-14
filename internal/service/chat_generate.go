@@ -1669,15 +1669,6 @@ func isAgentDebugEnabled(settingsJSON string) bool {
 	return settings.Debug
 }
 
-// isGlobalDebugMode checks the user_settings developer_mode flag.
-func (s *chatServiceImpl) isGlobalDebugMode() bool {
-	settings, err := s.store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
-	if err != nil {
-		return false
-	}
-	return settings.DeveloperMode
-}
-
 // earlyStopSynthesisPrompt is the user-turn prompt injected when the chat loop
 // hits its iteration ceiling (max_turns or runaway_fail_cap). The final LLM
 // call is made without tools so the model cannot recurse further.

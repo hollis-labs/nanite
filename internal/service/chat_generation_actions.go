@@ -265,8 +265,8 @@ func (s *chatServiceImpl) initializeRun(
 	for i, t := range tools {
 		toolNames[i] = t.Name
 	}
-	// Debug mode: per-agent setting or global developer_mode.
-	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
+	// Debug mode: per-agent setting.
+	debugMode := isAgentDebugEnabled(agent.Settings)
 
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().

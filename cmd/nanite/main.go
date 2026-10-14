@@ -1084,7 +1084,7 @@ func initProviders() (*provider.Registry, *providercatalog.Catalog) {
 	// spawn through internal/runtime/agent.Boot, which takes each runtime's
 	// adapter from the go-providers registry through go-agent-wrapper's
 	// launch.Select (CW-20260930-0113). There is no adapter list to build
-	// here; dev mode reaches Claude as ContainerConfig.CLIDeveloperMode.
+	// here; yolo permission mode selects Claude's developer variant at launch.
 	return registry, catalog
 }
 

@@ -33,8 +33,8 @@ import (
 // Output is the FULL inventory regardless of caller — this primitive is
 // a catalog, not a permission check. Whether any specific tool is
 // actually reachable for the calling agent is governed elsewhere: the
-// agent profile's tool permissions, the dev-mode gate, and project /
-// session preload policy. Agents (and humans reading the result) should
+// agent profile's tool permissions and project / session preload
+// policy. Agents (and humans reading the result) should
 // not infer per-agent reach from the presence or absence of a tool in
 // this output.
 //
@@ -179,7 +179,7 @@ type inventoryEntry struct {
 // available and falling back to the in-process self-tools when not.
 //
 // Output is the full inventory regardless of caller. Per-agent reach
-// (permissions, dev-mode gate, project/session policy) is enforced
+// (permissions, project/session policy) is enforced
 // elsewhere; this function is a registry view, not a filter. ctx is
 // reserved for future per-call signals (request-scoped logging,
 // cancellation when an inventory source becomes async); the current

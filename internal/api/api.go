@@ -603,7 +603,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Debug
 
-	// Inspector (I1 — dev-mode per-turn aggregator, CW-20260426-0004)
+	// Inspector (I1 — per-turn aggregator, CW-20260426-0004)
 	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns", a.handleInspectorListTurns)
 	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns/{turn_id}", a.handleInspectorGetTurn)
 

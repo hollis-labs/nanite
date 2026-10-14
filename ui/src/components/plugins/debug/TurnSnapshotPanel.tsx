@@ -42,7 +42,7 @@ export function TurnSnapshotContent({ sessionId }: TurnSnapshotPanelProps) {
   }, [metrics])
 
   if (isLoading) return <p className="text-[11px] text-fg-muted">Loading...</p>
-  if (snapshots.length === 0) return <p className="text-[11px] text-fg-faint">No snapshots captured. Enable debug mode on the agent or turn on developer mode in settings.</p>
+  if (snapshots.length === 0) return <p className="text-[11px] text-fg-faint">No snapshots captured. Enable debug mode on the agent.</p>
 
   return (
     <div className="space-y-1">

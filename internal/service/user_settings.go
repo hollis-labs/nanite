@@ -27,7 +27,7 @@ type userSettingsStore interface {
 //
 // The rules transports apply to individual fields live here as well: the
 // enum validators for a settings update, tool load-preference validation
-// and merge, and the dev-mode check. Store errors are returned unwrapped,
+// and merge. Store errors are returned unwrapped,
 // because the API echoes some of them verbatim.
 type UserSettingsService struct {
 	store        userSettingsStore

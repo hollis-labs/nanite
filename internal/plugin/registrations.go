@@ -850,9 +850,8 @@ func newSubprocessHTTPHandler(transport *subprocess.Transport, handlerName strin
 // Absolute paths and relative paths that escape pluginDir via ".." segments
 // are rejected so a hostile plugin.yaml cannot coerce the host into reading
 // arbitrary files at load time. Install-time validation catches the same
-// class of issue, but this is defense-in-depth — dev-mode installs only warn
-// on suspicious schema paths, and a compiled-in builtin path with a crafted
-// manifest would otherwise bypass that check.
+// class of issue, but this is defense-in-depth for a compiled-in builtin path
+// with a crafted manifest, which never goes through install-time validation.
 func resolvePluginAssetPath(pluginDir, rel string) (string, error) {
 	if filepath.IsAbs(rel) {
 		return "", fmt.Errorf("absolute asset path %q not permitted", rel)

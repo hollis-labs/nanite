@@ -109,6 +109,17 @@ remains is defense in depth, not a boundary. User-initiated shell commands
 from the UI use the same denylist and secret filtering, and the session's
 `yolo` shell mode skips OS isolation.
 
+**Permission mode.** Tool calls are decided by the permission engine's rules
+and mode (`default`, `accept-edits`, `plan`, `yolo`; deny rules always win).
+Nanite boots in `default`. Set `NANITE_PERMISSION_MODE` or the `permission_mode`
+config key to start in another mode, or `PUT /api/permissions/mode` to change
+it at runtime. Nothing else selects `yolo`; there is no developer-mode setting.
+In `yolo`, approval prompts are bypassed, Claude CLI agents launch with
+`--dangerously-skip-permissions`, and each such launch and the boot itself log
+an `AUDIT` line. Which tools an agent may call is decided by its `agent_tools`
+grants and those rules. The one name-keyed refusal left is structural:
+`python_run` and `code_task` cannot be called from inside `python_run`.
+
 Agent CLIs that Nanite launches (Claude Code, Codex and the like) run as
 your user. Their own permission systems apply. A launched Claude is allowed
 the tools of Nanite's own MCP server (`--allowedTools=mcp__nanite__*`) and no

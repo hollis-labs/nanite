@@ -175,7 +175,7 @@ type ChatServiceConfig struct {
 	// writes are skipped.
 	AdapterRegistry *agent.AdapterRegistry
 
-	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// Inspector is the I1 per-turn aggregator (CW-20260426-0004).
 	// nil-safe: when nil the inspector is disabled.
 	Inspector *inspectsvc.Service
 
@@ -283,7 +283,7 @@ type chatServiceImpl struct {
 	// adapterRegistry is forwarded to sandbox.Populate on each CLI chat turn.
 	adapterRegistry *agent.AdapterRegistry
 
-	// inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
+	// inspector is the I1 per-turn aggregator (CW-20260426-0004).
 	// nil-safe: the inspector service is always wired in production.
 	inspector *inspectsvc.Service
 

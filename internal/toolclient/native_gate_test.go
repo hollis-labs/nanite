@@ -42,16 +42,10 @@ func TestNativeGateDecidesTheCallAndNothingFallsThrough(t *testing.T) {
 	}
 }
 
-func TestNativeGateDoesNotLiftTheDeveloperModeBackstop(t *testing.T) {
+func TestNativeGateGatesEveryCall(t *testing.T) {
 	tb := New(nil, nil, DefaultConfig())
-	tb.DeveloperModeFunc = func() bool { return false }
-	ctx := WithNativeToolGate(context.Background(), &recordingGate{allow: true})
-	_, err := tb.CallTool(ctx, "agent-x", "dev_bash", map[string]any{"command": "true"})
-	if err == nil || !strings.Contains(err.Error(), "developer_mode") {
-		t.Fatalf("an allowing gate bypassed the developer-mode gate: %v", err)
-	}
 	// A denying gate is refused before any execution is attempted.
-	_, err = tb.CallTool(WithNativeToolGate(context.Background(), &recordingGate{allow: false}), "agent-x", "todo_create", nil)
+	_, err := tb.CallTool(WithNativeToolGate(context.Background(), &recordingGate{allow: false}), "agent-x", "todo_create", nil)
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("denying gate: %v", err)
 	}
@@ -59,19 +53,6 @@ func TestNativeGateDoesNotLiftTheDeveloperModeBackstop(t *testing.T) {
 	_, err = tb.CallTool(WithNativeToolGate(context.Background(), &recordingGate{allow: true}), "agent-x", "todo_create", nil)
 	if err == nil || !strings.Contains(err.Error(), "no MCP manager") {
 		t.Fatalf("allowing gate did not reach execution: %v", err)
-	}
-}
-
-func TestOmitUnavailableDevToolsFollowsDeveloperMode(t *testing.T) {
-	tb := New(nil, nil, DefaultConfig())
-	tools := []llmtypes.ToolDefinition{{Name: "dev_read"}, {Name: "dev_bash"}, {Name: "think"}}
-	tb.DeveloperModeFunc = func() bool { return false }
-	if got := nameList(tb.OmitUnavailableDevTools(tools)); strings.Join(got, ",") != "think" {
-		t.Fatalf("developer mode off kept %v", got)
-	}
-	tb.DeveloperModeFunc = func() bool { return true }
-	if got := nameList(tb.OmitUnavailableDevTools(tools)); len(got) != 3 {
-		t.Fatalf("developer mode on dropped tools: %v", got)
 	}
 }
 

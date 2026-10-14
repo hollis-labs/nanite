@@ -4,10 +4,6 @@
 // ValidateManifest enforces the released shared manifest and Nanite contract, cross-reference consistency between declared registrations and
 // on-disk assets, and plugin-archive hygiene checks (bundle files exist, agent
 // profiles resolve, envelope schema files resolve, etc).
-//
-// DeveloperMode downgrades most "refuse" outcomes to warnings so that
-// developers iterating on a plugin can still load it without shipping every
-// asset.
 package install
 
 import (
@@ -98,11 +94,6 @@ func (e *InstallError) Warnings() []InstallFailure {
 
 // ValidationOptions tunes the validator behavior.
 type ValidationOptions struct {
-	// DeveloperMode downgrades most refuse outcomes (missing bundle files,
-	// missing envelope schemas, missing agent-profile files) to warnings.
-	// Schema violations (malformed manifest) remain refuse in developer mode.
-	DeveloperMode bool
-
 	// AllowedPlatforms optionally restricts acceptable release.platforms values
 	// to a known set. Empty means any platform string is accepted.
 	AllowedPlatforms []string
@@ -163,15 +154,6 @@ func (v *validator) warn(kind Kind, field, msg string) {
 	})
 }
 
-// refuseOrWarn adds a refusal under normal mode, warning in developer mode.
-func (v *validator) refuseOrWarn(kind Kind, field, msg string) {
-	if v.opts.DeveloperMode {
-		v.warn(kind, field, msg)
-	} else {
-		v.refuse(kind, field, msg)
-	}
-}
-
 func (v *validator) result() *InstallError {
 	if len(v.failures) == 0 {
 		return nil
@@ -205,7 +187,7 @@ func (v *validator) validateShadcnVersion(m *plugin.PluginManifest) {
 		return
 	}
 	if err := plugin.CheckShadcnCompat(m.UI.ShadcnVersion); err != nil {
-		v.refuseOrWarn(KindSchema, "ui.shadcn_version", err.Error())
+		v.refuse(KindSchema, "ui.shadcn_version", err.Error())
 	}
 }
 

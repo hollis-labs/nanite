@@ -22,6 +22,17 @@ nanite agent validate flat.md
 nanite agent install --resources resources.json flat.md
 ```
 
+`install` writes the database directly, so it needs to know which one: pass
+`-db <path>`, or set `NANITE_DB_PATH=<path>` (or `NANITE_WORKSPACE=<name>`).
+With none of them it refuses and prints the suggested default. The same
+`-db` is accepted by every offline or client subcommand (`agent`, `auth`,
+`authority`, `mcp`, `skill`, `plugin`, `profile`). For a server started with
+`serve -db X`, the CLI finds its operator token (`nanite auth token-path`)
+and credentials from the same `-db X` or `NANITE_DB_PATH=X`: the credential
+directory sits beside the database whenever one is named explicitly. The
+`nanite auth` commands talk to the server's address, `NANITE_API_URL` or
+`NANITE_PORT`, so point those at a non-default port too.
+
 `author` also accepts a standalone concrete definition without `--role`.
 Flattening keeps concrete identity, requirements, permissions, continuity and
 extensions. Behavioral prompt fields and native class may inherit. A nonnil

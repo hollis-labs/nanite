@@ -93,6 +93,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	args := os.Args[2:]
+	switch os.Args[1] {
+	case "plugin", "mcp", "skill", "profile", "agent", "auth", "authority":
+		// One -db for every offline/client subcommand; see dbflag.go.
+		cliDB, args = extractDBFlag(args)
+	}
+
 	switch os.Args[1] {
 	case "serve":
 		if err := cmdServe(os.Args[2:]); err != nil {
@@ -107,15 +114,15 @@ func main() {
 	case "chat":
 		cmdChat(os.Args[2:])
 	case "plugin":
-		cmdPlugin(os.Args[2:])
+		cmdPlugin(args)
 	case "mcp":
-		cmdMCP(os.Args[2:])
+		cmdMCP(args)
 	case "skill":
-		cmdSkill(os.Args[2:])
+		cmdSkill(args)
 	case "profile":
-		cmdProfile(os.Args[2:])
+		cmdProfile(args)
 	case "agent":
-		cmdAgent(os.Args[2:])
+		cmdAgent(args)
 	case "install":
 		cmdInstall(os.Args[2:])
 	case "message":
@@ -125,9 +132,9 @@ func main() {
 	case "path":
 		cmdPath(os.Args[2:])
 	case "auth":
-		cmdAuth(os.Args[2:])
+		cmdAuth(args)
 	case "authority":
-		cmdAuthority(os.Args[2:])
+		cmdAuthority(args)
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:

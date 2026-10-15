@@ -55,7 +55,7 @@ next turn cold-boots instead of pretending a wire-level cancel occurred.
 
 A pinned definition plus host settings with `runtime: "cli"` runs a CLI agent
 through `POST /api/agent/v1/sessions`, the same route and event stream as a
-native API agent. Claude is the supported provider.
+native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
 
 ```json
 {"version":"1","runtime":"cli","provider":"claude","model":"haiku",
@@ -68,15 +68,33 @@ native API agent. Claude is the supported provider.
   ignores `additionalDirectories` from a workspace it has not been trusted in
   and the ephemeral boot dir never is. Filesystem authority comes from the host
   document, not the request.
-- **Model.** `model` is passed to the CLI (`--model`). It is optional; a model
-  on a provider whose flag is not verified is refused.
+- **Model.** `model` is required for a CLI host and is passed to the CLI as
+  `--model`, the flag each of the four CLIs documents (`modelFlags` in
+  `factory.go`). OpenCode takes `provider/model`. A provider outside that table
+  (an ACP-only one such as Copilot or Pi) is refused when it names a model.
 - **Boot.** The view boots the host settings' projected profile (definition text
   as the system prompt, provider, model, directories), resolved by host settings
   ID, on the same `driveBootSession` path as other CLI chat. The view pins the
   host revision it was admitted under; a turn after the host is edited or
   disabled fails with `host_revision_changed`.
-- **Resume.** The provider session ID is persisted, so a turn after a server
-  restart resumes the CLI's own session with its context.
+- **Resume.** For Claude, OpenCode and Antigravity the provider session ID is
+  persisted, so a turn after a server restart resumes the CLI's own session. A
+  Codex session cannot be resumed by a later boot (it keeps its rollout under a
+  per-boot `CODEX_HOME`), so after a restart its context comes from Nanite's
+  recovery pack, not from Codex.
+- **Directories.** Claude and Antigravity are given each directory with
+  `--add-dir`; Codex gets them as `writable_roots` in its planted `config.toml`.
+- **Nanite MCP server.** Claude reads it from the planted `.mcp.json` (with the
+  strict-MCP flags and an allow rule); Codex reads it from `[mcp_servers.*]` in
+  the planted `config.toml`. agy discovers the plugin's `mcp_config.json`, but
+  its headless mode auto-denies a tool call that needs the `mcp` permission
+  unless an allow-rule exists in agy's `settings.json` (global, shared with the
+  desktop app, and not written by Nanite) or the launch is yolo.
+- **Antigravity.** The boot dir carries `AGENTS.md`, `boot.md` and a workspace
+  plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP server. agy
+  has no config-dir variable and shares its global config with the desktop app,
+  so nothing is written there and, unlike Claude, its global MCP servers still
+  load alongside the planted one.
 - **Permissions.** The CLI runs under the boot dir's Claude permissions and the
   planted strict `.mcp.json`; Nanite's tools reach it only through the Nanite
   MCP server, so tool authorization is unchanged. The developer variant

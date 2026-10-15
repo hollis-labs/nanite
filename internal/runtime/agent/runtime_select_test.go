@@ -92,12 +92,12 @@ func TestSelectRuntime(t *testing.T) {
 }
 
 // Chat routing and the subagent runner ask CanLaunch. Copilot and Pi are
-// routable now; Antigravity has no Nanite boot-dir layout yet.
+// routable now, and Antigravity has a boot-dir layout (bootdir_agy.go).
 func TestCanLaunch(t *testing.T) {
 	for name, want := range map[string]bool{
 		"claude": true, "pty-claude": true, "codex": true, "opencode": true,
 		"copilot": true, "pi": true,
-		"agy": false, "nonsense-provider": false, "": false,
+		"agy": true, "nonsense-provider": false, "": false,
 	} {
 		if got := CanLaunch(name); got != want {
 			t.Errorf("CanLaunch(%q) = %v, want %v", name, got, want)

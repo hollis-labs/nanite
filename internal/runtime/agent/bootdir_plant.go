@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/hollis-labs/substrate/harness/adapters/provider"
 	"github.com/hollis-labs/substrate/harness/agentlaunch"
 	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 	"github.com/hollis-labs/substrate/harness/workspace/materialize"
@@ -385,4 +386,26 @@ func mcpOverlay(params SetupParams) (map[string]string, error) {
 		return nil, nil
 	}
 	return map[string]string{".mcp.json": body}, nil
+}
+
+// naniteMCPServerSpec is the Nanite MCP server as a go-providers MCPServerSpec,
+// for the providers whose MCP servers are rendered by the library into the
+// provider's own config (Codex's config.toml, OpenCode's opencode.json). The
+// bool is false when MCP planting is disabled.
+func naniteMCPServerSpec(params SetupParams) (provider.MCPServerSpec, bool, error) {
+	storeScope := params.Mode != ModeLongLived && params.Mode != ModeResume
+	id, command, args, env, err := naniteMCPEntry(params.MCPConfig, params.SessionID, storeScope)
+	if err != nil || id == "" {
+		return provider.MCPServerSpec{}, false, err
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	kv := make([]string, 0, len(keys))
+	for _, k := range keys {
+		kv = append(kv, k+"="+env[k])
+	}
+	return provider.MCPServerSpec{Name: id, Command: command, Args: args, Env: kv}, true, nil
 }

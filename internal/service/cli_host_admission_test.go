@@ -48,7 +48,7 @@ func TestAdmitCLIHostRefusalsCarryACause(t *testing.T) {
 		{"acp protocol", cliHost(func(h *store.NativeHostSettings) { h.Protocol = "acp" }), "default", nil, CauseCLIHostUnsupportedField},
 		{"no directories", cliHost(func(h *store.NativeHostSettings) { h.Directories = nil }), "default", nil, CauseHostDirectoriesMissing},
 		{"relative directory", cliHost(func(h *store.NativeHostSettings) { h.Directories = []string{"work"} }), "default", nil, CauseCLIHostUnsupportedField},
-		{"model on unverified provider", cliHost(func(h *store.NativeHostSettings) { h.Provider = "codex" }), "default", nil, CauseCLIHostUnsupportedField},
+		{"model on unverified provider", cliHost(func(h *store.NativeHostSettings) { h.Provider = "copilot" }), "default", nil, CauseCLIHostUnsupportedField},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := admitCLIHost(tc.host, tc.profile, tc.req)

@@ -239,7 +239,7 @@ func (a *API) handleAgentV1CreateSession(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, service.ErrUnsupportedDefinition), errors.Is(err, service.ErrUnsupportedModel):
 			status = 422
 		}
-		a.agentV1Error(w, status, err.Error())
+		a.agentV1ErrorCause(w, status, err.Error(), service.CauseCode(err))
 		return
 	}
 	w.Header().Set("Location", agentV1RoutePrefix+"/sessions/"+url.PathEscape(sess.ID))
@@ -345,7 +345,7 @@ func (a *API) handleAgentV1SendTurn(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, service.ErrCognitiveAdmissionClosed) {
 			status = http.StatusServiceUnavailable
 		}
-		a.agentV1Error(w, status, err.Error())
+		a.agentV1ErrorCause(w, status, err.Error(), service.CauseCode(err))
 		return
 	}
 	links := agentV1TurnRoutes(sessionID, msgID)
@@ -435,6 +435,12 @@ func (a *API) agentV1LookupError(w http.ResponseWriter, err error) {
 	a.agentV1Error(w, http.StatusInternalServerError, "view lookup failed")
 }
 func (a *API) agentV1Error(w http.ResponseWriter, status int, message string) {
+	a.agentV1ErrorCause(w, status, message, "")
+}
+
+// agentV1ErrorCause is agentV1Error plus a stable cause code (see
+// service.UnsupportedCause) the client can switch on without parsing text.
+func (a *API) agentV1ErrorCause(w http.ResponseWriter, status int, message, cause string) {
 	code := "invalid_request"
 	switch status {
 	case http.StatusUnauthorized:
@@ -458,7 +464,11 @@ func (a *API) agentV1Error(w http.ResponseWriter, status int, message string) {
 		message = "internal operation failed"
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
-	a.jsonResp(w, status, map[string]any{"error": map[string]any{"code": code, "message": message, "retryable": status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests, "request_id": uuid.NewString()}})
+	body := map[string]any{"code": code, "message": message, "retryable": status == http.StatusServiceUnavailable || status == http.StatusTooManyRequests, "request_id": uuid.NewString()}
+	if cause != "" && status == http.StatusUnprocessableEntity {
+		body["cause"] = cause
+	}
+	a.jsonResp(w, status, map[string]any{"error": body})
 }
 
 func (a *API) agentV1Handler(handler http.HandlerFunc) http.HandlerFunc {

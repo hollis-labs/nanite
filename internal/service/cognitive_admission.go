@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -81,7 +80,7 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 			return "", resolveErr
 		}
 		if agent.RuntimeKind != "" && agent.RuntimeKind != "api" {
-			return "", ErrUnsupportedModel
+			return "", unsupportedModelCause(CauseRuntimeNotAPI, "agent runtime %q is not native; native chat needs runtime \"api\"", agent.RuntimeKind)
 		}
 		if providerID == "" {
 			providerID = agent.DefaultProvider
@@ -91,10 +90,10 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 		}
 	}
 	if providerID == "" || model == "" {
-		return "", fmt.Errorf("%w: no provider and model selected for this view; set them on the agent's host settings or the launch request", ErrUnsupportedModel)
+		return "", unsupportedModelCause(CauseModelNotSelected, "no provider and model selected for this view; set them on the agent's host settings or the launch request")
 	}
 	if _, ok := s.providers.Get(providerID); !ok {
-		return "", ErrUnsupportedModel
+		return "", unsupportedModelCause(CauseProviderNotRegistered, "provider %q is not a registered native provider; check its API key status and restart the server", providerID)
 	}
 	s.activeGenMu.Lock()
 	count := 0

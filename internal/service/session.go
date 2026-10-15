@@ -189,10 +189,10 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 	}
 	if !opts.SkipAgentBinding {
 		if s.native == nil {
-			return nil, ErrUnsupportedDefinition
+			return nil, unsupportedCause(CauseNativeHostUnconfigured, "this server has no native chat host configured")
 		}
 		if opts.SubagentRuntime != "" && opts.SubagentRuntime != "api" {
-			return nil, ErrUnsupportedDefinition
+			return nil, unsupportedCause(CauseRuntimeUnsupported, "runtime %q is not supported for native chat; use runtime \"api\"", opts.SubagentRuntime)
 		}
 		var requested *ModelSelection
 		if opts.Provider != "" || opts.Model != "" {

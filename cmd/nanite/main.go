@@ -100,6 +100,14 @@ func main() {
 		// One -db for every offline/client subcommand; see dbflag.go.
 		cliDB, args = extractDBFlag(args)
 	}
+	switch os.Args[1] {
+	case "auth", "authority":
+		// -db finds the credentials; --url picks the server they are sent to.
+		if u, rest := extractURLFlag(args); u != "" {
+			_ = os.Setenv(brand.Env("API_URL"), u)
+			args = rest
+		}
+	}
 
 	switch os.Args[1] {
 	case "serve":

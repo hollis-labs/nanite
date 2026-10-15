@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
@@ -38,20 +39,30 @@ import (
 // adds no tier to internal/agent/discovery.go. Every write here is the direct
 // result of one operator invocation naming one path.
 func cmdAgent(args []string) {
+	if len(args) == 0 {
+		agentUsage(os.Stderr)
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "help", "-h", "--help", "-help":
+		agentUsage(os.Stdout)
+		return
+	}
 	if err := runPinnedAgentCommand(args, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func agentUsage() {
-	fmt.Fprintf(os.Stderr, "usage: %s agent <install|sync> ...\n", brand.BinaryName)
-	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  install <path>        import an agent definition from a local path")
-	fmt.Fprintln(os.Stderr, "  sync <slug> <path>    re-run import for an already-imported agent")
-	fmt.Fprintln(os.Stderr, "flags:")
-	fmt.Fprintln(os.Stderr, "  -db <path>            database to write (else NANITE_DB_PATH / NANITE_WORKSPACE)")
-	fmt.Fprintln(os.Stderr, "  --adapter <name>      force a format adapter instead of trying each in priority order")
+func agentUsage(w io.Writer) {
+	fmt.Fprintf(w, "usage: %s agent <author|validate|install> ...\n", brand.BinaryName)
+	fmt.Fprintln(w, "commands:")
+	fmt.Fprintln(w, "  author [--role <role.md>] <definition.md>    flatten a role into an authored definition")
+	fmt.Fprintln(w, "  validate <definition.md>                     check schema and print id, revision, digest")
+	fmt.Fprintln(w, "  install [--resources <manifest.json>] <definition.md>   store a definition and print its pin")
+	fmt.Fprintln(w, "the digest covers behavior, not identity: use identity_digest to tell definitions apart")
+	fmt.Fprintln(w, "flags:")
+	fmt.Fprintln(w, "  -db <path>            database to write (else NANITE_DB_PATH / NANITE_WORKSPACE)")
 }
 
 // openAgentImporter opens the shared DB and returns a fresh Importer plus the

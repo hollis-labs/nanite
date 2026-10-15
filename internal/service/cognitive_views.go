@@ -76,10 +76,10 @@ func (f ModelAuthorizerFunc) AuthorizeModel(ctx context.Context, p DefinitionRef
 func configuredNativeModel(registry *provider.Registry, keys *providerkeys.Manager) ModelAuthorizer {
 	return ModelAuthorizerFunc(func(_ context.Context, _ DefinitionRef, requested *ModelSelection) (ModelSelection, error) {
 		if requested == nil || strings.TrimSpace(requested.Provider) == "" || strings.TrimSpace(requested.Model) == "" {
-			return ModelSelection{}, fmt.Errorf("%w: select a provider and model in the agent's host settings or the launch request", ErrUnsupportedModel)
+			return ModelSelection{}, unsupportedModelCause(CauseModelNotSelected, "select a provider and model in the agent's host settings or the launch request")
 		}
 		if _, ok := registry.Get(requested.Provider); !ok {
-			return ModelSelection{}, fmt.Errorf("%w: %s", ErrUnsupportedModel, unregisteredProviderReason(context.Background(), requested.Provider, keys))
+			return ModelSelection{}, unsupportedModelCause(CauseProviderKeyUnavailable, "%s", unregisteredProviderReason(context.Background(), requested.Provider, keys))
 		}
 		return *requested, nil
 	})
@@ -152,12 +152,15 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		if DefinitionRefFromMesh(h.DefinitionRef) != req.DefinitionRef {
 			return nil, ErrDefinitionDigestMismatch
 		}
-		if !h.Enabled || h.Settings.Runtime != "api" {
-			return nil, ErrUnsupportedDefinition
+		if !h.Enabled {
+			return nil, unsupportedCause(CauseHostDisabled, "host settings %q are disabled; enable them or launch against enabled settings", h.ID)
+		}
+		if h.Settings.Runtime != "api" {
+			return nil, unsupportedCause(CauseRuntimeNotAPI, "host settings %q use runtime %q, but native chat needs runtime \"api\"; set runtime to api on the host settings", h.ID, h.Settings.Runtime)
 		}
 		selected := ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model}
 		if req.ModelSelection != nil && *req.ModelSelection != selected {
-			return nil, ErrUnsupportedModel
+			return nil, unsupportedModelCause(CauseModelSelectionMismatch, "the requested provider/model (%s/%s) differs from the host settings (%s/%s); omit the request selection or change the host settings", req.ModelSelection.Provider, req.ModelSelection.Model, selected.Provider, selected.Model)
 		}
 		req.ModelSelection = &selected
 		cfg.HostSettings = &h.Settings

@@ -31,6 +31,9 @@ Credentials for the Nanite HTTP API (CW-20261011-0036).
   reset-operator                  OFFLINE recovery: revoke every operator credential and
                                   write a fresh one to the token file
 
+Commands talk to the server at --url <url> (else NANITE_API_URL, else NANITE_PORT,
+else http://127.0.0.1:8090); -db does not select a server.
+
 Every command takes -db <path> (or NANITE_DB_PATH) to find the credentials
 of a server started with serve -db <path>; they live beside that database.
 
@@ -134,7 +137,7 @@ func authDo(method, path string, body any) ([]byte, int, error) {
 	applyClientAuth(req)
 	resp, err := http.DefaultClient.Do(req) // #nosec G704 -- same loopback API base as above
 	if err != nil {
-		return nil, 0, fmt.Errorf("could not reach %s: %w (is `%s serve` running?)", apiBaseURL(), err, brand.BinaryName)
+		return nil, 0, fmt.Errorf("could not reach %s: %w (is `%s serve` running? -db does not choose the server: pass --url or set %s / %s)", apiBaseURL(), err, brand.BinaryName, brand.Env("API_URL"), brand.Env("PORT"))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agentauthor"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	mesh "github.com/hollis-labs/substrate/mesh"
 	"github.com/hollis-labs/substrate/mesh/agentdef"
@@ -29,8 +30,11 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 	if args[0] == "author" {
 		return authorPinnedAgent(args[1:], out)
 	}
+	if args[0] == "setup" {
+		return runAgentSetupCommand(args[1:], out)
+	}
 	if args[0] != "validate" && args[0] != "install" {
-		return fmt.Errorf("unknown agent command %q: use author, validate or install (old profile sync/import is retired); run `nanite agent help`", args[0])
+		return fmt.Errorf("unknown agent command %q: use author, validate, install or setup (old profile sync/import is retired); run `nanite agent help`", args[0])
 	}
 	fs := flag.NewFlagSet("agent "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -67,28 +71,8 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 	}
 	var resources []store.DefinitionResource
 	if *resourcePath != "" {
-		manifest, manifestErr := readAuthoredDefinitionFile(*resourcePath)
-		if manifestErr != nil {
-			return manifestErr
-		}
-		var refs []struct {
-			URI  string `json:"uri"`
-			Path string `json:"path"`
-		}
-		dec := json.NewDecoder(bytes.NewReader(manifest))
-		dec.DisallowUnknownFields()
-		if err = dec.Decode(&refs); err != nil {
+		if resources, err = readResourceManifest(*resourcePath); err != nil {
 			return err
-		}
-		if dec.Decode(new(any)) != io.EOF {
-			return errors.New("resource manifest must be one JSON array")
-		}
-		for _, ref := range refs {
-			body, resourceErr := readAuthoredDefinitionFile(ref.Path)
-			if resourceErr != nil {
-				return resourceErr
-			}
-			resources = append(resources, store.DefinitionResource{URI: ref.URI, Content: body})
 		}
 	}
 	st, err := store.New(context.Background(), resolveDBPath())
@@ -179,4 +163,44 @@ func readAuthoredDefinitionFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("authored input exceeds 1 MiB")
 	}
 	return data, nil
+}
+
+// readResourceManifest reads a URI-to-local-file JSON manifest into definition
+// resources.
+func readResourceManifest(path string) ([]store.DefinitionResource, error) {
+	manifest, err := readAuthoredDefinitionFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var refs []struct {
+		URI  string `json:"uri"`
+		Path string `json:"path"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(manifest))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(&refs); err != nil {
+		return nil, err
+	}
+	if dec.Decode(new(any)) != io.EOF {
+		return nil, errors.New("resource manifest must be one JSON array")
+	}
+	var resources []store.DefinitionResource
+	for _, ref := range refs {
+		body, err := readAuthoredDefinitionFile(ref.Path)
+		if err != nil {
+			return nil, err
+		}
+		resources = append(resources, store.DefinitionResource{URI: ref.URI, Content: body})
+	}
+	return resources, nil
+}
+
+// runAgentSetupCommand opens the database and key manager `agent setup` needs.
+func runAgentSetupCommand(args []string, out io.Writer) error {
+	st, err := store.New(context.Background(), resolveDBPath())
+	if err != nil {
+		return err
+	}
+	defer closeStoreBestEffort(context.Background(), st)
+	return runAgentSetup(context.Background(), st, service.DefaultProviderKeys(st), args, out)
 }

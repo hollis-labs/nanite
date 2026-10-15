@@ -4,6 +4,37 @@ Nanite separates three things: immutable intrinsic definitions, mutable host
 execution settings, and verified actor authority. Installing content does not
 create an actor or grant tools and skills.
 
+## The one-step path
+
+```sh
+nanite agent setup flat.md --provider anthropic --model <model> --tools all \
+  [--slug S] [--title T] [--resources resources.json] [--reason "why"] [-db path]
+```
+
+`setup` installs the definition, creates its host settings (slug from the
+definition id unless `--slug`), reviews those settings and grants the tools,
+all in one transaction. It prints the definition ref, host settings id and
+revision, the authority id, the granted tools, and a ready
+`POST /api/agent/v1/sessions` body.
+
+Everything that can be checked is checked first and refuses without writing:
+the definition parses, the runtime is supported (`api` today; `cli` is refused
+until it lands), the provider is a native API provider with a usable key (the
+refusal names the remedy, e.g. `provider set-key`; keys are never printed), and
+every named tool exists. `--tools all` grants every tool the catalog lists as
+available; it is a grant recorded like any other, not a bypass. The catalog is
+filled when the server starts, so start it once on a new database before
+asking for more than the always-included tools. Dotted names (`dev.read`) are
+read as `dev_read`; `nanite authority tools` lists the names.
+
+Running it again with the same inputs changes nothing and reports the existing
+ids (`"created": false`). A slug already used by different settings (another
+definition revision, provider, model or runtime) is refused; pass `--slug`.
+The semantic digest ignores identity, so definitions are told apart by id and
+revision, and `agent validate` also prints `identity_digest`.
+
+The steps below are what `setup` does, for when you need one on its own.
+
 ## Author and install intrinsic content
 
 Definitions use agentdef v2 frontmatter, a stable definition ID, an authored

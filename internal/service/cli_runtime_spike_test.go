@@ -61,11 +61,11 @@ func TestSpikeCLIRuntimeClaudeTurn(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			kinds = append(kinds, string(ev.Kind))
-			switch ev.Kind {
+			switch ev.Kind { //nolint:exhaustive // the spike logs only the kinds that explain a failed turn
 			case runtimeevents.KindStderrLine, runtimeevents.KindTurnFailed, runtimeevents.KindAgentDelta:
 				t.Logf("%s %.400s", ev.Kind, ev.Payload)
 			}
-			switch ev.Kind {
+			switch ev.Kind { //nolint:exhaustive // the spike reacts only to text and terminal events
 			case runtimeevents.KindAgentDelta:
 				var p struct {
 					Content string `json:"content"`

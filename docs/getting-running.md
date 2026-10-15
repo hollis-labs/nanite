@@ -4,18 +4,15 @@ A runbook for a fresh database with API auth ON: build, serve, define an agent,
 run one API agent and one CLI agent, each through a turn. `scripts/smoke-agents.sh`
 does the same sequence unattended.
 
-Status (CW-20261014-0163, scaffold): the API-agent path below was run end to
-end on `integ/nanite-usable`. The CLI-agent path needs `runtime=cli` in the
-definition flow (B2, CW-20261014-0161) and is marked **[after B2]**. Today it
-is refused; see "Known refusals". `nanite agent setup` (A2) is not on this
-branch, so agents are set up with the definition and host-settings steps that
-it will wrap.
+Host settings and sessions are created with the definition and host-settings
+steps below.
 
 ## 0. Prerequisites
 
 - Go (see `go.mod`), `jq`, `curl`.
-- For the CLI agent: a logged-in `claude` CLI (`claude --version`, run once
-  interactively to log in).
+- For the CLI agent: a logged-in provider CLI. `claude` by default; `codex`,
+  `opencode` and `agy` also launch (`SMOKE_CLI_PROVIDER`). Run it once
+  interactively to log in.
 - For the API agent: a provider key (below).
 
 ## 1. Build
@@ -78,7 +75,10 @@ DEF
 
 ```sh
 ./nanite serve -port "$NANITE_PORT" &            # no --insecure-no-auth
-TOKEN=$(cat "$(./nanite auth token-path)")        # operator token, never printed here
+TOKEN_FILE=$(./nanite auth token-path)
+until [ -s "$TOKEN_FILE" ]; do sleep 0.5; done    # the server writes the token at startup
+TOKEN=$(cat "$TOKEN_FILE")                        # operator token, never printed here
+until curl -s -o /dev/null localhost:$NANITE_PORT/api/agent-host-settings; do sleep 0.5; done
 curl -s -o /dev/null -w '%{http_code}\n' localhost:$NANITE_PORT/api/agent-host-settings   # 401
 ```
 
@@ -106,21 +106,41 @@ api -X POST localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/turns \
 api localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/messages | jq '.items[]|{role,content}'
 ```
 
-The reply is the assistant message (`51`). Host settings are
-`{"runtime":"cli","provider":"claude","model":"haiku","native_loop":{}}` for the
-CLI agent **[after B2]**; everything else is identical.
+The reply is the assistant message (`51`).
 
-## 7. Stop and resume **[verify]**
+For a CLI agent only the settings differ. A CLI host needs `directories`; the
+first is the agent's work root and the rest are added to its reach. Provider and
+model are both required:
 
-Cancel a running turn with `POST /api/agent/v1/sessions/{id}/turns/{turnId}/cancel`.
-A session keeps its history; send another turn to the same `session_view_id`
-after the server restarts. Not yet exercised by the smoke script.
+```sh
+mkdir -p /tmp/cli-work
+HOST=$(api -X POST localhost:$NANITE_PORT/api/agent-host-settings -d "{
+  \"title\":\"cli agent\",\"slug\":\"cli-agent\",\"definition_ref\":$PIN,\"enabled\":true,
+  \"settings\":{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"claude\",\"model\":\"haiku\",
+    \"directories\":[\"/tmp/cli-work\"],\"native_loop\":{}}}")
+```
+
+Create the session and send the turn exactly as above. `codex`, `opencode` and
+`agy` take their own model ids. Nanite's MCP tools reach claude and codex; agy
+gets them only when the permission mode is yolo, and opencode not yet.
+
+## 7. Stop and resume
+
+Cancel a running turn with `POST /api/agent/v1/sessions/{id}/turns/{turnId}/cancel`;
+the session answers the next turn. A session keeps its history: after the server
+restarts, send another turn to the same `session_view_id`. A CLI session resumes
+from the provider's session, or from Nanite's recovery pack when the provider
+cannot resume. The smoke script exercises both for the CLI agent.
 
 ## Known refusals
 
 | Step | Symptom | Cause |
 |---|---|---|
-| session create, `runtime=cli` | `422 unsupported_selection`, "definition semantics unsupported by native chat" | native sessions accept only `runtime=api` until B2; the message hides the cause |
+| session create, `runtime=cli` | `422`, `error.cause` `host_directories_missing` | the CLI host settings have no `directories` |
+| session create, `runtime=cli` | `422`, `error.cause` `cli_host_unsupported_field` | the host sets `mcp_servers`, `harness_profile`, a non-empty `native_loop`, `recall_*`, `protocol` or `transport`, or a relative directory |
+| session create, `runtime=cli` | `422`, `error.cause` `read_only_unenforceable` | the definition asks for a read-only permission profile, which a CLI process cannot enforce |
+| session create, `runtime=cli` | `422`, `error.cause` `provider_not_launchable` | no provider, or one Nanite cannot launch |
+| turn, `runtime=cli` | `host_revision_changed` | the host settings were edited after the session was created; create a new session |
 | host settings create | `400 invalid host settings request` | the body has an unknown field (e.g. `source`); the server assigns it |
 | session create | `404 sql: no rows` | stale `host_settings.revision`; use the revision returned by create |
 
@@ -129,5 +149,6 @@ after the server restarts. Not yet exercised by the smoke script.
 ```sh
 scripts/smoke-agents.sh                                   # API half runs when SMOKE_API_MODEL is set
 SMOKE_API_MODEL=<model id> scripts/smoke-agents.sh
-SMOKE_CLI=1 SMOKE_API_MODEL=<model id> scripts/smoke-agents.sh   # [after B2]
+SMOKE_CLI=1 SMOKE_API_MODEL=<model id> scripts/smoke-agents.sh
+SMOKE_CLI=1 SMOKE_CLI_PROVIDER=codex SMOKE_CLI_MODEL=<model id> scripts/smoke-agents.sh
 ```

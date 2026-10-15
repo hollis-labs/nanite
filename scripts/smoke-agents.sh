@@ -149,7 +149,7 @@ run_agent() { # name settings-json
   if [ "$name" = cli ]; then
     resume_check "$sid"
     stop_check "$sid"
-    [ -n "${SMOKE_MCP:-}" ] && mcp_check "$sid"
+    if [ -n "${SMOKE_MCP:-}" ]; then mcp_check "$sid"; fi
   fi
 }
 
@@ -160,14 +160,14 @@ else
   skp "api agent: set SMOKE_API_MODEL and provide a key for '$api_provider' (e.g. ANTHROPIC_API_KEY)"
 fi
 
-# 4. CLI agent (runtime=cli lands with B2, CW-20261014-0161)
+# 4. CLI agent (runtime=cli)
 if [ -n "${SMOKE_CLI:-}" ]; then
   # A CLI agent's work root is the first host directory.
   mkdir -p "$work/cli-work"
   cli_model=${SMOKE_CLI_MODEL-haiku}
   run_agent cli "{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"${SMOKE_CLI_PROVIDER:-claude}\",\"model\":\"$cli_model\",\"directories\":[\"$work/cli-work\"],\"native_loop\":{}}"
 else
-  skp "cli agent: set SMOKE_CLI=1 once runtime=cli (B2) is merged and claude is logged in"
+  skp "cli agent: set SMOKE_CLI=1 (and the CLI must be logged in)"
 fi
 
 say "---- pass=$pass fail=$fail skip=$skip"

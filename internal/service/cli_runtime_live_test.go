@@ -58,7 +58,7 @@ func TestLiveCLIRuntimeModelAndHostDirectory(t *testing.T) {
 		return runtimeevents.SinkFunc(func(_ context.Context, ev runtimeevents.Event) error {
 			mu.Lock()
 			defer mu.Unlock()
-			switch ev.Kind {
+			switch ev.Kind { //nolint:exhaustive // only the CLI's init line and terminal events matter here
 			case runtimeevents.KindStdoutLine:
 				var p struct{ Line string }
 				_ = json.Unmarshal(ev.Payload, &p)
@@ -87,7 +87,7 @@ func TestLiveCLIRuntimeModelAndHostDirectory(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
 	target := filepath.Join(shared, "out.txt")
-	if err := sess.SendInput([]byte("Use the Write tool to create the file " + target + " containing exactly HELLO. Then reply DONE.")); err != nil {
+	if err = sess.SendInput([]byte("Use the Write tool to create the file " + target + " containing exactly HELLO. Then reply DONE.")); err != nil {
 		t.Fatalf("SendInput: %v", err)
 	}
 	select {
@@ -103,7 +103,7 @@ func TestLiveCLIRuntimeModelAndHostDirectory(t *testing.T) {
 	if !strings.Contains(strings.ToLower(initModel), "haiku") {
 		t.Errorf("CLI reported model %q, want the host's haiku", initModel)
 	}
-	got, err := os.ReadFile(target)
+	got, err := os.ReadFile(target) //nolint:gosec // G304: target is under the test's own t.TempDir()
 	if err != nil || strings.TrimSpace(string(got)) != "HELLO" {
 		t.Errorf("host directory write: %q, %v", got, err)
 	}

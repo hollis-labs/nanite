@@ -84,12 +84,12 @@ func TestCheckHostRevisionFailsAfterTheHostChanges(t *testing.T) {
 	}
 	svc := &chatServiceImpl{store: st}
 	agent := &store.AgentProfile{HostSettingsID: host.ID, Revision: host.Revision}
-	if err := svc.checkHostRevision(ctx, agent); err != nil {
+	if err = svc.checkHostRevision(ctx, agent); err != nil {
 		t.Fatalf("unchanged host: %v", err)
 	}
 	changed := host
 	changed.Settings.Model = "opus"
-	if _, err := st.UpdateAgentHostSettings(ctx, changed, host.Revision); err != nil {
+	if _, err = st.UpdateAgentHostSettings(ctx, changed, host.Revision); err != nil {
 		t.Fatalf("update host: %v", err)
 	}
 	err = svc.checkHostRevision(ctx, agent)

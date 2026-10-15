@@ -364,7 +364,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if profile == nil {
 		return nil, errors.New("agent.Boot: profile resolution returned nil")
 	}
-	if err := checkExpectedHostRevision(opts, profile); err != nil {
+	if err = checkExpectedHostRevision(opts, profile); err != nil {
 		return nil, fmt.Errorf("agent.Boot: %w", err)
 	}
 

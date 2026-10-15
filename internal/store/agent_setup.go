@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
@@ -15,7 +16,7 @@ import (
 
 // ErrAgentSetupConflict reports that the slug is already taken by host
 // settings that are not the ones this setup would create.
-var ErrAgentSetupConflict = errors.New("host settings with this slug already exist with a different definition, provider, model or runtime")
+var ErrAgentSetupConflict = errors.New("host settings with this slug already exist with a different definition, provider, model, runtime or directories")
 
 // AllAvailableTools asks AgentSetup to grant every available known tool.
 const AllAvailableTools = "*"
@@ -24,16 +25,17 @@ const AllAvailableTools = "*"
 // native agent: install it, give it host settings, review those settings and
 // grant tools, all or nothing.
 type AgentSetup struct {
-	Definition []byte
-	Resources  []DefinitionResource
-	Slug       string // default: derived from the definition id
-	Title      string // default: the definition name
-	Provider   string
-	Model      string
-	Runtime    string   // "api" (default) or "cli"
-	Tools      []string // tool names, or AllAvailableTools
-	GrantedBy  string   // accountable actor recorded on the authority
-	Reason     string
+	Definition  []byte
+	Resources   []DefinitionResource
+	Slug        string // default: derived from the definition id
+	Title       string // default: the definition name
+	Provider    string
+	Model       string
+	Runtime     string   // "api" (default) or "cli"
+	Directories []string // directories the agent may work in (host settings)
+	Tools       []string // tool names, or AllAvailableTools
+	GrantedBy   string   // accountable actor recorded on the authority
+	Reason      string
 }
 
 // AgentSetupResult describes what exists after a setup, whether it was created
@@ -147,7 +149,7 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 	if title == "" {
 		title = slug
 	}
-	want := NativeHostSettings{Version: "1", Runtime: runtime, Provider: in.Provider, Model: in.Model}
+	want := NativeHostSettings{Version: "1", Runtime: runtime, Provider: in.Provider, Model: in.Model, Directories: in.Directories}
 	if err = want.Validate(); err != nil {
 		return res, err
 	}
@@ -177,7 +179,7 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 	case err != nil:
 		return res, err
 	default:
-		if host.DefinitionRef != di.pin || !host.Enabled || host.Settings.Runtime != want.Runtime || host.Settings.Provider != want.Provider || host.Settings.Model != want.Model {
+		if host.DefinitionRef != di.pin || !host.Enabled || host.Settings.Runtime != want.Runtime || host.Settings.Provider != want.Provider || host.Settings.Model != want.Model || !slices.Equal(host.Settings.Directories, want.Directories) {
 			return res, fmt.Errorf("%w: slug %q (use --slug to choose another)", ErrAgentSetupConflict, slug)
 		}
 	}

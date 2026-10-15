@@ -27,6 +27,9 @@ filled when the server starts, so start it once on a new database before
 asking for more than the always-included tools. Dotted names (`dev.read`) are
 read as `dev_read`; `nanite authority tools` lists the names.
 
+Host directories default to a private workspace, `agent-workspaces/<slug>` beside the
+database (created for you); `--directories a,b` names others.
+
 Running it again with the same inputs changes nothing and reports the existing
 ids (`"created": false`). A slug already used by different settings (another
 definition revision, provider, model or runtime) is refused; pass `--slug`.

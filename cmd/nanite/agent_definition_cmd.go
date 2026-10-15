@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/agentauthor"
@@ -202,5 +203,5 @@ func runAgentSetupCommand(args []string, out io.Writer) error {
 		return err
 	}
 	defer closeStoreBestEffort(context.Background(), st)
-	return runAgentSetup(context.Background(), st, service.DefaultProviderKeys(st), args, out)
+	return runAgentSetup(context.Background(), st, service.DefaultProviderKeys(st), filepath.Join(filepath.Dir(resolveDBPath()), "agent-workspaces"), args, out)
 }

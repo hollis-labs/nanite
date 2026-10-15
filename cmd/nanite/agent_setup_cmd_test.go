@@ -47,11 +47,12 @@ func setupFixture(t *testing.T, withKey bool) (*store.Store, *providerkeys.Manag
 func TestAgentSetupYieldsLaunchableSessionBodyAndIsIdempotent(t *testing.T) {
 	st, keys, def := setupFixture(t, true)
 	args := []string{def, "--provider", "anthropic", "--model", "m", "--tools", "dev.read", "--reason", "test"}
+	ws := t.TempDir()
 	var first, second bytes.Buffer
-	if err := runAgentSetup(context.Background(), st, keys, args, &first); err != nil {
+	if err := runAgentSetup(context.Background(), st, keys, ws, args, &first); err != nil {
 		t.Fatal(err)
 	}
-	if err := runAgentSetup(context.Background(), st, keys, args, &second); err != nil {
+	if err := runAgentSetup(context.Background(), st, keys, ws, args, &second); err != nil {
 		t.Fatal(err)
 	}
 	var a, b map[string]any
@@ -64,6 +65,13 @@ func TestAgentSetupYieldsLaunchableSessionBodyAndIsIdempotent(t *testing.T) {
 	body, _ := req["body"].(map[string]any)
 	if body["definition_ref"] == nil || body["host_settings"] == nil || req["path"] != "/api/agent/v1/sessions" {
 		t.Fatalf("session request = %v", req)
+	}
+	dirs, _ := a["directories"].([]any)
+	if len(dirs) != 1 || dirs[0] != filepath.Join(ws, "def-cli-setup") {
+		t.Fatalf("directories = %v, want a per-agent workspace under %s", dirs, ws)
+	}
+	if fi, err := os.Stat(filepath.Join(ws, "def-cli-setup")); err != nil || !fi.IsDir() {
+		t.Fatalf("workspace not created: %v", err)
 	}
 	if strings.Contains(first.String(), setupTestKey) {
 		t.Fatal("output leaked the key")
@@ -86,7 +94,7 @@ func TestAgentSetupRefusesBeforeWriting(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st, keys, def := setupFixture(t, tc.withKey)
-			err := runAgentSetup(context.Background(), st, keys, append([]string{def}, tc.extra...), &bytes.Buffer{})
+			err := runAgentSetup(context.Background(), st, keys, t.TempDir(), append([]string{def}, tc.extra...), &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}

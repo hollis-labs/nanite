@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,7 +20,7 @@ import (
 	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
-const agentSetupUsage = "usage: nanite agent setup <definition.md> --provider P --model M [--runtime api] [--tools all|a,b] [--slug S] [--title T] [--resources manifest.json] [--reason R]"
+const agentSetupUsage = "usage: nanite agent setup <definition.md> --provider P --model M [--runtime api] [--tools all|a,b] [--slug S] [--title T] [--directories d1,d2] [--resources manifest.json] [--reason R]"
 
 // setupCLIActor is the accountable actor recorded for authority created from
 // the offline CLI: whoever can write the database is the operator.
@@ -27,7 +29,7 @@ const setupCLIActor = "cli:agent-setup"
 // runAgentSetup is `nanite agent setup`: install the definition, create host
 // settings, review them and grant tools in one transaction, after checking
 // every precondition that can be checked without writing.
-func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Manager, args []string, out io.Writer) error {
+func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Manager, workspaceRoot string, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("agent setup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	provider := fs.String("provider", "", "provider name (anthropic, openai)")
@@ -35,6 +37,7 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 	runtime := fs.String("runtime", "api", "api (cli arrives with slice B)")
 	toolsFlag := fs.String("tools", "", "comma-separated tool names, or all")
 	slug := fs.String("slug", "", "host settings slug (default: from the definition id)")
+	dirsFlag := fs.String("directories", "", "comma-separated directories the agent may work in (default: a private workspace beside the database)")
 	title := fs.String("title", "", "host settings title (default: the definition name)")
 	resourcePath := fs.String("resources", "", "explicit URI-to-local-file JSON manifest")
 	reason := fs.String("reason", "", "why these tools are granted (recorded)")
@@ -92,7 +95,31 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 		}
 	}
 
-	res, err := st.SetupAgent(ctx, store.AgentSetup{Definition: data, Resources: resources, Slug: *slug, Title: *title,
+	dirs := splitTools(*dirsFlag)
+	if len(dirs) == 0 {
+		// An agent with no directories cannot run, so give each its own
+		// workspace beside the database rather than the server's cwd.
+		name := *slug
+		if name == "" {
+			d, _ := agentdef.Parse(data, agentpolicy.Option())
+			name = store.AgentSetupSlug(d.DefinitionID)
+		}
+		dirs = []string{filepath.Join(workspaceRoot, name)}
+	}
+	for i, d := range dirs {
+		abs, absErr := filepath.Abs(d)
+		if absErr != nil {
+			return absErr
+		}
+		dirs[i] = abs
+	}
+	for _, d := range dirs {
+		if err = os.MkdirAll(d, 0o700); err != nil {
+			return fmt.Errorf("create agent directory %s: %w", d, err)
+		}
+	}
+
+	res, err := st.SetupAgent(ctx, store.AgentSetup{Definition: data, Resources: resources, Slug: *slug, Title: *title, Directories: dirs,
 		Provider: *provider, Model: *model, Runtime: *runtime, Tools: requested, GrantedBy: setupCLIActor, Reason: *reason})
 	if err != nil {
 		return err
@@ -107,6 +134,7 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 		"slug":             res.HostSettings.Slug,
 		"authority_id":     res.AuthorityID,
 		"tools":            res.Tools,
+		"directories":      res.HostSettings.Settings.Directories,
 		"session_request": map[string]any{
 			"method": "POST", "path": "/api/agent/v1/sessions",
 			"body": map[string]any{"definition_ref": ref, "host_settings": hostRef},

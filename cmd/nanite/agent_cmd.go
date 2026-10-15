@@ -45,13 +45,14 @@ func cmdAgent(args []string) {
 }
 
 func agentUsage() {
-	fmt.Fprintf(os.Stderr, "usage: %s agent <install|sync> ...\n", brand.BinaryName)
+	fmt.Fprintf(os.Stderr, "usage: %s agent <author|validate|install> ...\n", brand.BinaryName)
 	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  install <path>        import an agent definition from a local path")
-	fmt.Fprintln(os.Stderr, "  sync <slug> <path>    re-run import for an already-imported agent")
+	fmt.Fprintln(os.Stderr, "  author [--role <role.md>] <definition.md>    flatten a role into an authored definition")
+	fmt.Fprintln(os.Stderr, "  validate <definition.md>                     check schema and print id, revision, digest")
+	fmt.Fprintln(os.Stderr, "  install [--resources <manifest.json>] <definition.md>   store a definition and print its pin")
+	fmt.Fprintln(os.Stderr, "the digest covers behavior, not identity: use identity_digest to tell definitions apart")
 	fmt.Fprintln(os.Stderr, "flags:")
 	fmt.Fprintln(os.Stderr, "  -db <path>            database to write (else NANITE_DB_PATH / NANITE_WORKSPACE)")
-	fmt.Fprintln(os.Stderr, "  --adapter <name>      force a format adapter instead of trying each in priority order")
 }
 
 // openAgentImporter opens the shared DB and returns a fresh Importer plus the

@@ -382,3 +382,45 @@ func TestResolveToolNamesRequiresTheViewToHaveBeenAdmittedUnderTheReviewedRevisi
 		}
 	}
 }
+
+func TestLocalAuthorityDottedToolAliasAndHint(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	host := nativeHost(t, s, "dotted")
+	nativeTool(t, s, "dev_read")
+	la := s.LocalAuthority()
+	a, err := la.CreateAuthority(ctx, "cred-1", host.ID, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = la.GrantTool(ctx, "cred-1", a.ID, "dev.read", "r"); err != nil {
+		t.Fatalf("dotted alias: %v", err)
+	}
+	if tools, _ := la.ListTools(ctx, a.ID); len(tools) != 1 || tools[0].Name != "dev_read" {
+		t.Fatalf("alias granted %v, want dev_read", tools)
+	}
+	err = la.GrantTool(ctx, "cred-1", a.ID, "no.such", "r")
+	if !errors.Is(err, ErrNativeToolNotGrantable) || !strings.Contains(err.Error(), "authority tools") {
+		t.Fatalf("hint missing: %v", err)
+	}
+}
+
+func TestLocalAuthorityGrantableToolsListsOnlyAvailable(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	nativeTool(t, s, "dev_read")
+	if _, err := s.UpsertKnownTool(ctx, "gone_tool", "builtin", "unavailable", "x"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LocalAuthority().GrantableTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, g := range got {
+		names = append(names, g.Name)
+	}
+	if !strings.Contains(strings.Join(names, ","), "dev_read") || strings.Contains(strings.Join(names, ","), "gone_tool") {
+		t.Fatalf("grantable = %v", names)
+	}
+}

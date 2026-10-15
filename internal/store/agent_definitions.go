@@ -260,17 +260,35 @@ type AgentHostSettings struct {
 	Revision      string             `json:"revision"`
 }
 
+// ValidateHostSlug reports whether slug may name host settings. Callers that
+// derive paths from a slug must check it first.
+func ValidateHostSlug(slug string) error {
+	if !hostSlugPattern.MatchString(slug) || slug == "user" {
+		return fmt.Errorf("invalid host settings slug %q: use lowercase letters, digits and single hyphens (and not \"user\")", slug)
+	}
+	return nil
+}
+
+// validateNewHostSettings is the one validation every host-settings write
+// passes, whichever transaction it runs in.
+func validateNewHostSettings(input AgentHostSettings) error {
+	if ValidateHostSlug(input.Slug) != nil || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Source) == "" {
+		return errors.New("host settings require slug, title and accountable source")
+	}
+	if err := input.Settings.Validate(); err != nil {
+		return err
+	}
+	if input.ID != "" || input.Revision != "" {
+		return errors.New("host settings identity and revision are assigned by the host")
+	}
+	return nil
+}
+
 var hostSlugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 func (s *Store) CreateAgentHostSettings(ctx context.Context, input AgentHostSettings) (AgentHostSettings, error) {
-	if !hostSlugPattern.MatchString(input.Slug) || input.Slug == "user" || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Source) == "" {
-		return input, errors.New("host settings require slug, title and accountable source")
-	}
-	if err := input.Settings.Validate(); err != nil {
+	if err := validateNewHostSettings(input); err != nil {
 		return input, err
-	}
-	if input.ID != "" || input.Revision != "" {
-		return input, errors.New("host settings identity and revision are assigned by the host")
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -287,6 +305,9 @@ func (s *Store) CreateAgentHostSettings(ctx context.Context, input AgentHostSett
 // createAgentHostSettingsTx writes validated host settings inside the caller's
 // transaction; the caller commits.
 func createAgentHostSettingsTx(ctx context.Context, tx *sql.Tx, input AgentHostSettings) (AgentHostSettings, error) {
+	if err := validateNewHostSettings(input); err != nil {
+		return input, err
+	}
 	var duplicate bool
 	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_host_settings WHERE slug=?)`, input.Slug).Scan(&duplicate); queryErr != nil {
 		return input, queryErr

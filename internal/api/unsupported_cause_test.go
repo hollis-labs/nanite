@@ -87,3 +87,24 @@ func TestLogicalProvision422ReturnsTheCause(t *testing.T) {
 		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 	}
 }
+
+// The body `agent setup` emits must be admitted by the real create path.
+func TestSetupEmittedSessionBodyIsAdmitted(t *testing.T) {
+	a, mux := newTestAPI(t)
+	allowTestNativeModel(a)
+	if _, err := a.store.UpsertKnownTool(t.Context(), "dev_read", "builtin", "available", "read"); err != nil {
+		t.Fatal(err)
+	}
+	def := []byte("---\nschema_version: \"2\"\ndefinition_id: def:setup-admit\nrevision: \"1\"\nname: setup-admit\ndescription: Fixture.\nbehavior:\n  purpose: Complete the requested work.\nrequirements: {}\nharness_profile:\n  context: {}\n  permissions:\n    profile: default\ncontinuity:\n  mode: ephemeral\n---\nFixture.\n")
+	res, err := a.store.SetupAgent(t.Context(), store.AgentSetup{Definition: def, Provider: "fixture", Model: "fixture-model", Tools: []string{"dev_read"}, GrantedBy: "cli:agent-setup", Reason: "test", Directories: []string{t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := service.DefinitionRef{DefinitionID: res.DefinitionRef.ID, Revision: res.DefinitionRef.Revision, SemanticDigest: res.DefinitionRef.Digest}
+	raw, _ := json.Marshal(map[string]any{"definition_ref": ref, "host_settings": service.HostSettingsRef{ID: res.HostSettings.ID, Revision: res.HostSettings.Revision}})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", agentV1RoutePrefix+"/sessions", bytes.NewReader(raw)))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("setup's session body was refused: %d %s", w.Code, w.Body.String())
+	}
+}

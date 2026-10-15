@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/agentdefs"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
@@ -20,7 +21,7 @@ import (
 	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
-const agentSetupUsage = "usage: nanite agent setup <definition.md> --provider P --model M [--runtime api] [--tools all|a,b] [--slug S] [--title T] [--directories d1,d2] [--resources manifest.json] [--reason R]"
+const agentSetupUsage = "usage: nanite agent setup <definition.md|archetype-id> --provider P --model M [--runtime api] [--tools all|a,b] [--slug S] [--title T] [--directories d1,d2] [--resources manifest.json] [--reason R]"
 
 // setupCLIActor is the accountable actor recorded for authority created from
 // the offline CLI: whoever can write the database is the operator.
@@ -57,11 +58,12 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 	if len(positional) != 1 {
 		return errors.New("one authored definition file is required\n" + agentSetupUsage)
 	}
-	data, err := readAuthoredDefinitionFile(positional[0])
+	data, archetypeResources, err := loadSetupDefinition(positional[0])
 	if err != nil {
 		return err
 	}
-	if _, err = agentdef.Parse(data, agentpolicy.Option()); err != nil {
+	parsed, err := agentdef.Parse(data, agentpolicy.Option())
+	if err != nil {
 		return fmt.Errorf("definition is not valid: %w", err)
 	}
 
@@ -88,22 +90,47 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 			requested[i] = store.AllAvailableTools
 		}
 	}
-	var resources []store.DefinitionResource
+	resources := archetypeResources
 	if *resourcePath != "" {
 		if resources, err = readResourceManifest(*resourcePath); err != nil {
 			return err
 		}
+	}
+	// The slug names a directory below: validate it before any path is joined.
+	name := *slug
+	if name == "" {
+		name = store.AgentSetupSlug(parsed.DefinitionID)
+	}
+	if err = store.ValidateHostSlug(name); err != nil {
+		return err
+	}
+	// Refuse a definition the native runtime would refuse at launch, so setup
+	// never returns a session body that cannot be admitted.
+	byURI := map[string][]byte{}
+	for _, r := range resources {
+		byURI[r.URI] = r.Content
+	}
+	digest, err := agentdef.Digest(parsed)
+	if err != nil {
+		return err
+	}
+	if _, err = service.MapChatDefinition(service.VerifiedDefinition{
+		Ref:        service.DefinitionRef{DefinitionID: parsed.DefinitionID, Revision: parsed.Revision, SemanticDigest: digest},
+		Definition: parsed,
+		ReadResource: func(_ context.Context, ref agentdef.Ref) ([]byte, error) {
+			if body, ok := byURI[ref.URI]; ok {
+				return body, nil
+			}
+			return nil, fmt.Errorf("resource %q was not supplied; pass --resources", ref.URI)
+		},
+	}); err != nil {
+		return fmt.Errorf("this definition cannot run on native chat: %w", err)
 	}
 
 	dirs := splitTools(*dirsFlag)
 	if len(dirs) == 0 {
 		// An agent with no directories cannot run, so give each its own
 		// workspace beside the database rather than the server's cwd.
-		name := *slug
-		if name == "" {
-			d, _ := agentdef.Parse(data, agentpolicy.Option())
-			name = store.AgentSetupSlug(d.DefinitionID)
-		}
 		dirs = []string{filepath.Join(workspaceRoot, name)}
 	}
 	for i, d := range dirs {
@@ -134,6 +161,7 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 		"slug":             res.HostSettings.Slug,
 		"authority_id":     res.AuthorityID,
 		"tools":            res.Tools,
+		"tools_added":      res.Added,
 		"directories":      res.HostSettings.Settings.Directories,
 		"session_request": map[string]any{
 			"method": "POST", "path": "/api/agent/v1/sessions",
@@ -172,4 +200,35 @@ func splitTools(v string) []string {
 		}
 	}
 	return out
+}
+
+// loadSetupDefinition reads the definition setup installs: an authored file if
+// the argument names one, else the id or name of an embedded archetype (with
+// the resources it pins).
+func loadSetupDefinition(arg string) ([]byte, []store.DefinitionResource, error) {
+	if _, statErr := os.Stat(arg); statErr == nil {
+		data, err := readAuthoredDefinitionFile(arg)
+		return data, nil, err
+	}
+	catalog, err := agentdefs.Catalog()
+	if err != nil {
+		return nil, nil, err
+	}
+	var ids []string
+	for _, a := range catalog {
+		d, parseErr := agentdef.Parse(a.Data, agentpolicy.Option())
+		if parseErr != nil {
+			continue
+		}
+		ids = append(ids, d.DefinitionID)
+		if d.DefinitionID == arg || d.Name == arg {
+			var resources []store.DefinitionResource
+			for _, r := range a.Resources {
+				resources = append(resources, store.DefinitionResource{URI: r.URI, Content: r.Content})
+			}
+			return a.Data, resources, nil
+		}
+	}
+	sort.Strings(ids)
+	return nil, nil, fmt.Errorf("%q is neither a definition file nor an embedded archetype; archetypes: %s", arg, strings.Join(ids, ", "))
 }

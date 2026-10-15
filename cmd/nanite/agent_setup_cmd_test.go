@@ -106,3 +106,85 @@ func TestAgentSetupRefusesBeforeWriting(t *testing.T) {
 		})
 	}
 }
+
+func rowsAfterSetup(t *testing.T, st *store.Store) int {
+	t.Helper()
+	var n int
+	_ = st.DB.QueryRow(`SELECT (SELECT COUNT(*) FROM agent_definitions)+(SELECT COUNT(*) FROM agent_host_settings)+(SELECT COUNT(*) FROM native_authorities)`).Scan(&n)
+	return n
+}
+
+func TestAgentSetupRefusesUnsafeSlugAndUnlaunchableDefinition(t *testing.T) {
+	st, keys, def := setupFixture(t, true)
+	ws := t.TempDir()
+	base := []string{"--provider", "anthropic", "--model", "m", "--tools", "all"}
+	err := runAgentSetup(context.Background(), st, keys, ws, append([]string{def, "--slug", "../outside"}, base...), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "invalid host settings slug") {
+		t.Fatalf("path-like slug: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(ws)); len(entries) > 0 {
+		for _, e := range entries {
+			if e.Name() == "outside" {
+				t.Fatal("slug escaped the workspace root")
+			}
+		}
+	}
+	// A schema-valid definition the native runtime refuses at launch.
+	data, _ := os.ReadFile(def)
+	durable := filepath.Join(t.TempDir(), "durable.md")
+	if err = os.WriteFile(durable, []byte(strings.Replace(string(data), "mode: ephemeral", "mode: durable", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = runAgentSetup(context.Background(), st, keys, ws, append([]string{durable}, base...), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cannot run on native chat") {
+		t.Fatalf("durable continuity: %v", err)
+	}
+	if n := rowsAfterSetup(t, st); n != 0 {
+		t.Fatalf("refusals wrote %d rows", n)
+	}
+	if _, statErr := os.Stat(filepath.Join(ws, "def-cli-setup")); statErr == nil {
+		t.Fatal("a refused setup created a workspace")
+	}
+}
+
+func TestAgentSetupAcceptsEmbeddedArchetypeID(t *testing.T) {
+	st, keys, _ := setupFixture(t, true)
+	var out bytes.Buffer
+	args := []string{"def:nanite/chat", "--provider", "anthropic", "--model", "m", "--tools", "dev_read"}
+	if err := runAgentSetup(context.Background(), st, keys, t.TempDir(), args, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"definition_id":"def:nanite/chat"`) {
+		t.Fatalf("output = %s", out.String())
+	}
+	err := runAgentSetup(context.Background(), st, keys, t.TempDir(), []string{"no-such-archetype", "--provider", "anthropic", "--model", "m", "--tools", "all"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "def:nanite/chat") {
+		t.Fatalf("unknown archetype should list the ids: %v", err)
+	}
+}
+
+func TestAgentSetupRerunReportsEveryGrantAndAddsOnly(t *testing.T) {
+	st, keys, def := setupFixture(t, true)
+	if _, err := st.UpsertKnownTool(context.Background(), "dev_write", "builtin", "available", "write"); err != nil {
+		t.Fatal(err)
+	}
+	ws := t.TempDir()
+	run := func(tools string) map[string]any {
+		var out bytes.Buffer
+		if err := runAgentSetup(context.Background(), st, keys, ws, []string{def, "--provider", "anthropic", "--model", "m", "--tools", tools}, &out); err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		_ = json.Unmarshal(out.Bytes(), &m)
+		return m
+	}
+	run("dev_read,dev_write")
+	second := run("dev_read")
+	got, _ := second["tools"].([]any)
+	if second["created"] != false || len(got) != 2 {
+		t.Fatalf("second = %v, want created=false and the full grant set [dev_read dev_write]", second)
+	}
+	if added, _ := second["tools_added"].([]any); len(added) != 0 {
+		t.Fatalf("tools_added = %v", added)
+	}
+}

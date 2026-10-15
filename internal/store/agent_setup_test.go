@@ -97,3 +97,19 @@ func TestSetupAgentRefusesSlugBoundToDifferentSettings(t *testing.T) {
 		t.Fatalf("different model on same slug: %v", err)
 	}
 }
+
+func TestSetupAgentValidatesLikeCreateHostSettings(t *testing.T) {
+	s := newTestStore(t)
+	nativeTool(t, s, "dev_read")
+	def := definitionTestBytes("def:setup-five", "1", "Setup fixture.")
+	for _, slug := range []string{"../outside", "user", "Has Space", "-lead"} {
+		in := setupInput(def, "dev_read")
+		in.Slug = slug
+		if _, err := s.SetupAgent(context.Background(), in); err == nil {
+			t.Fatalf("slug %q accepted", slug)
+		}
+	}
+	if n := authorityRowCount(t, s, "agent_host_settings"); n != 0 {
+		t.Fatalf("%d host settings after refusals", n)
+	}
+}

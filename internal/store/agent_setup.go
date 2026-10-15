@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
@@ -45,8 +46,9 @@ type AgentSetupResult struct {
 	Name          string
 	HostSettings  AgentHostSettings
 	AuthorityID   string
-	Tools         []string
-	Created       bool // false when every part already existed
+	Tools         []string // every tool the authority now grants, not just those requested
+	Added         []string // tools this call granted for the first time
+	Created       bool     // false when every part already existed
 }
 
 // AgentSetupSlug derives a host-settings slug from a definition id.
@@ -149,6 +151,9 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 	if title == "" {
 		title = slug
 	}
+	if err = ValidateHostSlug(slug); err != nil {
+		return res, err
+	}
 	want := NativeHostSettings{Version: "1", Runtime: runtime, Provider: in.Provider, Model: in.Model, Directories: in.Directories}
 	if err = want.Validate(); err != nil {
 		return res, err
@@ -157,7 +162,7 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 	if err != nil {
 		return res, err
 	}
-	res.Tools = tools
+	requestedTools := tools
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -196,20 +201,43 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 	case err != nil:
 		return res, err
 	}
-	for _, name := range tools {
-		var before int
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM native_authority_tools WHERE authority_id=?`, authority.ID).Scan(&before); err != nil {
-			return res, err
+	granted := func() (map[string]bool, error) {
+		rows, qerr := tx.QueryContext(ctx, `SELECT k.name FROM native_authority_tools t JOIN known_tools k ON k.id=t.tool_id WHERE t.authority_id=? ORDER BY k.name`, authority.ID)
+		if qerr != nil {
+			return nil, qerr
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]bool{}
+		for rows.Next() {
+			var n string
+			if qerr = rows.Scan(&n); qerr != nil {
+				return nil, qerr
+			}
+			out[n] = true
+		}
+		return out, rows.Err()
+	}
+	have, err := granted()
+	if err != nil {
+		return res, err
+	}
+	for _, name := range requestedTools {
+		if have[name] {
+			continue
 		}
 		if err = grantToolTx(ctx, tx, authority, in.GrantedBy, authority.ID, name, in.Reason); err != nil {
 			return res, err
 		}
-		var after int
-		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM native_authority_tools WHERE authority_id=?`, authority.ID).Scan(&after); err != nil {
-			return res, err
-		}
-		created = created || after > before
+		res.Added = append(res.Added, name)
+		created = true
 	}
+	if have, err = granted(); err != nil {
+		return res, err
+	}
+	for name := range have {
+		res.Tools = append(res.Tools, name)
+	}
+	sort.Strings(res.Tools)
 	if err = tx.Commit(); err != nil {
 		return res, err
 	}

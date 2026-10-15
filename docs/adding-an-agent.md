@@ -7,7 +7,7 @@ create an actor or grant tools and skills.
 ## The one-step path
 
 ```sh
-nanite agent setup flat.md --provider anthropic --model <model> --tools all \
+nanite agent setup <flat.md | archetype-id> --provider anthropic --model <model> --tools all \
   [--slug S] [--title T] [--resources resources.json] [--reason "why"] [-db path]
 ```
 
@@ -30,8 +30,15 @@ read as `dev_read`; `nanite authority tools` lists the names.
 Host directories default to a private workspace, `agent-workspaces/<slug>` beside the
 database (created for you); `--directories a,b` names others.
 
+The first argument is an authored file or the id (or name) of an embedded
+archetype such as `def:nanite/chat`; an unknown one lists the ids. A definition
+the native runtime would refuse at launch (for example durable continuity) is
+refused up front, so the printed session body is always admissible.
+
 Running it again with the same inputs changes nothing and reports the existing
-ids (`"created": false`). A slug already used by different settings (another
+ids (`"created": false`). Re-running is additive: `tools` is always the
+complete set now granted, `tools_added` is what this call added, and a narrower
+`--tools` never revokes (use `authority ungrant`). A slug already used by different settings (another
 definition revision, provider, model or runtime) is refused; pass `--slug`.
 The semantic digest ignores identity, so definitions are told apart by id and
 revision, and `agent validate` also prints `identity_digest`.

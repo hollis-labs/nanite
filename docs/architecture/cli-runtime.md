@@ -48,7 +48,7 @@ Reuse `NativeHostSettings`. No new fields for the first cut.
 | `protocol` / `transport` | empty = native mode; `acp` + `stdio` (or `tcp` for Copilot) selects ACP |
 | `directories` | extra readable/writable roots (gap 3) |
 | `mcp_servers` | extra MCP servers to plant (gap 3) |
-| `harness_profile`, `native_loop`, `recall_*` | ignored for CLI. The CLI owns its loop. Validation should warn, not reject |
+| `harness_profile`, `native_loop`, `recall_*` | not applicable: the CLI owns its loop. Empty or default values pass; a non-empty value is rejected with a typed cause (open question 1) |
 
 "Bootdir" is not a host setting. `Boot` plants an ephemeral per-session boot dir
 (`bootdir_claude.go` etc.) and the host document stays free of paths. Work

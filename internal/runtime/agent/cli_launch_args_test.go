@@ -119,3 +119,30 @@ func TestHostDirectoriesJoinWritableRoots(t *testing.T) {
 		t.Errorf("malformed directories granted %q", got)
 	}
 }
+
+// agy's permission bypass follows the permission engine's mode, like Claude's
+// developer variant: only yolo adds it.
+func TestAgyBypassFlagFollowsYoloMode(t *testing.T) {
+	sel := RuntimeSelection{Runtime: runtimes.Antigravity, Mode: runtimes.ModeSubprocessPerTurn}
+	argvFor := func(d *Dependencies) []string {
+		a, err := selectAdapter(d, sel, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a.(adapters.RuntimeAdapter).CLIAdapter().BuildArgs("hi", "", "")
+	}
+	if slices.Contains(argvFor(&Dependencies{}), "--dangerously-skip-permissions") {
+		t.Error("default mode launched agy with the bypass flag")
+	}
+	if !slices.Contains(argvFor(withYolo(&Dependencies{}, true)), "--dangerously-skip-permissions") {
+		t.Error("yolo mode did not launch agy with the bypass flag")
+	}
+	// Other runtimes never get agy's flag.
+	a, err := selectAdapter(withYolo(&Dependencies{}, true), RuntimeSelection{Runtime: runtimes.Codex, Mode: runtimes.ModeSubprocessPerTurn}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(a.(adapters.RuntimeAdapter).CLIAdapter().BuildArgs("hi", "", ""), "--dangerously-skip-permissions") {
+		t.Error("codex launched with agy's bypass flag")
+	}
+}

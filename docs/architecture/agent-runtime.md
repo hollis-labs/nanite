@@ -87,9 +87,14 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
 - **Nanite MCP server.** Claude reads it from the planted `.mcp.json` (with the
   strict-MCP flags and an allow rule); Codex reads it from `[mcp_servers.*]` in
   the planted `config.toml`. agy discovers the plugin's `mcp_config.json`, but
-  its headless mode auto-denies a tool call that needs the `mcp` permission
-  unless an allow-rule exists in agy's `settings.json` (global, shared with the
-  desktop app, and not written by Nanite) or the launch is yolo.
+  its headless mode auto-denies a tool call that needs the `mcp` permission.
+  Nanite launches agy with `--dangerously-skip-permissions` only when the
+  permission engine's mode is yolo (the counterpart of Claude's developer
+  variant, with the same audit log line); otherwise the Nanite MCP tools are
+  unavailable to it, and the launch logs that. To use them without yolo, an
+  operator adds an allow-rule (`permissions.allow`) to agy's own
+  `~/.gemini/antigravity-cli/settings.json`; Nanite never writes that file, which
+  the Antigravity desktop app shares.
 - **Antigravity.** The boot dir carries `AGENTS.md`, `boot.md` and a workspace
   plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP server. agy
   has no config-dir variable and shares its global config with the desktop app,

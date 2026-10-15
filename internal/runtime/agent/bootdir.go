@@ -350,6 +350,8 @@ func bootdirLayoutFor(provider string) Layout {
 		return codexLayout{}
 	case "opencode":
 		return opencodeLayout{}
+	case "antigravity":
+		return agyLayout{}
 	case "gemini":
 		return unsupportedLayout{name: "gemini"}
 	case "copilot":

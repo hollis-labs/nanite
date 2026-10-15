@@ -112,7 +112,14 @@ func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 		return plant.PlantSpec{}, hooksUnsupportedError("codex",
 			"no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape")
 	}
-	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots)
+	// Codex reads MCP servers from config.toml, not from the .mcp.json sidecar.
+	var mcpServers []provider.MCPServerSpec
+	if spec, ok, mcpErr := naniteMCPServerSpec(params); mcpErr != nil {
+		return plant.PlantSpec{}, mcpErr
+	} else if ok {
+		mcpServers = append(mcpServers, spec)
+	}
+	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots, mcpServers...)
 	if err != nil {
 		return plant.PlantSpec{}, err
 	}

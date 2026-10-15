@@ -20,7 +20,7 @@ import (
 // adapters, mutation-by-slug sync, enrollment or declaration-to-grant step.
 func runPinnedAgentCommand(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: nanite agent <author|validate|install> [--role <role.md>] [--resources <manifest.json>] <definition.md>")
+		return errors.New("usage: nanite agent <author|validate|install> [-db <path>] [--role <role.md>] [--resources <manifest.json>] <definition.md>")
 	}
 	if args[0] == "author" {
 		return authorPinnedAgent(args[1:], out)

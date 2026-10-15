@@ -11,6 +11,7 @@ import (
 
 	paths "github.com/hollis-labs/libs/util/apppaths"
 	"github.com/hollis-labs/nanite/internal/apiauth"
+	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -28,9 +29,22 @@ func authPathsAt(dir string) authPaths {
 	return authPaths{dir: dir, db: filepath.Join(dir, "auth.db"), token: filepath.Join(dir, "operator.token")}
 }
 
-// resolveAuthPaths puts the auth directory beside an explicit --db (tests and
-// throwaway instances stay self-contained), else in the data directory.
+// resolveAuthPaths is the single place the server and every CLI command agree
+// on where the credentials live. The auth directory sits beside the database
+// whenever the operator named one — a --db flag (dbFlag, else the subcommand's
+// own, cliDB) or NANITE_DB / NANITE_DB_PATH — so tests and throwaway
+// instances stay self-contained and `serve -db X` is found again by
+// `NANITE_DB_PATH=X nanite auth ...`. With no explicit database (default or
+// NANITE_WORKSPACE) it is in the data directory.
+//
+// An instance that set only NANITE_DB_PATH before this agreed with the CLI
+// kept its credentials in the data directory; that directory is still used
+// when it holds a credential database and the one beside the db does not, so
+// an upgrade never silently mints a new operator.
 func resolveAuthPaths(dbFlag string) (authPaths, error) {
+	if dbFlag == "" {
+		dbFlag = cliDB
+	}
 	if dbFlag != "" {
 		abs, err := filepath.Abs(dbFlag)
 		if err != nil {
@@ -38,11 +52,28 @@ func resolveAuthPaths(dbFlag string) (authPaths, error) {
 		}
 		return authPathsAt(filepath.Join(filepath.Dir(abs), "auth")), nil
 	}
-	layout, err := config.ResolveLayout(paths.WithoutMaterialize())
+	var opts []paths.Option
+	if legacy := os.Getenv(brand.Env("DB")); legacy != "" {
+		opts = append(opts, paths.WithDBOverride(legacy))
+	}
+	layout, err := config.ResolveLayout(append(opts, paths.WithoutMaterialize())...)
 	if err != nil {
 		return authPaths{}, fmt.Errorf("resolve app layout: %w", err)
 	}
-	return authPathsAt(filepath.Join(layout.DataDir(), "auth")), nil
+	dataAuth := authPathsAt(filepath.Join(layout.DataDir(), "auth"))
+	if os.Getenv(brand.Env("DB")) == "" && os.Getenv(brand.Env("DB_PATH")) == "" {
+		return dataAuth, nil
+	}
+	besideDB := authPathsAt(filepath.Join(filepath.Dir(layout.MainDB()), "auth"))
+	if fileExists(dataAuth.db) && !fileExists(besideDB.db) {
+		return dataAuth, nil
+	}
+	return besideDB, nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // serveAuth is what `nanite serve` hands the server.

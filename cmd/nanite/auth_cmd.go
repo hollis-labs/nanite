@@ -31,6 +31,9 @@ Credentials for the Nanite HTTP API (CW-20261011-0036).
   reset-operator                  OFFLINE recovery: revoke every operator credential and
                                   write a fresh one to the token file
 
+Every command takes -db <path> (or NANITE_DB_PATH) to find the credentials
+of a server started with serve -db <path>; they live beside that database.
+
 Scopes: read, operate, tools, maintain, admin (operator only).`
 
 func cmdAuth(args []string) {

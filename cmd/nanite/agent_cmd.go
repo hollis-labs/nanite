@@ -50,6 +50,7 @@ func agentUsage() {
 	fmt.Fprintln(os.Stderr, "  install <path>        import an agent definition from a local path")
 	fmt.Fprintln(os.Stderr, "  sync <slug> <path>    re-run import for an already-imported agent")
 	fmt.Fprintln(os.Stderr, "flags:")
+	fmt.Fprintln(os.Stderr, "  -db <path>            database to write (else NANITE_DB_PATH / NANITE_WORKSPACE)")
 	fmt.Fprintln(os.Stderr, "  --adapter <name>      force a format adapter instead of trying each in priority order")
 }
 

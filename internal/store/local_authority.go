@@ -99,17 +99,30 @@ func (l *LocalAuthority) CreateAuthority(ctx context.Context, grantedBy, hostSet
 	if !host.Enabled {
 		return out, errors.New("host settings are disabled")
 	}
-	rc, err := newReceipt(grantedBy, host.Revision, host.DefinitionRef.Digest, reason)
-	if err != nil {
-		return out, err
-	}
-	out = NativeAuthority{ID: uuid.NewString(), HostSettingsID: host.ID, HostSettingsRevision: host.Revision,
-		DefinitionID: host.DefinitionRef.ID, DefinitionRevision: host.DefinitionRef.Revision, SemanticDigest: host.DefinitionRef.Digest, Enabled: true}
 	tx, err := l.s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return NativeAuthority{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	created, err := createAuthorityTx(ctx, tx, host, grantedBy, reason)
+	if err != nil {
+		return NativeAuthority{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return NativeAuthority{}, err
+	}
+	return l.GetAuthority(ctx, created.ID)
+}
+
+// createAuthorityTx records the review inside the caller's transaction; the
+// caller commits. host must be the settings now in force.
+func createAuthorityTx(ctx context.Context, tx *sql.Tx, host AgentHostSettings, grantedBy, reason string) (NativeAuthority, error) {
+	rc, err := newReceipt(grantedBy, host.Revision, host.DefinitionRef.Digest, reason)
+	if err != nil {
+		return NativeAuthority{}, err
+	}
+	out := NativeAuthority{ID: uuid.NewString(), HostSettingsID: host.ID, HostSettingsRevision: host.Revision,
+		DefinitionID: host.DefinitionRef.ID, DefinitionRevision: host.DefinitionRef.Revision, SemanticDigest: host.DefinitionRef.Digest, Enabled: true}
 	// The revision is read inside the transaction's view of the write so a
 	// settings update between the read above and this insert is not blessed.
 	var current string
@@ -126,10 +139,7 @@ func (l *LocalAuthority) CreateAuthority(ctx context.Context, grantedBy, hostSet
 	if err = auditNative(ctx, tx, out.ID, "authority_created", "", grantedBy, reason); err != nil {
 		return NativeAuthority{}, err
 	}
-	if err = tx.Commit(); err != nil {
-		return NativeAuthority{}, err
-	}
-	return l.GetAuthority(ctx, out.ID)
+	return out, nil
 }
 
 // RevokeAuthority ends an authority permanently. Its grants stay as history but
@@ -165,15 +175,24 @@ func (l *LocalAuthority) GrantTool(ctx context.Context, grantedBy, authorityID, 
 	if !a.Enabled || a.RevokedAt != "" {
 		return ErrNativeAuthorityRevoked
 	}
-	rc, err := newReceipt(grantedBy, a.HostSettingsRevision, a.SemanticDigest, reason)
-	if err != nil {
-		return err
-	}
 	tx, err := l.s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = grantToolTx(ctx, tx, a, grantedBy, authorityID, toolName, reason); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// grantToolTx grants one available tool inside the caller's transaction; the
+// caller commits. A repeat grant is a no-op that keeps the original receipt.
+func grantToolTx(ctx context.Context, tx *sql.Tx, a NativeAuthority, grantedBy, authorityID, toolName, reason string) error {
+	rc, err := newReceipt(grantedBy, a.HostSettingsRevision, a.SemanticDigest, reason)
+	if err != nil {
+		return err
+	}
 	var toolID string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, toolName).Scan(&toolID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -198,7 +217,7 @@ func (l *LocalAuthority) GrantTool(ctx context.Context, grantedBy, authorityID, 
 	if err = auditNative(ctx, tx, authorityID, "tool_granted", toolID, grantedBy, reason); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // RevokeTool removes one grant; revoking a tool that is not granted is a no-op.

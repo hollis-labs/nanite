@@ -55,11 +55,12 @@ func cmdAgent(args []string) {
 }
 
 func agentUsage(w io.Writer) {
-	fmt.Fprintf(w, "usage: %s agent <author|validate|install> ...\n", brand.BinaryName)
+	fmt.Fprintf(w, "usage: %s agent <author|validate|install|setup> ...\n", brand.BinaryName)
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  author [--role <role.md>] <definition.md>    flatten a role into an authored definition")
 	fmt.Fprintln(w, "  validate <definition.md>                     check schema and print id, revision, digest")
 	fmt.Fprintln(w, "  install [--resources <manifest.json>] <definition.md>   store a definition and print its pin")
+	fmt.Fprintln(w, "  setup <definition.md> --provider P --model M --tools all|a,b   install, configure, review and grant in one step")
 	fmt.Fprintln(w, "the digest covers behavior, not identity: use identity_digest to tell definitions apart")
 	fmt.Fprintln(w, "flags:")
 	fmt.Fprintln(w, "  -db <path>            database to write (else NANITE_DB_PATH / NANITE_WORKSPACE)")

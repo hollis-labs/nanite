@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/service"
@@ -83,7 +84,8 @@ func TestAgentV1CapabilitiesAdvertiseTheCLIRuntime(t *testing.T) {
 			cli = &caps.RuntimeKinds[i]
 		}
 	}
-	if cli == nil || len(cli.Providers) == 0 || cli.Providers[0] != "claude" {
-		t.Fatalf("runtime_kinds = %+v, want cli with claude", caps.RuntimeKinds)
+	want := []string{"claude", "codex", "opencode", "agy"}
+	if cli == nil || !reflect.DeepEqual(cli.Providers, want) {
+		t.Fatalf("runtime_kinds = %+v, want cli with providers %v", caps.RuntimeKinds, want)
 	}
 }

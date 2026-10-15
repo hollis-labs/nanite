@@ -485,7 +485,7 @@ func (a *API) agentV1Handler(handler http.HandlerFunc) http.HandlerFunc {
 func agentV1RuntimeKinds() []runtimeKindOption {
 	kinds := []runtimeKindOption{{Value: "api", Label: "Native cognition", ProductSupported: true}}
 	var launchable []string
-	for _, name := range []string{"claude"} {
+	for _, name := range []string{"claude", "codex", "opencode", "agy"} {
 		if runtimeagent.CanLaunch(name) {
 			launchable = append(launchable, name)
 		}

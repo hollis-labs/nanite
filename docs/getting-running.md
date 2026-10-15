@@ -71,7 +71,7 @@ continuity:
 ---
 Answer arithmetic questions with the number only.
 DEF
-./nanite agent install agent.md        # prints {"id","revision","digest"}
+./nanite agent install agent.md        # prints the pin: id, revision, digest (and name, identity_digest)
 ```
 
 ## 5. Serve with auth ON
@@ -92,7 +92,7 @@ The pin from step 4 is `{id, revision, digest}` on the host-settings route and
 
 ```sh
 api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$@"; }
-PIN=$(./nanite agent install agent.md)
+PIN=$(./nanite agent install agent.md | jq -c '{id, revision, digest}')
 # API agent
 HOST=$(api -X POST localhost:$NANITE_PORT/api/agent-host-settings -d "{
   \"title\":\"api agent\",\"slug\":\"api-agent\",\"definition_ref\":$PIN,\"enabled\":true,

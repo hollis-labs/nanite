@@ -56,7 +56,8 @@ continuity:
 ---
 Follow the user's instruction exactly and briefly.
 DEF
-pin=$("$bin" agent install -db "$db" "$work/def.md") && ok "definition installed" || { bad "definition install"; exit 1; }
+# install prints more than the pin (name, identity_digest); the routes take {id, revision, digest}.
+pin=$("$bin" agent install -db "$db" "$work/def.md" | jq -c '{id, revision, digest}') && ok "definition installed" || { bad "definition install"; exit 1; }
 
 # 2. serve with auth ON
 start_server() {

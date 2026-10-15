@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/clientcontext"
 	"github.com/hollis-labs/nanite/internal/effort"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
@@ -186,7 +187,7 @@ func (a *API) handleAgentV1Capabilities(w http.ResponseWriter, r *http.Request) 
 		App:                 agentV1App(),
 		Operations:          agentV1Operations(),
 		StreamTransports:    []string{"sse"},
-		RuntimeKinds:        []runtimeKindOption{{Value: "api", Label: "Native cognition", ProductSupported: true}},
+		RuntimeKinds:        agentV1RuntimeKinds(),
 		TurnStates:          agentV1SessionActivityOptions(),
 		SupportedEventTypes: agentV1EventTypes(),
 		SessionCreateFields: agentV1FieldSupport{Supported: []string{"definition_ref", "host_settings", "model_selection", "project_id", "title", "metadata"}, Unsupported: []string{"agent_id", "provider", "model", "runtime_kind", "work_root", "durable_agent_id", "boot_profile_id", "subagent_runtime"}},
@@ -476,4 +477,21 @@ func (a *API) agentV1Handler(handler http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "private, no-store")
 		handler(w, r)
 	}
+}
+
+// agentV1RuntimeKinds lists the runtimes a defined session can run on: native
+// API cognition always, and a CLI runtime when the host can launch at least one
+// CLI provider.
+func agentV1RuntimeKinds() []runtimeKindOption {
+	kinds := []runtimeKindOption{{Value: "api", Label: "Native cognition", ProductSupported: true}}
+	var launchable []string
+	for _, name := range []string{"claude"} {
+		if runtimeagent.CanLaunch(name) {
+			launchable = append(launchable, name)
+		}
+	}
+	if len(launchable) > 0 {
+		kinds = append(kinds, runtimeKindOption{Value: "cli", Label: "CLI agent", ProductSupported: true, Providers: launchable})
+	}
+	return kinds
 }

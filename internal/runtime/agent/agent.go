@@ -90,6 +90,12 @@ type Options struct {
 	// Dependencies.Agents. Empty falls back to the default profile.
 	AgentProfile string
 
+	// ExpectedHostRevision pins the host settings revision the resolved
+	// profile must carry. Boot, relaunch and bootdir regeneration all resolve
+	// the mutable host again; a mismatch fails with ErrHostRevisionChanged
+	// before anything is materialized or spawned. Empty disables the check.
+	ExpectedHostRevision string
+
 	// SessionID is the chat-harness-supplied identifier. When empty
 	// (most callers other than chat), Boot generates one.
 	SessionID string
@@ -358,6 +364,9 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if profile == nil {
 		return nil, errors.New("agent.Boot: profile resolution returned nil")
 	}
+	if err = checkExpectedHostRevision(opts, profile); err != nil {
+		return nil, fmt.Errorf("agent.Boot: %w", err)
+	}
 
 	sessID := opts.SessionID
 	if sessID == "" {
@@ -426,8 +435,10 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// ACP agents consume their system prompt over session/new|load and do
 	// not consume Nanite's native provider boot files. Native agents retain
 	// the existing boot-profile/layout compilation unchanged.
+	var bootParams SetupParams
 	if !isACP {
 		layout, params := composeBootdirParams(deps, opts, profile, sessID)
+		bootParams = params
 		bootDir, err = layout.Setup(params)
 		if err != nil {
 			if hadLineage && deps.PathGrants != nil {
@@ -449,7 +460,12 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir)
+	var launchX launchExtra
+	if !isACP {
+		launchX.Model = profile.DefaultModel
+		launchX.AddDirs = bootParams.CLIWritableRoots
+	}
+	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir, launchX)
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
 	}
@@ -746,4 +762,15 @@ func envMapToSlice(env map[string]string) []string {
 // ULID is monotonic-time prefixed so logs sort naturally.
 func newSessionID() string {
 	return ulid.Make().String()
+}
+
+// ErrHostRevisionChanged reports that the profile resolved at launch is not the
+// host settings revision the session was admitted under.
+var ErrHostRevisionChanged = errors.New("host settings revision changed")
+
+func checkExpectedHostRevision(opts Options, profile *store.AgentProfile) error {
+	if opts.ExpectedHostRevision == "" || profile.Revision == opts.ExpectedHostRevision {
+		return nil
+	}
+	return fmt.Errorf("%w: host settings %s is at revision %s, the session was admitted at %s", ErrHostRevisionChanged, profile.HostSettingsID, profile.Revision, opts.ExpectedHostRevision)
 }

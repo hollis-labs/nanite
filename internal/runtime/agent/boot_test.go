@@ -402,3 +402,19 @@ func TestBoot_RequiresProfile(t *testing.T) {
 		t.Fatalf("expected resolve-profile error, got %v", err)
 	}
 }
+
+// TestBoot_PinnedHostRevision: a launch (first boot, relaunch, bootdir rebuild)
+// refuses a host that moved past the revision the session was admitted under,
+// before any workspace or process exists.
+func TestBoot_PinnedHostRevision(t *testing.T) {
+	deps, _ := makeBootDeps(t, "claude")
+	deps.Agents = &fakeAgentProfiles{profile: &store.AgentProfile{ID: "h1", Revision: "r2", HostSettingsID: "h1"}}
+	opts := Options{Mode: ModeLongLived, Workdir: t.TempDir(), ExpectedHostRevision: "r1"}
+
+	if _, err := Boot(context.Background(), deps, opts); !errors.Is(err, ErrHostRevisionChanged) {
+		t.Fatalf("Boot err = %v, want ErrHostRevisionChanged", err)
+	}
+	if _, _, err := ResolveBootdirParams(deps, opts, "sess"); !errors.Is(err, ErrHostRevisionChanged) {
+		t.Fatalf("ResolveBootdirParams err = %v, want ErrHostRevisionChanged", err)
+	}
+}

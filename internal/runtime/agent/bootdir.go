@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -123,7 +124,7 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		// plumbing has to change.
 		Hooks: DefaultBootDirHooks,
 	}
-	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir)
+	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir, profileDirectories(profile)...)
 	if deps != nil {
 		// No root offered to an agent (the work root, dev_tools_allowed_paths,
 		// path grants) may be, or sit inside, a control-plane directory
@@ -161,7 +162,7 @@ func PathMentionLaunchRootsEnabled() bool {
 // unless the PathMentionLaunchRootsEnv kill switch asks for the old
 // behavior. Even then they are only grants that survived the mention
 // policy (permission.MentionPolicy).
-func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) []string {
+func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string, profileDirs ...string) []string {
 	seen := make(map[string]struct{})
 	var out []string
 	add := func(path string) {
@@ -188,6 +189,9 @@ func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string) [
 	}
 
 	add(workRoot)
+	for _, dir := range profileDirs {
+		add(dir)
+	}
 	if deps == nil {
 		return out
 	}
@@ -254,6 +258,9 @@ func ResolveBootdirParams(deps *Dependencies, opts Options, sessID string) (Layo
 	}
 	if profile == nil {
 		return nil, SetupParams{}, errors.New("agent.ResolveBootdirParams: profile resolution returned nil")
+	}
+	if err := checkExpectedHostRevision(opts, profile); err != nil {
+		return nil, SetupParams{}, fmt.Errorf("agent.ResolveBootdirParams: %w", err)
 	}
 	layout, params := composeBootdirParams(deps, opts, profile, sessID)
 	return layout, params, nil
@@ -417,3 +424,17 @@ func (u unsupportedLayout) AmendEnv(base map[string]string, _ string) map[string
 func (u unsupportedLayout) SpawnWorkdir(_, projectDir string) string       { return projectDir }
 func (u unsupportedLayout) BootPrompt(*store.AgentProfile, Options) string { return "" }
 func (u unsupportedLayout) BootMode() string                               { return "" }
+
+// profileDirectories lists the directories an agent's host settings grant, from
+// AgentProfile.Directories (a JSON array of paths). A malformed value grants
+// nothing.
+func profileDirectories(profile *store.AgentProfile) []string {
+	if profile == nil || profile.Directories == "" || profile.Directories == "[]" {
+		return nil
+	}
+	var dirs []string
+	if err := json.Unmarshal([]byte(profile.Directories), &dirs); err != nil {
+		return nil
+	}
+	return dirs
+}

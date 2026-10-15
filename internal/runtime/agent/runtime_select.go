@@ -142,6 +142,19 @@ func launchSupported(sel RuntimeSelection) bool {
 	return false
 }
 
+// launchExtra carries the per-launch arguments that come from the agent profile
+// rather than from the runtime selection.
+type launchExtra struct {
+	// Model is passed to the CLI when its flag is verified for the runtime
+	// (modelArgs).
+	Model string
+	// AddDirs are directories granted on the command line in addition to the
+	// work root. Claude ignores the boot dir's permissions.additionalDirectories
+	// until its workspace is trusted, and the ephemeral boot dir never is, so
+	// the command line is the grant that holds.
+	AddDirs []string
+}
+
 // selectAdapter builds the wrapper adapter for sel through launch.Select.
 // Native: the registry's own go-providers adapter, Claude's developer variant
 // when the permission engine is in yolo mode, with workRootArgs at the convention's extra
@@ -152,7 +165,11 @@ func launchSupported(sel RuntimeSelection) bool {
 // Claude launch gets the strict-MCP flags for its .mcp.json (strictMCPArgs)
 // and the allow rule for the planted server (claudeMCPAllowArgs) ahead of
 // workRootArgs, so the variadic --add-dir stays last.
-func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string) (adapters.Adapter, error) {
+func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string, extra ...launchExtra) (adapters.Adapter, error) {
+	var x launchExtra
+	if len(extra) > 0 {
+		x = extra[0]
+	}
 	if sel.Mode == runtimes.ModePTY {
 		return nil, errTerminalLaunchUnsupported
 	}
@@ -172,7 +189,8 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 		ExtraArgs: slices.Concat(
 			strictMCPArgs(sel.Runtime, bootDir),
 			claudeMCPAllowArgs(sel.Runtime, bootDir, deps.MCPConfig),
-			workRootArgs(string(sel.Runtime), workRoot),
+			modelArgs(string(sel.Runtime), x.Model),
+			addDirArgs(string(sel.Runtime), workRoot, x.AddDirs),
 		),
 	}
 	if deps.NativeCLIAdapter != nil {

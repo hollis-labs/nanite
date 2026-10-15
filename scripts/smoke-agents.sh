@@ -70,6 +70,13 @@ curl -s -o /dev/null -w '%{http_code}' "$base/api/agent-host-settings" | grep -q
   && ok "unauthenticated request refused (auth is ON)" || bad "expected 401 without a token"
 tok=$(cat "$("$bin" auth token-path -db "$db")")
 auth=(-H "Authorization: Bearer $tok")
+# SMOKE_YOLO=1 puts the permission engine in yolo mode (reset by a restart, so
+# set_yolo runs again after each start). Only for exercising yolo-gated launches.
+set_yolo() {
+  [ -n "${SMOKE_YOLO:-}" ] || return 0
+  curl -s -o /dev/null "${auth[@]}" -H 'Content-Type: application/json' -X PUT "$base/api/permissions/mode" -d '{"mode":"yolo"}'
+}
+set_yolo
 
 # wait_reply SESSION PATTERN LABEL: poll history for an assistant message matching PATTERN
 wait_reply() {
@@ -89,6 +96,7 @@ resume_check() {
   local sid=$1
   kill "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
   start_server
+  set_yolo
   curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$sid/turns" \
     -d '{"content":[{"kind":"text","text":"Add 1 to your previous answer. Reply with the number only."}],"delivery":"at_idle"}' >/dev/null
   wait_reply "$sid" 52 "cli: resumed after a server restart with context"

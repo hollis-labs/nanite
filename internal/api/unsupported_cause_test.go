@@ -40,9 +40,9 @@ func TestAgentV1CreateSession422NamesCauseAndRemedy(t *testing.T) {
 		want []string
 		code string
 	}{
-		"disabled host settings": {host("cause-disabled", false, "api"), nil, []string{"disabled", "enable"}, "host_disabled"},
-		"runtime is not api":     {host("cause-cli", true, "cli"), nil, []string{`runtime "cli"`, `runtime "api"`}, "runtime_not_api"},
-		"selection mismatch":     {host("cause-mismatch", true, "api"), &service.ModelSelection{Provider: "other", Model: "other-model"}, []string{"other/other-model", "fixture/fixture-model"}, "model_selection_mismatch"},
+		"disabled host settings":      {host("cause-disabled", false, "api"), nil, []string{"disabled", "enable"}, "host_disabled"},
+		"cli provider not launchable": {host("cause-cli", true, "cli"), nil, []string{`"fixture"`, "cannot be launched"}, "provider_not_launchable"},
+		"selection mismatch":          {host("cause-mismatch", true, "api"), &service.ModelSelection{Provider: "other", Model: "other-model"}, []string{"other/other-model", "fixture/fixture-model"}, "model_selection_mismatch"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := create(tc.h, tc.sel)

@@ -4,24 +4,79 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
 
+	secrets "github.com/hollis-labs/go-secrets"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
-	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
-// keyFixture is a ProviderConfigService whose keychain and environment are
-// plain maps. The keychain map is deliberately unsynchronized: SetAPIKey's
-// own lock is the only thing keeping concurrent saves off it, so -race sees
-// it if that lock goes.
+// fakeKeys is the key manager as the service sees it, over plain maps. The
+// keychain map (by provider id) is deliberately unsynchronized: SetAPIKey's own
+// lock is the only thing keeping concurrent saves off it, so -race sees it if
+// that lock goes. env is by variable name and always enabled, as with
+// NANITE_PROVIDER_KEY_ENV=1.
+type fakeKeys struct {
+	keychain     map[string]string
+	env          map[string]string
+	setSecret    func(id, value string) error
+	deleteSecret func(id string) error
+}
+
+func (k *fakeKeys) lookup(id string) (string, string) {
+	if v := k.keychain[id]; v != "" {
+		return v, "keychain"
+	}
+	if name := ProviderKeyEnvName(id); name != "" && k.env[name] != "" {
+		return k.env[name], "env:" + name
+	}
+	return "", ""
+}
+
+func (k *fakeKeys) Resolve(_ context.Context, id string) (secrets.Secret, providerkeys.Report, error) {
+	v, src := k.lookup(id)
+	if v == "" {
+		return secrets.Secret{}, providerkeys.Report{}, &providerkeys.Error{ProviderID: id, Err: &secrets.Error{Kind: secrets.KindNotFound}}
+	}
+	return secrets.FromString(v), providerkeys.Report{Source: src}, nil
+}
+
+func (k *fakeKeys) Status(_ context.Context, id string) providerkeys.Status {
+	v, src := k.lookup(id)
+	if v == "" {
+		return providerkeys.Status{ProviderID: id, Code: "secret_not_found"}
+	}
+	return providerkeys.Status{ProviderID: id, Usable: true, Source: src}
+}
+
+func (k *fakeKeys) Func(id string) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		sec, _, err := k.Resolve(ctx, id)
+		return sec.Reveal(), err
+	}
+}
+
+func (k *fakeKeys) SetKey(_ context.Context, id string, r io.Reader) error {
+	b, _ := io.ReadAll(r)
+	if err := k.setSecret(id, string(b)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (k *fakeKeys) ClearKey(_ context.Context, id string) error { return k.deleteSecret(id) }
+
+// keyFixture is a ProviderConfigService over a fakeKeys.
 type keyFixture struct {
 	svc      *ProviderConfigService
+	keys     *fakeKeys
 	keychain map[string]string
 	env      map[string]string
 	reg      *provider.Registry
@@ -36,12 +91,10 @@ func newKeyFixture(t *testing.T) *keyFixture {
 		reg:      provider.NewRegistry(),
 		cat:      providercatalog.New(),
 	}
-	f.svc = NewProviderConfigService(nil)
-	f.svc.setSecret = func(k, v string) error { f.keychain[k] = v; return nil }
-	f.svc.deleteSecret = func(k string) error { delete(f.keychain, k); return nil }
-	f.svc.resolveKey = func(providerID, envKey string) (string, string) {
-		return resolveAPIKey(func(k string) string { return f.keychain[k] }, func(k string) string { return f.env[k] }, providerID, envKey)
-	}
+	f.keys = &fakeKeys{keychain: f.keychain, env: f.env}
+	f.keys.setSecret = func(id, v string) error { f.keychain[id] = v; return nil }
+	f.keys.deleteSecret = func(id string) error { delete(f.keychain, id); return nil }
+	f.svc = NewProviderConfigService(nil, f.keys)
 	f.svc.SetProviderRuntime(f.reg, f.cat)
 	return f
 }
@@ -64,10 +117,10 @@ func TestSetAPIKey_SaveRegistersAFreshAdapterEachTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetAPIKey: %v", err)
 	}
-	if res != (APIKeyResult{HasKey: true, KeySource: APIKeySourceKeychain}) {
+	if res != (APIKeyResult{HasKey: true, KeySource: "keychain"}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if f.keychain[secrets.ProviderKeyName("anthropic-001")] != "sk-one" {
+	if f.keychain["anthropic-001"] != "sk-one" {
 		t.Fatalf("keychain = %v", f.keychain)
 	}
 	first, ok := f.registered(t)
@@ -97,10 +150,10 @@ func TestSetAPIKey_ClearWithEnvKeyKeepsProviderOnEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetAPIKey clear: %v", err)
 	}
-	if res != (APIKeyResult{HasKey: false, KeySource: APIKeySourceEnvironment}) {
+	if res != (APIKeyResult{HasKey: false, KeySource: "env:ANTHROPIC_API_KEY"}) {
 		t.Fatalf("result = %+v, want has_key=false on the environment key", res)
 	}
-	if _, ok := f.keychain[secrets.ProviderKeyName("anthropic-001")]; ok {
+	if _, ok := f.keychain["anthropic-001"]; ok {
 		t.Fatal("keychain entry not deleted")
 	}
 	after, ok := f.registered(t)
@@ -161,10 +214,10 @@ func TestSetAPIKey_AdapterlessRowOnlyWritesKeychain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res != (APIKeyResult{HasKey: true, KeySource: APIKeySourceKeychain}) {
+	if res != (APIKeyResult{HasKey: true, KeySource: "keychain"}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if f.keychain[secrets.ProviderKeyName("gemini-api-001")] != "g-key" {
+	if f.keychain["gemini-api-001"] != "g-key" {
 		t.Fatal("keychain not written")
 	}
 	if names := f.reg.Names(); len(names) != 0 {
@@ -174,7 +227,7 @@ func TestSetAPIKey_AdapterlessRowOnlyWritesKeychain(t *testing.T) {
 
 func TestSetAPIKey_KeychainFailureChangesNothing(t *testing.T) {
 	f := newKeyFixture(t)
-	f.svc.setSecret = func(string, string) error { return errors.New("dbus-launch: not found") }
+	f.keys.setSecret = func(string, string) error { return errors.New("dbus-launch: not found") }
 	if _, err := f.svc.SetAPIKey(context.Background(), "anthropic-001", "sk"); err == nil {
 		t.Fatal("SetAPIKey succeeded although the keychain write failed")
 	}
@@ -187,7 +240,7 @@ func TestSetAPIKey_NoRuntimeOnlyWritesKeychain(t *testing.T) {
 	f := newKeyFixture(t)
 	f.svc.SetProviderRuntime(nil, nil)
 	res, err := f.svc.SetAPIKey(context.Background(), "anthropic-001", "sk")
-	if err != nil || res.KeySource != APIKeySourceKeychain {
+	if err != nil || res.KeySource != "keychain" {
 		t.Fatalf("SetAPIKey = %+v, %v", res, err)
 	}
 	if _, ok := f.reg.Get("anthropic"); ok {
@@ -240,7 +293,7 @@ func TestSetAPIKey_ConcurrentSavesStayConsistent(t *testing.T) {
 	close(stop)
 	readers.Wait()
 
-	_, hasKey := f.keychain[secrets.ProviderKeyName("anthropic-001")]
+	_, hasKey := f.keychain["anthropic-001"]
 	if _, ok := f.registered(t); ok != hasKey {
 		t.Fatalf("registry has anthropic=%v, keychain has a key=%v", ok, hasKey)
 	}
@@ -292,8 +345,8 @@ func TestSetAPIKey_CredentialFailurePreservesRuntimeAndCause(t *testing.T) {
 			}
 			previous, _ := f.registered(t)
 			cause := errors.New("backend error containing private-credential")
-			f.svc.setSecret = func(string, string) error { return cause }
-			f.svc.deleteSecret = func(string) error { return cause }
+			f.keys.setSecret = func(string, string) error { return cause }
+			f.keys.deleteSecret = func(string) error { return cause }
 			key := "private-credential"
 			if operation == "clear" {
 				key = ""
@@ -303,11 +356,11 @@ func TestSetAPIKey_CredentialFailurePreservesRuntimeAndCause(t *testing.T) {
 			if !errors.As(err, &unavailable) || !errors.Is(err, cause) || unavailable.Operation != operation || unavailable.EnvironmentVariable != "ANTHROPIC_API_KEY" {
 				t.Fatalf("missing typed error/cause: %v", err)
 			}
-			if strings.Contains(err.Error(), "private-credential") || !strings.Contains(err.Error(), "restart Nanite") {
+			if strings.Contains(err.Error(), "private-credential") || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 				t.Fatalf("unsafe or unhelpful error: %v", err)
 			}
 			current, ok := f.registered(t)
-			if !ok || current != previous || f.keychain[secrets.ProviderKeyName("anthropic-001")] != "retained-key" {
+			if !ok || current != previous || f.keychain["anthropic-001"] != "retained-key" {
 				t.Fatal("failed key update changed retained runtime/credential")
 			}
 		})
@@ -320,8 +373,8 @@ func TestSetAPIKey_CanceledRequestDoesNotTouchCredentialOrRuntime(t *testing.T) 
 		t.Fatal(err)
 	}
 	previous, _ := f.registered(t)
-	f.svc.setSecret = func(string, string) error { t.Fatal("canceled save reached credential store"); return nil }
-	f.svc.deleteSecret = func(string) error { t.Fatal("canceled clear reached credential store"); return nil }
+	f.keys.setSecret = func(string, string) error { t.Fatal("canceled save reached credential store"); return nil }
+	f.keys.deleteSecret = func(string) error { t.Fatal("canceled clear reached credential store"); return nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, key := range []string{"replacement", ""} {
@@ -330,7 +383,7 @@ func TestSetAPIKey_CanceledRequestDoesNotTouchCredentialOrRuntime(t *testing.T) 
 		}
 	}
 	current, ok := f.registered(t)
-	if !ok || current != previous || f.keychain[secrets.ProviderKeyName("anthropic-001")] != "retained-key" {
+	if !ok || current != previous || f.keychain["anthropic-001"] != "retained-key" {
 		t.Fatal("canceled request changed runtime or credential")
 	}
 }

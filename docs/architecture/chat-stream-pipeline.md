@@ -100,7 +100,7 @@ wire representations using shared framing.
 | OpenCode CLI | one process per turn, plain-text stdout | go-providers, go-runner |
 | ACP agents | JSON-RPC 2.0 over stdio; only when the agent profile's protocol is `acp` | go-agent-wrapper |
 
-- API providers register only when a key resolves (keychain, then env). No Google, Ollama, OpenRouter, Mistral or Azure adapter exists.
+- API providers register only when a key resolves by reference (`internal/providerkeys`: the provider's `key_ref`, then the default keychain entry, then the environment only when `NANITE_PROVIDER_KEY_ENV=1`); the adapter fetches the key again on first use. No Google, Ollama, OpenRouter, Mistral or Azure adapter exists.
 - SDK-level retries are disabled in both HTTP clients.
 
 ### 2.2 Internal provider event (`llmtypes.StreamEvent`)

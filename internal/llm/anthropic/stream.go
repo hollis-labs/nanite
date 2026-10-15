@@ -32,8 +32,9 @@ import (
 // breaker state as the request flows through; this method just opens the
 // stream and translates events.
 func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
-	if c.apiKey == "" {
-		return nil, errors.New("ANTHROPIC_API_KEY not set")
+	api, err := c.client(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	model, err := resolveModel(in)
@@ -117,7 +118,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 	// optional interleaved thinking).
 	opts := []option.RequestOption{betaHeaderRequestOption(interleavedThinking)}
 
-	stream := c.sdk.Messages.NewStreaming(ctx, params, opts...)
+	stream := api.Messages.NewStreaming(ctx, params, opts...)
 	if streamErr := stream.Err(); streamErr != nil {
 		// NewStreaming surfaces non-OK setup errors via Err() (e.g. auth).
 		return nil, translateError(streamErr)

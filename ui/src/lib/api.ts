@@ -1497,8 +1497,8 @@ export const api = {
   ): Promise<{
     provider_id: string;
     has_key: boolean;
-    /** Where the key the provider now runs on comes from; "" when it has none. */
-    key_source: "keychain" | "environment" | "";
+    /** Where the key the provider now runs on resolves from (never the key): "keychain", "keychain:legacy:nanite", "env:VAR", ...; "" when it has none. */
+    key_source: string;
   }> => {
     const res = await fetch(`${API_BASE}/providers/${id}/api-key`, {
       method: "POST",

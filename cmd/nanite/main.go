@@ -29,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 
 	gosched "github.com/hollis-labs/libs/util/scheduler"
 	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
@@ -89,7 +90,7 @@ func loadServeRuntimeConfig(load serveRuntimeConfigLoader) (*config.RuntimeConfi
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, profile, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, profile, provider, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -121,6 +122,8 @@ func main() {
 		cmdSkill(args)
 	case "profile":
 		cmdProfile(args)
+	case "provider":
+		cmdProvider(args)
 	case "agent":
 		cmdAgent(args)
 	case "install":
@@ -372,7 +375,9 @@ func cmdServeWithInitializers(
 	}
 
 	// Set up provider registry (API keys, CLI adapters).
-	registry, providerCatalog := initProviders()
+	providerKeys := service.DefaultProviderKeys(s)
+	slogx.SetValueRedactor(providerkeys.Redactor().Redact)
+	registry, providerCatalog := initProviders(providerKeys)
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -507,6 +512,7 @@ func cmdServeWithInitializers(
 		HarnessProfiles:          harnessProfiles,
 		Store:                    s,
 		Providers:                registry,
+		ProviderKeys:             providerKeys,
 		MCP:                      mcpManager,
 		ToolClient:               tb,
 		Plugins:                  pluginHost,
@@ -1059,32 +1065,38 @@ func cmdServeWithInitializers(
 // DevPTY constructor which sets SkipPermissions=true in the adapter itself —
 // CW-20260515-0003 dropped the legacy skipPermsAdapter wrapper that used to
 // append --dangerously-skip-permissions externally.
-func initProviders() (*provider.Registry, *providercatalog.Catalog) {
+func initProviders(keys *providerkeys.Manager) (*provider.Registry, *providercatalog.Catalog) {
 	registry := provider.NewRegistry()
 	catalog := providercatalog.New()
 
-	// The API provider table and its key resolution (keychain first, then
-	// environment) live in internal/service so the provider key endpoints
-	// can build the same adapters at runtime (CW-20260930-0101).
+	// The API provider table lives in internal/service so the provider key
+	// endpoints can build the same adapters at runtime (CW-20260930-0101).
+	// A provider's key is a reference (internal/providerkeys): it is checked
+	// here only to decide whether to register the provider, and the adapter
+	// fetches it again when a request first uses it. A provider with no usable
+	// key is not registered, and says why.
 	var registeredAPI, missingAPI []string
 	for _, spec := range service.APIProviderSpecs() {
-		key, source := service.ResolveAPIKey(spec.ProviderID, spec.EnvKey)
-		if key != "" {
-			registry.Register(spec.Name, spec.NewProvider(key))
+		st := keys.Status(context.Background(), spec.ProviderID)
+		if st.Usable {
+			registry.Register(spec.Name, spec.NewLazyProvider(keys.Func(spec.ProviderID)))
 			catalog.Add(providercatalog.Entry{
 				Name:        spec.Name,
 				DisplayName: spec.DisplayName,
 				RowID:       spec.ProviderID,
 			})
-			slog.Info("provider registered", "provider", spec.Name, "key_source", source)
+			slog.Info("provider registered", "provider", spec.Name, "key_source", st.Source)
 			registeredAPI = append(registeredAPI, spec.Name)
 		} else {
+			slog.Warn("provider not registered: no usable API key",
+				"provider", spec.Name, "code", st.Code, "ref", st.Ref, "guidance", st.Guidance)
 			missingAPI = append(missingAPI, spec.Name)
 		}
 	}
 
 	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
-		slog.Warn("no API providers configured — chat will not work")
+		slog.Warn(fmt.Sprintf("no API providers configured — chat will not work; save a key with `%s provider set-key <provider-id>` (key on stdin); `%s provider status` shows why each provider is unusable",
+			brand.BinaryName, brand.BinaryName))
 	}
 
 	// CLI agents (claude / codex / opencode, and copilot / pi over ACP)

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/providerkeys"
+
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
 
 	"github.com/hollis-labs/substrate/agent/approval"
@@ -182,9 +184,12 @@ type Container struct {
 	RuntimeFeed *HostRuntimeFeed
 	Events      EventEmitter
 	Providers   *provider.Registry
-	Commands    *chat.CommandRegistry
-	Plugins     *plugin.Host
-	MCP         *mcp.Manager
+	// ProviderKeys resolves and writes native-provider API keys by
+	// reference. Never nil on a built Container.
+	ProviderKeys *providerkeys.Manager
+	Commands     *chat.CommandRegistry
+	Plugins      *plugin.Host
+	MCP          *mcp.Manager
 
 	// Messaging service — validates, persists, and fans out
 	// agent-to-agent messages plus handoff state transitions.
@@ -390,10 +395,13 @@ type ContainerConfig struct {
 	DefaultDefinitionRef DefinitionRef
 	Store                *store.Store
 	Providers            *provider.Registry
-	MCP                  *mcp.Manager
-	ToolClient           *toolclient.ToolClient
-	Plugins              *plugin.Host
-	AppConfig            *config.TunablesConfig
+	// ProviderKeys resolves native-provider API keys by reference. Nil builds
+	// the default over the OS keychain and the provider rows' key_ref.
+	ProviderKeys *providerkeys.Manager
+	MCP          *mcp.Manager
+	ToolClient   *toolclient.ToolClient
+	Plugins      *plugin.Host
+	AppConfig    *config.TunablesConfig
 	// HarnessProfiles is the harness profile registry (D-33). nil means the
 	// embedded built-in profiles only.
 	HarnessProfiles *harnessprofile.Registry
@@ -515,9 +523,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 		defaultRef = embedded.Ref
 	}
+	providerKeys := cfg.ProviderKeys
+	if providerKeys == nil {
+		providerKeys = DefaultProviderKeys(cfg.Store)
+	}
 	models := cfg.ModelAuthorizer
 	if models == nil {
-		models = configuredNativeModel(cfg.Providers)
+		models = configuredNativeModel(cfg.Providers, providerKeys)
 	}
 	cognitiveViews := &CognitiveViews{Store: cfg.Store, Resolver: resolver, Models: models, DefaultDefinitionRef: defaultRef}
 	workingDir := cfg.WorkingDir
@@ -596,7 +608,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
 	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
 	usage := NewUsageService(cfg.Store, cfg.Store)
-	providerConfig := NewProviderConfigService(cfg.Store)
+	providerConfig := NewProviderConfigService(cfg.Store, providerKeys)
 	// Saving an API key swaps the registered adapter live (CW-20260930-0101).
 	// providercatalog.Catalog is nil-receiver safe, so a nil ProviderCatalog
 	// (tests that don't wire one) is fine here.
@@ -1066,6 +1078,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		DBPath:           cfg.Store.DBPath(catalogCtx),
 		MCP:              cfg.MCP,
 		Providers:        cfg.Providers,
+		ProviderKeys:     providerKeys,
 		APIBaseURL:       cfg.APIBaseURL,
 		AgentCredential:  cfg.AgentCredential,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
@@ -1442,6 +1455,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		RuntimeFeed:         runtimeFeed,
 		Events:              events,
 		Providers:           cfg.Providers,
+		ProviderKeys:        providerKeys,
 		Commands:            commands,
 		Plugins:             cfg.Plugins,
 		PluginConfig:        NewPluginConfigService(cfg.Store, cfg.Plugins),

@@ -187,12 +187,24 @@ transcripts, agent profiles, plugin settings, and MCP server configurations.
 `nanite path` prints where it and Nanite's other state live (resolved from the
 XDG directories, or `NANITE_DB_PATH`); `--db` overrides it for `nanite serve`.
 
-Provider API keys and plugin configuration fields marked secret are stored in
-the OS keychain (macOS Keychain, Windows Credential Manager, or the Linux
-Secret Service), not in the database. When the keychain has no key for a
-provider, Nanite falls back to the conventional environment variable
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), which is how a container is
-configured.
+Plugin configuration fields marked secret are stored in the OS keychain
+(macOS Keychain, Windows Credential Manager, or the Linux Secret Service), not
+in the database.
+
+A provider API key is a *reference*, resolved when the provider is first used,
+never a value in the database or a config file. By default Nanite looks in the
+OS keychain; a provider can instead name another source with
+`nanite provider set-ref <id> <ref>` (`keychain://`, `helper://`, `file://`,
+`op://`). Save a key with `nanite provider set-key <id>`, which reads it from
+standard input so it never appears in a process list or shell history.
+`nanite provider status` shows, for each provider, whether a key resolves and
+from where, and never prints a key.
+
+The conventional environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+are **not** read unless you set `NANITE_PROVIDER_KEY_ENV=1`, which is how a
+container without a keychain is configured. With it on, the environment is
+consulted last and a provider running on it reports `env:<VARIABLE>` as its
+source. Resolved key values are scrubbed from Nanite's logs and error messages.
 
 MCP server `env` values and HTTP `headers` are stored in the database in
 plaintext. The API redacts them on read — key names stay visible, values are

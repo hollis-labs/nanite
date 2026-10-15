@@ -38,7 +38,7 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 		return nil, ErrLogicalAgentProvisionInput
 	}
 	if host == nil || host.Resolver == nil || host.Models == nil {
-		return nil, unsupportedCause("native_host_unconfigured", "this server has no native chat host configured")
+		return nil, unsupportedCause(CauseNativeHostUnconfigured, "this server has no native chat host configured")
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return nil, contextErr
@@ -64,14 +64,14 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	// Retained profiles do not apply the native view's read-only posture. Refuse
 	// that semantic rather than storing an ignored policy label as enforcement.
 	if cfg.PermissionProfile != "default" {
-		return nil, unsupportedCause("permission_profile_unsupported", "permission profile %q is not supported for logical agents; use profile \"default\"", cfg.PermissionProfile)
+		return nil, unsupportedCause(CausePermissionProfileUnsupported, "permission profile %q is not supported for logical agents; use profile \"default\"", cfg.PermissionProfile)
 	}
 	model, err := host.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(model.Provider) == "" || strings.TrimSpace(model.Model) == "" {
-		return nil, unsupportedModelCause("model_not_selected", "no provider and model selected; pass a model selection")
+		return nil, unsupportedModelCause(CauseModelNotSelected, "no provider and model selected; pass a model selection")
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		return nil, contextErr

@@ -11,11 +11,31 @@ import (
 // working, and adds a stable Code that clients and the HTTP layer can switch
 // on. Msg is the operator-facing cause and remedy; it never carries a secret.
 //
-// Codes in use: host_settings_disabled, runtime_not_api, runtime_unsupported,
-// native_host_unconfigured, model_selection_mismatch, model_not_selected,
-// model_authorizer_missing, provider_not_registered,
-// permission_profile_unsupported, definition_unsupported,
-// resource_resolver_unavailable.
+// The codes are constants below; keep one list so every branch (native API,
+// CLI runtime) speaks the same vocabulary.
+const (
+	CauseHostDisabled                 = "host_disabled"
+	CauseRuntimeNotAPI                = "runtime_not_api"
+	CauseRuntimeUnsupported           = "runtime_unsupported"
+	CauseNativeHostUnconfigured       = "native_host_unconfigured"
+	CauseModelSelectionMismatch       = "model_selection_mismatch"
+	CauseModelNotSelected             = "model_not_selected"
+	CauseModelAuthorizerMissing       = "model_authorizer_missing"
+	CauseProviderNotRegistered        = "provider_not_registered"
+	CauseProviderKeyUnavailable       = "provider_key_unavailable"
+	CausePermissionProfileUnsupported = "permission_profile_unsupported"
+	CauseDefinitionUnsupported        = "definition_unsupported"
+	CauseResourceResolverMissing      = "resource_resolver_unavailable"
+
+	// Reserved for the CLI runtime (B2); defined here so there is one list.
+	CauseRuntimeUnavailable      = "runtime_unavailable"
+	CauseReadOnlyUnenforceable   = "read_only_unenforceable"
+	CauseProviderNotLaunchable   = "provider_not_launchable"
+	CauseCLIHostUnsupportedField = "cli_host_unsupported_field"
+	CauseHostDirectoriesMissing  = "host_directories_missing"
+	CauseHostRevisionChanged     = "host_revision_changed"
+)
+
 type UnsupportedCause struct {
 	Code string
 	Msg  string

@@ -87,7 +87,9 @@ func TestAgentSetupRefusesBeforeWriting(t *testing.T) {
 	}{
 		{"no key", false, []string{"--provider", "anthropic", "--model", "m", "--tools", "all"}, "provider set-key anthropic"},
 		{"unknown provider", true, []string{"--provider", "nowhere", "--model", "m", "--tools", "all"}, "not a native API provider"},
-		{"runtime cli", true, []string{"--provider", "anthropic", "--model", "m", "--runtime", "cli", "--tools", "all"}, "runtime cli"},
+		{"cli unknown provider", false, []string{"--provider", "nowhere", "--runtime", "cli", "--tools", "all"}, "cannot be launched"},
+		{"cli no provider", false, []string{"--runtime", "cli", "--tools", "all"}, "--provider is required for runtime cli"},
+		{"unknown runtime", true, []string{"--provider", "anthropic", "--model", "m", "--runtime", "vm", "--tools", "all"}, "--runtime api or cli"},
 		{"no model", true, []string{"--provider", "anthropic", "--tools", "all"}, "--provider and --model"},
 		{"no tools flag", true, []string{"--provider", "anthropic", "--model", "m"}, "--tools is required"},
 		{"unknown tool", true, []string{"--provider", "anthropic", "--model", "m", "--tools", "no_such"}, "authority tools"},
@@ -186,5 +188,47 @@ func TestAgentSetupRerunReportsEveryGrantAndAddsOnly(t *testing.T) {
 	}
 	if added, _ := second["tools_added"].([]any); len(added) != 0 {
 		t.Fatalf("tools_added = %v", added)
+	}
+}
+
+func TestAgentSetupCLIRuntimeSkipsKeyAndSharesAdmission(t *testing.T) {
+	st, keys, def := setupFixture(t, false) // no API key: a CLI agent does not need one
+	ws := t.TempDir()
+	var out bytes.Buffer
+	if err := runAgentSetup(context.Background(), st, keys, ws, []string{def, "--provider", "claude", "--model", "haiku", "--runtime", "cli", "--tools", "dev.read"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["created"] != true || got["session_request"] == nil {
+		t.Fatalf("output = %v", got)
+	}
+	host, err := st.GetAgentHostSettings(context.Background(), got["host_settings_id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Settings.Runtime != "cli" || host.Settings.Provider != "claude" || host.Settings.Model != "haiku" || len(host.Settings.Directories) != 1 {
+		t.Fatalf("host settings = %+v", host.Settings)
+	}
+}
+
+func TestAgentSetupCLIRefusesReadOnlyDefinitionBeforeWriting(t *testing.T) {
+	st, keys, def := setupFixture(t, false)
+	data, err := os.ReadFile(def) //nolint:gosec // G304: test fixture path from t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro := filepath.Join(t.TempDir(), "ro.md")
+	if err = os.WriteFile(ro, []byte(strings.Replace(string(data), "profile: default", "profile: read-only", 1)), 0o600); err != nil { //nolint:gosec // G703: test fixture written under t.TempDir
+		t.Fatal(err)
+	}
+	err = runAgentSetup(context.Background(), st, keys, t.TempDir(), []string{ro, "--provider", "claude", "--runtime", "cli", "--tools", "all"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cannot run as a CLI agent") {
+		t.Fatalf("err = %v", err)
+	}
+	if n := rowsAfterSetup(t, st); n != 0 {
+		t.Fatalf("refusal wrote %d rows", n)
 	}
 }

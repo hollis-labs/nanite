@@ -8,6 +8,7 @@ create an actor or grant tools and skills.
 
 ```sh
 nanite agent setup <flat.md | archetype-id> --provider anthropic --model <model> --tools all \
+  [--runtime api|cli] \
   [--slug S] [--title T] [--resources resources.json] [--reason "why"] [-db path]
 ```
 
@@ -18,9 +19,12 @@ revision, the authority id, the granted tools, and a ready
 `POST /api/agent/v1/sessions` body.
 
 Everything that can be checked is checked first and refuses without writing:
-the definition parses, the runtime is supported (`api` today; `cli` is refused
-until it lands), the provider is a native API provider with a usable key (the
-refusal names the remedy, e.g. `provider set-key`; keys are never printed), and
+the definition parses, the runtime is `api` or `cli`; for `api` the provider is a native API provider
+with a usable key (the refusal names the remedy, e.g. `provider set-key`; keys
+are never printed); for `cli` (`--provider claude`, `--model` optional) no API
+key is needed and the host is checked by the same admission session creation
+applies (launchable provider, default permission profile, absolute directories,
+verified model flag), so setup refuses what a launch would; and
 every named tool exists. `--tools all` grants every tool the catalog lists as
 available; it is a grant recorded like any other, not a bypass. The catalog is
 filled when the server starts, so start it once on a new database before

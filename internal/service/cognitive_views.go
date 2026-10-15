@@ -265,6 +265,13 @@ func admitCLIHost(h store.NativeHostSettings, permissionProfile string, requeste
 	return selected, nil
 }
 
+// AdmitCLIHost applies session creation's CLI host admission, so callers that
+// prepare host settings (agent setup) refuse exactly what a launch would.
+func AdmitCLIHost(h store.NativeHostSettings, permissionProfile string) error {
+	_, err := admitCLIHost(h, permissionProfile, nil)
+	return err
+}
+
 // cliUnsupportedField names the first host field that is set but does not apply
 // to a CLI agent, or "". Default (empty) values pass: the same host document
 // shape serves both runtimes.

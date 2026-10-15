@@ -35,7 +35,11 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 	// usage StreamEvent before the terminator.
 	params.StreamOptions.IncludeUsage = sdk.Bool(true)
 
-	stream := c.sdk.Chat.Completions.NewStreaming(ctx, params)
+	api, err := c.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stream := api.Chat.Completions.NewStreaming(ctx, params)
 
 	out := make(chan llmtypes.StreamEvent, 16)
 	go func() {

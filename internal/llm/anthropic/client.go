@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
@@ -70,6 +71,11 @@ const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
 // like chat_generate.go and chat_rate_budget_pause.go can migrate via type
 // rename only.
 type Client struct {
+	// keyMu guards apiKey, sdk, keyFn and keyLoaded, which a lazily resolved
+	// key (SetKeyFunc) changes at first use rather than at construction.
+	keyMu          sync.Mutex
+	keyFn          KeyFunc
+	keyLoaded      bool
 	apiKey         string
 	sdk            sdk.Client
 	httpClient     *http.Client
@@ -130,6 +136,9 @@ func New() *Client {
 // the new key is in effect for subsequent requests. Composition root calls
 // this after pulling the key from the OS keychain.
 func (c *Client) SetAPIKey(key string) {
+	c.keyMu.Lock()
+	defer c.keyMu.Unlock()
+	c.keyFn, c.keyLoaded = nil, false
 	c.apiKey = key
 	c.rebuildSDK()
 }
@@ -139,7 +148,11 @@ func (c *Client) SetAPIKey(key string) {
 // wraps keycheck.ErrRejected; any other failure means the provider could not
 // be reached or answered with an error of its own.
 func (c *Client) VerifyKey(ctx context.Context) error {
-	_, err := c.sdk.Models.List(ctx, sdk.ModelListParams{Limit: sdk.Int(1)})
+	api, kerr := c.client(ctx)
+	if kerr != nil {
+		return kerr
+	}
+	_, err := api.Models.List(ctx, sdk.ModelListParams{Limit: sdk.Int(1)})
 	if err == nil {
 		return nil
 	}

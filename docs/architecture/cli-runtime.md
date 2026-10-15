@@ -97,9 +97,11 @@ All of it rides existing code paths.
   the planted Nanite MCP server (`claude_mcp_allow.go`, `strict_mcp.go`).
   Nanite-owned tools reach the CLI only through that MCP server, so
   `toolclient`/RPC authorization remains the gate for them.
-- Yolo/developer posture is `Dependencies.DeveloperMode`, which selects the
-  Claude developer variant. It stays a daemon-level dependency, never a host
-  setting or a request field. The spike ran with it on.
+- Yolo selects the Claude developer variant: `Dependencies.yoloMode()` reads
+  the permission engine's mode, and only `ModeYolo` sets
+  `launch.Selection.DeveloperMode` (with an AUDIT log line). It is a daemon
+  permission-engine state, never a host setting or request field, so a CLI host
+  needs nothing of its own. The spike runs in the default mode.
 - ACP permission requests go through the existing approval bridge
   (`agent-runtime.md`, "ACP permission requests"). Best-effort, not a gate.
 - `projectAgentHost` refuses any definition whose permission profile is not

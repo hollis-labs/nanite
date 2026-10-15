@@ -45,7 +45,7 @@ func TestSpikeCLIRuntimeClaudeTurn(t *testing.T) {
 
 	bundle, err := BuildAgentDependencies(AgentDepsConfig{
 		Store: st, Streams: NewStreamManager(st), WorkspacesRoot: t.TempDir(),
-		DBPath: filepath.Join(t.TempDir(), "spike.db"), CLIDeveloperMode: true,
+		DBPath: filepath.Join(t.TempDir(), "spike.db"),
 	})
 	if err != nil {
 		t.Fatal(err)

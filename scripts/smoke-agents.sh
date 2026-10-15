@@ -28,7 +28,7 @@ say()  { printf '%s\n' "$*"; }
 ok()   { pass=$((pass+1)); say "PASS  $*"; }
 bad()  { fail=$((fail+1)); say "FAIL  $*"; }
 skp()  { skip=$((skip+1)); say "SKIP  $*"; }
-cleanup() { [ -n "$srv" ] && kill "$srv" 2>/dev/null || true; rm -rf "$work"; }
+cleanup() { [ -n "$srv" ] && kill "$srv" 2>/dev/null || true; if [ -n "${SMOKE_KEEP:-}" ]; then say "kept $work"; else rm -rf "$work"; fi; }
 trap cleanup EXIT
 
 [ -x "$bin" ] || (cd "$root" && go build -o "$bin" ./cmd/nanite)
@@ -59,19 +59,45 @@ DEF
 pin=$("$bin" agent install -db "$db" "$work/def.md") && ok "definition installed" || { bad "definition install"; exit 1; }
 
 # 2. serve with auth ON
-"$bin" serve -db "$db" -port "$port" -dev >"$work/serve.log" 2>&1 &
-srv=$!
-for _ in $(seq 1 60); do curl -fs "$base/api/health" >/dev/null 2>&1 && break; sleep 0.5; done
+start_server() {
+  "$bin" serve -db "$db" -port "$port" -dev >>"$work/serve.log" 2>&1 &
+  srv=$!
+  for _ in $(seq 1 60); do curl -fs "$base/api/health" >/dev/null 2>&1 && break; sleep 0.5; done
+}
+start_server
 curl -s -o /dev/null -w '%{http_code}' "$base/api/agent-host-settings" | grep -q '^401$' \
   && ok "unauthenticated request refused (auth is ON)" || bad "expected 401 without a token"
 tok=$(cat "$("$bin" auth token-path -db "$db")")
 auth=(-H "Authorization: Bearer $tok")
 
-# one agent: host settings -> session -> turn -> text
+# wait_reply SESSION PATTERN LABEL: poll history for an assistant message matching PATTERN
+wait_reply() {
+  local sid=$1 pat=$2 label=$3 h
+  for _ in $(seq 1 90); do
+    sleep 2
+    h=$(curl -s "${auth[@]}" "$base/api/agent/v1/sessions/$sid/messages")
+    # Only an assistant message counts.
+    printf '%s' "$h" | jq -e --arg p "$pat" '[.items[] | select(.role=="assistant") | .content] | any(test($p))' >/dev/null 2>&1 && { ok "$label"; return 0; }
+  done
+  bad "$label: no matching reply within 180s"; return 1
+}
+
+# resume_check SESSION: restart the server, then ask something only the earlier
+# turn can answer. The CLI's own session (provider_session_id) must carry it.
+resume_check() {
+  local sid=$1
+  kill "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
+  start_server
+  curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$sid/turns" \
+    -d '{"content":[{"kind":"text","text":"Add 1 to your previous answer. Reply with the number only."}],"delivery":"at_idle"}' >/dev/null
+  wait_reply "$sid" 52 "cli: resumed after a server restart with context"
+}
+
+# one agent: host settings -> session -> turn -> reply
 run_agent() { # name settings-json
-  local name=$1 settings=$2 host hid hrev sid turn
+  local name=$1 settings=$2 host hid hrev sid sref turn
   host=$(curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent-host-settings" \
-    -d "{\"title\":\"smoke $name\",\"slug\":\"smoke-$name\",\"definition_ref\":$pin,\"enabled\":true,\"settings\":$settings}") 
+    -d "{\"title\":\"smoke $name\",\"slug\":\"smoke-$name\",\"definition_ref\":$pin,\"enabled\":true,\"settings\":$settings}")
   hid=$(printf '%s' "$host" | jq -r '.id // empty' 2>/dev/null || true)
   hrev=$(printf '%s' "$host" | jq -r '.revision // empty' 2>/dev/null || true)
   # The session route names the same pin definition_id / semantic_digest.
@@ -83,14 +109,9 @@ run_agent() { # name settings-json
   sid=$(printf '%s' "$sid" | jq -r '.session_view_id')
   turn=$(curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$sid/turns" \
     -d '{"content":[{"kind":"text","text":"What is 17 times 3? Reply with the number only."}],"delivery":"at_idle"}')
-  say "      turn accepted: $(printf '%s' "$turn" | head -c 200)"
-  for _ in $(seq 1 90); do
-    sleep 2
-    h=$(curl -s "${auth[@]}" "$base/api/agent/v1/sessions/$sid/messages")
-    # Only an assistant message counts; the question has no canned answer.
-    printf "%s" "$h" | jq -e '[.items[] | select(.role=="assistant") | .content] | any(test("51"))' >/dev/null 2>&1 && { ok "$name: turn completed with a reply"; return; }
-  done
-  bad "$name: no reply within 180s"
+  say "      turn accepted: $(printf '%s' "$turn" | head -c 120)"
+  wait_reply "$sid" 51 "$name: turn completed with a reply" || return
+  if [ "$name" = cli ]; then resume_check "$sid"; fi
 }
 
 # 3. API agent
@@ -102,7 +123,9 @@ fi
 
 # 4. CLI agent (runtime=cli lands with B2, CW-20261014-0161)
 if [ -n "${SMOKE_CLI:-}" ]; then
-  run_agent cli '{"version":"1","runtime":"cli","provider":"claude","model":"haiku","native_loop":{}}'
+  # A CLI agent's work root is the first host directory.
+  mkdir -p "$work/cli-work"
+  run_agent cli "{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"claude\",\"model\":\"haiku\",\"directories\":[\"$work/cli-work\"],\"native_loop\":{}}"
 else
   skp "cli agent: set SMOKE_CLI=1 once runtime=cli (B2) is merged and claude is logged in"
 fi

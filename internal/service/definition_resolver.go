@@ -176,7 +176,7 @@ func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error
 func mapChatDefinition(ctx context.Context, verified VerifiedDefinition) (ChatDefinitionConfig, error) {
 	d := verified.Definition
 	if d == nil {
-		return ChatDefinitionConfig{}, fmt.Errorf("%w: the resolved definition is empty", ErrUnsupportedDefinition)
+		return ChatDefinitionConfig{}, unsupportedCause("definition_unsupported", "the resolved definition is empty")
 	}
 	if err := agentpolicy.ValidateExecution(d); err != nil {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: %w", ErrUnsupportedDefinition, err)
@@ -194,7 +194,7 @@ func mapChatDefinition(ctx context.Context, verified VerifiedDefinition) (ChatDe
 	var bundle *agentpolicy.ReflexBundle
 	if e, ok := d.Extensions[agentpolicy.ReflexNamespace]; ok {
 		if verified.ReadResource == nil {
-			return ChatDefinitionConfig{}, fmt.Errorf("%w: reflex resource resolver unavailable", ErrUnsupportedDefinition)
+			return ChatDefinitionConfig{}, unsupportedCause("resource_resolver_unavailable", "reflex resource resolver unavailable")
 		}
 		p, err := agentpolicy.DecodeReflex(e)
 		if err != nil {
@@ -221,7 +221,7 @@ func mapChatDefinition(ctx context.Context, verified VerifiedDefinition) (ChatDe
 	for _, refs := range [][]agentdef.Ref{d.Behavior.Instructions, d.Behavior.SOPs} {
 		for _, ref := range refs {
 			if verified.ReadResource == nil {
-				return ChatDefinitionConfig{}, fmt.Errorf("%w: instruction resource resolver unavailable", ErrUnsupportedDefinition)
+				return ChatDefinitionConfig{}, unsupportedCause("resource_resolver_unavailable", "instruction resource resolver unavailable")
 			}
 			body, err := verified.ReadResource(ctx, ref)
 			if err != nil {

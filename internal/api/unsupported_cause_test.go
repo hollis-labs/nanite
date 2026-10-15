@@ -38,10 +38,11 @@ func TestAgentV1CreateSession422NamesCauseAndRemedy(t *testing.T) {
 		h    store.AgentHostSettings
 		sel  *service.ModelSelection
 		want []string
+		code string
 	}{
-		"disabled host settings": {host("cause-disabled", false, "api"), nil, []string{"disabled", "enable"}},
-		"runtime is not api":     {host("cause-cli", true, "cli"), nil, []string{`runtime "cli"`, `runtime "api"`}},
-		"selection mismatch":     {host("cause-mismatch", true, "api"), &service.ModelSelection{Provider: "other", Model: "other-model"}, []string{"other/other-model", "fixture/fixture-model"}},
+		"disabled host settings": {host("cause-disabled", false, "api"), nil, []string{"disabled", "enable"}, "host_settings_disabled"},
+		"runtime is not api":     {host("cause-cli", true, "cli"), nil, []string{`runtime "cli"`, `runtime "api"`}, "runtime_not_api"},
+		"selection mismatch":     {host("cause-mismatch", true, "api"), &service.ModelSelection{Provider: "other", Model: "other-model"}, []string{"other/other-model", "fixture/fixture-model"}, "model_selection_mismatch"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := create(tc.h, tc.sel)
@@ -51,11 +52,15 @@ func TestAgentV1CreateSession422NamesCauseAndRemedy(t *testing.T) {
 			var body struct {
 				Error struct {
 					Code    string `json:"code"`
+					Cause   string `json:"cause"`
 					Message string `json:"message"`
 				} `json:"error"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
+			}
+			if body.Error.Code != "unsupported_selection" || body.Error.Cause != tc.code {
+				t.Fatalf("code=%q cause=%q, want unsupported_selection/%s", body.Error.Code, body.Error.Cause, tc.code)
 			}
 			for _, want := range tc.want {
 				if !strings.Contains(body.Error.Message, want) {

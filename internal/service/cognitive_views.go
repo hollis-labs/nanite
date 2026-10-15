@@ -74,7 +74,7 @@ func configuredNativeModel(registry *provider.Registry) ModelAuthorizer {
 			return ModelSelection{}, fmt.Errorf("%w: select a provider and model in the agent's host settings or the launch request", ErrUnsupportedModel)
 		}
 		if _, ok := registry.Get(requested.Provider); !ok {
-			return ModelSelection{}, fmt.Errorf("%w: provider %q is not a registered native provider", ErrUnsupportedModel, requested.Provider)
+			return ModelSelection{}, UnregisteredProviderError(ErrUnsupportedModel, requested.Provider)
 		}
 		return *requested, nil
 	})
@@ -126,12 +126,15 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		if DefinitionRefFromMesh(h.DefinitionRef) != req.DefinitionRef {
 			return nil, ErrDefinitionDigestMismatch
 		}
-		if !h.Enabled || h.Settings.Runtime != "api" {
-			return nil, ErrUnsupportedDefinition
+		if !h.Enabled {
+			return nil, fmt.Errorf("%w: host settings %q are disabled; enable them or launch against enabled settings", ErrUnsupportedDefinition, h.ID)
+		}
+		if h.Settings.Runtime != "api" {
+			return nil, fmt.Errorf("%w: host settings %q use runtime %q, but native chat needs runtime \"api\"; set runtime to api on the host settings", ErrUnsupportedDefinition, h.ID, h.Settings.Runtime)
 		}
 		selected := ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model}
 		if req.ModelSelection != nil && *req.ModelSelection != selected {
-			return nil, ErrUnsupportedModel
+			return nil, fmt.Errorf("%w: the requested provider/model (%s/%s) differs from the host settings (%s/%s); omit the request selection or change the host settings", ErrUnsupportedModel, req.ModelSelection.Provider, req.ModelSelection.Model, selected.Provider, selected.Model)
 		}
 		req.ModelSelection = &selected
 		cfg.HostSettings = &h.Settings

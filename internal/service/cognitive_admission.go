@@ -81,7 +81,7 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 			return "", resolveErr
 		}
 		if agent.RuntimeKind != "" && agent.RuntimeKind != "api" {
-			return "", ErrUnsupportedModel
+			return "", fmt.Errorf("%w: agent runtime %q is not native; native chat needs runtime \"api\"", ErrUnsupportedModel, agent.RuntimeKind)
 		}
 		if providerID == "" {
 			providerID = agent.DefaultProvider
@@ -94,7 +94,7 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 		return "", fmt.Errorf("%w: no provider and model selected for this view; set them on the agent's host settings or the launch request", ErrUnsupportedModel)
 	}
 	if _, ok := s.providers.Get(providerID); !ok {
-		return "", ErrUnsupportedModel
+		return "", UnregisteredProviderError(ErrUnsupportedModel, providerID)
 	}
 	s.activeGenMu.Lock()
 	count := 0

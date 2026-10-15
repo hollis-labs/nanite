@@ -175,9 +175,16 @@ func (l *LocalAuthority) GrantTool(ctx context.Context, grantedBy, authorityID, 
 	}
 	defer func() { _ = tx.Rollback() }()
 	var toolID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, toolName).Scan(&toolID); err != nil {
+	err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, toolName).Scan(&toolID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Tool names use underscores (dev_read); accept the dotted spelling.
+		if alias := strings.ReplaceAll(toolName, ".", "_"); alias != toolName {
+			err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, alias).Scan(&toolID)
+		}
+	}
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: %q", ErrNativeToolNotGrantable, toolName)
+			return fmt.Errorf("%w: %q; list grantable names with `nanite authority tools`", ErrNativeToolNotGrantable, toolName)
 		}
 		return err
 	}
@@ -316,6 +323,27 @@ func (l *LocalAuthority) ListAuthorities(ctx context.Context, hostSettingsID str
 			return nil, gerr
 		}
 		out = append(out, a)
+	}
+	return out, nil
+}
+
+// GrantableTool is one tool name a grant can name.
+type GrantableTool struct {
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Description string `json:"description,omitempty"`
+}
+
+// GrantableTools lists the available known tools, by the exact names GrantTool
+// accepts.
+func (l *LocalAuthority) GrantableTools(ctx context.Context) ([]GrantableTool, error) {
+	known, err := l.s.ListAvailableKnownTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GrantableTool, 0, len(known))
+	for _, k := range known {
+		out = append(out, GrantableTool{Name: k.Name, Source: k.Source, Description: k.Description})
 	}
 	return out, nil
 }

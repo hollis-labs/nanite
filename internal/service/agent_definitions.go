@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/hollis-labs/nanite/internal/store"
 	mesh "github.com/hollis-labs/substrate/mesh"
@@ -53,14 +54,14 @@ func (s *AgentDefinitions) validateHostModel(ctx context.Context, h store.AgentH
 	}
 	if h.Settings.Runtime == "api" {
 		if s.Models == nil {
-			return ErrUnsupportedModel
+			return fmt.Errorf("%w: no model authorizer configured on this server", ErrUnsupportedModel)
 		}
 		model, err := s.Models.AuthorizeModel(ctx, DefinitionRefFromMesh(h.DefinitionRef), &ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model})
 		if err != nil {
 			return err
 		}
 		if model.Provider != h.Settings.Provider || model.Model != h.Settings.Model {
-			return ErrUnsupportedModel
+			return fmt.Errorf("%w: authorized selection %s/%s differs from host settings %s/%s", ErrUnsupportedModel, model.Provider, model.Model, h.Settings.Provider, h.Settings.Model)
 		}
 	}
 	if h.Settings.Runtime == "cli" && (h.Settings.Provider == "" || h.Settings.Model == "") {

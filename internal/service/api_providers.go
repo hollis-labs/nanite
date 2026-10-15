@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -115,4 +116,18 @@ func resolveAPIKey(secret, getenv func(string) string, providerID, envKey string
 		}
 	}
 	return "", ""
+}
+
+// UnregisteredProviderError explains a refused provider: native providers
+// register only when a key resolves (keychain, then the conventional
+// environment variable), so the remedy is a key and a restart.
+func UnregisteredProviderError(sentinel error, name string) error {
+	var names []string
+	for _, spec := range APIProviderSpecs() {
+		if spec.Name == name && spec.EnvKey != "" {
+			return fmt.Errorf("%w: provider %q is not a registered native provider because no API key was found; set %s (or store a key for it in the keychain) and restart the server", sentinel, name, spec.EnvKey)
+		}
+		names = append(names, spec.Name)
+	}
+	return fmt.Errorf("%w: provider %q is not a registered native provider; the native providers are %s", sentinel, name, strings.Join(names, ", "))
 }

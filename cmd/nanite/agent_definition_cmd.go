@@ -3,16 +3,20 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/agentauthor"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/store"
+	mesh "github.com/hollis-labs/substrate/mesh"
 	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
@@ -54,10 +58,12 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 			return errors.New("resource byte verification is performed during install; validate checks authored schema and semantic pin")
 		}
 		return json.NewEncoder(out).Encode(struct {
-			ID       string `json:"id"`
-			Revision string `json:"revision"`
-			Digest   string `json:"digest"`
-		}{d.DefinitionID, d.Revision, digest})
+			ID             string `json:"id"`
+			Revision       string `json:"revision"`
+			Digest         string `json:"digest"`
+			Name           string `json:"name"`
+			IdentityDigest string `json:"identity_digest"`
+		}{d.DefinitionID, d.Revision, digest, d.Name, definitionIdentityDigest(d, digest)})
 	}
 	var resources []store.DefinitionResource
 	if *resourcePath != "" {
@@ -94,7 +100,19 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(out).Encode(pin)
+	return json.NewEncoder(out).Encode(struct {
+		mesh.DefinitionRef
+		Name           string `json:"name"`
+		IdentityDigest string `json:"identity_digest"`
+	}{pin, d.Name, definitionIdentityDigest(d, digest)})
+}
+
+// definitionIdentityDigest binds a definition's id, name and revision to its
+// semantic digest. The semantic digest deliberately excludes identity, so two
+// definitions that differ only in id or name share it; this value does not.
+func definitionIdentityDigest(d *agentdef.Definition, semantic string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{d.DefinitionID, d.Revision, d.Name, semantic}, "\n")))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // Authoring flattens intrinsic role behavior before installation. It makes no

@@ -176,7 +176,7 @@ func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error
 func mapChatDefinition(ctx context.Context, verified VerifiedDefinition) (ChatDefinitionConfig, error) {
 	d := verified.Definition
 	if d == nil {
-		return ChatDefinitionConfig{}, ErrUnsupportedDefinition
+		return ChatDefinitionConfig{}, fmt.Errorf("%w: the resolved definition is empty", ErrUnsupportedDefinition)
 	}
 	if err := agentpolicy.ValidateExecution(d); err != nil {
 		return ChatDefinitionConfig{}, fmt.Errorf("%w: %w", ErrUnsupportedDefinition, err)

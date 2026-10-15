@@ -78,6 +78,7 @@ func TestNativeAuthorityRoutesRefuseEveryoneButAnAdminCredential(t *testing.T) {
 		{"GET", "/api/native-authority?host_settings_id=" + host.ID, nil},
 		{"POST", "/api/native-authority", map[string]any{"host_settings_id": host.ID, "reason": "r"}},
 		{"GET", "/api/native-authority/x", nil},
+		{"GET", "/api/native-authority/tools", nil},
 		{"POST", "/api/native-authority/x/revoke", reason},
 		{"PUT", "/api/native-authority/x/tools/dev_read", reason},
 		{"DELETE", "/api/native-authority/x/tools/dev_read", reason},
@@ -240,5 +241,16 @@ func TestAgentV1TurnCarriesTheAuthenticatedSubmitter(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[0] != clientPrincipal.CredentialID || seen[1] != "" {
 		t.Fatalf("submitters seen = %q", seen)
+	}
+}
+
+func TestNativeAuthorityToolsListsGrantableNames(t *testing.T) {
+	a, mux := newTestAPI(t)
+	if _, err := a.store.UpsertKnownTool(t.Context(), "dev_read", "builtin", "available", "read"); err != nil {
+		t.Fatal(err)
+	}
+	w := naReq(mux, &operatorPrincipal, "GET", "/api/native-authority/tools", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"dev_read"`) {
+		t.Fatalf("tools = %d %s", w.Code, w.Body.String())
 	}
 }

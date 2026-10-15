@@ -82,7 +82,7 @@ TOKEN=$(cat "$(./nanite auth token-path)")        # operator token, never printe
 curl -s -o /dev/null -w '%{http_code}\n' localhost:$NANITE_PORT/api/agent-host-settings   # 401
 ```
 
-Use `-H "Authorization: Bearer $TOKEN"` on every call below.
+Every call below sends `Authorization: Bearer $TOKEN` (the `api` function in step 6).
 
 ## 6. Host settings, session, turn
 
@@ -91,19 +91,19 @@ The pin from step 4 is `{id, revision, digest}` on the host-settings route and
 `{definition_id, revision, semantic_digest}` on the session route.
 
 ```sh
-H='-H Authorization:\ Bearer\ '$TOKEN' -H Content-Type:\ application/json'
+api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$@"; }
 PIN=$(./nanite agent install agent.md)
 # API agent
-HOST=$(curl -s $H -X POST localhost:$NANITE_PORT/api/agent-host-settings -d "{
+HOST=$(api -X POST localhost:$NANITE_PORT/api/agent-host-settings -d "{
   \"title\":\"api agent\",\"slug\":\"api-agent\",\"definition_ref\":$PIN,\"enabled\":true,
   \"settings\":{\"version\":\"1\",\"runtime\":\"api\",\"provider\":\"anthropic\",\"model\":\"<model id>\",\"native_loop\":{}}}")
 SREF=$(echo "$PIN" | jq -c '{definition_id:.id,revision,semantic_digest:.digest}')
-SID=$(curl -s $H -X POST localhost:$NANITE_PORT/api/agent/v1/sessions -d "{
+SID=$(api -X POST localhost:$NANITE_PORT/api/agent/v1/sessions -d "{
   \"definition_ref\":$SREF,
   \"host_settings\":{\"id\":\"$(echo "$HOST"|jq -r .id)\",\"revision\":\"$(echo "$HOST"|jq -r .revision)\"}}" | jq -r .session_view_id)
-curl -s $H -X POST localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/turns \
+api -X POST localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/turns \
   -d '{"content":[{"kind":"text","text":"What is 17 times 3? Reply with the number only."}],"delivery":"at_idle"}'
-curl -s $H localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/messages | jq '.items[]|{role,content}'
+api localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/messages | jq '.items[]|{role,content}'
 ```
 
 The reply is the assistant message (`51`). Host settings are

@@ -212,7 +212,18 @@ func (l *LocalAuthority) RevokeTool(ctx context.Context, grantedBy, authorityID,
 	}
 	defer func() { _ = tx.Rollback() }()
 	var toolID string
-	if err = tx.QueryRowContext(ctx, `SELECT t.tool_id FROM native_authority_tools t JOIN known_tools k ON k.id=t.tool_id WHERE t.authority_id=? AND k.name=?`, authorityID, toolName).Scan(&toolID); err != nil {
+	granted := func(name string) error {
+		return tx.QueryRowContext(ctx, `SELECT t.tool_id FROM native_authority_tools t JOIN known_tools k ON k.id=t.tool_id WHERE t.authority_id=? AND k.name=?`, authorityID, name).Scan(&toolID)
+	}
+	err = granted(toolName)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Same dotted-alias rule as GrantTool, whether or not the tool is
+		// still available.
+		if alias := strings.ReplaceAll(toolName, ".", "_"); alias != toolName {
+			err = granted(alias)
+		}
+	}
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/substrate/mesh/agentdef"
@@ -17,5 +19,19 @@ func TestDefinitionIdentityDigestSeparatesIdAndName(t *testing.T) {
 	}
 	if da != definitionIdentityDigest(a, same) {
 		t.Fatal("identity digest is not stable")
+	}
+}
+
+func TestAgentHelpIsReachableAndNamesEveryCommand(t *testing.T) {
+	var b strings.Builder
+	agentUsage(&b)
+	for _, want := range []string{"author", "validate", "install", "identity_digest"} {
+		if !strings.Contains(b.String(), want) {
+			t.Fatalf("usage lacks %q:\n%s", want, b.String())
+		}
+	}
+	err := runPinnedAgentCommand([]string{"sync"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "nanite agent help") {
+		t.Fatalf("unknown command error = %v", err)
 	}
 }

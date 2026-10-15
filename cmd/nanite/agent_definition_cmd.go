@@ -30,7 +30,7 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 		return authorPinnedAgent(args[1:], out)
 	}
 	if args[0] != "validate" && args[0] != "install" {
-		return errors.New("agent command requires validate or install; old profile sync/import is retired")
+		return fmt.Errorf("unknown agent command %q: use author, validate or install (old profile sync/import is retired); run `nanite agent help`", args[0])
 	}
 	fs := flag.NewFlagSet("agent "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)

@@ -424,3 +424,28 @@ func TestLocalAuthorityGrantableToolsListsOnlyAvailable(t *testing.T) {
 		t.Fatalf("grantable = %v", names)
 	}
 }
+
+func TestLocalAuthorityRevokeToolAcceptsDottedAliasEvenWhenUnavailable(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	host := nativeHost(t, s, "revoke-alias")
+	nativeTool(t, s, "dev_read")
+	la := s.LocalAuthority()
+	a, err := la.CreateAuthority(ctx, "cred-1", host.ID, "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = la.GrantTool(ctx, "cred-1", a.ID, "dev_read", "r"); err != nil {
+		t.Fatal(err)
+	}
+	// The tool later leaves the catalog; the grant must still be revocable.
+	if _, err = s.UpsertKnownTool(ctx, "dev_read", "builtin", "unavailable", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if err = la.RevokeTool(ctx, "cred-1", a.ID, "dev.read", "r"); err != nil {
+		t.Fatal(err)
+	}
+	if tools, _ := la.ListTools(ctx, a.ID); len(tools) != 0 {
+		t.Fatalf("dotted revoke left %v", tools)
+	}
+}

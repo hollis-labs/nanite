@@ -52,6 +52,12 @@ type ProviderStatusView struct {
 	ProviderConfigView
 	HasAPIKey  bool `json:"has_api_key"`
 	Registered bool `json:"registered"`
+	// KeySource names where the key resolved from ("keychain",
+	// "keychain:legacy:nanite", "env:VAR", ...); KeyCode is the typed reason
+	// ("secret_not_found", "secret_denied", "secret_unavailable") when an API
+	// provider has no usable key. Neither carries a key.
+	KeySource string `json:"key_source,omitempty"`
+	KeyCode   string `json:"key_code,omitempty"`
 }
 
 // ProviderStatusDetailView is GET /api/providers/{id}/status. Its fields are
@@ -59,6 +65,8 @@ type ProviderStatusView struct {
 // map[string]any it replaced.
 type ProviderStatusDetailView struct {
 	HasAPIKey  bool               `json:"has_api_key"`
+	KeyCode    string             `json:"key_code,omitempty"`
+	KeySource  string             `json:"key_source,omitempty"`
 	Provider   ProviderConfigView `json:"provider"`
 	Registered bool               `json:"registered"`
 }

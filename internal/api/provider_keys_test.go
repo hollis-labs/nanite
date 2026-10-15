@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 )
 
 type verifiable interface {
@@ -65,6 +67,11 @@ func TestSetProviderAPIKey_HotSwapsTheRegisteredAdapter(t *testing.T) {
 		t.Fatal("anthropic not registered after saving a key")
 	}
 
+	// A turn in flight has already used its adapter, which fetches its key on
+	// first use and then keeps it.
+	if got := keyUsedBy(t, inFlight, &gotKey); got != "sk-one" {
+		t.Fatalf("the first adapter sent %q, want sk-one", got)
+	}
 	if code, body := postAPIKey(t, mux, "anthropic-001", "sk-two"); code != http.StatusOK {
 		t.Fatalf("second save: %d %v", code, body)
 	}
@@ -87,13 +94,14 @@ func TestSetProviderAPIKey_ClearFallsBackToEnvironment(t *testing.T) {
 	var gotKey atomic.Value
 	fakeAnthropicModels(t, &status, &gotKey)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-env")
+	t.Setenv(providerkeys.EnvEnableVar, "1") // the environment is a fallback only when enabled
 	a, mux := newTestAPIWithSeededProviders(t)
 
 	if code, body := postAPIKey(t, mux, "anthropic-001", "sk-keychain"); code != http.StatusOK {
 		t.Fatalf("save: %d %v", code, body)
 	}
 	code, body := postAPIKey(t, mux, "anthropic-001", "")
-	want := map[string]any{"has_key": false, "key_source": "environment", "provider_id": "anthropic-001"}
+	want := map[string]any{"has_key": false, "key_source": "env:ANTHROPIC_API_KEY", "provider_id": "anthropic-001"}
 	if code != http.StatusOK || !reflect.DeepEqual(body, want) {
 		t.Fatalf("clear: %d %v, want 200 %v", code, body, want)
 	}
@@ -130,4 +138,60 @@ func decodeObject(t *testing.T, raw []byte) map[string]any {
 		t.Fatalf("response is not a JSON object: %v — %s", err, raw)
 	}
 	return m
+}
+
+// The environment is not a key source unless the operator enabled it; the
+// status says the variable is being ignored and what to do.
+func TestProviderStatus_EnvironmentIgnoredByDefaultAndExplained(t *testing.T) {
+	isolateProviderKeys(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-env-must-not-appear")
+	_, mux := newTestAPIWithSeededProviders(t)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/providers/anthropic-001/status", nil))
+	body := decodeObject(t, w.Body.Bytes())
+	if w.Code != http.StatusOK || body["has_api_key"] != false || body["key_code"] != "secret_not_found" {
+		t.Fatalf("status: %d %v", w.Code, body)
+	}
+	if strings.Contains(w.Body.String(), "sk-env-must-not-appear") {
+		t.Fatal("the environment key was reported")
+	}
+}
+
+func TestProviderStatus_ReportsTheSourceOfAUsableKey(t *testing.T) {
+	isolateProviderKeys(t)
+	_, mux := newTestAPIWithSeededProviders(t)
+	if code, body := postAPIKey(t, mux, "anthropic-001", "sk-saved"); code != http.StatusOK {
+		t.Fatalf("save: %d %v", code, body)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/providers/anthropic-001/status", nil))
+	body := decodeObject(t, w.Body.Bytes())
+	if body["has_api_key"] != true || body["key_source"] != "keychain" {
+		t.Fatalf("status: %v", body)
+	}
+	if strings.Contains(w.Body.String(), "sk-saved") {
+		t.Fatal("the key was reported")
+	}
+}
+
+func TestUpdateProvider_KeyRefMustBeAReferenceAndIsNeverEchoed(t *testing.T) {
+	isolateProviderKeys(t)
+	_, mux := newTestAPIWithSeededProviders(t)
+	put := func(settings string) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(map[string]string{"settings": settings})
+		req := httptest.NewRequest(http.MethodPut, "/api/providers/anthropic-001", strings.NewReader(string(b)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+
+	w := put(`{"key_ref":"sk-ant-api03-pasted-by-mistake"}`)
+	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "pasted-by-mistake") {
+		t.Fatalf("a literal key in key_ref: %d %s", w.Code, w.Body.String())
+	}
+	if w := put(`{"key_ref":"keychain://work/anthropic"}`); w.Code != http.StatusOK {
+		t.Fatalf("a reference: %d %s", w.Code, w.Body.String())
+	}
 }

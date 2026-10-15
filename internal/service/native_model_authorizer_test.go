@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	secrets "github.com/hollis-labs/go-secrets"
+	"github.com/hollis-labs/go-secrets/secretstest"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
@@ -16,7 +19,7 @@ import (
 func TestConfiguredNativeModel_NoDefaultFallback(t *testing.T) {
 	reg := provider.NewRegistry()
 	reg.Register("anthropic", stubLLMProvider{})
-	authorize := configuredNativeModel(reg)
+	authorize := configuredNativeModel(reg, nil)
 	ref := DefinitionRef{}
 
 	t.Run("accepts the requested selection as given", func(t *testing.T) {
@@ -52,4 +55,40 @@ func TestConfiguredNativeModel_NoDefaultFallback(t *testing.T) {
 			t.Fatalf("err = %v, want ErrUnsupportedModel", err)
 		}
 	})
+}
+
+// An unregistered API provider is refused with the reason its key could not be
+// used, typed, instead of the bare "not a registered native provider".
+func TestConfiguredNativeModel_RefusalNamesTheKeyProblem(t *testing.T) {
+	const leak = "sk-ant-api03-MUST-NOT-APPEAR-0123456789"
+	cases := []struct {
+		name  string
+		setup func(*secretstest.FakeStore)
+		want  []string
+	}{
+		{"no key saved", func(*secretstest.FakeStore) {}, []string{"secret_not_found", "provider set-key anthropic-001"}},
+		{"keychain denied", func(fs *secretstest.FakeStore) { fs.Fail = &secrets.Error{Kind: secrets.KindDenied} }, []string{"secret_denied"}},
+		{"keychain unavailable", func(fs *secretstest.FakeStore) { fs.Fail = &secrets.Error{Kind: secrets.KindUnavailable} }, []string{"secret_unavailable"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			secretstest.Install(t)
+			fs := &secretstest.FakeStore{}
+			tc.setup(fs)
+			keys := providerkeys.New(providerkeys.Options{Store: fs, EnvNames: ProviderKeyEnvName,
+				LookupEnv: func(string) (string, bool) { return leak, true }})
+			authorize := configuredNativeModel(provider.NewRegistry(), keys)
+
+			_, err := authorize.AuthorizeModel(context.Background(), DefinitionRef{}, &ModelSelection{Provider: "anthropic", Model: "m"})
+			if !errors.Is(err, ErrUnsupportedModel) {
+				t.Fatalf("err = %v, want ErrUnsupportedModel", err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Fatalf("err = %q, want it to contain %q", err, w)
+				}
+			}
+			secretstest.AssertNoLeak(t, leak, err)
+		})
+	}
 }

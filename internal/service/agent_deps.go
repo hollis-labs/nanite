@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/providerkeys"
+
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -88,6 +90,10 @@ type AgentDepsConfig struct {
 	// path entirely (Refresh returns an error and the broker escalates
 	// to Permanent).
 	Providers *provider.Registry
+
+	// ProviderKeys resolves the key the credentials adapter pushes onto a
+	// cached SDK client. Nil leaves the remediation path unwired.
+	ProviderKeys *providerkeys.Manager
 
 	// SkillVendor is the content-addressed vendored skill store
 	// (internal/skillvendor.Store) — TASKS/skills/10 wires this onto
@@ -300,7 +306,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		Envelope: &recoveryEnvelopeSink{
 			streams: cfg.Streams,
 		},
-		Credentials: newRecoveryCredentialsAdapter(resolver, cfg.Providers),
+		Credentials: newRecoveryCredentialsAdapter(resolver, cfg.Providers, keysOrNil(cfg.ProviderKeys)),
 		// HTTPRetry is deliberately left unwired here (Phase 0 task 04):
 		// the real adapter closes over chatServiceImpl.RetryLastMessage,
 		// and chatServiceImpl doesn't exist yet at this point in
@@ -1426,4 +1432,12 @@ func sessionNoticeText(ev events.Event) string {
 	default:
 		return ""
 	}
+}
+
+// keysOrNil avoids a typed-nil interface when no manager was wired.
+func keysOrNil(m *providerkeys.Manager) providerKeyResolver {
+	if m == nil {
+		return nil
+	}
+	return m
 }

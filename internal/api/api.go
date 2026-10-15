@@ -64,6 +64,9 @@ type API struct {
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
+	if svc != nil && svc.ProviderKeys != nil {
+		deps = service.EmbedderSelectDepsFor(svc.ProviderKeys)
+	}
 	key := make([]byte, 32)
 	rand.Read(key)
 	return &API{

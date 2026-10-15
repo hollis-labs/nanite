@@ -18,6 +18,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 )
 
 // Format selects the underlying slog handler.
@@ -200,6 +201,29 @@ const (
 // IDs, UUIDs with hyphens, and base64 tokens are not matched.
 var apiKeyPattern = regexp.MustCompile(`\b[a-fA-F0-9]{32,}\b`)
 
+// valueRedactor scrubs known secret values (resolved provider keys) from every
+// string the handler sees, wherever the call site put them. nil is off.
+var valueRedactor atomic.Pointer[func(string) string]
+
+// SetValueRedactor installs fn as the process-wide secret-value scrubber. It
+// applies to the message and to every string and error attribute, so a key
+// that reaches a log line through an error or a formatted message is replaced
+// even when the call site does not know it holds one. Pass nil to remove it.
+func SetValueRedactor(fn func(string) string) {
+	if fn == nil {
+		valueRedactor.Store(nil)
+		return
+	}
+	valueRedactor.Store(&fn)
+}
+
+func scrubValue(s string) string {
+	if fn := valueRedactor.Load(); fn != nil {
+		return (*fn)(s)
+	}
+	return s
+}
+
 // PIIRedactor wraps another slog.Handler and scrubs sensitive attrs
 // before delegating.
 type PIIRedactor struct {
@@ -218,7 +242,7 @@ func (p *PIIRedactor) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle redacts the record's attributes then delegates.
 func (p *PIIRedactor) Handle(ctx context.Context, r slog.Record) error {
-	cloned := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	cloned := slog.NewRecord(r.Time, r.Level, scrubValue(r.Message), r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		cloned.AddAttrs(redactAttr(a))
 		return true
@@ -260,8 +284,20 @@ func redactAttr(a slog.Attr) slog.Attr {
 	}
 
 	if a.Value.Kind() == slog.KindString {
-		if s := a.Value.String(); apiKeyPattern.MatchString(s) {
-			return slog.String(a.Key, apiKeyPattern.ReplaceAllString(s, redactedKeyPlaceholder))
+		s := scrubValue(a.Value.String())
+		if apiKeyPattern.MatchString(s) {
+			s = apiKeyPattern.ReplaceAllString(s, redactedKeyPlaceholder)
+		}
+		if s != a.Value.String() {
+			return slog.String(a.Key, s)
+		}
+		return a
+	}
+	if a.Value.Kind() == slog.KindAny {
+		if err, ok := a.Value.Any().(error); ok {
+			if s := scrubValue(err.Error()); s != err.Error() {
+				return slog.String(a.Key, s)
+			}
 		}
 	}
 	return a

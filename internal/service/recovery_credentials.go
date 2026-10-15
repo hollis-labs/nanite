@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 
+	secrets "github.com/hollis-labs/go-secrets"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
@@ -28,10 +29,9 @@ var _ broker.CredentialOps = (*recoveryCredentialsAdapter)(nil)
 //
 //   - Direct API providers (anthropic / openai, used by nanite's chat
 //     utility paths via internal/llm/anthropic + internal/llm/openai)
-//     resolve their key from the OS keychain at boot via secrets.Get,
-//     then cache it on an in-memory client via SetAPIKey. Refresh =
-//     re-read keychain → call SetAPIKey to rebuild the SDK with the new
-//     key.
+//     resolve their key by reference (internal/providerkeys) the first
+//     time a request needs it. Refresh = re-resolve the reference → call
+//     SetAPIKey to rebuild the SDK with the new key.
 //   - CLI providers (claude / codex / opencode) spawned via agent.Boot
 //     manage their own auth (e.g. `claude login`). nanite does NOT inject
 //     ANTHROPIC_API_KEY etc. into their env (see internal/runtime/agent/env.go
@@ -40,18 +40,16 @@ var _ broker.CredentialOps = (*recoveryCredentialsAdapter)(nil)
 //     return an error so the broker escalates to Permanent rather than
 //     issuing a no-op retry that will hit the same auth wall.
 //
-// keyringLookup / setAnthropicKey / setOpenAIKey are package-level seams
+// resolveKey / setAnthropicKey / setOpenAIKey are package-level seams
 // so unit tests can drive the adapter without hitting the real keychain
 // or the real provider clients.
 type recoveryCredentialsAdapter struct {
 	agents    runtimeagent.AgentProfiles
 	providers *provider.Registry
 
-	// keyringLookup mirrors secrets.Get; tests override.
-	keyringLookup func(key string) string
-
-	// providerKeyName mirrors secrets.ProviderKeyName; tests override.
-	providerKeyName func(providerID string) string
+	// resolveKey returns the provider's current key by reference (stored ref,
+	// keychain, opt-in environment); tests override.
+	resolveKey func(ctx context.Context, providerID string) (string, error)
 }
 
 // newRecoveryCredentialsAdapter wires the adapter against the production
@@ -61,13 +59,23 @@ type recoveryCredentialsAdapter struct {
 // providers may be nil in lightweight test setups where no API providers
 // are wired (Refresh on a CLI profile still works; Refresh on an API
 // profile errors with "registry not wired").
-func newRecoveryCredentialsAdapter(agents runtimeagent.AgentProfiles, providers *provider.Registry) *recoveryCredentialsAdapter {
-	return &recoveryCredentialsAdapter{
-		agents:          agents,
-		providers:       providers,
-		keyringLookup:   secrets.Get,
-		providerKeyName: secrets.ProviderKeyName,
+func newRecoveryCredentialsAdapter(agents runtimeagent.AgentProfiles, providers *provider.Registry, keys providerKeyResolver) *recoveryCredentialsAdapter {
+	a := &recoveryCredentialsAdapter{agents: agents, providers: providers}
+	if keys != nil {
+		a.resolveKey = func(ctx context.Context, providerID string) (string, error) {
+			sec, _, err := keys.Resolve(ctx, providerID)
+			if err != nil {
+				return "", err
+			}
+			return sec.Reveal(), nil
+		}
 	}
+	return a
+}
+
+// providerKeyResolver is the part of the key manager the adapter uses.
+type providerKeyResolver interface {
+	Resolve(ctx context.Context, providerID string) (secrets.Secret, providerkeys.Report, error)
 }
 
 // providerKind enumerates the broker-relevant credential surfaces. The
@@ -176,14 +184,17 @@ func (a *recoveryCredentialsAdapter) Refresh(ctx context.Context, agentProfile s
 		return errors.New("recovery: credentials adapter: provider registry not wired")
 	}
 
-	if a.keyringLookup == nil || a.providerKeyName == nil {
-		return errors.New("recovery: credentials adapter: keyring seams not wired")
+	if a.resolveKey == nil {
+		return errors.New("recovery: credentials adapter: key resolver not wired")
 	}
 
-	key := a.keyringLookup(a.providerKeyName(provID))
-	if key == "" {
-		return fmt.Errorf("recovery: keychain has no key for provider %q (provID %q); cannot refresh",
-			provName, provID)
+	key, kerr := a.resolveKey(ctx, provID)
+	if kerr == nil && key == "" {
+		kerr = errors.New("the resolved key is empty")
+	}
+	if kerr != nil {
+		return fmt.Errorf("recovery: no key for provider %q (provID %q); cannot refresh: %w",
+			provName, provID, kerr)
 	}
 
 	p, ok := a.providers.Get(provName)

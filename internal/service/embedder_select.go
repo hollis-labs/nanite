@@ -2,10 +2,9 @@ package service
 
 import (
 	"context"
-	"os"
 
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
-	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	embedcontracts "github.com/hollis-labs/substrate/llm-core/embedcontracts"
 )
 
@@ -61,18 +60,32 @@ func IsSupportedEmbeddingProvider(id string) bool {
 type EmbedderSelectDeps struct {
 	// LookupSecret returns the API key for the given provider ID, or "" if absent.
 	LookupSecret func(providerID string) string
-	// Getenv returns the named environment variable; defaults to os.Getenv.
+	// Getenv returns the named environment variable. Production returns "":
+	// the environment is read through the key manager, only when enabled.
 	Getenv func(key string) string
 }
 
-// DefaultEmbedderSelectDeps wires SelectEmbedder against live keychain and
-// environment.
+// DefaultEmbedderSelectDeps wires SelectEmbedder against the default key
+// manager (OS keychain; the environment only when enabled).
 func DefaultEmbedderSelectDeps() EmbedderSelectDeps {
+	return EmbedderSelectDepsFor(DefaultProviderKeys(nil))
+}
+
+// EmbedderSelectDepsFor wires SelectEmbedder against keys, so an embedder
+// finds its provider key the same way the chat provider does.
+func EmbedderSelectDepsFor(keys *providerkeys.Manager) EmbedderSelectDeps {
 	return EmbedderSelectDeps{
 		LookupSecret: func(providerID string) string {
-			return secrets.Get(secrets.ProviderKeyName(providerID))
+			sec, _, err := keys.Resolve(context.Background(), providerID)
+			if err != nil {
+				return ""
+			}
+			return sec.Reveal()
 		},
-		Getenv: os.Getenv,
+		// The environment is a key source only when the operator enabled it,
+		// and then the manager's chain already includes it, in order and
+		// reported. Reading it here too would bypass that switch.
+		Getenv: func(string) string { return "" },
 	}
 }
 

@@ -1,21 +1,14 @@
 package service
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"strconv"
-	"strings"
 
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
-	"github.com/hollis-labs/nanite/internal/secrets"
 	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-)
-
-// Key sources reported by ResolveAPIKey.
-const (
-	APIKeySourceKeychain    = "keychain"
-	APIKeySourceEnvironment = "environment"
 )
 
 // APIProviderSpec is one HTTP API provider Nanite has an adapter for.
@@ -36,18 +29,30 @@ type APIProviderSpec struct {
 	// ProviderID is the seeded provider row id, and names its keychain entry
 	// (secrets.ProviderKeyName).
 	ProviderID string
-	// EnvKey is the conventional environment variable for this provider,
-	// used when the keychain has nothing — see ResolveAPIKey.
+	// EnvKey is the conventional environment variable for this provider. It is
+	// read only when the operator has enabled the environment fallback
+	// (providerkeys.EnvEnableVar); see internal/providerkeys.
 	EnvKey string
 
-	create func() llmcontracts.Provider
-	setKey func(llmcontracts.Provider, string)
+	create  func() llmcontracts.Provider
+	setKey  func(llmcontracts.Provider, string)
+	lazyKey func(llmcontracts.Provider, func(context.Context) (string, error))
 }
 
 // NewProvider builds a fresh adapter authenticated with key.
 func (s APIProviderSpec) NewProvider(key string) llmcontracts.Provider {
 	p := s.create()
 	s.setKey(p, key)
+	return p
+}
+
+// NewLazyProvider builds a fresh adapter whose key is fetched by keyFn when a
+// request first needs it, not now. The adapter never holds a key it has not
+// been asked to use, and a failed fetch surfaces on that request as keyFn's
+// own (typed) error.
+func (s APIProviderSpec) NewLazyProvider(keyFn func(context.Context) (string, error)) llmcontracts.Provider {
+	p := s.create()
+	s.lazyKey(p, keyFn)
 	return p
 }
 
@@ -69,6 +74,9 @@ func APIProviderSpecs() []APIProviderSpec {
 				return ap
 			},
 			setKey: func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) },
+			lazyKey: func(p llmcontracts.Provider, fn func(context.Context) (string, error)) {
+				p.(*nllmanthropic.Client).SetKeyFunc(fn)
+			},
 		},
 		{
 			Name: "openai", DisplayName: "OpenAI", ProviderID: "openai-001", EnvKey: "OPENAI_API_KEY",
@@ -79,6 +87,9 @@ func APIProviderSpecs() []APIProviderSpec {
 			// followups.nanite.cw_20260508_0012.openai_rate_budget_parity).
 			create: func() llmcontracts.Provider { return nllmopenai.New("", nil) },
 			setKey: func(p llmcontracts.Provider, k string) { p.(*nllmopenai.Client).SetAPIKey(k) },
+			lazyKey: func(p llmcontracts.Provider, fn func(context.Context) (string, error)) {
+				p.(*nllmopenai.Client).SetKeyFunc(fn)
+			},
 		},
 	}
 }
@@ -91,28 +102,4 @@ func APIProviderSpecByID(providerID string) (APIProviderSpec, bool) {
 		}
 	}
 	return APIProviderSpec{}, false
-}
-
-// ResolveAPIKey returns the key for a provider row and where it came from:
-// keychain first, then environment, or ("", "") when neither has one.
-//
-// A container has no OS keyring — the secret-service lookup fails with
-// `exec: "dbus-launch": executable file not found in $PATH` — so a
-// keychain-only lookup registers no providers at all, and chat is dead with
-// only a WARN to say so. The environment is how a container is configured;
-// refusing to read it makes Nanite unrunnable anywhere but a desktop.
-func ResolveAPIKey(providerID, envKey string) (key, source string) {
-	return resolveAPIKey(secrets.Get, os.Getenv, providerID, envKey)
-}
-
-func resolveAPIKey(secret, getenv func(string) string, providerID, envKey string) (string, string) {
-	if k := strings.TrimSpace(secret(secrets.ProviderKeyName(providerID))); k != "" {
-		return k, APIKeySourceKeychain
-	}
-	if envKey != "" {
-		if k := strings.TrimSpace(getenv(envKey)); k != "" {
-			return k, APIKeySourceEnvironment
-		}
-	}
-	return "", ""
 }

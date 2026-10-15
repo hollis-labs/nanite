@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
@@ -68,16 +69,41 @@ func (f ModelAuthorizerFunc) AuthorizeModel(ctx context.Context, p DefinitionRef
 // fall back on (CW-20261011-0031): a native API view without a provider and
 // model is refused, naming what is missing, and a provider the host has not
 // registered is refused.
-func configuredNativeModel(registry *provider.Registry) ModelAuthorizer {
+//
+// When the provider is one Nanite has an adapter for but is not registered,
+// the refusal says why its key could not be used (not found, denied,
+// unavailable) and what to do, from keys; it never reports a key.
+func configuredNativeModel(registry *provider.Registry, keys *providerkeys.Manager) ModelAuthorizer {
 	return ModelAuthorizerFunc(func(_ context.Context, _ DefinitionRef, requested *ModelSelection) (ModelSelection, error) {
 		if requested == nil || strings.TrimSpace(requested.Provider) == "" || strings.TrimSpace(requested.Model) == "" {
 			return ModelSelection{}, fmt.Errorf("%w: select a provider and model in the agent's host settings or the launch request", ErrUnsupportedModel)
 		}
 		if _, ok := registry.Get(requested.Provider); !ok {
-			return ModelSelection{}, fmt.Errorf("%w: provider %q is not a registered native provider", ErrUnsupportedModel, requested.Provider)
+			return ModelSelection{}, fmt.Errorf("%w: %s", ErrUnsupportedModel, unregisteredProviderReason(context.Background(), requested.Provider, keys))
 		}
 		return *requested, nil
 	})
+}
+
+// unregisteredProviderReason explains why a provider is not registered. For an
+// API provider with an adapter the cause is its key, reported with the typed
+// code and remedy; otherwise it is the plain statement.
+func unregisteredProviderReason(ctx context.Context, name string, keys *providerkeys.Manager) string {
+	plain := fmt.Sprintf("provider %q is not a registered native provider", name)
+	if keys == nil {
+		return plain
+	}
+	for _, spec := range APIProviderSpecs() {
+		if spec.Name != name {
+			continue
+		}
+		st := keys.Status(ctx, spec.ProviderID)
+		if st.Usable {
+			return plain + " (its key resolves from " + st.Source + "; restart Nanite or save the key again to register it)"
+		}
+		return fmt.Sprintf("provider %q has no usable API key (%s): %s", name, st.Code, st.Guidance)
+	}
+	return plain
 }
 
 type CognitiveViews struct {

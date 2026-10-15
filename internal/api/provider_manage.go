@@ -1,13 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/service"
 
-	"github.com/hollis-labs/nanite/internal/secrets"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 )
 
 func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
@@ -20,6 +21,10 @@ func (a *API) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.Services.ProviderConfig.Update(r.Context(), id, req.toStore()); err != nil {
+		if errors.Is(err, providerkeys.ErrInvalidKeyRef) {
+			a.errorResp(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		a.errorResp(w, http.StatusInternalServerError, "failed to update provider: "+err.Error())
 		return
 	}
@@ -72,12 +77,14 @@ func (a *API) handleGetProviderStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hasKey := secrets.Has(secrets.ProviderKeyName(id))
+	key := a.providerKeyStatus(r.Context(), id)
 	registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
 
 	a.jsonResp(w, http.StatusOK, ProviderStatusDetailView{
 		Provider:   providerConfigToView(p),
-		HasAPIKey:  hasKey,
+		HasAPIKey:  key.Usable,
+		KeyCode:    key.Code,
+		KeySource:  key.Source,
 		Registered: registered,
 	})
 }
@@ -126,7 +133,7 @@ func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Reques
 
 	out := make([]ProviderStatusView, 0, len(providers))
 	for _, p := range providers {
-		hasKey := secrets.Has(secrets.ProviderKeyName(p.ID))
+		key := a.providerKeyStatus(r.Context(), p.ID)
 		registered := a.Services.Providers != nil && a.Services.Providers.Has(p.ProviderType)
 
 		// For CLI providers, also check pty- and sub- variants.
@@ -136,10 +143,25 @@ func (a *API) handleGetAllProviderStatuses(w http.ResponseWriter, r *http.Reques
 
 		out = append(out, ProviderStatusView{
 			ProviderConfigView: providerConfigToView(&p),
-			HasAPIKey:          hasKey,
+			HasAPIKey:          key.Usable,
+			KeySource:          key.Source,
+			KeyCode:            key.Code,
 			Registered:         registered,
 		})
 	}
 
 	a.jsonResp(w, http.StatusOK, out)
+}
+
+// providerKeyStatus reports whether a provider row has a usable key and where
+// it resolves from. Only rows Nanite has an API adapter for have a key to
+// report; the rest (CLI providers) are the zero Status.
+func (a *API) providerKeyStatus(ctx context.Context, id string) providerkeys.Status {
+	if a.Services.ProviderKeys == nil {
+		return providerkeys.Status{ProviderID: id}
+	}
+	if _, ok := service.APIProviderSpecByID(id); !ok {
+		return providerkeys.Status{ProviderID: id}
+	}
+	return a.Services.ProviderKeys.Status(ctx, id)
 }

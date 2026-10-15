@@ -426,8 +426,10 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	// ACP agents consume their system prompt over session/new|load and do
 	// not consume Nanite's native provider boot files. Native agents retain
 	// the existing boot-profile/layout compilation unchanged.
+	var bootParams SetupParams
 	if !isACP {
 		layout, params := composeBootdirParams(deps, opts, profile, sessID)
+		bootParams = params
 		bootDir, err = layout.Setup(params)
 		if err != nil {
 			if hadLineage && deps.PathGrants != nil {
@@ -449,7 +451,12 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir)
+	var launchX launchExtra
+	if !isACP {
+		launchX.Model = profile.DefaultModel
+		launchX.AddDirs = bootParams.CLIWritableRoots
+	}
+	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir, launchX)
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
 	}

@@ -51,6 +51,46 @@ ACP uses its real turn-scoped cancel. Native runtimes honestly report that
 turn cancellation is unsupported, so Nanite stops that exact wrapper and the
 next turn cold-boots instead of pretending a wire-level cancel occurred.
 
+## Defined CLI sessions
+
+A pinned definition plus host settings with `runtime: "cli"` runs a CLI agent
+through `POST /api/agent/v1/sessions`, the same route and event stream as a
+native API agent. Claude is the supported provider.
+
+```json
+{"version":"1","runtime":"cli","provider":"claude","model":"haiku",
+ "directories":["/abs/path/to/work"],"native_loop":{}}
+```
+
+- **Work root and directories.** `directories` is required. The first entry is
+  the session's work root; every entry is granted to the CLI on its command
+  line (`--add-dir`), not only in the boot dir's `settings.json`, because Claude
+  ignores `additionalDirectories` from a workspace it has not been trusted in
+  and the ephemeral boot dir never is. Filesystem authority comes from the host
+  document, not the request.
+- **Model.** `model` is passed to the CLI (`--model`). It is optional; a model
+  on a provider whose flag is not verified is refused.
+- **Boot.** The view boots the host settings' projected profile (definition text
+  as the system prompt, provider, model, directories), resolved by host settings
+  ID, on the same `driveBootSession` path as other CLI chat. The view pins the
+  host revision it was admitted under; a turn after the host is edited or
+  disabled fails with `host_revision_changed`.
+- **Resume.** The provider session ID is persisted, so a turn after a server
+  restart resumes the CLI's own session with its context.
+- **Permissions.** The CLI runs under the boot dir's Claude permissions and the
+  planted strict `.mcp.json`; Nanite's tools reach it only through the Nanite
+  MCP server, so tool authorization is unchanged. The developer variant
+  (`--dangerously-skip-permissions`) is selected only when the permission
+  engine's mode is yolo, with an audit log line. A definition whose permission
+  profile is not `default` is refused: a CLI process cannot enforce read-only.
+- **Refusals.** A 422 from session create carries `error.cause`:
+  `runtime_unavailable`, `provider_not_launchable`, `read_only_unenforceable`,
+  `cli_host_unsupported_field` (`harness_profile`, a non-empty `native_loop`,
+  `recall_*`, `mcp_servers`, a relative directory, or a model the provider's
+  CLI does not take), `host_directories_missing`.
+- **Capabilities.** `runtime_kinds` lists `cli` with the providers this host can
+  launch.
+
 ## Subagent runtime
 
 A subagent's runtime follows its parent. A CLI process's calls to Nanite's own

@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"reflect"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
+	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
@@ -155,20 +159,34 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		if !h.Enabled {
 			return nil, unsupportedCause(CauseHostDisabled, "host settings %q are disabled; enable them or launch against enabled settings", h.ID)
 		}
-		if h.Settings.Runtime != "api" {
-			return nil, unsupportedCause(CauseRuntimeNotAPI, "host settings %q use runtime %q, but native chat needs runtime \"api\"; set runtime to api on the host settings", h.ID, h.Settings.Runtime)
+		switch h.Settings.Runtime {
+		case "api":
+			selected := ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model}
+			if req.ModelSelection != nil && *req.ModelSelection != selected {
+				return nil, unsupportedModelCause(CauseModelSelectionMismatch, "the requested provider/model (%s/%s) differs from the host settings (%s/%s); omit the request selection or change the host settings", req.ModelSelection.Provider, req.ModelSelection.Model, selected.Provider, selected.Model)
+			}
+			req.ModelSelection = &selected
+		case "cli":
+			selected, cliErr := admitCLIHost(h.Settings, cfg.PermissionProfile, req.ModelSelection)
+			if cliErr != nil {
+				return nil, cliErr
+			}
+			req.ModelSelection = &selected
+		default:
+			return nil, unsupportedCause(CauseRuntimeUnsupported, "host settings %q use runtime %q, which native sessions do not run; use \"api\" or \"cli\"", h.ID, h.Settings.Runtime)
 		}
-		selected := ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model}
-		if req.ModelSelection != nil && *req.ModelSelection != selected {
-			return nil, unsupportedModelCause(CauseModelSelectionMismatch, "the requested provider/model (%s/%s) differs from the host settings (%s/%s); omit the request selection or change the host settings", req.ModelSelection.Provider, req.ModelSelection.Model, selected.Provider, selected.Model)
-		}
-		req.ModelSelection = &selected
 		cfg.HostSettings = &h.Settings
 		cfg.HostSettingsRef = &HostSettingsRef{ID: h.ID, Revision: h.Revision}
 	}
-	cfg.Model, err = v.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
-	if err != nil {
-		return nil, err
+	if cfg.HostSettings != nil && cfg.HostSettings.Runtime == "cli" {
+		// A CLI agent's model is the CLI's own; there is no native provider
+		// registry to authorize it against.
+		cfg.Model = *req.ModelSelection
+	} else {
+		cfg.Model, err = v.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
+		if err != nil {
+			return nil, err
+		}
 	}
 	refJSON, err := json.Marshal(req.DefinitionRef)
 	if err != nil {
@@ -208,4 +226,60 @@ func (v *CognitiveViews) Get(ctx context.Context, id string) (DefinitionRef, Cha
 
 func (v *CognitiveViews) LatestTurn(ctx context.Context, viewID string) (string, error) {
 	return v.Store.LatestCognitiveTurn(ctx, viewID)
+}
+
+// admitCLIHost decides whether a runtime=cli host can run as a native session
+// and returns the provider/model it runs on. It refuses, with a stated cause,
+// anything a CLI process cannot honor: a read-only definition (the CLI has no
+// enforced read-only posture), native-loop knobs (the CLI owns its loop), host
+// MCP servers (planting them is not implemented), a model on a runtime whose
+// model flag is unverified, and a host that grants no directory.
+func admitCLIHost(h store.NativeHostSettings, permissionProfile string, requested *ModelSelection) (ModelSelection, error) {
+	if h.Provider == "" {
+		return ModelSelection{}, unsupportedCause(CauseProviderNotLaunchable, "host settings name no CLI provider; set provider (for example \"claude\")")
+	}
+	if err := runtimeagent.LaunchError(h.Provider); err != nil {
+		return ModelSelection{}, unsupportedCause(CauseProviderNotLaunchable, "provider %q cannot be launched on this host: %v", h.Provider, err)
+	}
+	if permissionProfile != "" && permissionProfile != "default" {
+		return ModelSelection{}, unsupportedCause(CauseReadOnlyUnenforceable, "the definition asks for permission profile %q, which a CLI process cannot enforce; use a definition with the default profile or runtime \"api\"", permissionProfile)
+	}
+	if field := cliUnsupportedField(h); field != "" {
+		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field %q does not apply to a CLI agent; remove it", field)
+	}
+	if len(h.Directories) == 0 {
+		return ModelSelection{}, unsupportedCause(CauseHostDirectoriesMissing, "a CLI agent needs at least one directory in host settings; the first is its work root")
+	}
+	for _, dir := range h.Directories {
+		if expanded, err := runtimeagent.ExpandUserHome(strings.TrimSpace(dir)); err != nil || !filepath.IsAbs(expanded) {
+			return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings directory %q must be an absolute path", dir)
+		}
+	}
+	if h.Model != "" && !runtimeagent.ModelFlagVerified(h.Provider) {
+		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field \"model\" is not supported for provider %q yet; remove it", h.Provider)
+	}
+	selected := ModelSelection{Provider: h.Provider, Model: h.Model}
+	if requested != nil && *requested != selected {
+		return ModelSelection{}, unsupportedModelCause(CauseModelSelectionMismatch, "the requested provider/model (%s/%s) differs from the host settings (%s/%s); omit the request selection or change the host settings", requested.Provider, requested.Model, selected.Provider, selected.Model)
+	}
+	return selected, nil
+}
+
+// cliUnsupportedField names the first host field that is set but does not apply
+// to a CLI agent, or "". Default (empty) values pass: the same host document
+// shape serves both runtimes.
+func cliUnsupportedField(h store.NativeHostSettings) string {
+	switch {
+	case h.HarnessProfile != "":
+		return "harness_profile"
+	case !reflect.DeepEqual(h.NativeLoop, harnessprofile.Layer{}):
+		return "native_loop"
+	case h.RecallLimit != nil:
+		return "recall_limit"
+	case h.RecallTimeoutMS != nil:
+		return "recall_timeout_ms"
+	case len(h.MCPServers) > 0:
+		return "mcp_servers"
+	}
+	return ""
 }

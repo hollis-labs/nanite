@@ -128,6 +128,49 @@ func workRootArgs(providerName, workRoot string) []string {
 	}
 }
 
+// addDirArgs is workRootArgs for the work root plus further roots: one variadic
+// --add-dir, the work root first, duplicates and empty entries dropped. It is
+// nil for a runtime that takes no --add-dir.
+func addDirArgs(providerName, workRoot string, more []string) []string {
+	switch normalizeProviderName(providerName) {
+	case "claude", "claude-code", "claudecode":
+	default:
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var dirs []string
+	for _, d := range append([]string{workRoot}, more...) {
+		if d == "" {
+			continue
+		}
+		if _, dup := seen[d]; dup {
+			continue
+		}
+		seen[d] = struct{}{}
+		dirs = append(dirs, d)
+	}
+	if len(dirs) == 0 {
+		return nil
+	}
+	return append([]string{"--add-dir"}, dirs...)
+}
+
+// modelArgs selects the model for a native CLI launch. Only Claude's --model is
+// verified; the other runtimes get no flag, and a host that names a model for
+// them is refused at session create rather than silently launched on the CLI's
+// own default.
+func modelArgs(providerName, model string) []string {
+	if model == "" {
+		return nil
+	}
+	switch normalizeProviderName(providerName) {
+	case "claude", "claude-code", "claudecode":
+		return []string{"--model", model}
+	default:
+		return nil
+	}
+}
+
 // useACPProtocol reports whether profile is explicitly configured to
 // launch through the ACP client abstraction (TASKS/agent-host-acp/08-11,
 // libs/go-agent-wrapper's acp package plus its opencodeacp/copilotacp
@@ -167,4 +210,10 @@ func effectiveACPTransport(profile *store.AgentProfile) adapters.Transport {
 		return adapters.TransportTCP
 	}
 	return adapters.TransportStdio
+}
+
+// ModelFlagVerified reports whether Nanite passes a host-selected model to
+// providerName's CLI. Only Claude's --model is verified (modelArgs).
+func ModelFlagVerified(providerName string) bool {
+	return len(modelArgs(providerName, "x")) > 0
 }

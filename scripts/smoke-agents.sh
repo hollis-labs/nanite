@@ -45,7 +45,7 @@ revision: "1"
 name: smoke-agent
 description: Smoke test agent.
 behavior:
-  purpose: Answer with the number only.
+  purpose: Do exactly what is asked, briefly.
 requirements: {}
 harness_profile:
   context: {}
@@ -54,7 +54,7 @@ harness_profile:
 continuity:
   mode: ephemeral
 ---
-Answer arithmetic questions with the number only.
+Follow the user's instruction exactly and briefly.
 DEF
 pin=$("$bin" agent install -db "$db" "$work/def.md") && ok "definition installed" || { bad "definition install"; exit 1; }
 
@@ -79,7 +79,7 @@ wait_reply() {
     # Only an assistant message counts.
     printf '%s' "$h" | jq -e --arg p "$pat" '[.items[] | select(.role=="assistant") | .content] | any(test($p))' >/dev/null 2>&1 && { ok "$label"; return 0; }
   done
-  bad "$label: no matching reply within 180s"; return 1
+  bad "$label: no matching reply within 180s; last assistant message: $(printf '%s' "$h" | jq -r '[.items[] | select(.role=="assistant") | .content] | last // "none" | .[0:240]' 2>/dev/null)"; return 1
 }
 
 # resume_check SESSION: restart the server, then ask something only the earlier
@@ -91,6 +91,32 @@ resume_check() {
   curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$sid/turns" \
     -d '{"content":[{"kind":"text","text":"Add 1 to your previous answer. Reply with the number only."}],"delivery":"at_idle"}' >/dev/null
   wait_reply "$sid" 52 "cli: resumed after a server restart with context"
+}
+
+# send_turn SESSION TEXT: post a turn, print the response body
+send_turn() {
+  curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$1/turns" \
+    -d "$(jq -nc --arg t "$2" '{content:[{kind:"text",text:$t}],delivery:"at_idle"}')"
+}
+
+# stop_check SESSION: cancel a running turn, then expect the session to answer the next one.
+stop_check() {
+  local sid=$1 turn tid code
+  turn=$(send_turn "$sid" "Count from 1 to 400 as a comma separated list, nothing else.")
+  tid=$(printf '%s' "$turn" | jq -r '.stream_url' | sed -n 's#.*/turns/\([^/]*\)/.*#\1#p')
+  sleep 4
+  code=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" -X POST "$base/api/agent/v1/sessions/$sid/turns/$tid/cancel")
+  case "$code" in 2??) ok "cli: running turn cancelled ($code)";; *) bad "cli: cancel returned $code";; esac
+  sleep 3
+  send_turn "$sid" "Reply with the single word BANANA." >/dev/null
+  wait_reply "$sid" BANANA "cli: session answers after a cancel"
+}
+
+# mcp_check SESSION: the Nanite MCP server must be visible to the CLI.
+mcp_check() {
+  local sid=$1
+  send_turn "$sid" "Call your MCP tool named agent_list (it may be prefixed with the server name nanite). Reply with TOOL_OK if the call ran, TOOL_MISSING if you have no such tool, or TOOL_REFUSED if it was refused, then one short reason." >/dev/null
+  wait_reply "$sid" TOOL_OK "cli: Nanite MCP tool callable" || true
 }
 
 # one agent: host settings -> session -> turn -> reply
@@ -111,7 +137,11 @@ run_agent() { # name settings-json
     -d '{"content":[{"kind":"text","text":"What is 17 times 3? Reply with the number only."}],"delivery":"at_idle"}')
   say "      turn accepted: $(printf '%s' "$turn" | head -c 120)"
   wait_reply "$sid" 51 "$name: turn completed with a reply" || return
-  if [ "$name" = cli ]; then resume_check "$sid"; fi
+  if [ "$name" = cli ]; then
+    resume_check "$sid"
+    stop_check "$sid"
+    [ -n "${SMOKE_MCP:-}" ] && mcp_check "$sid"
+  fi
 }
 
 # 3. API agent
@@ -125,7 +155,8 @@ fi
 if [ -n "${SMOKE_CLI:-}" ]; then
   # A CLI agent's work root is the first host directory.
   mkdir -p "$work/cli-work"
-  run_agent cli "{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"claude\",\"model\":\"haiku\",\"directories\":[\"$work/cli-work\"],\"native_loop\":{}}"
+  cli_model=${SMOKE_CLI_MODEL-haiku}
+  run_agent cli "{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"${SMOKE_CLI_PROVIDER:-claude}\",\"model\":\"$cli_model\",\"directories\":[\"$work/cli-work\"],\"native_loop\":{}}"
 else
   skp "cli agent: set SMOKE_CLI=1 once runtime=cli (B2) is merged and claude is logged in"
 fi

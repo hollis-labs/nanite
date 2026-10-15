@@ -163,6 +163,9 @@ func (s *chatServiceImpl) driveBootSession(
 			Role:                      role,
 			ExternalLifecycleObserver: true,
 		}
+		if agent != nil && agent.HostSettingsID != "" {
+			bootOpts.ExpectedHostRevision = agent.Revision
+		}
 		applyLegacyCLIProviderToBootOpts(&bootOpts, providerName)
 		// Pinned content is authoritative. Retired mutable cmd/http resolver
 		// rows are never read or executed while assembling a fresh boot.
@@ -183,6 +186,9 @@ func (s *chatServiceImpl) driveBootSession(
 			}
 		}
 		booted, err := runtimeagent.Boot(ctx, s.agentDeps, bootOpts)
+		if errors.Is(err, runtimeagent.ErrHostRevisionChanged) {
+			return nil, unsupportedCause(CauseHostRevisionChanged, "host settings %s changed since this session was created; create a new session (%v)", agent.HostSettingsID, err)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)
 		}

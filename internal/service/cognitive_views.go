@@ -280,6 +280,10 @@ func cliUnsupportedField(h store.NativeHostSettings) string {
 		return "recall_timeout_ms"
 	case len(h.MCPServers) > 0:
 		return "mcp_servers"
+	case h.Protocol != "":
+		return "protocol"
+	case h.Transport != "":
+		return "transport"
 	}
 	return ""
 }

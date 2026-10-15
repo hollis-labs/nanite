@@ -247,9 +247,13 @@ func newNativeCLIFixture(t *testing.T, tc nativeCLICase) *characterizationFixtur
 	}
 
 	bridge := &agentEventBridge{streams: f.svc.streams}
+	// The resolver answers with the host revision the session was admitted
+	// under, as the production resolver does, so the launch pin holds.
+	admitted := f.svc.agents.(*characterizationAgents).agent
 	deps := &runtimeagent.Dependencies{
 		Agents: &fakeAgentProfilesResolver{profile: &store.AgentProfile{
 			ID: "agent-characterization", Slug: "characterization-agent", DefaultProvider: tc.adapter,
+			Revision: admitted.Revision, HostSettingsID: admitted.HostSettingsID,
 		}},
 		Manager:    runtimeagent.NewSessionManager(),
 		Store:      &agentRuntimeStore{store: f.st},

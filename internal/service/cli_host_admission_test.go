@@ -45,6 +45,7 @@ func TestAdmitCLIHostRefusalsCarryACause(t *testing.T) {
 		{"harness profile", cliHost(func(h *store.NativeHostSettings) { h.HarnessProfile = "strict" }), "default", nil, CauseCLIHostUnsupportedField},
 		{"recall limit", cliHost(func(h *store.NativeHostSettings) { h.RecallLimit = &limit }), "default", nil, CauseCLIHostUnsupportedField},
 		{"mcp servers", cliHost(func(h *store.NativeHostSettings) { h.MCPServers = []string{"files"} }), "default", nil, CauseCLIHostUnsupportedField},
+		{"acp protocol", cliHost(func(h *store.NativeHostSettings) { h.Protocol = "acp" }), "default", nil, CauseCLIHostUnsupportedField},
 		{"no directories", cliHost(func(h *store.NativeHostSettings) { h.Directories = nil }), "default", nil, CauseHostDirectoriesMissing},
 		{"relative directory", cliHost(func(h *store.NativeHostSettings) { h.Directories = []string{"work"} }), "default", nil, CauseCLIHostUnsupportedField},
 		{"model on unverified provider", cliHost(func(h *store.NativeHostSettings) { h.Provider = "codex" }), "default", nil, CauseCLIHostUnsupportedField},

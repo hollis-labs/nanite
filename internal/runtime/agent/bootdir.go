@@ -259,6 +259,9 @@ func ResolveBootdirParams(deps *Dependencies, opts Options, sessID string) (Layo
 	if profile == nil {
 		return nil, SetupParams{}, errors.New("agent.ResolveBootdirParams: profile resolution returned nil")
 	}
+	if err := checkExpectedHostRevision(opts, profile); err != nil {
+		return nil, SetupParams{}, fmt.Errorf("agent.ResolveBootdirParams: %w", err)
+	}
 	layout, params := composeBootdirParams(deps, opts, profile, sessID)
 	return layout, params, nil
 }

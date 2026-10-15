@@ -130,9 +130,9 @@ func TestAgentSetupRefusesUnsafeSlugAndUnlaunchableDefinition(t *testing.T) {
 		}
 	}
 	// A schema-valid definition the native runtime refuses at launch.
-	data, _ := os.ReadFile(def)
+	data, _ := os.ReadFile(def) //nolint:gosec // G304: test fixture path from t.TempDir
 	durable := filepath.Join(t.TempDir(), "durable.md")
-	if err = os.WriteFile(durable, []byte(strings.Replace(string(data), "mode: ephemeral", "mode: durable", 1)), 0o600); err != nil {
+	if err = os.WriteFile(durable, []byte(strings.Replace(string(data), "mode: ephemeral", "mode: durable", 1)), 0o600); err != nil { //nolint:gosec // G703: test fixture written under t.TempDir
 		t.Fatal(err)
 	}
 	err = runAgentSetup(context.Background(), st, keys, ws, append([]string{durable}, base...), &bytes.Buffer{})

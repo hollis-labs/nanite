@@ -184,16 +184,48 @@ Notes from the run:
 - The spike calls `Boot` directly. It does not exercise `CognitiveViews.Create`
   or the HTTP route; those are the B2 gates above.
 
-## Open questions
+## Open questions, with recommendations
 
-1. Where does the CLI session's work directory come from for an API caller
-   (`work_root` is currently unsupported on the v1 create route)?
-2. Should `harness_profile` / `native_loop` on a CLI host be rejected or
-   ignored? Proposed: ignored with a warning in the create response.
-3. Codex and OpenCode model flags: confirm per adapter before B2 relies on a
-   uniform `--model`.
-4. Trust dialog handling (gap 6): pre-seed `~/.claude.json` (touches a user
-   file) or pass `--add-dir`?
-5. Should `runtime_kinds` list per-provider launchability, or only the kind?
-6. ACP-for-Claude vs streaming stdio: both are reachable; B2 keeps native
-   streaming stdio as the default and treats `protocol=acp` as opt-in.
+1. **`harness_profile` / `native_loop` on a CLI host: reject or ignore?**
+   Recommend **reject, typed**. Reject only a non-empty value (the API-shaped
+   default `native_loop: {}` and an empty `harness_profile` must pass, since
+   the same host document shape is used for both runtimes), with a
+   `cli_host_unsupported_field` cause naming the field. Silently ignoring a
+   knob the author set is the "422 that hides the cause" problem again.
+   The error vocabulary belongs with A3.
+2. **Claude boot-dir trust dialog (gap 6).** Options:
+   - *Pre-seed `hasTrustDialogAccepted` in `~/.claude.json`.* Works, but Nanite
+     edits a user-owned file shared with interactive Claude sessions, and the
+     key is per boot-dir path, so entries accumulate.
+   - *Pass the writable roots as `--add-dir` launch args* (`workRootArgs`
+     already does this for the work root). No user file touched, no state.
+     Unverified that `--add-dir` is honoured without the trust entry; B2 must
+     check it first.
+   - *Give the boot dir its own `CLAUDE_CONFIG_DIR`.* Hermetic, but then the
+     login in `~/.claude` is not visible, so the turn fails "Not logged in".
+   Recommend **`--add-dir`**, falling back to documenting the limitation
+   (writable roots dropped, work root still reachable) if it does not work.
+   Never edit `~/.claude.json`.
+3. **Where does the work directory come from for an API caller?**
+   `work_root` is deliberately unsupported on the v1 create route, so the
+   caller cannot name an arbitrary path. Recommend **host settings own it**:
+   `directories` is the allow-list, the first entry is the default work root,
+   and a later optional `work_root` on create is accepted only if it lies
+   inside one of those entries (path-contained, symlinks resolved). A CLI
+   process can read and write there, so filesystem authority stays with the
+   host document, not the request. For B2, ship the default only; add the
+   create-time field when something needs it. A host with no `directories`
+   refuses CLI session create with a typed cause rather than defaulting to
+   the daemon's cwd.
+4. **Model flag per adapter.** Recommend B2 does **Claude only**
+   (`--model`), verified by a launch-args unit test, and refuses a model on
+   Codex/OpenCode hosts with a typed cause until each flag is confirmed
+   against that adapter. A uniform `--model` is an assumption.
+5. **`runtime_kinds` in capabilities.** Recommend listing **per provider**:
+   kind `cli` with the providers `LaunchError` says are launchable on this
+   host (claude yes, antigravity no). The UI and the 422 cause both need to
+   say *which* provider is the problem, and a bare `cli` would promise more
+   than the host can launch.
+6. **ACP vs streaming stdio for Claude.** Recommend native streaming stdio as
+   the default (it is what chat uses today and the spike proves); `protocol=acp`
+   stays opt-in and unchanged.

@@ -24,7 +24,7 @@ func TestCodexLayoutPlantsTheNaniteMCPServerInConfigTOML(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(boot) })
-	b, err := os.ReadFile(filepath.Join(boot, "config.toml"))
+	b, err := os.ReadFile(filepath.Join(boot, "config.toml")) //nolint:gosec // G304: boot is the test's own planted temp dir
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestCodexLayoutPlantsNoMCPServerWhenDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(boot) })
-	b, _ := os.ReadFile(filepath.Join(boot, "config.toml"))
+	b, _ := os.ReadFile(filepath.Join(boot, "config.toml")) //nolint:gosec // G304: boot is the test's own planted temp dir
 	if strings.Contains(string(b), "mcp_servers") {
 		t.Errorf("MCP disabled, but config.toml names a server:\n%s", b)
 	}

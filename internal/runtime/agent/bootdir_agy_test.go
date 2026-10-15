@@ -28,9 +28,9 @@ func TestAgyLayoutPlantsTheWorkspacePlugin(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(boot) })
 
 	read := func(rel string) string {
-		b, err := os.ReadFile(filepath.Join(boot, rel))
-		if err != nil {
-			t.Fatalf("%s: %v", rel, err)
+		b, readErr := os.ReadFile(filepath.Join(boot, rel)) //nolint:gosec // G304: boot is the test's own planted temp dir
+		if readErr != nil {
+			t.Fatalf("%s: %v", rel, readErr)
 		}
 		return string(b)
 	}

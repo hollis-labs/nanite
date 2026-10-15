@@ -52,6 +52,7 @@ func TestSpikeCLIRuntimeClaudeTurn(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var kinds []string
+	var terminal runtimeevents.Event
 	var text strings.Builder
 	done := make(chan struct{})
 	var once sync.Once
@@ -72,6 +73,7 @@ func TestSpikeCLIRuntimeClaudeTurn(t *testing.T) {
 				_ = json.Unmarshal(ev.Payload, &p)
 				text.WriteString(p.Content)
 			case runtimeevents.KindTurnCompleted, runtimeevents.KindTurnFailed:
+				terminal = ev
 				once.Do(func() { close(done) })
 			}
 			return nil
@@ -104,6 +106,9 @@ func TestSpikeCLIRuntimeClaudeTurn(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	t.Logf("provider_session_id=%q event kinds=%v reply=%q", sess.ProviderSessionID(), kinds, text.String())
+	if terminal.Kind != runtimeevents.KindTurnCompleted {
+		t.Fatalf("turn ended with %q, want %q: %s", terminal.Kind, runtimeevents.KindTurnCompleted, terminal.Payload)
+	}
 	if !strings.Contains(strings.ToUpper(text.String()), "PONG") {
 		t.Errorf("reply %q does not contain PONG", text.String())
 	}

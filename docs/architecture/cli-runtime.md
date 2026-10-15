@@ -1,13 +1,10 @@
 # Native-session runtime for CLI agents (`runtime=cli`)
 
-Status: design + spike, CW-20261014-0155 (epic EP-20261014-0002, slice B1).
-Not implemented beyond the spike test. Implementation is B2.
-
 ## Problem
 
 The definition flow (`POST /api/agent/v1/sessions` with `definition_ref` and
 `host_settings`) only runs `runtime=api`. `CognitiveViews.Create`
-(`internal/service/cognitive_views.go:129`) returns `ErrUnsupportedDefinition`
+(`internal/service/cognitive_views.go`) rejects any host runtime other than `api` with `ErrUnsupportedDefinition`
 for any other runtime, and the API maps that to a 422 that does not say why.
 Capabilities advertise `runtime_kinds: [api]` only (`internal/api/agent_v1.go`).
 
@@ -15,9 +12,9 @@ Owner decision 2026-10-14: CLI agents (Claude, Codex, OpenCode/agy) get their
 own native-session runtime in the definition flow. Nanite stays standalone and
 keeps its own CLI sessions (ruling 2026-10-13).
 
-## What already exists
+## Building blocks
 
-Most of the machinery is already in tree; the design is mostly *removing four
+Most of the machinery exists; the design is mostly *removing four
 hard-coded "api" assumptions* and filling three gaps.
 
 - `store.NativeHostSettings` already validates `runtime=cli` and the
@@ -46,8 +43,8 @@ Reuse `NativeHostSettings`. No new fields for the first cut.
 | `provider` | registry runtime name: `claude`, `codex`, `opencode` (aliases `agy`, `claude-code` normalise) or an ACP-only one (`copilot`, `pi`) |
 | `model` | passed to the CLI (see gap 1) |
 | `protocol` / `transport` | empty = native mode; `acp` + `stdio` (or `tcp` for Copilot) selects ACP |
-| `directories` | extra readable/writable roots (gap 3) |
-| `mcp_servers` | extra MCP servers to plant (gap 3) |
+| `directories` | extra readable/writable roots (required change 3) |
+| `mcp_servers` | extra MCP servers to plant (required change 3) |
 | `harness_profile`, `native_loop`, `recall_*` | not applicable: the CLI owns its loop. Empty or default values pass; a non-empty value is rejected with a typed cause (open question 1) |
 
 "Bootdir" is not a host setting. `Boot` plants an ephemeral per-session boot dir
@@ -71,7 +68,7 @@ All of it rides existing code paths.
    against the *launch registry*, not the API `provider.Registry`
    (`configuredNativeModel` would refuse `claude`).
 2. **Turn.** `submitCognitiveTurn` stops requiring an API provider for a CLI
-   host. `chat_generation_actions.go:1945` builds the transient `AgentProfile`
+   host. the defined-view branch of `chat_generation_actions.go` builds the transient `AgentProfile`
    with `RuntimeKind: "api"` hard-coded; for a CLI host it takes `RuntimeKind`
    from `cfg.HostSettings.Runtime`. `resolveProvider` then returns
    `(provider, nil)` and the existing `driveBootSession` runs.
@@ -79,7 +76,7 @@ All of it rides existing code paths.
    `Options.AgentProfile`. A defined view has no slug, so the design passes the
    host settings ID (`cfg.HostSettingsRef.ID`), which `GetOrDefault` resolves.
    The host revision is pinned on the view; Boot re-reads the host row, so a
-   revision mismatch must fail the turn, not silently use a newer host (gap 4).
+   revision mismatch must fail the turn, not silently use a newer host (required change 4).
 4. **Stream.** Unchanged: wrapper events to `runtimeEventBridgeSink` to
    `chatstream/v1` SSE, plus the host runtime feed.
 5. **Stop / cancel.** Unchanged. Claude/Codex/OpenCode native runtimes report
@@ -107,7 +104,7 @@ All of it rides existing code paths.
 - `projectAgentHost` refuses any definition whose permission profile is not
   `default` ("no enforced read-only posture"). That is correct for CLI and
   should stay: a `read-only` definition cannot be honoured by a CLI process,
-  so it is refused, with a stated cause (gap 5).
+  so it is refused, with a stated cause (required change 5).
 
 ### MCP attachment
 
@@ -128,16 +125,15 @@ is added to the allow list explicitly.
 | Events, SSE, runtime feed | `runtimeEventBridgeSink`, `HostRuntimeFeed` |
 | Recovery | `observeSessionForRecovery`, recovery broker |
 
-## Gaps B2 must close
+## Required changes
 
 1. **Model is not passed to the CLI.** `Options` and `launch.Selection` carry
    no model. `DefaultModel` reaches only the prompt text
-   (`sandbox_content_claude.go:117`). Fix: add `Options.Model` and append
+   (`sandbox_content_claude.go`). Fix: add `Options.Model` and append
    `--model <m>` (Claude), the equivalent for Codex/OpenCode, to
-   `Selection.ExtraArgs`. The spike asked for `haiku` and did not verify it
-   reached the CLI.
-2. **Admission and authorization hard-code API.** `cognitive_views.go:129`,
-   `cognitive_admission.go` (`s.providers.Get`), `session.go:192-195`,
+   `Selection.ExtraArgs`. Verify with a launch-args test and one live check.
+2. **Admission and authorization hard-code API.** `CognitiveViews.Create`,
+   `cognitive_admission.go` (`s.providers.Get`), `sessionServiceImpl.Create`,
    `logical_agent_provision.go`. Introduce one `hostRuntimeKind(h)` helper and
    route on it.
 3. **Host `mcp_servers` and `directories` are unprojected** (see above).
@@ -151,9 +147,9 @@ is added to the allow list explicitly.
 6. **Boot-dir trust warning.** Claude prints "workspace has not been trusted;
    ignoring permissions.additionalDirectories" for the ephemeral boot dir, so
    `CLIWritableRoots` are silently dropped on this Claude version (2.1.300).
-   The spike hit it. Needs either a pre-seeded trust entry or passing the dirs
+   Needs either a pre-seeded trust entry or passing the dirs
    as `--add-dir`.
-7. **Provider session ID** was empty after one turn in the spike (see below).
+7. **Provider session ID** persistence and resume must be verified through the chat path's observer.
 
 ## Spike
 
@@ -169,20 +165,18 @@ NANITE_SPIKE_CLAUDE=1 go test ./internal/service \
   -run TestSpikeCLIRuntimeClaudeTurn -v -count=1
 ```
 
-Result: PASS in about 32 s. Events: `sandbox.applied, session.ready,
-process.started, stdin.write, ... turn.started, session.processing,
-agent.delta ("PONG"), turn.completed, session.idle`. This shows the
-definition-to-host-settings-to-profile projection and `Boot` already compose
-for `runtime=cli` with no production change.
+It asserts that the run ends in `turn.completed` (not `turn.failed`) and that
+the reply contains the expected word. Outcomes are recorded in Torque
+(CW-20261014-0155), not here.
 
-Notes from the run:
+Limits of the spike:
 
 - With the test binary's isolated `HOME` the turn fails `Not logged in`. The
   spike passes the real HOME in `Options.Env`; the daemon inherits it.
-- `provider_session_id` read empty right after the turn. It is persisted by
-  the chat path's observer, which the spike does not run. Unconfirmed.
-- The spike calls `Boot` directly. It does not exercise `CognitiveViews.Create`
-  or the HTTP route; those are the B2 gates above.
+- It calls `Boot` directly. It does not exercise `CognitiveViews.Create` or the
+  HTTP route; those are the required changes above.
+- It does not check that the model reaches the CLI, that the provider session
+  ID is persisted, or that resume works.
 
 ## Open questions, with recommendations
 
@@ -193,7 +187,7 @@ Notes from the run:
    `cli_host_unsupported_field` cause naming the field. Silently ignoring a
    knob the author set is the "422 that hides the cause" problem again.
    The error vocabulary belongs with A3.
-2. **Claude boot-dir trust dialog (gap 6).** Options:
+2. **Claude boot-dir trust dialog (required change 6).** Options:
    - *Pre-seed `hasTrustDialogAccepted` in `~/.claude.json`.* Works, but Nanite
      edits a user-owned file shared with interactive Claude sessions, and the
      key is per boot-dir path, so entries accumulate.

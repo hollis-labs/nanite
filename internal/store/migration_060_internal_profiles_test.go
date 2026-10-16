@@ -32,7 +32,7 @@ func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
 
 	wantSlugs := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range wantSlugs {
-		got, err := migrationHistoricalAgentBySlug(s, context.Background(), slug)
+		got, err := migrationHistoricalAgentBySlug(context.Background(), s, slug)
 		if err != nil {
 			t.Fatalf("GetAgentBySlug %q after migration 060: %v", slug, err)
 		}

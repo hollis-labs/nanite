@@ -4,8 +4,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	permissionlib "github.com/hollis-labs/go-permission"
-	"github.com/hollis-labs/nanite/internal/service"
 )
 
 // handleRespondApproval handles POST /api/sessions/{id}/approvals/{requestId}.
@@ -49,11 +50,11 @@ func (a *API) handleRespondApproval(w http.ResponseWriter, r *http.Request) {
 	if a.Services.CognitiveApprovals != nil {
 		if err := a.Services.CognitiveApprovals.RespondRetained(r.Context(), sessionID, requestID, decision, scope); err != nil {
 			switch {
-			case errors.Is(err, service.ErrCognitiveApprovalScope):
+			case errors.Is(err, approval.ErrScope):
 				a.agentV1Error(w, http.StatusUnprocessableEntity, err.Error())
-			case errors.Is(err, service.ErrCognitiveApprovalConflict):
+			case errors.Is(err, approval.ErrConflict):
 				a.agentV1Error(w, http.StatusConflict, err.Error())
-			case errors.Is(err, service.ErrCognitiveApprovalNotFound):
+			case errors.Is(err, approval.ErrNotFound):
 				a.errorResp(w, http.StatusNotFound, "approval request not found in this session")
 			default:
 				a.errorResp(w, http.StatusInternalServerError, "approval response failed")

@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/config"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // TestSlotStash_E2E_50KLineFile_StashAndDevRead is the ticket's

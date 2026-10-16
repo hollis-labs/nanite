@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 
+	agentservice "github.com/hollis-labs/substrate/agent/service"
+
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -169,7 +171,7 @@ func (a *API) handleAgentV1Initialize(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleAgentV1Capabilities(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, agentV1CapabilitiesResponse{
 		DefaultDefinitionRef: a.Services.CognitiveViews.DefaultDefinitionRef, StreamEncodings: []string{"chatstream/v1"},
-		EventRetention: service.CognitiveEventRetention, EventGraceSeconds: int(service.CognitiveEventGrace.Seconds()), QueueLimit: service.CognitiveQueuedTurnLimit, SupportedPermissionProfiles: []string{"default", "read-only"},
+		EventRetention: agentservice.EventRetention, EventGraceSeconds: int(agentservice.EventGrace.Seconds()), QueueLimit: service.CognitiveQueuedTurnLimit, SupportedPermissionProfiles: []string{"default", "read-only"},
 		SchemaVersion:       1,
 		ProtocolVersion:     "v1",
 		RoutePrefix:         agentV1RoutePrefix,

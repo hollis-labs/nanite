@@ -14,10 +14,10 @@ import (
 	permissionlib "github.com/hollis-labs/go-permission"
 	ledger "github.com/hollis-labs/go-usage-ledger"
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/usagecost"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 func terminationUsage(reason string) llmtypes.StreamEvent {

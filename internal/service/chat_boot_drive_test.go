@@ -13,10 +13,10 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	runtimeevents "github.com/hollis-labs/go-runtime-events/runtimeevents"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // syncBuffer is a goroutine-safe bytes.Buffer wrapper, used below to

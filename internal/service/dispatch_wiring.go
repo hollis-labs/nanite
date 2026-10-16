@@ -9,7 +9,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // SubagentSpawner is the narrow surface dispatchSpawner needs from

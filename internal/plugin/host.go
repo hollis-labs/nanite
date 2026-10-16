@@ -899,42 +899,6 @@ func (h *Host) CheckAllConnectorHealth() []ConnectorStatus {
 	return out
 }
 
-// recordConnectorFailure marks a connector as unhealthy after send retries
-// are exhausted.
-//
-// No current caller: this was invoked by the now-removed TriggerDispatcher
-// (internal/plugin/triggers.go, deleted alongside trigger_rules —
-// TASKS/phase-0/18b-cut-dead-messaging-and-plugin-tables.md). Left in place
-// because it belongs to the general connector-health subsystem
-// (connectorHealth/GetConnectorStatuses/CheckConnectorHealth), which is
-// still live via internal/api/connectors.go and out of this task's scope —
-// not something specific to trigger_rules.
-func (h *Host) recordConnectorFailure(name string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	status, exists := h.connectorHealth[name]
-	if !exists {
-		return
-	}
-	status.Healthy = false
-	status.LastErrorAt = time.Now()
-	status.ConsecutiveFailures++
-}
-
-// recordConnectorSuccess marks a connector as healthy after a successful
-// send. Same "no current caller" note as recordConnectorFailure, above.
-func (h *Host) recordConnectorSuccess(name string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	status, exists := h.connectorHealth[name]
-	if !exists {
-		return
-	}
-	status.Healthy = true
-	status.LastError = ""
-	status.ConsecutiveFailures = 0
-}
-
 // RegisterProvider registers a runtime LLM provider from a plugin.
 // The provider must implement the llmcontracts.Provider interface; the host
 // registers it with the provider registry via the "provider-registry" service.

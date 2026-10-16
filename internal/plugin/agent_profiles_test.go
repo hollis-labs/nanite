@@ -227,12 +227,3 @@ mcp_servers:
 		t.Errorf("a rejected agent-profile file still produced agent rows: %+v", agents)
 	}
 }
-
-func containsString(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
-}

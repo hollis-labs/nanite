@@ -8,8 +8,12 @@ on:
 permissions:
   contents: read
 
+# One queue per ref: GitHub keeps a single pending run per concurrency group,
+# so a shared group let a dispatch on one PR branch cancel another branch's
+# queued run. Runs on the same ref still serialize, and an in-flight run is
+# never cut.
 concurrency:
-  group: full-repo-quality-gate
+  group: full-repo-quality-gate-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

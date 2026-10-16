@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -106,7 +107,11 @@ func TestHostQueryFailedLaunchRevokesGrant(t *testing.T) {
 	declaration.Config = manifest.Config{}
 	declaration.Server.Entry = "bin/plugin"
 	declaration.Capabilities = []sdkprocess.CapabilityRequest{{Name: pluginapi.CapabilityReadOnlyQuery, Metadata: json.RawMessage(`{"resources":["sessions"],"all_sessions":true}`)}}
-	binary, err := os.ReadFile("/bin/false")
+	falseBinary, err := exec.LookPath("false") // /bin/false on Linux, /usr/bin/false on macOS
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(falseBinary)
 	if err != nil {
 		t.Fatal(err)
 	}

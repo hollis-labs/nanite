@@ -13,12 +13,18 @@ func TestInspectPlacedConfinesFilesAndRecordsMetadata(t *testing.T) {
 	if err := os.WriteFile(path, []byte("REPORT"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// InspectPlaced reports the canonical path; t.TempDir() is not canonical on
+	// macOS (/var -> /private/var).
+	want, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, input := range []string{"report.txt", path} {
 		got, err := InspectPlaced(root, input, "report.txt", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Path != path || got.Size != 6 || !strings.HasPrefix(got.MIME, "text/plain") {
+		if got.Path != want || got.Size != 6 || !strings.HasPrefix(got.MIME, "text/plain") {
 			t.Fatalf("wrong placed metadata: %+v", got)
 		}
 	}

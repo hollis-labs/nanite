@@ -65,6 +65,7 @@ func TestMigrate103DropsSessionIntentColumn(t *testing.T) {
 // constraint rejects a non-enum value at the SQL layer) — now exercised on
 // the Down-recreated column instead, since a fresh DB no longer has it.
 func TestMigrate103DownReaddsSessionIntentColumn(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	ctx := context.Background()
 

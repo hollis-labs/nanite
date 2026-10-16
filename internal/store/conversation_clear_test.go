@@ -12,6 +12,7 @@ import (
 )
 
 func TestClearConversation_RetainsHistoryAndPinsAcrossReopen(t *testing.T) {
+	t.Parallel()
 	for _, keep := range []bool{false, true} {
 		t.Run(map[bool]string{false: "drop", true: "keep"}[keep], func(t *testing.T) {
 			s := newTestStore(t)

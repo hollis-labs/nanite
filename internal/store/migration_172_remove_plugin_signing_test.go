@@ -8,12 +8,9 @@ import (
 )
 
 func TestMigration172PreservesCatalogsAndSettings(t *testing.T) {
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 171)
 	ctx := context.Background()
 	provider := migration147Provider(t, s)
-	if _, err := provider.DownTo(ctx, 171); err != nil {
-		t.Fatal(err)
-	}
 	source, createErr := s.CreateCatalogSource(ctx, "Operator Catalog", "https://example.com/plugins.json", "custom", 73)
 	if createErr != nil {
 		t.Fatal(createErr)

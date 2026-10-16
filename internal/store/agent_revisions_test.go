@@ -42,12 +42,9 @@ func TestHistoricalRevisionJournalPreservedAndMutableRestoreRefused(t *testing.T
 	}
 }
 func TestHistoricalRevisionUpgradeRetainsBaselineOnExplicitHistoricalWriter(t *testing.T) {
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 174)
 	ctx := t.Context()
 	provider := newMigrationProvider(t, s)
-	if _, err := provider.DownTo(ctx, 174); err != nil {
-		t.Fatal(err)
-	}
 	p := makeTestAgentRawSQL(t, s, "pre-journal")
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatal(err)

@@ -218,7 +218,8 @@ func TestHostRuntimeIdentityLedgerHasDocumentedBound(t *testing.T) {
 }
 
 func TestMigration157HostRuntimeFeedDownAndUp(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 156)
 	ctx := context.Background()
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -227,9 +228,6 @@ func TestMigration157HostRuntimeFeedDownAndUp(t *testing.T) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if err != nil {
 		t.Fatalf("migration provider: %v", err)
-	}
-	if _, err := provider.DownTo(ctx, 156); err != nil {
-		t.Fatalf("down migration 157: %v", err)
 	}
 	for _, table := range []string{"host_runtime_feed_identities", "host_runtime_feed_events", "host_runtime_feed_heads"} {
 		exists, err := s.tableExists(ctx, table)

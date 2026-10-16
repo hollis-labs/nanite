@@ -119,6 +119,7 @@ func TestMCPServerTrust_DefaultsAndRoundTrip(t *testing.T) {
 // (via repeated New on the same path) to confirm the ALTER TABLE statements
 // in 012 don't error on the duplicate-column path.
 func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := dir + "/test.db"
 

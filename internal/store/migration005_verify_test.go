@@ -9,6 +9,7 @@ import (
 )
 
 func TestMigration005_MessagingSessionScoping(t *testing.T) {
+	t.Parallel()
 	dbPath := t.TempDir() + "/migration005test.db"
 	s, err := New(context.Background(), dbPath)
 	if err != nil {

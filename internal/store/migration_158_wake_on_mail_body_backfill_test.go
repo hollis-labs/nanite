@@ -30,13 +30,10 @@ const (
 )
 
 func TestMigration158_BackfillsAlreadySeededWakeOnMailBodies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 157)
 	provider := gooseProviderFor(t, s)
-
-	if _, err := provider.DownTo(ctx, 157); err != nil {
-		t.Fatalf("goose DownTo 157 (reverse migration 158): %v", err)
-	}
 
 	// Plant one system-seeded row per class, exactly as a pre-158 install holds
 	// them. Both are hard failures: if either insert were refused, every
@@ -90,13 +87,10 @@ func TestMigration158_BackfillsAlreadySeededWakeOnMailBodies(t *testing.T) {
 // so a body an operator has already changed is not silently overwritten by an
 // upgrade.
 func TestMigration158_LeavesOperatorEditedBodiesAlone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 157)
 	provider := gooseProviderFor(t, s)
-
-	if _, err := provider.DownTo(ctx, 157); err != nil {
-		t.Fatalf("goose DownTo 157: %v", err)
-	}
 
 	const operatorBody = "Mail waiting. Follow our house triage runbook."
 	plantWakeOnMailRowAs(t, s, "process", operatorBody, "operator")

@@ -58,6 +58,7 @@ func TestMigrate102DropsSessionCompactionColumns(t *testing.T) {
 // re-adding both columns with their original nullable TEXT/DATETIME shape
 // (see migrations/001_schema.sql and migrations/074_agent_profiles_multi_agent.sql).
 func TestMigrate102DownReaddsSessionCompactionColumns(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	ctx := context.Background()
 

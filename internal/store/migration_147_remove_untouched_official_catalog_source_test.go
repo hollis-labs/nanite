@@ -31,13 +31,10 @@ func migration147Provider(t *testing.T, s *Store) *goose.Provider {
 }
 
 func TestMigration147DownUpRemovesOnlyUntouchedLegacySeed(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 146)
 	ctx := context.Background()
 	provider := migration147Provider(t, s)
-
-	if _, err := provider.DownTo(ctx, 146); err != nil {
-		t.Fatalf("goose DownTo 146: %v", err)
-	}
 
 	legacy, err := s.GetCatalogSource(ctx, legacyOfficialCatalogID)
 	if err != nil {
@@ -71,6 +68,7 @@ func TestMigration147DownUpRemovesOnlyUntouchedLegacySeed(t *testing.T) {
 }
 
 func TestMigration147PreservesEveryChangedLegacySeedShape(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		updateSQL  string
@@ -88,12 +86,9 @@ func TestMigration147PreservesEveryChangedLegacySeedShape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := newTestStore(t)
+			s := newTestStoreAtVersion(t, 146)
 			ctx := context.Background()
 			provider := migration147Provider(t, s)
-			if _, err := provider.DownTo(ctx, 146); err != nil {
-				t.Fatalf("goose DownTo 146: %v", err)
-			}
 			if _, err := s.DB.ExecContext(ctx, tt.updateSQL); err != nil {
 				t.Fatalf("customize legacy source: %v", err)
 			}
@@ -109,13 +104,10 @@ func TestMigration147PreservesEveryChangedLegacySeedShape(t *testing.T) {
 }
 
 func TestMigration147DownDoesNotOverwriteExistingOfficialRow(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 147)
 	ctx := context.Background()
 	provider := migration147Provider(t, s)
-
-	if _, err := provider.DownTo(ctx, 147); err != nil {
-		t.Fatalf("restore historical schema: %v", err)
-	}
 
 	_, insertErr := s.DB.ExecContext(ctx, `
 		INSERT INTO catalog_sources

@@ -38,6 +38,7 @@ import (
 // reads. The .md files are the SOT, and internal/agent/builtin's
 // profiles_test.go is where their content is guarded.
 func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
 	s, err := New(context.Background(), dbPath)
@@ -121,6 +122,7 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 // the file-SoT layer (internal/agent/builtin/profiles_test.go) which can
 // import toolclient.
 func TestMigration063_AnalystDeniesAllTools(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
 	s, err := New(context.Background(), dbPath)

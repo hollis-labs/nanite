@@ -145,7 +145,8 @@ func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 // TestMigrate115DownDropsOptOutColumnAndTable is the tested Down half of
 // migration 115.
 func TestMigrate115DownDropsOptOutColumnAndTable(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 114)
 	ctx := context.Background()
 
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
@@ -155,10 +156,6 @@ func TestMigrate115DownDropsOptOutColumnAndTable(t *testing.T) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if err != nil {
 		t.Fatalf("construct goose provider: %v", err)
-	}
-
-	if _, err := provider.DownTo(ctx, 114); err != nil {
-		t.Fatalf("goose DownTo 114 (reverse migration 115): %v", err)
 	}
 
 	// opt_out_allowed no longer exists.

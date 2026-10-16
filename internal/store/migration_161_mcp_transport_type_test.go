@@ -17,13 +17,10 @@ import (
 // UPDATE deleted. Rolling back to 160, planting, and replaying forward is the
 // only shape that exercises the backfill. Same technique as migration 148's.
 func TestMigration161RewritesLegacySSERowsToStreamable(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 160)
 	ctx := context.Background()
 	provider := newMigrationProvider(t, s)
-
-	if _, err := provider.DownTo(ctx, 160); err != nil {
-		t.Fatalf("goose DownTo 160: %v", err)
-	}
 
 	plant := func(name, transport string) {
 		t.Helper()
@@ -64,6 +61,7 @@ func TestMigration161RewritesLegacySSERowsToStreamable(t *testing.T) {
 // migration tests roll through (up, down, up): Down has to put 'streamable'
 // back to 'sse', because pre-161 code knows no other name for a remote server.
 func TestMigration161DownRestoresTheSingleRemoteSpelling(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	ctx := context.Background()
 	provider := newMigrationProvider(t, s)

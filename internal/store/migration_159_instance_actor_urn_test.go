@@ -19,13 +19,10 @@ import (
 //     agent_profiles would still expose an addressable urn column and the
 //     thing this migration exists to remove would still be there.
 func TestMigration159_BackfillsInstanceActorURNs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 158)
 	provider := gooseProviderFor(t, s)
-
-	if _, err := provider.DownTo(ctx, 158); err != nil {
-		t.Fatalf("goose DownTo 158: %v", err)
-	}
 
 	// Two instances against ONE profile — the case the architecture forbids
 	// sharing an identity for, and the case the live database already
@@ -114,13 +111,11 @@ func TestMigration159_BackfillsInstanceActorURNs(t *testing.T) {
 // rename and not a DROP: the 70 strings the old minter wrote survive, so what
 // was minted into Tether's authority can still be reconciled.
 func TestMigration159_PreservesLegacyURNValues(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 158)
 	provider := gooseProviderFor(t, s)
 
-	if _, err := provider.DownTo(ctx, 158); err != nil {
-		t.Fatalf("goose DownTo 158: %v", err)
-	}
 	agent := makeTestAgentRawSQL(t, s, "mig159-legacy")
 	const oldURN = "msg://agent/agent-mux/agt_abcdefghij"
 	const oldAliases = `["msg://agent/agent-mux/mig159-legacy"]`

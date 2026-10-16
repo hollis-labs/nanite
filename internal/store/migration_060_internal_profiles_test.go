@@ -21,6 +21,7 @@ import (
 // reads. The .md files are the SOT, and internal/agent/builtin's
 // profiles_test.go is where their content is guarded.
 func TestMigration060_SeedsFourInternalProfilesAndFlipsSource(t *testing.T) {
+	t.Parallel()
 	// Fresh DB — migration 060 INSERT OR IGNORE creates the four rows.
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")

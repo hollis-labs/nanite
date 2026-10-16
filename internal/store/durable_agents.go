@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/hollis-labs/nanite/internal/a2a"
 )
 
 const (
@@ -153,47 +151,13 @@ const durableAgentEventColumns = `id, instance_id, event_type, status_before, st
     session_id, source, message, metadata_json, created_at`
 
 func (s *Store) CreateDurableAgentInstance(ctx context.Context, inst *DurableAgentInstance) error {
-	if inst == nil {
-		return errors.New("CreateDurableAgentInstance: nil instance")
-	}
-	if inst.Name == "" {
-		return errors.New("CreateDurableAgentInstance: name is required")
-	}
-	if inst.Slug == "" {
-		return errors.New("CreateDurableAgentInstance: slug is required")
-	}
-	if inst.ProfileID == "" {
-		return errors.New("CreateDurableAgentInstance: profile_id is required")
-	}
-	if _, err := s.GetAgent(ctx, inst.ProfileID); err != nil {
-		return fmt.Errorf("CreateDurableAgentInstance: profile %s: %w", inst.ProfileID, err)
-	}
-	applyDurableAgentInstanceDefaults(inst)
-	if err := validateDurableAgentInstance(inst); err != nil {
-		return err
-	}
-
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO durable_agent_instances (`+durableAgentInstanceColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass,
-		inst.Provider, inst.Model, inst.RuntimeKind, inst.LaunchSourceType,
-		inst.LaunchSourceID, inst.WorkRoot, inst.Status, inst.CurrentSessionID,
-		inst.FailureReason, inst.MetadataJSON, inst.URN,
-		inst.CreatedAt.UTC().Format(time.RFC3339Nano),
-		inst.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		formatOptionalTime(inst.ArchivedAt),
-	)
-	if err != nil {
-		return fmt.Errorf("create durable_agent_instances %s: %w", inst.ID, err)
-	}
-	return nil
+	return ErrVerifiedActorRequired
 }
 
 func (s *Store) GetDurableAgentInstance(ctx context.Context, id string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
 	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
-		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE id = ?`, id,
+		`SELECT `+durableAgentInstanceColumns+` FROM actor_instances WHERE id = ?`, id,
 	), &inst)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDurableAgentInstanceNotFound
@@ -207,7 +171,7 @@ func (s *Store) GetDurableAgentInstance(ctx context.Context, id string) (*Durabl
 func (s *Store) GetDurableAgentInstanceBySlug(ctx context.Context, slug string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
 	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
-		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE slug = ?`, slug,
+		`SELECT `+durableAgentInstanceColumns+` FROM actor_instances WHERE slug = ?`, slug,
 	), &inst)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDurableAgentInstanceNotFound
@@ -250,7 +214,7 @@ func (s *Store) GetDurableAgentInstanceByURN(ctx context.Context, urn string) (*
 	}
 	var inst DurableAgentInstance
 	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
-		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances WHERE urn = ?`, urn,
+		`SELECT `+durableAgentInstanceColumns+` FROM actor_instances WHERE urn = ?`, urn,
 	), &inst)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDurableAgentInstanceNotFound
@@ -276,7 +240,7 @@ func (s *Store) CountInstancesSharingMailboxSlot(ctx context.Context, profileID,
 	}
 	var n int
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM durable_agent_instances
+		`SELECT COUNT(*) FROM actor_instances
 		  WHERE profile_id = ? AND current_session_id = ? AND status != ?`,
 		profileID, sessionID, DurableAgentStatusArchived,
 	).Scan(&n)
@@ -289,7 +253,7 @@ func (s *Store) CountInstancesSharingMailboxSlot(ctx context.Context, profileID,
 func (s *Store) GetDurableAgentInstanceByProfileID(ctx context.Context, profileID string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
 	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,
-		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances
+		`SELECT `+durableAgentInstanceColumns+` FROM actor_instances
 		  WHERE profile_id = ? ORDER BY updated_at DESC LIMIT 1`, profileID,
 	), &inst)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -307,7 +271,7 @@ func (s *Store) ListDurableAgentInstances(ctx context.Context, includeArchived b
 		where = ""
 	}
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+durableAgentInstanceColumns+` FROM durable_agent_instances `+where+` ORDER BY updated_at DESC, name`,
+		`SELECT `+durableAgentInstanceColumns+` FROM actor_instances `+where+` ORDER BY updated_at DESC, name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list durable_agent_instances: %w", err)
@@ -349,7 +313,7 @@ func (s *Store) UpdateDurableAgentInstance(ctx context.Context, id string, upd D
 	}
 	inst.UpdatedAt = time.Now().UTC()
 	_, err = s.DB.ExecContext(ctx,
-		`UPDATE durable_agent_instances
+		`UPDATE actor_instances
 		    SET name = ?, slug = ?, work_root = ?, metadata_json = ?, updated_at = ?
 		  WHERE id = ?`,
 		inst.Name, inst.Slug, inst.WorkRoot, inst.MetadataJSON,
@@ -365,70 +329,8 @@ func (s *Store) UpdateDurableAgentInstance(ctx context.Context, id string, upd D
 // config by slug. An omitted status preserves the runtime-owned lifecycle
 // state; an explicit archive cannot be undone by a concurrent config refresh.
 func (s *Store) SyncDurableAgentInstanceConfig(ctx context.Context, inst *DurableAgentInstance) (*DurableAgentInstance, error) {
-	if inst == nil {
-		return nil, errors.New("SyncDurableAgentInstanceConfig: nil instance")
-	}
-	preserveLifecycleState := inst.Status == ""
-	if inst.Status == "" && inst.ArchivedAt != nil {
-		inst.Status = DurableAgentStatusArchived
-	}
-	applyDurableAgentInstanceDefaults(inst)
-	if err := validateDurableAgentInstance(inst); err != nil {
-		return nil, err
-	}
-	if _, err := s.GetAgent(ctx, inst.ProfileID); err != nil {
-		return nil, fmt.Errorf("SyncDurableAgentInstanceConfig: profile %s: %w", inst.ProfileID, err)
-	}
-
-	updatedAt := time.Now().UTC()
-	archiveTime := formatOptionalTime(inst.ArchivedAt)
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO durable_agent_instances (`+durableAgentInstanceColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(slug) DO UPDATE SET
-		     name = excluded.name,
-		     profile_id = excluded.profile_id,
-		     lifecycle_class = excluded.lifecycle_class,
-		     provider = excluded.provider,
-		     model = excluded.model,
-		     runtime_kind = excluded.runtime_kind,
-		     launch_source_type = excluded.launch_source_type,
-		     launch_source_id = excluded.launch_source_id,
-		     work_root = excluded.work_root,
-		     status = CASE WHEN ? THEN durable_agent_instances.status ELSE excluded.status END,
-		     current_session_id = CASE
-		         WHEN NOT ? AND excluded.status = 'archived' THEN excluded.current_session_id
-		         ELSE durable_agent_instances.current_session_id
-		     END,
-		     failure_reason = CASE
-		         WHEN NOT ? AND excluded.status = 'archived' THEN excluded.failure_reason
-		         ELSE durable_agent_instances.failure_reason
-		     END,
-		     metadata_json = excluded.metadata_json,
-		     updated_at = ?,
-		     archived_at = CASE
-		         WHEN NOT ? AND excluded.status = 'archived' THEN COALESCE(excluded.archived_at, ?)
-		         ELSE durable_agent_instances.archived_at
-		     END`,
-		inst.ID, inst.Name, inst.Slug, inst.ProfileID, inst.LifecycleClass,
-		inst.Provider, inst.Model, inst.RuntimeKind, inst.LaunchSourceType,
-		inst.LaunchSourceID, inst.WorkRoot, inst.Status, inst.CurrentSessionID,
-		inst.FailureReason, inst.MetadataJSON, inst.URN,
-		inst.CreatedAt.UTC().Format(time.RFC3339Nano),
-		inst.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		archiveTime,
-		preserveLifecycleState, preserveLifecycleState, preserveLifecycleState,
-		updatedAt.Format(time.RFC3339Nano), preserveLifecycleState, updatedAt.Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("sync durable_agent_instances %s: %w", inst.Slug, err)
-	}
-	saved, err := s.GetDurableAgentInstanceBySlug(ctx, inst.Slug)
-	if err != nil {
-		return nil, err
-	}
-	*inst = *saved
-	return saved, nil
+	// Config sync cannot mint an actor incarnation or assert an enrollment receipt.
+	return nil, ErrVerifiedActorRequired
 }
 
 func (s *Store) SetDurableAgentInstanceStatus(ctx context.Context, id, status string) (*DurableAgentInstance, error) {
@@ -437,7 +339,7 @@ func (s *Store) SetDurableAgentInstanceStatus(ctx context.Context, id, status st
 	}
 	now := time.Now().UTC()
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE durable_agent_instances SET status = ?, updated_at = ? WHERE id = ? AND status != 'archived'`,
+		`UPDATE actor_instances SET status = ?, updated_at = ? WHERE id = ? AND status != 'archived'`,
 		status, now.Format(time.RFC3339Nano), id,
 	)
 	if err != nil {
@@ -459,7 +361,7 @@ func (s *Store) SetDurableAgentInstanceLaunchState(ctx context.Context, id, stat
 	}
 	now := time.Now().UTC()
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE durable_agent_instances
+		`UPDATE actor_instances
 		    SET status = ?, current_session_id = ?, failure_reason = ?, updated_at = ?
 		  WHERE id = ? AND status != 'archived'`,
 		status, sessionID, failureReason, now.Format(time.RFC3339Nano), id,
@@ -480,7 +382,7 @@ func (s *Store) SetDurableAgentInstanceLaunchState(ctx context.Context, id, stat
 func (s *Store) ArchiveDurableAgentInstance(ctx context.Context, id string) (*DurableAgentInstance, error) {
 	now := time.Now().UTC()
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE durable_agent_instances
+		`UPDATE actor_instances
 		    SET status = 'archived', archived_at = ?, updated_at = ?
 		  WHERE id = ? AND status != 'archived'`,
 		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), id,
@@ -507,7 +409,7 @@ func (s *Store) AttachDurableAgentInstanceSession(ctx context.Context, instanceI
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO durable_agent_instance_sessions (instance_id, session_id, relation, attached_at, detached_at)
+		`INSERT INTO actor_instance_sessions (instance_id, session_id, relation, attached_at, detached_at)
 		 VALUES (?, ?, ?, ?, NULL)
 		 ON CONFLICT(instance_id, session_id) DO UPDATE SET
 		     relation = excluded.relation,
@@ -523,7 +425,7 @@ func (s *Store) AttachDurableAgentInstanceSession(ctx context.Context, instanceI
 func (s *Store) ListDurableAgentInstanceSessions(ctx context.Context, instanceID string) ([]DurableAgentInstanceSession, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT instance_id, session_id, relation, attached_at, detached_at
-		   FROM durable_agent_instance_sessions
+		   FROM actor_instance_sessions
 		  WHERE instance_id = ?
 		  ORDER BY attached_at DESC`, instanceID,
 	)
@@ -562,7 +464,7 @@ func (s *Store) ListDurableAgentInstanceSessionStates(ctx context.Context, insta
 		        ), ''),
 		        COALESCE(sess.halted_at, ''),
 		        COALESCE(sess.halted_reason, '')
-		   FROM durable_agent_instance_sessions rel
+		   FROM actor_instance_sessions rel
 		   LEFT JOIN sessions sess ON sess.id = rel.session_id
 		  WHERE rel.instance_id = ?
 		  ORDER BY rel.attached_at DESC`, instanceID,
@@ -603,7 +505,7 @@ func (s *Store) CreateDurableAgentEvent(ctx context.Context, event *DurableAgent
 	}
 	applyDurableAgentEventDefaults(event)
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO durable_agent_events (`+durableAgentEventColumns+`)
+		`INSERT INTO actor_instance_events (`+durableAgentEventColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.InstanceID, event.EventType, event.StatusBefore, event.StatusAfter,
 		event.SessionID, event.Source, event.Message, event.MetadataJSON,
@@ -624,7 +526,7 @@ func (s *Store) ListDurableAgentEvents(ctx context.Context, instanceID string, l
 	}
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+durableAgentEventColumns+`
-		   FROM durable_agent_events
+		   FROM actor_instance_events
 		  WHERE instance_id = ?
 		  ORDER BY created_at DESC, id DESC
 		  LIMIT ?`, instanceID, limit,
@@ -664,7 +566,7 @@ func (s *Store) ListDurableAgentSessionStatesForSession(ctx context.Context, ses
 		        ), ''),
 		        COALESCE(sess.halted_at, ''),
 		        COALESCE(sess.halted_reason, '')
-		   FROM durable_agent_instance_sessions rel
+		   FROM actor_instance_sessions rel
 		   LEFT JOIN sessions sess ON sess.id = rel.session_id
 		  WHERE rel.session_id = ?
 		  ORDER BY rel.attached_at DESC`, sessionID,
@@ -712,14 +614,7 @@ func applyDurableAgentInstanceDefaults(inst *DurableAgentInstance) {
 	if inst.ID == "" {
 		inst.ID = uuid.New().String()
 	}
-	// Mint the actor URN once. a2a.GenerateAgentURN is the canonical
-	// generator and puts it under the `nanite` authority; the retired
-	// store-side mirror wrote Tether's `agent-mux` instead
-	// (CW-20260912-0017). A caller that supplies a URN keeps it, so a
-	// restore or a deliberate re-home is not overwritten here.
-	if inst.URN == "" {
-		inst.URN = a2a.GenerateAgentURN()
-	}
+	// Actor addresses come only from an accepted verified binding.
 	if inst.LifecycleClass == "" {
 		inst.LifecycleClass = DurableAgentClassAdvisor
 	}

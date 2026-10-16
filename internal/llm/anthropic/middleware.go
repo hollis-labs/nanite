@@ -13,15 +13,15 @@ import (
 // Anthropic rate-limit response headers — prefers the canonical
 // "anthropic-ratelimit-*" names emitted by the Anthropic API, falling back to
 // the legacy/proxy "x-ratelimit-*" aliases.
-// Header names, not credentials — gosec G101 false-positive.
+// Header names, not credentials: gosec G101 matches "token" in the name.
 const (
-	headerAnthropicRateLimitInputTokens          = "anthropic-ratelimit-input-tokens-limit"
-	headerAnthropicRateLimitRemainingInputTokens = "anthropic-ratelimit-input-tokens-remaining"
-	headerAnthropicRateLimitResetInputTokens     = "anthropic-ratelimit-input-tokens-reset"
+	headerAnthropicRateLimitInputTokens          = "anthropic-ratelimit-input-tokens-limit"     // #nosec G101 -- header name, not a credential
+	headerAnthropicRateLimitRemainingInputTokens = "anthropic-ratelimit-input-tokens-remaining" // #nosec G101 -- header name, not a credential
+	headerAnthropicRateLimitResetInputTokens     = "anthropic-ratelimit-input-tokens-reset"     // #nosec G101 -- header name, not a credential
 
-	headerRateLimitInputTokens          = "x-ratelimit-limit-input-tokens"     //nolint:gosec // header name
-	headerRateLimitRemainingInputTokens = "x-ratelimit-remaining-input-tokens" //nolint:gosec // header name
-	headerRateLimitResetInputTokens     = "x-ratelimit-reset-input-tokens"     //nolint:gosec // header name
+	headerRateLimitInputTokens          = "x-ratelimit-limit-input-tokens"     // #nosec G101 -- header name, not a credential
+	headerRateLimitRemainingInputTokens = "x-ratelimit-remaining-input-tokens" // #nosec G101 -- header name, not a credential
+	headerRateLimitResetInputTokens     = "x-ratelimit-reset-input-tokens"     // #nosec G101 -- header name, not a credential
 )
 
 // rateAwareMiddleware returns an option.Middleware that:

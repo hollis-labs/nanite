@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"reflect"
 	"runtime"
 	"strings"
@@ -74,9 +75,15 @@ func TestExecuteGated_NoLoopbackGrantNeverProbes(t *testing.T) {
 		return unavailableLoopbackProbe()
 	})
 	g, agentID, skillSlug := newAuthorizedGate(t, `{}`)
+	// /bin/true does not exist on macOS (/usr/bin/true); sandbox-exec reports a
+	// missing target as exit 71.
+	trueBinary, lookErr := exec.LookPath("true")
+	if lookErr != nil {
+		t.Fatal(lookErr)
+	}
 	if _, err := g.ExecuteGated(context.Background(), ExecRequest{
 		SkillSlug: skillSlug, AgentID: agentID,
-		Command: []string{"/bin/true"}, WorkDir: t.TempDir(),
+		Command: []string{trueBinary}, WorkDir: t.TempDir(),
 		Kind: ExecKindMarker, Label: "no-network",
 	}); err != nil {
 		t.Fatalf("network-denied skill exec: %v", err)

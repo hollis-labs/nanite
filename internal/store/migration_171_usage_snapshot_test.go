@@ -5,12 +5,10 @@ import "testing"
 // Plant a real historical row at the previous schema, then migrate and replay.
 // A fresh empty fixture would not catch a migration rewriting old estimates.
 func TestMigration171PreservesHistoricalUsage(t *testing.T) {
-	st := newTestStore(t)
+	t.Parallel()
+	st := newTestStoreAtVersion(t, 169)
 	ctx := t.Context()
 	provider := newMigrationProvider(t, st)
-	if _, err := provider.DownTo(ctx, 169); err != nil {
-		t.Fatal(err)
-	}
 	session := &Session{}
 	if err := st.CreateSession(ctx, session); err != nil {
 		t.Fatal(err)

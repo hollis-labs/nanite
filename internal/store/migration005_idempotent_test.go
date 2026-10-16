@@ -9,6 +9,7 @@ import (
 // same DB (simulating a service restart) does not fail. The migration runner
 // re-executes all SQL files on every startup.
 func TestMigration005_Idempotent(t *testing.T) {
+	t.Parallel()
 	dbPath := t.TempDir() + "/idempotent005.db"
 
 	s1, err := New(context.Background(), dbPath)

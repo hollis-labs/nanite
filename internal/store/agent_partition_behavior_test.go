@@ -100,6 +100,7 @@ func partitionNoAuthority(t *testing.T, s *Store, identity string) {
 }
 
 func TestAgentPartitionUpgradePreservesHistoryWithoutAuthority(t *testing.T) {
+	t.Parallel()
 	old := partitionHistoricalStore(t)
 	ctx := context.Background()
 	// A syntactically valid actor URI in old columns is still only history.

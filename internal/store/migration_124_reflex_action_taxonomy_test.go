@@ -124,7 +124,8 @@ func TestMigrate124SeedsTaxonomyLookupTables(t *testing.T) {
 // probe rows under each created_by convention actually in use today, then
 // replaying 124's Up and checking the backfilled value.
 func TestMigrate124BackfillsProvenanceTierFromCreatedBy(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 123)
 	ctx := context.Background()
 
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
@@ -134,10 +135,6 @@ func TestMigrate124BackfillsProvenanceTierFromCreatedBy(t *testing.T) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if err != nil {
 		t.Fatalf("construct goose provider: %v", err)
-	}
-
-	if _, err := provider.DownTo(ctx, 123); err != nil {
-		t.Fatalf("goose DownTo 123 (reverse migration 124): %v", err)
 	}
 
 	// Pre-124 shape has no provenance_tier column yet — confirm that, then

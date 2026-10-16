@@ -177,7 +177,13 @@ jobs:
           while IFS= read -r package; do
             packages+=("$package")
           done < "$RUNNER_TEMP/tracked-go-packages.txt"
-          go test -race -count=1 "${packages[@]}"
+          # -timeout is per test binary and go test's 10m default is below what the
+          # heaviest packages (internal/store, api, service, workflowhost,
+          # cmd/nanite) need under -race. The whole step measured 22m10s on
+          # macos-15 (run 38876518881, 2026-10-16, with checkptr off for
+          # modernc.org/... only); 35m is ~1.5x that (CW-20261016-0127).
+          go test -race -count=1 -timeout=35m \
+            -gcflags='modernc.org/...=-d=checkptr=0' "${packages[@]}"
 
       - name: Report bare goroutine usage (safego adoption sweep)
         shell: bash

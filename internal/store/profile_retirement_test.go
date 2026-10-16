@@ -13,6 +13,7 @@ import (
 )
 
 func TestProfileRetirementCapturesCascadeChildrenAndRejectsChangedState(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "retire.db"))
 	if err != nil {

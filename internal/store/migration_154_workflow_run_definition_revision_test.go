@@ -9,12 +9,9 @@ import (
 
 func TestMigration154BindsRunToExactImmutableRevisionAcrossRestart(t *testing.T) {
 	t.Parallel()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 153)
 	ctx := context.Background()
 	provider := workflowMigration153Provider(t, s)
-	if _, err := provider.DownTo(ctx, 153); err != nil {
-		t.Fatalf("DownTo(153): %v", err)
-	}
 	assertWorkflowRunRevisionColumn(t, s, false)
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("apply migration 154: %v", err)

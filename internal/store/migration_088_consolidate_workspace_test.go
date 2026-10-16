@@ -23,6 +23,7 @@ import (
 // including 088, a clean no-op on the second and later boots. Unrelated to
 // the workspaces/sessions.workspace_id columns above — kept as-is.
 func TestMigration088_IdempotentReRun(t *testing.T) {
+	t.Parallel()
 	dbPath := t.TempDir() + "/idempotent.db"
 	s1, err := New(context.Background(), dbPath)
 	if err != nil {

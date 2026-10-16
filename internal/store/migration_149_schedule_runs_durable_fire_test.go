@@ -12,7 +12,8 @@ import (
 )
 
 func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 148)
 	ctx := context.Background()
 	migrationsDir, subErr := fs.Sub(migrationsFS, "migrations")
 	if subErr != nil {
@@ -21,9 +22,6 @@ func TestMigration149MapsExistingOpenRunsIntoRecoverableDurableFires(t *testing.
 	provider, providerErr := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if providerErr != nil {
 		t.Fatalf("goose.NewProvider: %v", providerErr)
-	}
-	if _, err := provider.DownTo(ctx, 148); err != nil {
-		t.Fatalf("DownTo(148): %v", err)
 	}
 
 	agent := makeTestAgentRawSQL(t, s, "migration-149")

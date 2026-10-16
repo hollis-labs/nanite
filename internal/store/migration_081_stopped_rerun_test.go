@@ -12,6 +12,7 @@ import (
 // replays. This regressed when 081 rebuilt the table with the pre-stopped
 // CHECK vocabulary.
 func TestMigration081_RerunAllowsStoppedStatus(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "migration081-rerun.db")
 	s, err := New(context.Background(), dbPath)
 	if err != nil {

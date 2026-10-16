@@ -32,6 +32,7 @@ import (
 //     ambiguous fixtures get wiped), every surviving row has source in the
 //     keep-list, and the expected slugs survive.
 func TestMigration062_EjectsNonInternalProfiles(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
 	s, err := New(context.Background(), dbPath)

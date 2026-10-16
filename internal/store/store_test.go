@@ -67,6 +67,7 @@ func copyFile(dst, src string) error {
 }
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := New(context.Background(), dbPath)
 	if err != nil {

@@ -121,7 +121,8 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 // rebuild unchanged — same technique as 124's own
 // TestMigrate124BackfillsProvenanceTierFromCreatedBy.
 func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 144)
 	ctx := context.Background()
 
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
@@ -131,10 +132,6 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if err != nil {
 		t.Fatalf("construct goose provider: %v", err)
-	}
-
-	if _, err := provider.DownTo(ctx, 144); err != nil {
-		t.Fatalf("goose DownTo 144 (reverse migration 145): %v", err)
 	}
 
 	// Pre-145 shape still has the 131-era six-value CHECK -- confirm

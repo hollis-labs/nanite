@@ -9,6 +9,7 @@ import (
 )
 
 func TestMigration169BindingsReverseWithoutDeletingDefinitions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	st := newTestStore(t)
 	agent := &AgentProfile{ID: "binding-migration-agent", Name: "Migration target", Slug: "binding-migration-agent", SystemPrompt: "test"}

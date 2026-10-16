@@ -90,6 +90,7 @@ func TestMigrate105NarrowsSessionStatusCheck(t *testing.T) {
 // 074_agent_profiles_multi_agent.sql, with the constraint actually enforced
 // at the SQL layer again (not just structurally present).
 func TestMigrate105DownWidensSessionStatusCheck(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	ctx := context.Background()
 

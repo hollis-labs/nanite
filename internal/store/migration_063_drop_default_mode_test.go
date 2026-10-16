@@ -21,6 +21,7 @@ import (
 //  4. Insert a fresh row through the store layer + read it back to prove the
 //     post-063 schema still round-trips through agentColumns/scanAgent.
 func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "fresh.db")
 	s, err := New(context.Background(), dbPath)

@@ -229,7 +229,10 @@ func TestAgentClient_StreamEvents_SurfacesScanError(t *testing.T) {
 		t.Fatalf("StreamEvents: %v", err)
 	}
 
-	deadline := time.After(5 * time.Second)
+	// The input is a fixed ~32MB line, which the race detector makes ~23x
+	// slower to scan (0.2s plain, ~4.6s idle under -race), so a 5s deadline
+	// fails under any load. This is a timeout for a hung stream, not a speed bar.
+	deadline := time.After(30 * time.Second)
 	select {
 	case evt, ok := <-events:
 		if !ok {

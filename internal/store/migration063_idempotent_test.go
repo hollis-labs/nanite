@@ -32,6 +32,7 @@ import (
 // "no such column" error AND leave the connection clean so Begin
 // succeeds.
 func TestMigration063_Idempotent_NoTxLeak(t *testing.T) {
+	t.Parallel()
 	dbPath := t.TempDir() + "/migration063.db"
 
 	s1, err := New(context.Background(), dbPath)

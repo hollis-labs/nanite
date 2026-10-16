@@ -14,12 +14,9 @@ import (
 
 func TestMigration153UpgradesPre150WithoutFabricatingLegacyPlan(t *testing.T) {
 	t.Parallel()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 149)
 	ctx := context.Background()
 	provider := workflowMigration153Provider(t, s)
-	if _, err := provider.DownTo(ctx, 149); err != nil {
-		t.Fatalf("DownTo(149): %v", err)
-	}
 	if err := s.CreateWorkflowRun(ctx, &WorkflowRunRow{
 		ID: "pre-150-legacy", DefinitionName: "authored legacy name", Status: "running",
 		InputJSON: `{"request":"preserve"}`,
@@ -77,12 +74,9 @@ FROM workflow_runs WHERE id = 'pre-150-legacy'`).Scan(
 
 func TestMigration153PreservesPilot152AndSupportsRollbackForward(t *testing.T) {
 	t.Parallel()
-	s := newTestStore(t)
+	s := newTestStoreAtVersion(t, 152)
 	ctx := context.Background()
 	provider := workflowMigration153Provider(t, s)
-	if _, err := provider.DownTo(ctx, 152); err != nil {
-		t.Fatalf("DownTo(152): %v", err)
-	}
 	at := time.Date(2026, 9, 4, 20, 0, 0, 0, time.UTC)
 	revision := workflowDefinitionRevisionFixture(
 		"pilot-revision-152", "pilot authored name", "workflow: pilot fixture",

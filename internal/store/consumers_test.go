@@ -168,6 +168,7 @@ func TestHistoricalProfileConsumerFKRemainsAuditedOnly(t *testing.T) {
 // migration 112: goose's DownTo must drop agent_profiles.consumer_id and
 // the consumers table, then Up must be able to replay cleanly.
 func TestMigrate112DownRemovesConsumersAndColumn(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	ctx := context.Background()
 

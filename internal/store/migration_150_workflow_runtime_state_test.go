@@ -10,7 +10,8 @@ import (
 )
 
 func TestMigration150AddsRuntimeStateWithoutReplacingProductRuns(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 149)
 	ctx := context.Background()
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -19,9 +20,6 @@ func TestMigration150AddsRuntimeStateWithoutReplacingProductRuns(t *testing.T) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if err != nil {
 		t.Fatalf("goose.NewProvider: %v", err)
-	}
-	if _, downErr := provider.DownTo(ctx, 149); downErr != nil {
-		t.Fatalf("DownTo(149): %v", downErr)
 	}
 
 	legacy := &WorkflowRunRow{

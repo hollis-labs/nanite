@@ -9,7 +9,8 @@ import (
 )
 
 func TestMigration151AddsImmutableExactPlanMaterial(t *testing.T) {
-	s := newTestStore(t)
+	t.Parallel()
+	s := newTestStoreAtVersion(t, 150)
 	ctx := context.Background()
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -18,9 +19,6 @@ func TestMigration151AddsImmutableExactPlanMaterial(t *testing.T) {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, s.DB, migrationsDir, goose.WithVerbose(false))
 	if err != nil {
 		t.Fatalf("goose.NewProvider: %v", err)
-	}
-	if _, err := provider.DownTo(ctx, 150); err != nil {
-		t.Fatalf("DownTo(150): %v", err)
 	}
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("Up migration 151: %v", err)

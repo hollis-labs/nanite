@@ -33,6 +33,7 @@ func execPreferences(t *testing.T, s *Store, query string, args ...any) {
 }
 
 func TestAdminPreferencesTriggers(t *testing.T) {
+	t.Parallel()
 	for _, recursive := range []int{0, 1} {
 		t.Run(fmt.Sprintf("recursive=%d", recursive), func(t *testing.T) {
 			s := newSeededStore(t)
@@ -158,6 +159,7 @@ func TestAdminPreferencesRollbackAndReadOnly(t *testing.T) {
 }
 
 func TestAdminPreferencesConcurrentConnections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "concurrent.db")
 	s, err := New(ctx, path)
@@ -251,6 +253,7 @@ func TestAdminPreferencesConcurrentConnections(t *testing.T) {
 // Build an actual pre-168 SQLite DB through goose, close it, then upgrade its
 // copy. This fixture complements (and does not replace) the real backup check.
 func TestAdminPreferencesUpgradeAndReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "pre.db")
 	db, err := sql.Open("sqlite", path)
@@ -432,6 +435,7 @@ func privateSettingsRow(t *testing.T, db *sql.DB) map[string]any {
 }
 
 func TestAdminPreferencesMigrationRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := newSeededStore(t)
 	ctx := context.Background()
 	execPreferences(t, s, `UPDATE user_settings SET tool_stream_behavior='hidden', tool_drawer_retention=60 WHERE id=1`)

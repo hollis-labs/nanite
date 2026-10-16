@@ -16,11 +16,8 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 	for _, material := range []string{"empty", "schedule", "fire", "authority"} {
 		t.Run(material, func(t *testing.T) {
 			ctx := context.Background()
-			host := newTestStore(t)
+			host := newTestStoreAtVersion(t, 172)
 			provider := newMigrationProvider(t, host)
-			if _, downErr := provider.DownTo(ctx, 172); downErr != nil {
-				t.Fatal(downErr)
-			}
 			agent := makeTestAgentRawSQL(t, host, "history")
 			at := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
 			// This downgrade test supplies historical rows explicitly; current

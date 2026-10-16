@@ -2,9 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"fmt"
 
 	"github.com/hollis-labs/nanite/internal/dispatch"
 )
@@ -20,22 +17,7 @@ import (
 //  1. agent_profiles.default_trust_tier for agentProfileID
 //  2. TrustNormal when that lookup misses (safe default)
 func (s *Store) ResolveTrust(ctx context.Context, agentProfileID string) (dispatch.TrustTier, error) {
-	var tier string
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT default_trust_tier FROM agent_profiles WHERE id = ?`,
-		agentProfileID,
-	).Scan(&tier)
-	if err == nil {
-		t := dispatch.TrustTier(tier)
-		if !t.IsValid() {
-			return dispatch.TrustNormal, fmt.Errorf("store: invalid default_trust_tier %q for agent %s", tier, agentProfileID)
-		}
-		return t, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return dispatch.TrustNormal, fmt.Errorf("store: resolve agent default trust: %w", err)
-	}
-
-	// Safe default — unknown agent ID means treat as normal (require approval).
-	return dispatch.TrustNormal, nil
+	// Intrinsic content, old profile columns and claimed IDs cannot confer
+	// execution trust. Until the verified host actor port is adopted, refuse.
+	return dispatch.TrustUntrusted, ErrVerifiedActorRequired
 }

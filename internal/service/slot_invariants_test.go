@@ -98,7 +98,7 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 		Status:       "active",
 		SystemPrompt: "You are the invariants-test agent. Body content for SlotAgent.",
 	}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), s, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if err := s.AssignSkillToAgent(context.Background(), agent.ID, sk.ID, ""); err != nil {
+	if err := s.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{AgentID: agent.ID, SkillName: sk.Slug}); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 

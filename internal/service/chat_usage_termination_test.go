@@ -112,7 +112,8 @@ func TestTerminatedTurnPersistsIncurredUsage(t *testing.T) {
 				hold := make(chan struct{})
 				t.Cleanup(func() { close(hold) })
 				steps[0].hold = hold
-				f.svc.agents.(*characterizationAgents).agent.Constraints = `{"idle_timeout_seconds":1}`
+				idleMS := int64(1000)
+				f.svc.agents.(*characterizationAgents).agent.NativeHost.NativeLoop.Limits.IdleTimeoutMs = &idleMS
 			case "assistant save error":
 				f.svc.store = &terminationStore{Store: f.svc.store, saveError: errors.New("original save failure")}
 			}
@@ -187,7 +188,8 @@ func TestFinalizedTurnPersistsUsageOnce(t *testing.T) {
 				steps[0].beforeReturn = func() { f.svc.pluginHost = host }
 			}
 			if path == "hard ceiling" {
-				f.svc.agents.(*characterizationAgents).agent.Constraints = `{"hard_ceiling":1}`
+				ceiling := 1
+				f.svc.agents.(*characterizationAgents).agent.NativeHost.NativeLoop.Harness.HardCeiling = &ceiling
 				steps[0].events = terminationToolEvents("fixture_tool")
 			}
 			if path == "canceled closed stream" {

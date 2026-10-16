@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func TestStartSurfaceCapabilities(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Start Surface Agent", Slug: "start-surface-agent", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), a.store, profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	inst := &store.DurableAgentInstance{
@@ -24,9 +25,7 @@ func TestStartSurfaceCapabilities(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, inst)
 
 	req := httptest.NewRequest("GET", "/api/start-surface/capabilities", nil)
 	w := httptest.NewRecorder()
@@ -65,7 +64,7 @@ func containsDurableAgent(items []DurableAgentInstanceView, id string) bool {
 func TestSessionDetailsContract(t *testing.T) {
 	a, mux := newTestAPI(t)
 	profile := &store.AgentProfile{Name: "Details Agent", Slug: "details-agent", SystemPrompt: "x"}
-	if err := a.store.CreateAgent(context.Background(), profile); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), a.store, profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	sess := &store.Session{Provider: "anthropic", Model: "model-a"}
@@ -81,9 +80,7 @@ func TestSessionDetailsContract(t *testing.T) {
 		ProfileID:        profile.ID,
 		LaunchSourceType: store.DurableAgentLaunchDurableAdvisor,
 	}
-	if err := a.store.CreateDurableAgentInstance(context.Background(), inst); err != nil {
-		t.Fatalf("CreateDurableAgentInstance: %v", err)
-	}
+	persistPriorAPIInstance(t, a.store, inst)
 	if err := a.store.AttachDurableAgentInstanceSession(context.Background(), inst.ID, sess.ID, store.DurableAgentSessionRelationPrimary); err != nil {
 		t.Fatalf("AttachDurableAgentInstanceSession: %v", err)
 	}

@@ -11,9 +11,9 @@ import (
 )
 
 func TestResultPreview_TaskFieldsAndCommentEnds(t *testing.T) {
-	cache, db := setupTestCache(t)
+	_, db := setupTestCache(t)
 	defer db.Close()
-	cache = NewResultCache(db, ResultCacheConfig{})
+	cache := NewResultCache(db, ResultCacheConfig{})
 	comments := []any{}
 	for i := 0; i < 8; i++ {
 		comments = append(comments, map[string]any{"content": strings.Repeat("historical investigation ", 200)})
@@ -62,9 +62,9 @@ func TestResultPreview_LongTextAndPython(t *testing.T) {
 }
 
 func TestResultCache_ReadPagesPreserveTextAndScope(t *testing.T) {
-	cache, db := setupTestCache(t)
+	_, db := setupTestCache(t)
 	defer db.Close()
-	cache = NewResultCache(db, ResultCacheConfig{})
+	cache := NewResultCache(db, ResultCacheConfig{})
 	text := strings.Repeat("é🙂 source line\n", 700)
 	body, _ := json.Marshal(map[string]any{"stdout": text, "a/b~c": []any{json.Number("9007199254740993")}})
 	view, err := cache.Results.Present(context.Background(), "owner", toolresult.Meta{CallID: "call", Tool: "python_run"}, string(body), 4000)
@@ -113,9 +113,9 @@ func TestResultCache_ReadPagesPreserveTextAndScope(t *testing.T) {
 }
 
 func TestResultCache_SearchContinuationAndFetchCoordinates(t *testing.T) {
-	cache, db := setupTestCache(t)
+	_, db := setupTestCache(t)
 	defer db.Close()
-	cache = NewResultCache(db, ResultCacheConfig{})
+	cache := NewResultCache(db, ResultCacheConfig{})
 	text := strings.Repeat("prefix ", 1000) + "NEEDLE one\nother\nNEEDLE two\nNEEDLE three\n"
 	body, _ := json.Marshal(map[string]any{"stdout": text})
 	view, err := cache.Results.Present(context.Background(), "s", toolresult.Meta{CallID: "call", Tool: "python_run"}, string(body), 4000)

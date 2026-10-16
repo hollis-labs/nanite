@@ -165,6 +165,15 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		if isCognitiveTurn(ctx) {
 			s.streams.CognitiveTurns().Ending(assistantMsgID, ctx.Err() != nil)
 		}
+		if !lifecycle.cliTurnSucceeded {
+			end := &chat.StreamTermination{Reason: "generation_failed", Outcome: "error"}
+			if ctx.Err() != nil {
+				end.Reason, end.Outcome = "canceled", "canceled"
+			}
+			// The producer declares its exit before EOF. The native run adapter
+			// still owns canonical finalization from the committed row and intent.
+			ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Termination: end, RetainedTerminal: true}
+		}
 		close(ch)
 		// CW-20260418-0100: hold the stream's ring buffer for a grace
 		// window after completion so an SSE client that was disconnected

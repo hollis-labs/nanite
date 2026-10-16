@@ -42,6 +42,10 @@ func populatedAgentProfile(t *testing.T) store.AgentProfile {
 			f.SetString(fmt.Sprintf("value-%d", i))
 		case reflect.Bool:
 			f.SetBool(true)
+		case reflect.Pointer:
+			// Pinned runtime-only policy/host fields are deliberately excluded from
+			// this legacy presentation DTO; populate them to exercise that boundary.
+			f.Set(reflect.New(f.Type().Elem()))
 		case reflect.Int:
 			f.SetInt(int64(1000 + i))
 		default:

@@ -152,7 +152,7 @@ func TestApplyScalarCascade_NoOpWhenRoleAndTaskAbsent(t *testing.T) {
 func TestAgentService_ResolveForSession_CascadeIsNoOpToday(t *testing.T) {
 	reader := newStubReader()
 	profile := &store.AgentProfile{
-		ID:              "agent-cascade",
+		ID:              "msg://agent/private-cascade",
 		Name:            "Cascade",
 		Slug:            "cascade",
 		Status:          "active",
@@ -162,8 +162,9 @@ func TestAgentService_ResolveForSession_CascadeIsNoOpToday(t *testing.T) {
 		DefaultProvider: "unchanged-provider",
 	}
 	reader.addAgent(profile)
+	reader.verifiedBindings[profile.ID] = true
 	reader.sessionBind["sess-cascade"] = &store.SessionAgent{
-		SessionID: "sess-cascade", AgentID: "agent-cascade", Mode: "default", IsPrimary: true,
+		SessionID: "sess-cascade", AgentID: "msg://agent/private-cascade", Mode: "default", IsPrimary: true,
 	}
 
 	svc := NewAgentService(AgentServiceConfig{
@@ -283,19 +284,19 @@ func TestAgentService_RoleForProfile_RealLookup(t *testing.T) {
 	}
 }
 
-// TestAgentService_ResolveForSession_RoleCascadeAppliesWhenRoleIDSet is the
+// TestAgentService_ResolveForSession_DoesNotReintroduceMutableRoleCascade is the
 // end-to-end companion to TestAgentService_ResolveForSession_
 // CascadeIsNoOpToday above: once a profile's role_id is populated (Phase 1
 // item 02's whole point), resolveForSession's cascade call now
 // contributes real role-level defaults through the live service seam, not
 // just through the pure-function tests above.
-func TestAgentService_ResolveForSession_RoleCascadeAppliesWhenRoleIDSet(t *testing.T) {
+func TestAgentService_ResolveForSession_DoesNotReintroduceMutableRoleCascade(t *testing.T) {
 	reader := newStubReader()
 	role := &store.Role{ID: "role-cascade-live", Slug: "sme-live", Name: "SME Live", SystemPrompt: "role-level persona (live)"}
 	reader.addRole(role)
 
 	profile := &store.AgentProfile{
-		ID:     "agent-role-bound",
+		ID:     "msg://agent/private-role-bound",
 		Name:   "Role Bound",
 		Slug:   "role-bound",
 		Status: "active",
@@ -305,8 +306,9 @@ func TestAgentService_ResolveForSession_RoleCascadeAppliesWhenRoleIDSet(t *testi
 		// own value.
 	}
 	reader.addAgent(profile)
+	reader.verifiedBindings[profile.ID] = true
 	reader.sessionBind["sess-role-bound"] = &store.SessionAgent{
-		SessionID: "sess-role-bound", AgentID: "agent-role-bound", Mode: "default", IsPrimary: true,
+		SessionID: "sess-role-bound", AgentID: "msg://agent/private-role-bound", Mode: "default", IsPrimary: true,
 	}
 
 	svc := NewAgentService(AgentServiceConfig{
@@ -318,7 +320,7 @@ func TestAgentService_ResolveForSession_RoleCascadeAppliesWhenRoleIDSet(t *testi
 	if err != nil {
 		t.Fatalf("ResolveForSession: %v", err)
 	}
-	if got.SystemPrompt != role.SystemPrompt {
-		t.Errorf("SystemPrompt: got %q, want role default %q (role_id is now real, not a permanent nil stub)", got.SystemPrompt, role.SystemPrompt)
+	if got.SystemPrompt != profile.SystemPrompt {
+		t.Errorf("SystemPrompt: got %q, want unchanged concrete %q (runtime role cascade is retired)", got.SystemPrompt, profile.SystemPrompt)
 	}
 }

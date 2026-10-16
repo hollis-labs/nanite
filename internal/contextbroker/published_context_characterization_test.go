@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // These behavioral expectations were exercised against the former context

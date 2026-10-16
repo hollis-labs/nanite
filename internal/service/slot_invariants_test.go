@@ -33,13 +33,13 @@ import (
 	"strings"
 	"testing"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // dispatchFlavor names one of the four dispatch types the orchestrator

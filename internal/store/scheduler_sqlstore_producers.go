@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 )
 
 func parseSchedulerHostTime(raw string) (time.Time, error) {

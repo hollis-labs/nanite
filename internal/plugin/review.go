@@ -14,12 +14,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 const MaxBundleBytes int64 = 512 << 20

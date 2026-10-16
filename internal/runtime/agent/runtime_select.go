@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	"github.com/hollis-labs/libs/harness/core/adapters/launch"
+	"github.com/hollis-labs/libs/harness/core/adapters/registry"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters"
-	"github.com/hollis-labs/substrate/harness/adapters/launch"
-	"github.com/hollis-labs/substrate/harness/adapters/registry"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 // runtime_select.go is Nanite's one launch decision (CW-20260930-0113,

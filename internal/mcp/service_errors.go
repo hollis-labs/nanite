@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log/slog"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 )
 
 // ServiceErrorResult maps service categories onto MCP's IsError result.

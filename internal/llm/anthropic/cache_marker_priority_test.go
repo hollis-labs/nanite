@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // TestCacheMarkerPriority_UniversalSlotFirst_LoadBearing is the

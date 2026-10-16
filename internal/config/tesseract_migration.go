@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/core/util/sqlite/sqlitekit"
 	"golang.org/x/sys/unix"
 
 	// Register the SQLite driver used by sqlitekit's read-only validator.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/libs/ui-go/envelopes"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes"
 	"github.com/hollis-labs/nanite/internal/chat"
 )
 

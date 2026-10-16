@@ -17,7 +17,11 @@ import (
 	"sync"
 	"testing"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -25,10 +29,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 type characterizationSessions struct{ st *store.Store }

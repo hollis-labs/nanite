@@ -10,11 +10,11 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 type ModelSelection struct {

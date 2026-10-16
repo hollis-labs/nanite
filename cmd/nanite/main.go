@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hollis-labs/libs/ui-go/envelopes"
-	"github.com/hollis-labs/substrate/llm-core/modelsdev"
+	"github.com/hollis-labs/libs/llm/core/modelsdev"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes"
 
-	"github.com/hollis-labs/libs/util/worktree"
+	"github.com/hollis-labs/libs/core/util/worktree"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/coordination"
@@ -31,11 +31,11 @@ import (
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
@@ -67,7 +67,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/workflowhost"
 	"github.com/hollis-labs/nanite/internal/workflowrunner"
 
-	agentbroker "github.com/hollis-labs/substrate/harness/broker"
+	agentbroker "github.com/hollis-labs/libs/harness/core/broker"
 )
 
 type serveLoggingInitializer func(slogx.Config) (*slog.Logger, io.Closer, error)

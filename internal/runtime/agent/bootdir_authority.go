@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/substrate/harness/agentlaunch"
-	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
-	"github.com/hollis-labs/substrate/harness/workspace"
-	"github.com/hollis-labs/substrate/harness/workspace/local"
+	"github.com/hollis-labs/libs/harness/core/agentlaunch"
+	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
+	"github.com/hollis-labs/libs/harness/core/workspace"
+	"github.com/hollis-labs/libs/harness/core/workspace/local"
 )
 
 var ErrArtifactRefreshUnavailable = errors.New("artifact refresh unavailable")

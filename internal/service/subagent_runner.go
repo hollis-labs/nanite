@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // resolveRoleWithFallback retains the runner call seam but resolves only the

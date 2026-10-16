@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/adapters/provider/events"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider/events"
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // CW-20260930-0113: with go-agent-wrapper v0.15.0 the go-providers adapter

@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 

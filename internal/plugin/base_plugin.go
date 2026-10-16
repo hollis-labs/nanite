@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	fplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	"gopkg.in/yaml.v3"
 )
 

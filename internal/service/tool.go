@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/describer"
 	"github.com/hollis-labs/nanite/internal/dispatch"
@@ -17,8 +19,6 @@ import (
 	recoverpkg "github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // chatRoleAgentSlug is the canonical slug of the chat-role agent profile

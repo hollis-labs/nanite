@@ -49,8 +49,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // maxCompositionDepth mirrors internal/skillinstall.DefaultMaxDependencyDepth

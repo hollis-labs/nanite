@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 func TestResolveBootPermissionMode(t *testing.T) {

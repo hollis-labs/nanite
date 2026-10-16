@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 const reviewerSubagent = `---

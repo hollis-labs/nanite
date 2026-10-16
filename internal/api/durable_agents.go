@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"

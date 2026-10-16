@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // ErrCompactionSessionNotFound distinguishes a missing session from failures

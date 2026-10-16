@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	"github.com/hollis-labs/libs/harness/core/broker"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/background"
@@ -30,8 +32,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	"github.com/hollis-labs/substrate/harness/broker"
 )
 
 // SelfToolsTransport provides self-service tools that let the agent

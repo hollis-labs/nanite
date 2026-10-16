@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
 )
 
 // TestAtomicWriteFile_NoPartialFileOnRenameFailure drives

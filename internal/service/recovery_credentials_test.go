@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // fakeProfileResolver lets tests dictate exactly what GetOrDefault returns

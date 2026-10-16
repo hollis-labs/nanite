@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // SubTask represents a discrete unit of work decomposed from a complex task.

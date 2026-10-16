@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	paths "github.com/hollis-labs/libs/util/apppaths"
+	paths "github.com/hollis-labs/libs/core/util/apppaths"
 	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"

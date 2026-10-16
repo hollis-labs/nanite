@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"strings"
 
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // providerRegistry is the part of provider.Registry that SetAPIKey swaps.

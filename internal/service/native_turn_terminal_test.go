@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/structuredmessage"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // CW-20261001-0019: since go-agent-wrapper v0.13.1 every runtime turn, native

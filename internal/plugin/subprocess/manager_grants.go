@@ -7,8 +7,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
-	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability"
+	sdksub "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // RenewGrants serializes one update for an exact live connection. The host

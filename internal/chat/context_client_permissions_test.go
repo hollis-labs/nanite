@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 // TestAssembleSlotSources_PermissionsSlot_EmptyWhenNothingConfigured asserts

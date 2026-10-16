@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func displayToolDefinition(name string) llmtypes.ToolDefinition {

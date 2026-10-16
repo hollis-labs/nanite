@@ -15,7 +15,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
 
 	plugin "github.com/hollis-labs/nanite/internal/plugin"
 )

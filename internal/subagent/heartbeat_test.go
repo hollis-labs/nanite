@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	core "github.com/hollis-labs/substrate/agent/subagent"
+	core "github.com/hollis-labs/libs/agent/core/subagent"
 )
 
 // TestHeartbeatIntervalInRange pins the validation window

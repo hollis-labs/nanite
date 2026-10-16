@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
 
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"gopkg.in/yaml.v3"
@@ -220,7 +220,7 @@ func TestRun_Subprocess_MainGoReferencesSDK(t *testing.T) {
 		t.Fatalf("read main.go: %v", err)
 	}
 	src := string(main)
-	if !strings.Contains(src, `"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"`) {
+	if !strings.Contains(src, `"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"`) {
 		t.Errorf("main.go missing plugin-sdk subprocess import")
 	}
 	if !strings.Contains(src, "subprocess.Serve") {
@@ -237,7 +237,7 @@ func TestRun_Subprocess_MainGoReferencesSDK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(gomod), "github.com/hollis-labs/libs/plugin-mcp v0.2.0") {
+	if !strings.Contains(string(gomod), "github.com/hollis-labs/libs/mcp/plugin-mcp v0.2.0") {
 		t.Errorf("go.mod missing published plugin-mcp v0.2.0 pin:\n%s", gomod)
 	}
 }

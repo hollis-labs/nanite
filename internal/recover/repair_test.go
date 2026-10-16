@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // stubProvider implements llmcontracts.Provider with a synthetic response.

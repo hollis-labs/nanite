@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // wiringStubSummarizer is a working (non-mock, non-nil-returning) Summarizer

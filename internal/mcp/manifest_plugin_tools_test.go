@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
-	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
+	sdkprocess "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	goplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )

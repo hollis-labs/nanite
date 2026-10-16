@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/substrate/mesh/agentdef"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 )
 
 func TestDefinitionIdentityDigestSeparatesIdAndName(t *testing.T) {

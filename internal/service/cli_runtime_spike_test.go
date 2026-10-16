@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/testhome"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
 )
 
 // TestSpikeCLIRuntimeClaudeTurn is the B1 spike (CW-20261014-0155): one real

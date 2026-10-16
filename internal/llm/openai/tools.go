@@ -1,7 +1,7 @@
 package openai
 
 import (
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
 )

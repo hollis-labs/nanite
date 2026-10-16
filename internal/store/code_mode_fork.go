@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/structuredmessage"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 var (

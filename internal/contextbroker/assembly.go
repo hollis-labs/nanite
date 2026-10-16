@@ -33,7 +33,7 @@ import (
 	"sort"
 	"strings"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
 )
 
 // SlotAction is the per-slot decision made by the assembly decider.

@@ -6,8 +6,8 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 //go:embed definitions/*.md resources/*.md

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 // Neither priority nor definition metadata can issue a tool capability. An

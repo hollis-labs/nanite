@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	mesh "github.com/hollis-labs/libs/mesh/core"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
-	mesh "github.com/hollis-labs/substrate/mesh"
 )
 
 func TestPinnedDefinitionAuthorHostAndAdmissionWire(t *testing.T) {

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/harness/adapters"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 )
 
 // plantedBootDir is a boot dir with a planted .mcp.json, as layout.Setup

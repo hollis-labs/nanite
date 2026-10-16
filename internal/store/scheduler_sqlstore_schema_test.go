@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/util/scheduler/sqlstore"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/core/util/scheduler/sqlstore"
 )
 
 // The additive schema is removable only while it carries no material. Once
@@ -50,7 +50,7 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 					t.Fatalf("historical rows changed: %v", got)
 				}
 			}
-			if _, upErr := provider.UpTo(ctx, 173); upErr != nil {
+			if _, upErr := provider.UpTo(ctx, 180); upErr != nil {
 				t.Fatal(upErr)
 			}
 			assertHistory()
@@ -85,11 +85,11 @@ func TestSchedulerSQLSchemaRollbackGuard(t *testing.T) {
 					t.Fatal("empty Down left lifecycle schema installed")
 				}
 				assertHistory()
-				if _, upErr := provider.UpTo(ctx, 173); upErr != nil {
+				if _, upErr := provider.UpTo(ctx, 180); upErr != nil {
 					t.Fatal(upErr)
 				}
 				assertHistory()
-				if _, replayErr := provider.UpTo(ctx, 173); replayErr != nil {
+				if _, replayErr := provider.UpTo(ctx, 180); replayErr != nil {
 					t.Fatal(replayErr)
 				}
 				assertHistory()

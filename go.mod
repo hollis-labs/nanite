@@ -30,6 +30,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
+	github.com/hollis-labs/plugin-sdk v0.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
@@ -75,7 +76,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
-	github.com/hollis-labs/plugin-sdk v0.6.1 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -84,7 +84,7 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.46.0
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
 	google.golang.org/protobuf v1.36.12 // indirect
@@ -94,18 +94,19 @@ require (
 )
 
 require (
-	github.com/hollis-labs/libs/plugin-mcp v0.2.0
+	github.com/hollis-labs/libs/agent/core v0.4.0
+	github.com/hollis-labs/libs/core/util v0.4.0
+	github.com/hollis-labs/libs/harness/core v0.10.0
+	github.com/hollis-labs/libs/llm/core v0.2.0
+	github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0
+	github.com/hollis-labs/libs/mesh/core v0.4.0
+	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
-	github.com/hollis-labs/libs/ui-go v0.1.0
-	github.com/hollis-labs/libs/util v0.2.0
-	github.com/hollis-labs/libs/workflow v0.1.0
-	github.com/hollis-labs/nanite/pkg/pluginapi v0.2.0
+	github.com/hollis-labs/libs/ui/ui-go v0.1.0
+	github.com/hollis-labs/libs/workflow/engine v0.1.0
+	github.com/hollis-labs/nanite/pkg/pluginapi v0.3.0
 	github.com/hollis-labs/plugins-catalog v0.1.0
-	github.com/hollis-labs/substrate/agent v0.3.0
-	github.com/hollis-labs/substrate/harness v0.3.1
-	github.com/hollis-labs/substrate/llm-core v0.1.0
-	github.com/hollis-labs/substrate/mesh v0.1.0
-	github.com/hollis-labs/tesseract v0.11.0
+	github.com/hollis-labs/tesseract v0.13.0
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/mod v0.41.0

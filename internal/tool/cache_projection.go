@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	toolresult "github.com/hollis-labs/libs/agent/core/toolresult"
 )
 
 var resultPointer = regexp.MustCompile(`tool_result://([A-Za-z0-9_-]+)`)

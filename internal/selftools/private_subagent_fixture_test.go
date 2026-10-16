@@ -8,7 +8,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
 
-	"github.com/hollis-labs/substrate/agent/subagent"
+	"github.com/hollis-labs/libs/agent/core/subagent"
 )
 
 // privateSpawnDecision tests the standalone lifecycle and envelope protocol.

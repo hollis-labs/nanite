@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/registry"
+	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/registry"
-	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 )
 
 // Layout abstracts per-provider boot-dir population. Each provider's

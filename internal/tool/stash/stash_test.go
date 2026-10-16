@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 func def(name string) llmtypes.ToolDefinition {

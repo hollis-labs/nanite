@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/harness/core/sandbox/pathsafe"
+	fplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/brand"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/service"
-	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
 )
 
 // Archive extraction caps — defense against zip-bomb / tar-bomb plugin
@@ -59,7 +59,7 @@ type PluginInfo struct {
 }
 
 // SkippedRegistrationInfo is the JSON-wire shape for a skipped registration.
-// Mirrors github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess.SkippedRegistration.
+// Mirrors github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess.SkippedRegistration.
 type SkippedRegistrationInfo struct {
 	Kind   string `json:"kind"`
 	ID     string `json:"id"`

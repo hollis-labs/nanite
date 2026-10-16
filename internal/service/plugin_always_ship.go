@@ -11,12 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	sdkprocess "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 const alwaysShipLateReserve = 256

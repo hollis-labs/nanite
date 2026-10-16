@@ -8,9 +8,9 @@ package service
 // the conversion logic lives here.
 
 import (
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // recordInspectorSlots builds a []inspector.SlotSnapshot from the

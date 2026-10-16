@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 // Flatten keeps concrete identity and policy. Empty behavioral scalars inherit

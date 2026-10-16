@@ -3,7 +3,7 @@ package plugin
 import (
 	"runtime"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
 
 	sharedcatalog "github.com/hollis-labs/plugins-catalog"
 )

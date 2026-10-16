@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 type logicalProvisionResolver func(context.Context, DefinitionRef) (VerifiedDefinition, error)

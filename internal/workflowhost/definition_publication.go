@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/libs/workflow/compile"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
 
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )

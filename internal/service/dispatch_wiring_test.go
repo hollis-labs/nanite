@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // fakeSubagentSpawner satisfies SubagentSpawner. Records every Spawn

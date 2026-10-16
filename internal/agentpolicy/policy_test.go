@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	shared "github.com/hollis-labs/substrate/agent/reflexes"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
+	shared "github.com/hollis-labs/libs/agent/core/reflexes"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 )
 
 func TestNativeNegotiationAndExplicitZero(t *testing.T) {

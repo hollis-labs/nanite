@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	sdkprocess "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"

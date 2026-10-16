@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	sdksub "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // mockPlugin reads JSON-RPC requests from r and writes responses to w.

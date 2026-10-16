@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 const (

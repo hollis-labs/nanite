@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // The conversation travels in the messages payload. A second copy in the

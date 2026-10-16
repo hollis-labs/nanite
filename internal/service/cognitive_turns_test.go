@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	agentservice "github.com/hollis-labs/substrate/agent/service"
+	agentservice "github.com/hollis-labs/libs/agent/core/service"
 
-	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
-	"github.com/hollis-labs/libs/ui-go/chatstream/hubbind"
-	streamhub "github.com/hollis-labs/libs/ui-go/streamhub"
+	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
+	"github.com/hollis-labs/libs/ui/ui-go/chatstream/hubbind"
+	streamhub "github.com/hollis-labs/libs/ui/ui-go/streamhub"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )

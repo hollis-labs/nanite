@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/agentlaunch"
+	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/agentlaunch"
-	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 )
 
 // agyLayout plants the Antigravity CLI (agy) shape, as go-providers'

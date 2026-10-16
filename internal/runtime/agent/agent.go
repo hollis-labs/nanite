@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/activity"
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	"github.com/hollis-labs/libs/harness/core/adapters/wrapper"
+	"github.com/hollis-labs/libs/harness/core/sandbox"
 	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/activity"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
-	"github.com/hollis-labs/substrate/harness/adapters/wrapper"
-	"github.com/hollis-labs/substrate/harness/sandbox"
 	"github.com/oklog/ulid/v2"
 )
 

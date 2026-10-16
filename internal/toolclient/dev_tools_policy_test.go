@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // Dev tools are ordinary tools: nothing in the broker hides or refuses them by

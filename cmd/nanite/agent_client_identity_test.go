@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
+	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
 )
 
 func TestAgentClientStreamRequiresRequestedRunAndContiguousCheckpoints(t *testing.T) {

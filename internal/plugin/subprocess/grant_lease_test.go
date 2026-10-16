@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability"
 )
 
 func leaseFixture(ttl time.Duration) (capability.RuntimeIdentity, capability.GrantSet) {

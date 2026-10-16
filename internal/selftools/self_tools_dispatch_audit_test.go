@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 func TestCallExecuteTask_ReflexMatch_EmitsUnifiedTraceRecord(t *testing.T) {

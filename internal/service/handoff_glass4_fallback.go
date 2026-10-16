@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"unicode/utf8"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // ensureGlass4HandoffPreCompact is the at-compaction fallback for the Glass-4

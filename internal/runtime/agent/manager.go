@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/hollis-labs/substrate/harness/adapters/acp"
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/adapters/wrapper"
+	"github.com/hollis-labs/libs/harness/core/adapters/acp"
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters/wrapper"
 )
 
 // ErrTurnCancelUnsupported is the wrapper-owned native-runtime ceiling. It is

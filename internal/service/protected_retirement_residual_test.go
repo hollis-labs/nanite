@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 func protectedResidualServiceKeep(t *testing.T, st *store.Store) ProtectedProfileRetirementRequest {

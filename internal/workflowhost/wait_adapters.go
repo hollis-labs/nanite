@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	workflowwait "github.com/hollis-labs/libs/workflow/wait"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"

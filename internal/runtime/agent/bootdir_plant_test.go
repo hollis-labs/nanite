@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/agentlaunch"
+	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
+	"github.com/hollis-labs/libs/harness/core/workspace/materialize/artifact"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/agentlaunch"
-	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
-	"github.com/hollis-labs/substrate/harness/workspace/materialize/artifact"
 )
 
 // TestPlantSpec_FilesMCPAndProviderSettings verifies the shared plantSpec

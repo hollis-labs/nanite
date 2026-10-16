@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/agent/runloop"
+	"github.com/hollis-labs/libs/agent/core/runloop"
 
-	feotel "github.com/hollis-labs/libs/util/otel"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"go.opentelemetry.io/otel/trace"
 )
 

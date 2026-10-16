@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hollis-labs/substrate/harness/sandbox"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
+	"github.com/hollis-labs/libs/harness/core/sandbox"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 )
 
 // control_plane.go write-protects Nanite's own state from the agents it

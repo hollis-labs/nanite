@@ -9,21 +9,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hollis-labs/substrate/agent/runloop"
+	"github.com/hollis-labs/libs/agent/core/runloop"
 
-	feotel "github.com/hollis-labs/libs/util/otel"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // noToolsWarningPrefix is prepended to the per-turn system prefix when the

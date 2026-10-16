@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
+	mesh "github.com/hollis-labs/libs/mesh/core"
 	"github.com/hollis-labs/nanite/internal/store"
-	mesh "github.com/hollis-labs/substrate/mesh"
 )
 
 // AgentDefinitions separates explicit immutable authoring from mutable host

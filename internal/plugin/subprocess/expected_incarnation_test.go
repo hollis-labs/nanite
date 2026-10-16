@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	pluginhost "github.com/hollis-labs/libs/plugin-mcp/plugin-host"
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-host/pluginhosttest"
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
+	pluginhost "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-host"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-host/pluginhosttest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability"
 )
 
 func TestExpectedIncarnationRefusesForeignTuple(t *testing.T) {

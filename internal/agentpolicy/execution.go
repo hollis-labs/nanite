@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/hollis-labs/substrate/mesh/agentdef"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 )
 
 var ErrUnsupportedExecution = errors.New("definition semantics are not applied by native execution")

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	mesh "github.com/hollis-labs/substrate/mesh"
+	mesh "github.com/hollis-labs/libs/mesh/core"
 )
 
 var ErrAgentProfileRetired = errors.New("agent profile has been retired")

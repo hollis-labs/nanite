@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/structuredmessage"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // CW-20261001-0168: since go-agent-wrapper v0.22.0 a native streaming Claude

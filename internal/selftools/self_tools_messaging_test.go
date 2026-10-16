@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 func messagingToolText(t *testing.T, st *SelfToolsTransport, ctx context.Context, name string, args map[string]any) string {

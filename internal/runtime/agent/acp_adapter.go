@@ -3,8 +3,8 @@ package agent
 import (
 	"fmt"
 
-	"github.com/hollis-labs/substrate/harness/adapters"
-	"github.com/hollis-labs/substrate/harness/adapters/launch"
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	"github.com/hollis-labs/libs/harness/core/adapters/launch"
 )
 
 // newACPAdapter selects the shipped protocol adapter through

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	mesh "github.com/hollis-labs/libs/mesh/core"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
-	mesh "github.com/hollis-labs/substrate/mesh"
 )
 
 const agentSourceResolveToolName = "agent_source_resolve"

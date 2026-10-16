@@ -26,7 +26,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/hollis-labs/substrate/harness/interception/egress"
+	"github.com/hollis-labs/libs/harness/core/interception/egress"
 )
 
 // ssrfResolver resolves a hostname to IP addresses. Tests replace this to

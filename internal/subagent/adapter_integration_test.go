@@ -11,11 +11,11 @@ import (
 	"sync"
 	"testing"
 
+	core "github.com/hollis-labs/libs/agent/core/subagent"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/store/mailboxadapter"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	core "github.com/hollis-labs/substrate/agent/subagent"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 func newTestDB(t *testing.T) (*sql.DB, *store.Store) {

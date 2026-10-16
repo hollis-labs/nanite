@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-host/pluginhosttest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-host/pluginhosttest"
 )
 
 func TestPluginEnvironmentAllowlist(t *testing.T) {

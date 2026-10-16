@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/agentlaunch"
+	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/agentlaunch"
-	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
 )
 
 // codexLayout plants the codex-specific shape:
@@ -25,7 +25,7 @@ import (
 // which carries the session's work root (CW-20261001-0020).
 //
 // TASKS/agent-host-acp/04: the bootdir file-set is declared as a
-// plant.PlantSpec (github.com/hollis-labs/substrate/harness/agentlaunch/planting) and planted
+// plant.PlantSpec (github.com/hollis-labs/libs/harness/core/agentlaunch/planting) and planted
 // through codexPlanter, which implements plant.Planter — see
 // bootdir_plant.go for why Nanite uses go-agent-wrapper's Planter
 // contract rather than agentkit/agentlaunch/providerplant.Plant.

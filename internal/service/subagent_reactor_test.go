@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // fakeSessionEventWriter records WriteSessionEvent calls so tests can

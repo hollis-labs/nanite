@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	secrets "github.com/hollis-labs/libs/security/secrets"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // Compile-time assertion: the adapter satisfies broker.CredentialOps.

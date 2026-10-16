@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentimport"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestImmutableAgentInstallDeclarationsCannotInitializeOrReplayHistoricalGrants(t *testing.T) {

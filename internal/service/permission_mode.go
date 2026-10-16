@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 // PermissionModeEnv names the environment variable that sets the permission

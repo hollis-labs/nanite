@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	workflowcompile "github.com/hollis-labs/libs/workflow/compile"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
-	"github.com/hollis-labs/libs/workflow/values"
+	workflowcompile "github.com/hollis-labs/libs/workflow/engine/compile"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // G-HOT-SWAP-DEAD activation: per-session partition that ships only an

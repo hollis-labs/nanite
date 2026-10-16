@@ -7,9 +7,9 @@ import (
 	"errors"
 	"strings"
 
+	mesh "github.com/hollis-labs/libs/mesh/core"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
-	mesh "github.com/hollis-labs/substrate/mesh"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 // projectAgentHost constructs the compatibility-shaped read DTO from one fresh

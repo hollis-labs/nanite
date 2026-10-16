@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/substrate/agent/subagent"
+	"github.com/hollis-labs/libs/agent/core/subagent"
 )
 
 // TestCallSpawnSubagent_FailFast_NoProfile_EmitsConfigEnvelope is the

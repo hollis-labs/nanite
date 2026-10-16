@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/core/util/sqlite/sqlitekit"
 	"github.com/hollis-labs/tesseract"
 	tesseractMemory "github.com/hollis-labs/tesseract/memory"
 )

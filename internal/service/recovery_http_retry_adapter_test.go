@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // TestRecoveryHTTPRetryAdapter_ForwardsToRetryLastMessage verifies the

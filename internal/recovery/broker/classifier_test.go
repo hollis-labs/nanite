@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
 )
 
 // TestClassifyTable exercises every rule in the classifier's documented

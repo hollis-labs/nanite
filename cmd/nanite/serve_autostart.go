@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	localdaemon "github.com/hollis-labs/libs/util/localdaemon"
+	localdaemon "github.com/hollis-labs/libs/core/util/localdaemon"
 	"github.com/hollis-labs/nanite/internal/config"
 )
 

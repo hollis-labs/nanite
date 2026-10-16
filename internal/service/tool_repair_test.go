@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/envelope"
 	"github.com/hollis-labs/nanite/internal/store"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // repairStubProvider is a minimal llmcontracts.Provider that returns a

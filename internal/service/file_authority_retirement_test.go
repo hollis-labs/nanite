@@ -10,10 +10,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 	_ "modernc.org/sqlite"
 )
 

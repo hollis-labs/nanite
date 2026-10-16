@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
 	"github.com/hollis-labs/nanite/internal/assets"
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 )
 
 // ScaffoldSource holds values used to render scaffold templates.

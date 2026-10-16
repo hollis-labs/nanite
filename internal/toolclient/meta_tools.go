@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // RequestToolsMetaTool returns the llmtypes.ToolDefinition for the

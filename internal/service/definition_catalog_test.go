@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 func TestStoredDefinitionCatalogResolvesPristineArtifacts(t *testing.T) {

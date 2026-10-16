@@ -9,10 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hollis-labs/substrate/agent/approval"
+	"github.com/hollis-labs/libs/agent/core/approval"
 
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/store"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 )
 
 func TestAgentV1ApprovalFacadesShareBoundOutcome(t *testing.T) {

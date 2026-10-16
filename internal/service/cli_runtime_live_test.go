@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/testhome"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
 )
 
 // TestLiveCLIRuntimeModelAndHostDirectory boots a real Claude from a pinned

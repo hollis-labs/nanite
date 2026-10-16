@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 func hookTestParams(hooks []BootDirHook) SetupParams {

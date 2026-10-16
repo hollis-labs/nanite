@@ -1,13 +1,13 @@
 <!-- Generated dependency snapshot; DO NOT EDIT. -->
-<!-- Upstream-owned source: github.com/hollis-labs/tesseract@v0.11.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
-<!-- Stable source URL: https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
+<!-- Upstream-owned source: github.com/hollis-labs/tesseract@v0.13.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
+<!-- Stable source URL: https://github.com/hollis-labs/tesseract/blob/v0.13.0/docs/guides/tesseract-adoption-and-v0.9-migration.md -->
 <!-- Relative upstream links are rewritten to tag-pinned URLs. -->
 
 # Tesseract v0.9 adoption and migration guide
 
 > Version-specific historical guide. It documents the v0.8-to-v0.9 cutover and
 > is not the install or upgrade guide for the current preview. Use
-> [Quick start](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/QUICKSTART.md) and [Operations](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/OPERATIONS.md) for current
+> [Quick start](https://github.com/hollis-labs/tesseract/blob/v0.13.0/docs/QUICKSTART.md) and [Operations](https://github.com/hollis-labs/tesseract/blob/v0.13.0/docs/OPERATIONS.md) for current
 > guidance.
 
 This guide is for applications and agents adopting Tesseract `v0.9.0`, especially consumers upgrading from `v0.8.x`. It covers the supported Go and MCP contracts, the breaking migration, and the operating rules that keep stored context trustworthy.
@@ -166,7 +166,7 @@ func main() {
 }
 ```
 
-The complete compile-checked version lives at [`../../examples/adoption-go/main.go`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/examples/adoption-go/main.go).
+The complete compile-checked version lives at [`../../examples/adoption-go/main.go`](https://github.com/hollis-labs/tesseract/blob/v0.13.0/examples/adoption-go/main.go).
 
 That example intentionally uses a disposable temporary root. An embedded production
 consumer must resolve a stable absolute `RootDir` (or explicit `DBPath` and
@@ -189,7 +189,7 @@ db, err := tesseract.Open(
 
 Without an injected embedder, embedding operations return `tesseract.ErrEmbedderUnavailable`; it is the same sentinel as `memory.ErrEmbedderUnavailable`, so `errors.Is` works through either supported facade. Pure lexical recall remains available. `ErrSimilarityUnavailable` was removed; do not retain an alias in consumer code.
 
-The `tesseract` daemon and MCP runtime currently construct the `openai` embedding provider from `embedding.provider: openai`, `embedding.model`, and `OPENAI_API_KEY`. An unsupported provider or missing credential disables embedding and leaves lexical/BM25 recall available. Explicit embedding-only, semantic-only, and RAG operations return a supported unavailable/error response; they do not report an empty semantic success. The same constructed provider instance is shared with the memory and MCP context tools.
+The `tesseract` daemon and MCP runtime currently construct the `openai` embedding provider from `embedding.provider: openai`, `embedding.model`, and the OpenAI key resolved from `embedding.api_key_ref` (default `file://tesseract/openai-api-key`, see `docs/secrets.md`). An unsupported provider or missing credential disables embedding and leaves lexical/BM25 recall available. Explicit embedding-only, semantic-only, and RAG operations return a supported unavailable/error response; they do not report an empty semantic success. The same constructed provider instance is shared with the memory and MCP context tools.
 
 ## MCP v0.9 surface
 
@@ -207,7 +207,7 @@ Run the stdio server from the same resolved layout as the daemon:
 }
 ```
 
-Begin discovery with `tesseract_skills` and then `tesseract_skills {"name":"start-here"}`. This progressive help is shipped by the `tesseract mcp` binary. The authoritative catalog is [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/MCP_TOOLS.md).
+Begin discovery with `tesseract_skills` and then `tesseract_skills {"name":"start-here"}`. This progressive help is shipped by the `tesseract mcp` binary. The authoritative catalog is [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.13.0/docs/MCP_TOOLS.md).
 
 The current domain writes are `context_write`, `memory_write`, and `knowledge_write`. The collapsed reads and revision operations are:
 
@@ -365,4 +365,4 @@ Run `tesseract path` to resolve the authoritative locations. Defaults follow XDG
 - [ ] Rename the process/binary and coordinate XDG data migration before restart; delete `CONTEXTD_ROOT` from runtime configuration.
 - [ ] Run Nanite's generated assets/contracts after the dependency update and verify no generated file restores a retired name.
 
-For the complete per-tool schema, HTTP peers, scopes, and current examples, use [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/MCP_TOOLS.md). For first-run daemon configuration, use [`../QUICKSTART.md`](https://github.com/hollis-labs/tesseract/blob/v0.11.0/docs/QUICKSTART.md).
+For the complete per-tool schema, HTTP peers, scopes, and current examples, use [`../MCP_TOOLS.md`](https://github.com/hollis-labs/tesseract/blob/v0.13.0/docs/MCP_TOOLS.md). For first-run daemon configuration, use [`../QUICKSTART.md`](https://github.com/hollis-labs/tesseract/blob/v0.13.0/docs/QUICKSTART.md).

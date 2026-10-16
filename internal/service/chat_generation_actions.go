@@ -10,21 +10,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/substrate/agent/runloop"
-	agentturn "github.com/hollis-labs/substrate/agent/turn"
+	"github.com/hollis-labs/libs/agent/core/runloop"
+	agentturn "github.com/hollis-labs/libs/agent/core/turn"
 
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/pkg/models"
 
 	"github.com/google/uuid"
-	feotel "github.com/hollis-labs/libs/util/otel"
-	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	toolresult "github.com/hollis-labs/libs/agent/core/toolresult"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	ledger "github.com/hollis-labs/libs/llm/core/usageledger"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
@@ -35,8 +37,6 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 type generationLifecycle struct {

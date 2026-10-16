@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	pluginhost "github.com/hollis-labs/libs/plugin-mcp/plugin-host"
-	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	pluginhost "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-host"
+	sdksub "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // pendingCallerContext holds AfterFunc callbacks pending to reproduce the

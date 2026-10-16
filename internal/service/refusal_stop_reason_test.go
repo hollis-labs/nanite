@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // A provider turn that ends in stop_reason=refusal must reach the client as an

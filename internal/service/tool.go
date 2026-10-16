@@ -211,7 +211,7 @@ func (s *toolServiceImpl) SelectForAgent(ctx context.Context, sessionID, agentID
 	// The already verified actor projection supplies host-owned tool settings.
 	mcpCount := countMCPOriginTools(s.toolClient, allTools)
 	if mcpCount == 0 && s.mcpManager != nil {
-		allTools, seen = s.discoverAgentMCPTools(ctx, dbAgent.MCPServers, allTools, seen)
+		allTools, _ = s.discoverAgentMCPTools(ctx, dbAgent.MCPServers, allTools, seen)
 	}
 	var callerSlug string
 	var callerDispatchAllowlist []string

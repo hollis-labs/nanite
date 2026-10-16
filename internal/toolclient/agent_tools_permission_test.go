@@ -83,8 +83,8 @@ func TestCallTool_AgentToolsDeniesUngrantedTool(t *testing.T) {
 	if _, err := s.UpsertKnownTool(ctx, "write_file", "builtin", "available", ""); err != nil {
 		t.Fatalf("UpsertKnownTool(write_file): %v", err)
 	}
-	if err := storetest.PriorToolGrant(ctx, s, agent.ID, readToolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
+	if operationErr := storetest.PriorToolGrant(ctx, s, agent.ID, readToolID, "explicit"); operationErr != nil {
+		t.Fatalf("GrantAgentTool: %v", operationErr)
 	}
 
 	mgr := mcp.NewManager()

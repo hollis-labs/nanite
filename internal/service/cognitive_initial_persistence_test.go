@@ -102,7 +102,7 @@ func TestCognitiveInitialSnapshotFailureSettlesBeforeDispatch(t *testing.T) {
 			}
 			if outage == "transient" {
 				// A later healthy admission proves no orphan generation/queue owner or
-				// disabled fixture hides dispatch. Its actual provider and tool both run.
+				// disabled fixture hides dispatch. Its provider runs, while an unissued tool remains refused.
 				next, err := f.svc.SubmitCognitiveTurn(t.Context(), view.ID, "healthy input")
 				if err != nil || next == id {
 					t.Fatalf("healthy turn refused: %s %v", next, err)
@@ -113,7 +113,7 @@ func TestCognitiveInitialSnapshotFailureSettlesBeforeDispatch(t *testing.T) {
 				}
 				drainStream(stream)
 				outcome, err := turns.Get(view.ID, next)
-				if err != nil || outcome.State != "completed" || f.provider.callCount() != 2 || len(f.tools.calls()) != 1 {
+				if err != nil || outcome.State != "completed" || f.provider.callCount() != 2 || len(f.tools.calls()) != 0 {
 					t.Fatalf("healthy path lost: %+v %v provider=%d tools=%v", outcome, err, f.provider.callCount(), f.tools.calls())
 				}
 			}

@@ -58,7 +58,7 @@ func TestBootSessionWorkdir_DurableStartLaunchesInWorkRoot(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	profile := &store.AgentProfile{Name: "Smoke Claude", Slug: "smoke-claude", SystemPrompt: "x"}
-	if err := st.CreateAgent(ctx, profile); err != nil {
+	if err := persistTestActor(ctx, st, profile); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	newInstance := func(slug, root string) *store.DurableAgentInstance {
@@ -74,7 +74,7 @@ func TestBootSessionWorkdir_DurableStartLaunchesInWorkRoot(t *testing.T) {
 			LaunchSourceType: store.DurableAgentLaunchCLIHarness,
 			WorkRoot:         root,
 		}
-		if err := st.CreateDurableAgentInstance(ctx, inst); err != nil {
+		if err := persistTestDurableInstance(ctx, st, inst); err != nil {
 			t.Fatalf("CreateDurableAgentInstance %s: %v", slug, err)
 		}
 		return inst
@@ -167,23 +167,12 @@ func TestBootSessionWorkdir_ProjectWithoutUsableRepoPath(t *testing.T) {
 	}
 }
 
-func TestRegenerateBootDirSlots_KeepsProjectFolder(t *testing.T) {
-	s := &chatServiceImpl{}
-	bootDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	s.activeSessionWorkRoots.Store("sess-regen-root", "/home/x/dev/project")
-
-	if err := s.regenerateBootDirSlots("sess-regen-root", bootDir, &store.AgentProfile{Name: "agent"}); err != nil {
-		t.Fatalf("regenerateBootDirSlots: %v", err)
-	}
-	body, err := os.ReadFile(filepath.Join(bootDir, "CLAUDE.md")) //nolint:gosec // reads a file this test just planted into a temp dir
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	if !strings.Contains(string(body), "## Project folder") || !strings.Contains(string(body), "/home/x/dev/project") {
-		t.Fatalf("regenerated CLAUDE.md dropped the project folder:\n%s", body)
+func TestFreshBootPrompt_KeepsProjectFolder(t *testing.T) {
+	agent := &store.AgentProfile{Name: "agent"}
+	prompt := runtimeagent.ResolveSystemPrompt("", agent, runtimeagent.ModeLongLived, "", nil, "/home/x/dev/project")
+	body := runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, prompt)
+	if !strings.Contains(body, "## Project folder") || !strings.Contains(body, "/home/x/dev/project") {
+		t.Fatalf("fresh boot dropped project folder: %s", body)
 	}
 }
 

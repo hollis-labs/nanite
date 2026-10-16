@@ -24,11 +24,8 @@ func TestSelfToolsReadServiceWiring(t *testing.T) {
 	if err := st.CreateSkill(ctx, skill); err != nil {
 		t.Fatal(err)
 	}
-	agent := &store.AgentProfile{ID: "wired-agent", Slug: "wired-agent", Status: "active"}
-	if err := st.CreateAgent(ctx, agent); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.InsertAgentProcedure(ctx, store.AgentProcedure{AgentID: agent.ID, Name: "boot", Body: "wired procedure"}); err != nil {
+	agent := &store.AgentProfile{ID: "wired-agent", Name: "Wired actor", Slug: "wired-agent", Status: "active"}
+	if err := persistTestActor(ctx, st, agent); err != nil {
 		t.Fatal(err)
 	}
 	session := &store.Session{ID: "wired-session", Title: "Wired session"}
@@ -50,8 +47,10 @@ func TestSelfToolsReadServiceWiring(t *testing.T) {
 	if got := call("skill_list", map[string]any{"category": "probe"}); !strings.Contains(got, skill.Name) {
 		t.Fatal(got)
 	}
-	if got := call("procedure_get", map[string]any{"name": "boot", "agent_id": "forged"}); got != "wired procedure" {
-		t.Fatal(got)
+	// Legacy procedure rows are not a runtime fallback for immutable SOPs.
+	result, procedureErr := transport.CallTool(ctx, "procedure_get", map[string]any{"name": "boot", "agent_id": "forged"})
+	if procedureErr == nil && (result == nil || !result.IsError) {
+		t.Fatalf("retired procedure lookup: %+v %v", result, procedureErr)
 	}
 	for _, target := range []string{session.ID, session.ShortCode} {
 		if got := call("chat_get", map[string]any{"target": target}); !strings.Contains(got, "wired reply") {
@@ -89,8 +88,8 @@ func TestSelfToolsWriteServiceWiring(t *testing.T) {
 	if err := st.CreateSession(ctx, session); err != nil {
 		t.Fatal(err)
 	}
-	agent := &store.AgentProfile{ID: "write-agent", Slug: "write-agent", Status: "active"}
-	if err := st.CreateAgent(ctx, agent); err != nil {
+	agent := &store.AgentProfile{ID: "write-agent", Name: "Write actor", Slug: "write-agent", Status: "active"}
+	if err := persistTestActor(ctx, st, agent); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.EnsureSessionAgent(ctx, session.ID, agent.ID, "default", true); err != nil {

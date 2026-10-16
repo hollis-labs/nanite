@@ -111,7 +111,7 @@ func TestHostQueryFailedLaunchRevokesGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary, err := os.ReadFile(falseBinary)
+	binary, err := os.ReadFile(falseBinary) // #nosec G304 -- fixture: copies the system `false` binary found on PATH
 	if err != nil {
 		t.Fatal(err)
 	}

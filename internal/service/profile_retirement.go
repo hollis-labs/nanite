@@ -31,6 +31,11 @@ type profileRetirementArchive struct {
 	Export  store.ProfileRetirementExport `json:"export"`
 }
 
+type ProtectedProfileRetirementRequest struct {
+	Actor  string
+	Reason string
+}
+
 // retirementArchiveRoot is host-derived, never supplied by an HTTP caller.
 // Only private regular files are read; exports may contain credentials.
 func (s *AgentConfigService) retirementArchiveRoot(ctx context.Context) (*os.Root, error) {
@@ -82,7 +87,24 @@ func writeRetirementFile(root *os.Root, name string, value any) error {
 // ExportEditableProfile persists and syncs the consistent private snapshot
 // before publishing its receipt. No profile or grant is changed here.
 func (s *AgentConfigService) ExportEditableProfile(ctx context.Context, id string) (ProfileRetirementReceipt, error) {
-	snapshot, err := s.store.ExportProfileRetirement(ctx, id)
+	return s.exportProfile(ctx, id, false)
+}
+
+// ExportProtectedProfile persists the same owner-private snapshot as the
+// editable path, but intentionally admits Nanite/plugin-owned classes for the
+// audited protected retirement workflow.
+func (s *AgentConfigService) ExportProtectedProfile(ctx context.Context, id string) (ProfileRetirementReceipt, error) {
+	return s.exportProfile(ctx, id, true)
+}
+
+func (s *AgentConfigService) exportProfile(ctx context.Context, id string, includeProtected bool) (ProfileRetirementReceipt, error) {
+	var snapshot store.ProfileRetirementExport
+	var err error
+	if includeProtected {
+		snapshot, err = s.store.ExportProtectedProfileRetirement(ctx, id)
+	} else {
+		snapshot, err = s.store.ExportProfileRetirement(ctx, id)
+	}
 	if err != nil {
 		return ProfileRetirementReceipt{}, err
 	}
@@ -107,6 +129,16 @@ func (s *AgentConfigService) ExportEditableProfile(ctx context.Context, id strin
 // compare its full state inside the deletion transaction. The archive survives
 // both success and conflict. It cannot be used to recreate authority.
 func (s *AgentConfigService) RetireEditableProfile(ctx context.Context, id, exportID, digest string) (ProfileRetirementReceipt, error) {
+	return s.retireProfile(ctx, id, exportID, digest, false, ProtectedProfileRetirementRequest{})
+}
+
+// RetireProtectedProfile requires the export created by ExportProtectedProfile,
+// records a durable tombstone, then deletes the Nanite/plugin-owned row.
+func (s *AgentConfigService) RetireProtectedProfile(ctx context.Context, id, exportID, digest string, req ProtectedProfileRetirementRequest) (ProfileRetirementReceipt, error) {
+	return s.retireProfile(ctx, id, exportID, digest, true, req)
+}
+
+func (s *AgentConfigService) retireProfile(ctx context.Context, id, exportID, digest string, includeProtected bool, req ProtectedProfileRetirementRequest) (ProfileRetirementReceipt, error) {
 	parsed, err := uuid.Parse(exportID)
 	if err != nil || parsed.String() != exportID {
 		return ProfileRetirementReceipt{}, store.ErrProfileRetirementConflict
@@ -170,7 +202,12 @@ func (s *AgentConfigService) RetireEditableProfile(ctx context.Context, id, expo
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return receipt, statErr
 	}
-	if err := s.store.RetireExportedProfile(ctx, id, digest); err != nil {
+	if includeProtected {
+		err = s.store.RetireExportedProfileWithAudit(ctx, id, digest, store.RetireAgentProfileAudit{ExportID: exportID, Actor: req.Actor, Reason: req.Reason})
+	} else {
+		err = s.store.RetireExportedProfile(ctx, id, digest)
+	}
+	if err != nil {
 		return receipt, err
 	}
 	receipt.Retired = true

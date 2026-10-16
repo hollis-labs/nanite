@@ -72,7 +72,7 @@ func TestMigration063_SeedsFiveRolePrompts(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got, err := s.GetAgentBySlug(context.Background(), c.slug)
+		got, err := migrationHistoricalAgentBySlug(context.Background(), s, c.slug)
 		if err != nil {
 			t.Errorf("GetAgentBySlug %q after migration 063: %v", c.slug, err)
 			continue
@@ -129,7 +129,7 @@ func TestMigration063_AnalystDeniesAllTools(t *testing.T) {
 	}
 	defer s.Close(context.Background())
 
-	got, err := s.GetAgentBySlug(context.Background(), "analyst")
+	got, err := migrationHistoricalAgentBySlug(context.Background(), s, "analyst")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug analyst: %v", err)
 	}

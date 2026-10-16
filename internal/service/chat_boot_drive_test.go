@@ -243,9 +243,9 @@ func TestSlotsChangedFor_FirstCallStampsThenChangeDetect(t *testing.T) {
 		t.Fatal("hash drift must report change")
 	}
 
-	// Stamp updates after a true result; another identical call returns false.
-	if changed := s.slotsChangedFor("sess-1", slots); changed {
-		t.Fatal("post-change call should re-baseline to false")
+	// Refused refresh never changes accepted boot hash; the drift stays visible.
+	if changed := s.slotsChangedFor("sess-1", slots); !changed {
+		t.Fatal("unapplied change must remain visible")
 	}
 }
 
@@ -267,35 +267,44 @@ func TestSlotsChangedFor_UserContextIgnored(t *testing.T) {
 	}
 }
 
-// TestRegenerateBootDirSlots_WritesAtomically verifies CLAUDE.md and
-// .sandbox/agent-context.md land in the boot dir with non-empty content.
-func TestRegenerateBootDirSlots_WritesAtomically(t *testing.T) {
-	s := &chatServiceImpl{}
+// Bound roots cannot be atomically replaced without reader custody.
+func TestRegenerateBootDirSlots_RefusesWithoutChangingBinding(t *testing.T) {
 	bootDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-
-	agent := &store.AgentProfile{Name: "test-agent", Description: "for tests"}
-
-	if err := s.regenerateBootDirSlots("sess-regen", bootDir, agent); err != nil {
-		t.Fatalf("regenerateBootDirSlots: %v", err)
+	paths := []string{filepath.Join(bootDir, "CLAUDE.md"), filepath.Join(bootDir, ".sandbox", "agent-context.md")}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("accepted old content"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	claude, err := os.ReadFile(filepath.Join(bootDir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
+	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}, agentEventBridge: &agentEventBridge{streams: NewStreamManager()}}
+	id := "bound-slot-refresh"
+	handle := &runtimeagent.Session{Provider: "claude", BootDir: bootDir}
+	s.runtimeSessions().Store(id, handle)
+	cw := ctxpkg.NewContextWindow(200_000, ctxpkg.DefaultEstimator{})
+	cw.SetContent(ctxpkg.SlotSystem, "accepted old content")
+	slots := &SlotAssemblyResult{Window: cw}
+	s.activeSessionSlots.Store(id, hashSlots(slots))
+	cw.SetContent(ctxpkg.SlotSystem, "unapplied new content")
+	ch, err := s.driveBootSession(context.Background(), id, &store.Session{}, &store.AgentProfile{Name: "new content"}, slots, "must not dispatch", 0, "")
+	if ch != nil || !errors.Is(err, runtimeagent.ErrArtifactRefreshUnavailable) {
+		t.Fatalf("refresh = (%v,%v)", ch, err)
 	}
-	if len(claude) == 0 {
-		t.Fatal("CLAUDE.md is empty")
+	for _, path := range paths {
+		data, err := os.ReadFile(path) // #nosec G304 -- paths are files authored above inside the private test directory.
+		if err != nil || string(data) != "accepted old content" {
+			t.Fatalf("bound file changed: %s %q %v", path, data, err)
+		}
 	}
-
-	ctxFile, err := os.ReadFile(filepath.Join(bootDir, ".sandbox", "agent-context.md"))
-	if err != nil {
-		t.Fatalf("read agent-context.md: %v", err)
+	if !s.slotsChangedFor(id, slots) {
+		t.Fatal("refusal advanced the accepted hash")
 	}
-	if len(ctxFile) == 0 {
-		t.Fatal("agent-context.md is empty")
+	// A nil runtime adapter would fail SendInput; the typed refusal above proves
+	// no reread or user dispatch reached it, and the same manager owner remains.
+	if got, ok := s.runtimeSessions().Load(id); !ok || got != handle {
+		t.Fatal("refusal replaced the bound owner")
 	}
 }
 

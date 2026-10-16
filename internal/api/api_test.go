@@ -72,6 +72,7 @@ func newTestAPI(t *testing.T) (*testAPI, *http.ServeMux) {
 	svc, err := service.NewContainer(service.ContainerConfig{
 		ModelCatalogOptions: modelsdevtest.Options(t),
 		Store:               s,
+		ModelAuthorizer:     fixtureNativeModels(),
 		Providers:           provider.NewRegistry(),
 		WorkingDir:          root,
 	})

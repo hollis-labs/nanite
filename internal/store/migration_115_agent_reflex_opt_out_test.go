@@ -51,17 +51,15 @@ func TestMigrate115AddsOptOutColumnAndTable(t *testing.T) {
 
 	// The opt-out table exists and enforces its FKs / PK.
 	agent := &AgentProfile{Name: "Opt-Out Probe", Slug: "opt-out-probe", SystemPrompt: "x", Class: "process"}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if err := s.SetAgentReflexOptOut(ctx, agent.ID, id); err != nil {
+	migrationHistoricalProfile(t, s, agent)
+	if err := migrationHistoricalOptOut(ctx, s, agent.ID, id); err != nil {
 		t.Fatalf("SetAgentReflexOptOut: %v", err)
 	}
 	// Idempotent re-insert.
-	if err := s.SetAgentReflexOptOut(ctx, agent.ID, id); err != nil {
+	if err := migrationHistoricalOptOut(ctx, s, agent.ID, id); err != nil {
 		t.Fatalf("SetAgentReflexOptOut (repeat): %v", err)
 	}
-	outs, err := s.ListAgentReflexOptOuts(ctx, agent.ID)
+	outs, err := migrationHistoricalOptOuts(ctx, s, agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentReflexOptOuts: %v", err)
 	}
@@ -71,16 +69,16 @@ func TestMigrate115AddsOptOutColumnAndTable(t *testing.T) {
 
 	// FK insert against a nonexistent reflex_id must fail under
 	// foreign_keys=ON.
-	if err := s.SetAgentReflexOptOut(ctx, agent.ID, "rfx-does-not-exist"); err == nil {
+	if operationErr := migrationHistoricalOptOut(ctx, s, agent.ID, "rfx-does-not-exist"); operationErr == nil {
 		t.Error("SetAgentReflexOptOut against a nonexistent reflex_id should fail the FK constraint")
 	}
 
 	// Deleting the reflex cascades the opt-out row away (no manual
 	// cleanup needed — see DeleteAgentReflex's doc comment).
-	if err := s.DeleteAgentReflex(ctx, id); err != nil {
-		t.Fatalf("DeleteAgentReflex: %v", err)
+	if _, operationErr := s.DB.ExecContext(ctx, `DELETE FROM agent_reflexes WHERE id=?`, id); operationErr != nil {
+		t.Fatalf("DeleteAgentReflex: %v", operationErr)
 	}
-	outs, err = s.ListAgentReflexOptOuts(ctx, agent.ID)
+	outs, err = migrationHistoricalOptOuts(ctx, s, agent.ID)
 	if err != nil {
 		t.Fatalf("ListAgentReflexOptOuts after reflex delete: %v", err)
 	}
@@ -105,7 +103,7 @@ func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	classReflexID, err := s.InsertAgentReflex(ctx, AgentReflex{
+	classReflexID, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		ClassTag:      "process",
 		Name:          "class-bound-probe",
 		TriggerKind:   ReflexTriggerEvent,
@@ -119,14 +117,12 @@ func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 	}
 
 	agent := &AgentProfile{Name: "Opt-Out Agent Delete Probe", Slug: "opt-out-agent-delete-probe", SystemPrompt: "x", Class: "process"}
-	if err := s.CreateAgent(context.Background(), agent); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if err := s.SetAgentReflexOptOut(ctx, agent.ID, classReflexID); err != nil {
+	migrationHistoricalProfile(t, s, agent)
+	if err := migrationHistoricalOptOut(ctx, s, agent.ID, classReflexID); err != nil {
 		t.Fatalf("SetAgentReflexOptOut: %v", err)
 	}
 
-	if err := s.DeleteAgent(context.Background(), agent.Slug); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM agent_profiles WHERE id=?`, agent.ID); err != nil {
 		t.Fatalf("DeleteAgent: %v", err)
 	}
 	var n int
@@ -141,7 +137,7 @@ func TestMigrate115AgentDeleteCascadesOptOuts(t *testing.T) {
 	// The class-bound reflex itself must survive — DeleteAgent only owns
 	// the deleted agent's own children, not global reflexes it merely
 	// opted out of.
-	if _, err := s.GetAgentReflex(ctx, classReflexID); err != nil {
+	if _, err := migrationHistoricalReflex(ctx, s, classReflexID); err != nil {
 		t.Errorf("class-bound reflex should survive the opting-out agent's deletion: %v", err)
 	}
 }

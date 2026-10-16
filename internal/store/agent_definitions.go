@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,19 +41,44 @@ type DefinitionArtifact struct {
 // profile converter. Every referenced byte is checked before any transaction;
 // installation creates no actor, binding, familiar catalog or grant rows.
 func (s *Store) InstallAgentDefinition(ctx context.Context, data []byte, resources []DefinitionResource) (mesh.DefinitionRef, error) {
+	di, err := prepareDefinitionInstall(data, resources)
+	if err != nil {
+		return di.pin, err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return di.pin, err
+	}
+	defer rollbackUnlessCommitted(tx)
+	if err := di.write(ctx, tx); err != nil {
+		return di.pin, err
+	}
+	return di.pin, tx.Commit()
+}
+
+// definitionInstall is a definition whose bytes and resources have all been
+// checked, ready to be written inside a caller's transaction.
+type definitionInstall struct {
+	pin      mesh.DefinitionRef
+	data     []byte
+	used     map[string]string
+	contents map[string][]byte
+}
+
+func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*definitionInstall, error) {
 	if len(data) > 1<<20 {
-		return mesh.DefinitionRef{}, errors.New("definition exceeds 1 MiB")
+		return &definitionInstall{}, errors.New("definition exceeds 1 MiB")
 	}
 	d, err := agentdef.Parse(data, agentpolicy.Option())
 	if err != nil {
-		return mesh.DefinitionRef{}, err
+		return &definitionInstall{}, err
 	}
 	if len(d.Requirements.Skills) != 0 {
-		return mesh.DefinitionRef{}, errors.New("skill installation requires a verified whole packaged tree")
+		return &definitionInstall{}, errors.New("skill installation requires a verified whole packaged tree")
 	}
 	digest, err := agentdef.Digest(d)
 	if err != nil {
-		return mesh.DefinitionRef{}, err
+		return &definitionInstall{}, err
 	}
 	pin := mesh.DefinitionRef{ID: d.DefinitionID, Revision: d.Revision, Digest: digest}
 	refs := append([]agentdef.Ref{}, d.Behavior.Instructions...)
@@ -78,7 +104,7 @@ func (s *Store) InstallAgentDefinition(ctx context.Context, data []byte, resourc
 	if e, ok := d.Extensions[agentpolicy.ReflexNamespace]; ok {
 		p, policyErr := agentpolicy.DecodeReflex(e)
 		if policyErr != nil {
-			return pin, policyErr
+			return &definitionInstall{pin: pin}, policyErr
 		}
 		reflexRef = &p.Bundle
 		refs = append(refs, p.Bundle)
@@ -86,7 +112,7 @@ func (s *Store) InstallAgentDefinition(ctx context.Context, data []byte, resourc
 	contents := map[string][]byte{}
 	for _, r := range resources {
 		if _, exists := contents[r.URI]; exists || len(r.Content) > 1<<20 {
-			return pin, errors.New("duplicate or oversized definition resource")
+			return &definitionInstall{pin: pin}, errors.New("duplicate or oversized definition resource")
 		}
 		contents[r.URI] = r.Content
 	}
@@ -94,64 +120,64 @@ func (s *Store) InstallAgentDefinition(ctx context.Context, data []byte, resourc
 	for _, r := range refs {
 		body, ok := contents[r.URI]
 		if !ok {
-			return pin, fmt.Errorf("%w: missing resource %q", ErrDefinitionContent, r.URI)
+			return &definitionInstall{pin: pin}, fmt.Errorf("%w: missing resource %q", ErrDefinitionContent, r.URI)
 		}
 		if prior, ok := used[r.URI]; ok && prior != r.Digest {
-			return pin, fmt.Errorf("%w: conflicting resource pins", ErrDefinitionContent)
+			return &definitionInstall{pin: pin}, fmt.Errorf("%w: conflicting resource pins", ErrDefinitionContent)
 		}
 		used[r.URI] = r.Digest
 		if reflexRef != nil && r == *reflexRef {
 			if _, bundleErr := agentpolicy.ParseReflexBundle(body, r); bundleErr != nil {
-				return pin, bundleErr
+				return &definitionInstall{pin: pin}, bundleErr
 			}
 		} else if agentdef.ArtifactDigest(body) != r.Digest {
-			return pin, fmt.Errorf("%w: resource %q", ErrDefinitionContent, r.URI)
+			return &definitionInstall{pin: pin}, fmt.Errorf("%w: resource %q", ErrDefinitionContent, r.URI)
 		}
 	}
 	if len(used) != len(contents) {
-		return pin, errors.New("unreferenced definition resource")
+		return &definitionInstall{pin: pin}, errors.New("unreferenced definition resource")
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return pin, err
-	}
-	defer rollbackUnlessCommitted(tx)
+	return &definitionInstall{pin: pin, data: data, used: used, contents: contents}, nil
+}
+
+func (di *definitionInstall) write(ctx context.Context, tx *sql.Tx) error {
+	pin, data, used, contents := di.pin, di.data, di.used, di.contents
 	artifactDigest := agentdef.ArtifactDigest(data)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_definitions(definition_id,revision,semantic_digest,artifact_digest,artifact) VALUES(?,?,?,?,?) ON CONFLICT(definition_id,revision) DO NOTHING`, pin.ID, pin.Revision, pin.Digest, artifactDigest, data); err != nil {
-		return pin, err
+		return err
 	}
 	var existingDigest string
 	var existing []byte
 	if err := tx.QueryRowContext(ctx, `SELECT artifact_digest,artifact FROM agent_definitions WHERE definition_id=? AND revision=?`, pin.ID, pin.Revision).Scan(&existingDigest, &existing); err != nil {
-		return pin, err
+		return err
 	}
 	if existingDigest != artifactDigest || !bytes.Equal(existing, data) {
-		return pin, ErrDefinitionRevisionConflict
+		return ErrDefinitionRevisionConflict
 	}
 	for uri, digest := range used {
 		body := contents[uri]
 		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_definition_resources(digest,content) VALUES(?,?) ON CONFLICT(digest) DO NOTHING`, digest, body); err != nil {
-			return pin, err
+			return err
 		}
 		var stored []byte
 		if err := tx.QueryRowContext(ctx, `SELECT content FROM agent_definition_resources WHERE digest=?`, digest).Scan(&stored); err != nil {
-			return pin, err
+			return err
 		}
 		if !bytes.Equal(stored, body) {
-			return pin, ErrDefinitionContent
+			return ErrDefinitionContent
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_definition_resource_refs(definition_id,revision,uri,digest) VALUES(?,?,?,?) ON CONFLICT(definition_id,revision,uri) DO NOTHING`, pin.ID, pin.Revision, uri, digest); err != nil {
-			return pin, err
+			return err
 		}
 		var linked string
 		if err := tx.QueryRowContext(ctx, `SELECT digest FROM agent_definition_resource_refs WHERE definition_id=? AND revision=? AND uri=?`, pin.ID, pin.Revision, uri).Scan(&linked); err != nil {
-			return pin, err
+			return err
 		}
 		if linked != digest {
-			return pin, ErrDefinitionContent
+			return ErrDefinitionContent
 		}
 	}
-	return pin, tx.Commit()
+	return nil
 }
 
 func (s *Store) GetAgentDefinitionArtifact(ctx context.Context, pin mesh.DefinitionRef) (DefinitionArtifact, error) {
@@ -234,23 +260,54 @@ type AgentHostSettings struct {
 	Revision      string             `json:"revision"`
 }
 
+// ValidateHostSlug reports whether slug may name host settings. Callers that
+// derive paths from a slug must check it first.
+func ValidateHostSlug(slug string) error {
+	if !hostSlugPattern.MatchString(slug) || slug == "user" {
+		return fmt.Errorf("invalid host settings slug %q: use lowercase letters, digits and single hyphens (and not \"user\")", slug)
+	}
+	return nil
+}
+
+// validateNewHostSettings is the one validation every host-settings write
+// passes, whichever transaction it runs in.
+func validateNewHostSettings(input AgentHostSettings) error {
+	if ValidateHostSlug(input.Slug) != nil || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Source) == "" {
+		return errors.New("host settings require slug, title and accountable source")
+	}
+	if err := input.Settings.Validate(); err != nil {
+		return err
+	}
+	if input.ID != "" || input.Revision != "" {
+		return errors.New("host settings identity and revision are assigned by the host")
+	}
+	return nil
+}
+
 var hostSlugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 func (s *Store) CreateAgentHostSettings(ctx context.Context, input AgentHostSettings) (AgentHostSettings, error) {
-	if !hostSlugPattern.MatchString(input.Slug) || input.Slug == "user" || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Source) == "" {
-		return input, errors.New("host settings require slug, title and accountable source")
-	}
-	if err := input.Settings.Validate(); err != nil {
+	if err := validateNewHostSettings(input); err != nil {
 		return input, err
-	}
-	if input.ID != "" || input.Revision != "" {
-		return input, errors.New("host settings identity and revision are assigned by the host")
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return input, err
 	}
 	defer rollbackUnlessCommitted(tx)
+	out, err := createAgentHostSettingsTx(ctx, tx, input)
+	if err != nil {
+		return input, err
+	}
+	return out, tx.Commit()
+}
+
+// createAgentHostSettingsTx writes validated host settings inside the caller's
+// transaction; the caller commits.
+func createAgentHostSettingsTx(ctx context.Context, tx *sql.Tx, input AgentHostSettings) (AgentHostSettings, error) {
+	if err := validateNewHostSettings(input); err != nil {
+		return input, err
+	}
 	var duplicate bool
 	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_host_settings WHERE slug=?)`, input.Slug).Scan(&duplicate); queryErr != nil {
 		return input, queryErr
@@ -274,13 +331,22 @@ func (s *Store) CreateAgentHostSettings(ctx context.Context, input AgentHostSett
 		}
 		return input, err
 	}
-	return input, tx.Commit()
+	return input, nil
 }
 
 func (s *Store) GetAgentHostSettings(ctx context.Context, id string) (AgentHostSettings, error) {
+	return getAgentHostSettingsWhere(ctx, s.DB, "id", id)
+}
+
+// hostSettingsQuerier is the read side shared by *sql.DB and *sql.Tx.
+type hostSettingsQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func getAgentHostSettingsWhere(ctx context.Context, q hostSettingsQuerier, column, value string) (AgentHostSettings, error) {
 	var h AgentHostSettings
 	var settings string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,slug,title,definition_id,definition_revision,semantic_digest,settings_json,enabled,source,plugin_id,revision FROM agent_host_settings WHERE id=?`, id).Scan(&h.ID, &h.Slug, &h.Title, &h.DefinitionRef.ID, &h.DefinitionRef.Revision, &h.DefinitionRef.Digest, &settings, &h.Enabled, &h.Source, &h.PluginID, &h.Revision)
+	err := q.QueryRowContext(ctx, `SELECT id,slug,title,definition_id,definition_revision,semantic_digest,settings_json,enabled,source,plugin_id,revision FROM agent_host_settings WHERE `+column+`=?`, value).Scan(&h.ID, &h.Slug, &h.Title, &h.DefinitionRef.ID, &h.DefinitionRef.Revision, &h.DefinitionRef.Digest, &settings, &h.Enabled, &h.Source, &h.PluginID, &h.Revision)
 	if err != nil {
 		return h, err
 	}

@@ -37,7 +37,12 @@ func (a *API) handleLogicalGeneralChatProvision(w http.ResponseWriter, r *http.R
 		case errors.Is(err, service.ErrUnsupportedDefinition), errors.Is(err, service.ErrUnsupportedModel):
 			status = http.StatusUnprocessableEntity
 		}
-		http.Error(w, "logical agent provisioning refused", status)
+		msg := "logical agent provisioning refused"
+		if status == http.StatusUnprocessableEntity {
+			// The cause is operator-actionable and carries no secrets.
+			msg = err.Error()
+		}
+		http.Error(w, msg, status)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

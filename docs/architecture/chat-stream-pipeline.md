@@ -100,7 +100,7 @@ wire representations using shared framing.
 | OpenCode CLI | one process per turn, plain-text stdout | go-providers, go-runner |
 | ACP agents | JSON-RPC 2.0 over stdio; only when the agent profile's protocol is `acp` | go-agent-wrapper |
 
-- API providers register only when a key resolves (keychain, then env). No Google, Ollama, OpenRouter, Mistral or Azure adapter exists.
+- API providers register only when a key resolves by reference (`internal/providerkeys`: the provider's `key_ref`, then the default keychain entry, then the environment only when `NANITE_PROVIDER_KEY_ENV=1`); the adapter fetches the key again on first use. No Google, Ollama, OpenRouter, Mistral or Azure adapter exists.
 - SDK-level retries are disabled in both HTTP clients.
 
 ### 2.2 Internal provider event (`llmtypes.StreamEvent`)
@@ -418,7 +418,7 @@ No `role='tool'` rows are written. Sessions are archived, never deleted. No rete
 
 ### 4.4 Memory-only
 
-Inspector `TurnSnapshot` ring (50 turns per session; exists only when `developer_mode` was on at boot; holds slots, model messages, and per-tool `arguments`, `result`, `visible_result`); stream ring buffers; producer channel; per-turn `chatMessages` (tool_use, tool_result, signed thinking); pending approvals; loop-detector windows. A restart mid-turn leaves the user row with no assistant row.
+Inspector `TurnSnapshot` ring (50 turns per session; always on; holds slots, model messages, and per-tool `arguments`, `result`, `visible_result`); stream ring buffers; producer channel; per-turn `chatMessages` (tool_use, tool_result, signed thinking); pending approvals; loop-detector windows. A restart mid-turn leaves the user row with no assistant row.
 
 ### 4.5 Tool calls: where inputs and outputs live
 
@@ -427,7 +427,7 @@ Calls: inline `{id, name, status}` refs in the assistant row. Inputs: durable, r
 | Channel | Carries | Durable |
 |---|---|---|
 | SSE `tool_call` / `tool_result` | `detail` ≤120 B; `summary` ≤500 B | no |
-| Inspector endpoint | full arguments and results | no (memory, dev mode) |
+| Inspector endpoint | full arguments and results | no (memory) |
 | `event_log` | name, result length | yes; no HTTP route |
 | `execution_metrics.debug_snapshots` | name, duration, success | yes |
 | `host_runtime_feed_events` (`/runtime-events`) | tool id, name, status, is_error; arguments and results redacted | yes; CLI-wrapper sessions only |

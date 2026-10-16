@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -168,3 +169,21 @@ var _ slog.Handler = (*PIIRedactor)(nil)
 // Smoke test that FatalContext does not panic at compile time (we can't
 // actually call it without exiting the process).
 var _ = func(ctx context.Context) { _ = ctx }
+
+func TestValueRedactor_ScrubsKnownSecretsFromMessageStringsAndErrors(t *testing.T) {
+	const registered = "sk-ant-api03-REGISTERED-VALUE" //nolint:gosec // a fixture, not a credential
+	SetValueRedactor(func(s string) string { return strings.ReplaceAll(s, registered, "[redacted]") })
+	t.Cleanup(func() { SetValueRedactor(nil) })
+
+	var buf bytes.Buffer
+	logger := slog.New(NewPIIRedactor(slog.NewJSONHandler(&buf, nil)))
+	logger.Info("failed with "+registered, "detail", "auth "+registered, "err", errors.New("401 for "+registered))
+	logger.With("preset", "x "+registered).Info("again")
+
+	if strings.Contains(buf.String(), registered) {
+		t.Fatalf("a registered secret reached the log: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "[redacted]") {
+		t.Fatalf("nothing was redacted: %s", buf.String())
+	}
+}

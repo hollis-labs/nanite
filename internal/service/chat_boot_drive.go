@@ -93,6 +93,15 @@ func (s *chatServiceImpl) driveBootSession(
 		return closed, nil
 	}
 
+	// A defined CLI view runs the host settings revision it was admitted under.
+	// A host edited since then fails the turn rather than quietly running the
+	// newer one.
+	if agent != nil && agent.HostSettingsID != "" {
+		if err := s.checkHostRevision(ctx, agent); err != nil {
+			return nil, err
+		}
+	}
+
 	// 1. Look up the active runtime session. A Wrapper that has already
 	// terminated remains bound until its exact observer (or this next-turn
 	// path) retires it; that keeps cleanup generation-safe.
@@ -126,10 +135,19 @@ func (s *chatServiceImpl) driveBootSession(
 		profileSlug := ""
 		if agent != nil {
 			profileSlug = agent.Slug
+			if agent.HostSettingsID != "" {
+				// A defined view has no slug; Boot resolves its host settings by ID.
+				profileSlug = agent.HostSettingsID
+			}
 		}
 		workdir, err := s.bootSessionWorkdir(ctx, session)
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: %w", err)
+		}
+		if root, hostErr := hostWorkRoot(agent); hostErr != nil {
+			return nil, fmt.Errorf("driveBootSession: %w", hostErr)
+		} else if root != "" {
+			workdir = root
 		}
 		if workdir != "" {
 			s.activeSessionWorkRoots.Store(sessionID, workdir)
@@ -144,6 +162,9 @@ func (s *chatServiceImpl) driveBootSession(
 			Workdir:                   workdir,
 			Role:                      role,
 			ExternalLifecycleObserver: true,
+		}
+		if agent != nil && agent.HostSettingsID != "" {
+			bootOpts.ExpectedHostRevision = agent.Revision
 		}
 		applyLegacyCLIProviderToBootOpts(&bootOpts, providerName)
 		// Pinned content is authoritative. Retired mutable cmd/http resolver
@@ -165,6 +186,9 @@ func (s *chatServiceImpl) driveBootSession(
 			}
 		}
 		booted, err := runtimeagent.Boot(ctx, s.agentDeps, bootOpts)
+		if errors.Is(err, runtimeagent.ErrHostRevisionChanged) {
+			return nil, unsupportedCause(CauseHostRevisionChanged, "host settings %s changed since this session was created; create a new session (%v)", agent.HostSettingsID, err)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)
 		}
@@ -860,4 +884,40 @@ func bootSessionRole(agent *store.AgentProfile) string {
 		return agent.Slug
 	}
 	return ""
+}
+
+// checkHostRevision fails when the host settings row a defined CLI view was
+// admitted under has changed or been disabled.
+func (s *chatServiceImpl) checkHostRevision(ctx context.Context, agent *store.AgentProfile) error {
+	reader, ok := s.store.(interface {
+		GetAgentHostSettings(context.Context, string) (store.AgentHostSettings, error)
+	})
+	if !ok {
+		return nil // Test adapters without host storage have nothing to compare.
+	}
+	h, err := reader.GetAgentHostSettings(ctx, agent.HostSettingsID)
+	if err != nil {
+		return fmt.Errorf("driveBootSession: host settings %s: %w", agent.HostSettingsID, err)
+	}
+	if h.Revision != agent.Revision || !h.Enabled {
+		return unsupportedCause(CauseHostRevisionChanged, "host settings %s changed since this session was created (revision %s, now %s); create a new session", h.ID, agent.Revision, h.Revision)
+	}
+	return nil
+}
+
+// hostWorkRoot is the work root a defined CLI view runs in: the first directory
+// its host settings grant. Filesystem authority comes from the host document,
+// not the request, so the host's directory outranks a project's repo path.
+func hostWorkRoot(agent *store.AgentProfile) (string, error) {
+	if agent == nil || agent.HostSettingsID == "" || agent.NativeHost == nil || len(agent.NativeHost.Directories) == 0 {
+		return "", nil
+	}
+	root, err := runtimeagent.ExpandUserHome(strings.TrimSpace(agent.NativeHost.Directories[0]))
+	if err != nil {
+		return "", fmt.Errorf("resolve work root: host directory %q: %w", agent.NativeHost.Directories[0], err)
+	}
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("resolve work root: host directory %q is not an absolute path", agent.NativeHost.Directories[0])
+	}
+	return filepath.Clean(root), nil
 }

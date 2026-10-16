@@ -265,8 +265,8 @@ func (s *chatServiceImpl) initializeRun(
 	for i, t := range tools {
 		toolNames[i] = t.Name
 	}
-	// Debug mode: per-agent setting or global developer_mode.
-	debugMode := isAgentDebugEnabled(agent.Settings) || s.isGlobalDebugMode()
+	// Debug mode: per-agent setting.
+	debugMode := isAgentDebugEnabled(agent.Settings)
 
 	// P3 (CW-20260420-0013): pre-loop classification. Runs once per
 	// generation; downstream consumers read via loopState.Classification().
@@ -1943,6 +1943,13 @@ func (s *chatServiceImpl) prepareTurn(
 			policy = cfg.NativePolicy.Defaults()
 		}
 		agent = &store.AgentProfile{Name: "Defined chat", SystemPrompt: cfg.Instructions, DefinitionPolicy: &policy, DefinitionReflex: cfg.ReflexBundle, NativeHost: cfg.HostSettings, Class: policy.Class, DefaultProvider: cfg.Model.Provider, DefaultModel: cfg.Model.Model, RuntimeKind: "api", Constraints: "{}", Settings: "{}", Tags: "[]", Tools: "[]"}
+		if cfg.HostSettings != nil && cfg.HostSettings.Runtime == "cli" && cfg.HostSettingsRef != nil {
+			// A CLI view boots the host's projected profile, pinned to the revision
+			// the view was admitted under (driveBootSession checks it).
+			agent.RuntimeKind = "cli"
+			agent.HostSettingsID = cfg.HostSettingsRef.ID
+			agent.Revision = cfg.HostSettingsRef.Revision
+		}
 		if cfg.HostSettings != nil {
 			if validationErr := cfg.HostSettings.Validate(); validationErr != nil {
 				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "Invalid host execution settings", nil)

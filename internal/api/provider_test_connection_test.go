@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/hollis-labs/libs/security/secrets/secretstest"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/zalando/go-keyring"
 )
@@ -18,9 +20,9 @@ import (
 // keys and never reaches a real provider.
 func isolateProviderKeys(t *testing.T) {
 	t.Helper()
-	keyring.MockInit()
+	secretstest.Install(t) // in-memory keychain; the real one is refused in a test binary
 	t.Cleanup(keyring.MockInit)
-	for _, env := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"} {
+	for _, env := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", providerkeys.EnvEnableVar} {
 		t.Setenv(env, "")
 	}
 }

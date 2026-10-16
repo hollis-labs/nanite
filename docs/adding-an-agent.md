@@ -4,6 +4,47 @@ Nanite separates three things: immutable intrinsic definitions, mutable host
 execution settings, and verified actor authority. Installing content does not
 create an actor or grant tools and skills.
 
+## The one-step path
+
+```sh
+nanite agent setup <flat.md | archetype-id> --provider anthropic --model <model> --tools all \
+  [--slug S] [--title T] [--resources resources.json] [--reason "why"] [-db path]
+```
+
+`setup` installs the definition, creates its host settings (slug from the
+definition id unless `--slug`), reviews those settings and grants the tools,
+all in one transaction. It prints the definition ref, host settings id and
+revision, the authority id, the granted tools, and a ready
+`POST /api/agent/v1/sessions` body.
+
+Everything that can be checked is checked first and refuses without writing:
+the definition parses, the runtime is supported (`api` today; `cli` is refused
+until it lands), the provider is a native API provider with a usable key (the
+refusal names the remedy, e.g. `provider set-key`; keys are never printed), and
+every named tool exists. `--tools all` grants every tool the catalog lists as
+available; it is a grant recorded like any other, not a bypass. The catalog is
+filled when the server starts, so start it once on a new database before
+asking for more than the always-included tools. Dotted names (`dev.read`) are
+read as `dev_read`; `nanite authority tools` lists the names.
+
+Host directories default to a private workspace, `agent-workspaces/<slug>` beside the
+database (created for you); `--directories a,b` names others.
+
+The first argument is an authored file or the id (or name) of an embedded
+archetype such as `def:nanite/chat`; an unknown one lists the ids. A definition
+the native runtime would refuse at launch (for example durable continuity) is
+refused up front, so the printed session body is always admissible.
+
+Running it again with the same inputs changes nothing and reports the existing
+ids (`"created": false`). Re-running is additive: `tools` is always the
+complete set now granted, `tools_added` is what this call added, and a narrower
+`--tools` never revokes (use `authority ungrant`). A slug already used by different settings (another
+definition revision, provider, model or runtime) is refused; pass `--slug`.
+The semantic digest ignores identity, so definitions are told apart by id and
+revision, and `agent validate` also prints `identity_digest`.
+
+The steps below are what `setup` does, for when you need one on its own.
+
 ## Author and install intrinsic content
 
 Definitions use agentdef v2 frontmatter, a stable definition ID, an authored
@@ -21,6 +62,17 @@ nanite agent author --role role.md concrete.md > flat.md
 nanite agent validate flat.md
 nanite agent install --resources resources.json flat.md
 ```
+
+`install` writes the database directly, so it needs to know which one: pass
+`-db <path>`, or set `NANITE_DB_PATH=<path>` (or `NANITE_WORKSPACE=<name>`).
+With none of them it refuses and prints the suggested default. The same
+`-db` is accepted by every offline or client subcommand (`agent`, `auth`,
+`authority`, `mcp`, `skill`, `plugin`, `profile`). For a server started with
+`serve -db X`, the CLI finds its operator token (`nanite auth token-path`)
+and credentials from the same `-db X` or `NANITE_DB_PATH=X`: the credential
+directory sits beside the database whenever one is named explicitly. The
+`nanite auth` commands talk to the server's address, `NANITE_API_URL` or
+`NANITE_PORT`, so point those at a non-default port too.
 
 `author` also accepts a standalone concrete definition without `--role`.
 Flattening keeps concrete identity, requirements, permissions, continuity and

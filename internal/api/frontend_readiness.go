@@ -42,6 +42,9 @@ type runtimeKindOption struct {
 	ManagedAutomation bool   `json:"managed_automation"`
 	ProductSupported  bool   `json:"product_supported"`
 	Description       string `json:"description,omitempty"`
+	// Providers names the providers this host can launch for the kind, when the
+	// kind is provider-scoped (cli).
+	Providers []string `json:"providers,omitempty"`
 }
 
 type workRootHint struct {

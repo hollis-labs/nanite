@@ -5,8 +5,8 @@ package api
 // GET /api/inspector/sessions/{session_id}/turns
 // GET /api/inspector/sessions/{session_id}/turns/{turn_id}
 //
-// Both endpoints return 404 when developer_mode is false or the inspector
-// service was not wired at startup.
+// Both endpoints sit behind the normal API auth. They return 404 only when the
+// inspector service was not wired.
 
 import (
 	"net/http"
@@ -23,7 +23,7 @@ import (
 // Response: {"session_id": "...", "turns": [...], "count": N}
 func (a *API) handleInspectorListTurns(w http.ResponseWriter, r *http.Request) {
 	if a.Services.Inspector == nil {
-		a.errorResp(w, http.StatusNotFound, "inspector not enabled — set developer_mode=true and restart")
+		a.errorResp(w, http.StatusNotFound, "inspector not available")
 		return
 	}
 
@@ -66,7 +66,7 @@ func (a *API) handleInspectorListTurns(w http.ResponseWriter, r *http.Request) {
 //   - turn_id: monotonic turn number ("1", "2", …)
 func (a *API) handleInspectorGetTurn(w http.ResponseWriter, r *http.Request) {
 	if a.Services.Inspector == nil {
-		a.errorResp(w, http.StatusNotFound, "inspector not enabled — set developer_mode=true and restart")
+		a.errorResp(w, http.StatusNotFound, "inspector not available")
 		return
 	}
 

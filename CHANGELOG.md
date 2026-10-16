@@ -8,6 +8,13 @@ lives in the git log.
 
 ### Breaking
 
+- **Provider API keys are read from the environment only when enabled.**
+  `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` were a silent fallback when the
+  keychain had no key; they are now ignored unless `NANITE_PROVIDER_KEY_ENV=1`.
+  A container configured by environment variable sets it. `nanite provider
+  status` and the provider status endpoint say when a variable is set but
+  ignored.
+
 - **Memory editor writes are owned by the Nanite app.** New notes and tool-use
   lessons use an app namespace with user-specific keys and enforced read
   filtering. Existing user memories remain readable without backfill and are
@@ -160,6 +167,16 @@ lives in the git log.
     dir is untrusted. The planted `settings.json` is unchanged.
 
 ### Added
+
+- **Provider keys by reference.** A provider's API key is a reference
+  (`keychain://`, `helper://`, `file://`, `op://`), set with `nanite provider
+  set-ref` or the `key_ref` setting, and resolved when the provider is first
+  used. `nanite provider list|status` shows which providers are usable and
+  where each key comes from, never the key; `nanite provider set-key <id>`
+  reads the key from standard input. A missing, denied or unavailable key is
+  reported with its reason instead of "not a registered native provider". The
+  existing keychain entry keeps working and is not migrated. Resolved keys are
+  scrubbed from logs and errors.
 
 - **Subagent progress heartbeats + narration guidance** (CW-20260519-0068).
   A long-running subagent dispatch (`subagent_spawn`, sync mode) previously

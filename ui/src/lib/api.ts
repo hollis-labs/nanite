@@ -1497,8 +1497,8 @@ export const api = {
   ): Promise<{
     provider_id: string;
     has_key: boolean;
-    /** Where the key the provider now runs on comes from; "" when it has none. */
-    key_source: "keychain" | "environment" | "";
+    /** Where the key the provider now runs on resolves from (never the key): "keychain", "keychain:legacy:nanite", "env:VAR", ...; "" when it has none. */
+    key_source: string;
   }> => {
     const res = await fetch(`${API_BASE}/providers/${id}/api-key`, {
       method: "POST",
@@ -1686,13 +1686,6 @@ export const api = {
   deleteSkill: async (id: string): Promise<void> => {
     const res = await fetch(`${API_BASE}/skills/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`);
-  },
-
-  // E1: returns whether dev-mode is active (env var or developer_mode setting).
-  getDevMode: async (): Promise<{ dev_mode: boolean; env_flag: boolean }> => {
-    const res = await fetch(`${API_BASE}/dev-mode`);
-    if (!res.ok) throw new Error(`Failed to get dev mode: ${res.status}`);
-    return res.json();
   },
 
   // Agent Skills (returns Skill[], not a join-table type)

@@ -36,10 +36,6 @@ func copySubmittedBy(from, into context.Context) context.Context {
 	return into
 }
 
-// nativeAskEachTime lists tools a native view never runs without an in-band,
-// once-only approval, even when the permission engine would allow them.
-var nativeAskEachTime = map[string]bool{"dev_bash": true, "python_run": true}
-
 // nativeToolGate adapts a live capability to toolclient.NativeToolGate.
 type nativeToolGate struct {
 	grants *NativeGrants
@@ -101,8 +97,7 @@ func (s *chatServiceImpl) issueNativeCapability(ctx context.Context, viewID, tur
 
 // nativeOfferedTools returns the definitions of the tools a native turn may be
 // offered right now: the live capability's grants, intersected with the turn's
-// narrowing and the submitting credential's standing, minus dev tools that
-// developer mode would refuse anyway. A turn without a live capability gets
+// narrowing and the submitting credential's standing. A turn without a live capability gets
 // none.
 func (s *chatServiceImpl) nativeOfferedTools(ctx context.Context) []llmtypes.ToolDefinition {
 	c, ok := executionCapabilityFrom(ctx)

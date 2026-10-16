@@ -3,8 +3,10 @@ package agent
 import (
 	"encoding/json"
 
-	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/harness/adapters"
+	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // streamingStdioUserFrame wraps raw text as a single NDJSON object in the
@@ -128,6 +130,69 @@ func workRootArgs(providerName, workRoot string) []string {
 	}
 }
 
+// addDirArgs is workRootArgs for the work root plus further roots, the work
+// root first, duplicates and empty entries dropped. Claude takes one variadic
+// --add-dir; agy takes the flag once per directory. It is nil for a runtime that
+// takes no --add-dir (Codex grants directories in its planted config.toml).
+func addDirArgs(providerName, workRoot string, more []string) []string {
+	provider := normalizeProviderName(providerName)
+	switch provider {
+	case "claude", "claude-code", "claudecode", "antigravity":
+	default:
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var dirs []string
+	for _, d := range append([]string{workRoot}, more...) {
+		if d == "" {
+			continue
+		}
+		if _, dup := seen[d]; dup {
+			continue
+		}
+		seen[d] = struct{}{}
+		dirs = append(dirs, d)
+	}
+	if len(dirs) == 0 {
+		return nil
+	}
+	if provider == "antigravity" {
+		var out []string
+		for _, d := range dirs {
+			out = append(out, "--add-dir", d)
+		}
+		return out
+	}
+	return append([]string{"--add-dir"}, dirs...)
+}
+
+// modelFlags is the command-line flag that selects the model for each runtime
+// Nanite launches natively. A runtime missing here gets no flag and a host that
+// names a model for it is refused at session create rather than silently
+// launched on the CLI's own default. Each entry was checked against that CLI's
+// --help and a launch-args test.
+var modelFlags = map[runtimes.ID]string{
+	runtimes.Claude:      "--model",
+	runtimes.Codex:       "--model",
+	runtimes.OpenCode:    "--model",
+	runtimes.Antigravity: "--model",
+}
+
+// modelArgs selects the model for a native CLI launch.
+func modelArgs(providerName, model string) []string {
+	if model == "" {
+		return nil
+	}
+	d, ok := resolveRuntime(providerName)
+	if !ok {
+		return nil
+	}
+	if flag, ok := modelFlags[d.ID]; ok {
+		return []string{flag, model}
+	}
+	return nil
+}
+
 // useACPProtocol reports whether profile is explicitly configured to
 // launch through the ACP client abstraction (TASKS/agent-host-acp/08-11,
 // libs/go-agent-wrapper's acp package plus its opencodeacp/copilotacp
@@ -167,4 +232,10 @@ func effectiveACPTransport(profile *store.AgentProfile) adapters.Transport {
 		return adapters.TransportTCP
 	}
 	return adapters.TransportStdio
+}
+
+// ModelFlagVerified reports whether Nanite passes a host-selected model to
+// providerName's CLI. Only Claude's --model is verified (modelArgs).
+func ModelFlagVerified(providerName string) bool {
+	return len(modelArgs(providerName, "x")) > 0
 }

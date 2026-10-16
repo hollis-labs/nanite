@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/hollis-labs/nanite/internal/llm/keycheck"
 	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
@@ -29,8 +30,13 @@ import (
 // Client wraps openai-go and implements llmcontracts.Provider for the
 // chat-completion path used by nanite's chat surface.
 type Client struct {
-	sdk    sdk.Client
-	apiKey string
+	// keyMu guards sdk, apiKey, keyFn and keyLoaded: a lazily resolved key
+	// (SetKeyFunc) changes them at first use rather than at construction.
+	keyMu     sync.Mutex
+	keyFn     KeyFunc
+	keyLoaded bool
+	sdk       sdk.Client
+	apiKey    string
 }
 
 // Compile-time interface assertion. The Client also exposes Embed* methods
@@ -66,6 +72,9 @@ func New(apiKey string, httpClient *http.Client, opts ...option.RequestOption) *
 // for parity with the registration shape in cmd/nanite/main.go which
 // constructs the provider, then sets the key once it has been resolved.
 func (c *Client) SetAPIKey(key string) {
+	c.keyMu.Lock()
+	defer c.keyMu.Unlock()
+	c.keyFn, c.keyLoaded = nil, false
 	c.apiKey = key
 	c.sdk = sdk.NewClient(
 		option.WithAPIKey(key),
@@ -78,7 +87,11 @@ func (c *Client) SetAPIKey(key string) {
 // wraps keycheck.ErrRejected; any other failure means the provider could not
 // be reached or answered with an error of its own.
 func (c *Client) VerifyKey(ctx context.Context) error {
-	_, err := c.sdk.Models.List(ctx)
+	api, kerr := c.client(ctx)
+	if kerr != nil {
+		return kerr
+	}
+	_, err := api.Models.List(ctx)
 	if err == nil {
 		return nil
 	}
@@ -113,7 +126,11 @@ func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.sdk.Chat.Completions.New(ctx, params)
+	api, err := c.client(ctx)
+	if err != nil {
+		return "", err
+	}
+	resp, err := api.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return "", translateError(err)
 	}

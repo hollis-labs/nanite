@@ -2,7 +2,6 @@ package anthropic
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -18,8 +17,9 @@ import (
 // response had no text blocks (rather than an empty string) so callers
 // can distinguish "no content" from "tool_use only".
 func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
-	if c.apiKey == "" {
-		return "", errors.New("ANTHROPIC_API_KEY not set")
+	api, err := c.client(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	model, err := resolveModel(in)
@@ -31,7 +31,7 @@ func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string,
 	params := c.buildMessageParams(nonStreamingRequest(in), model, interleavedThinking, reasoningCfg)
 
 	opts := []option.RequestOption{betaHeaderRequestOption(interleavedThinking)}
-	resp, err := c.sdk.Messages.New(ctx, params, opts...)
+	resp, err := api.Messages.New(ctx, params, opts...)
 	if err != nil {
 		return "", translateError(err)
 	}

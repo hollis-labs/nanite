@@ -96,14 +96,6 @@ func TestValidateManifest_MissingEnvelopeSchema_Refuse(t *testing.T) {
 	}
 }
 
-func TestValidateManifest_MissingEnvelopeSchema_RefuseInDeveloperMode(t *testing.T) {
-	dir := setupPlugin(t, validManifest(), map[string]string{"bin/giphy": "#!/bin/sh\n"})
-	err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{DeveloperMode: true})
-	if err == nil || !err.HasRefusals() {
-		t.Fatalf("missing asset must refuse: %v", err)
-	}
-}
-
 func TestValidateManifest_BadYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "plugin.yaml"), ":bad:yaml:")
@@ -113,7 +105,7 @@ func TestValidateManifest_BadYAML(t *testing.T) {
 	}
 }
 
-func TestValidateManifest_SchemaViolation_RefuseEvenInDeveloperMode(t *testing.T) {
+func TestValidateManifest_SchemaViolation_Refuses(t *testing.T) {
 	bad := `schema_version: 1
 id: Bad-ID
 name: x
@@ -127,9 +119,9 @@ nanite_compat:
   min: "0.9.0"
 `
 	dir := setupPlugin(t, bad, nil)
-	err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{DeveloperMode: true})
+	err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{})
 	if err == nil || !err.HasRefusals() {
-		t.Fatalf("schema violation must refuse even in dev mode, got: %v", err)
+		t.Fatalf("schema violation must refuse, got: %v", err)
 	}
 }
 
@@ -158,17 +150,15 @@ func TestValidateManifest_UIBundleMissing(t *testing.T) {
 	}
 }
 
-func TestValidateManifest_EntrypointMissingRefusesEveryMode(t *testing.T) {
+func TestValidateManifest_EntrypointMissingRefuses(t *testing.T) {
 	dir := setupPlugin(t, validManifest(), map[string]string{"envelopes/giphy-modal.schema.json": `{"type":"object"}`})
-	for _, dev := range []bool{false, true} {
-		err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{DeveloperMode: dev})
-		if err == nil || !err.HasRefusals() {
-			t.Fatalf("missing executable accepted in dev=%v", dev)
-		}
+	err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{})
+	if err == nil || !err.HasRefusals() {
+		t.Fatal("missing executable accepted")
 	}
 }
 
-func TestValidateManifest_AssetSymlinkEscapeRefusesEveryMode(t *testing.T) {
+func TestValidateManifest_AssetSymlinkEscapeRefuses(t *testing.T) {
 	dir := setupPlugin(t, validManifest(), map[string]string{"bin/giphy": "#!/bin/sh\n"})
 	outside := filepath.Join(t.TempDir(), "schema.json")
 	writeFile(t, outside, `{"type":"object"}`)
@@ -178,11 +168,9 @@ func TestValidateManifest_AssetSymlinkEscapeRefusesEveryMode(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "envelopes/giphy-modal.schema.json")); err != nil {
 		t.Fatal(err)
 	}
-	for _, dev := range []bool{false, true} {
-		err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{DeveloperMode: dev})
-		if err == nil || !err.HasRefusals() {
-			t.Fatalf("escaped asset accepted in dev=%v", dev)
-		}
+	err := ValidateManifest(filepath.Join(dir, "plugin.yaml"), dir, ValidationOptions{})
+	if err == nil || !err.HasRefusals() {
+		t.Fatal("escaped asset accepted")
 	}
 }
 

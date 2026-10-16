@@ -47,11 +47,7 @@ func TestSelectToolsAsProvider_BuiltinsPassThrough(t *testing.T) {
 	// (TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md
 	// moved that responsibility entirely to the caller's agent_tools filter,
 	// service/tool.go's filterToolsByAgentTools) -- this just confirms
-	// builtins still pass through uncapped, dev-tool-gate aside.
-	//
-	// Note: dev_* tools are gated behind developer_mode; we use non-dev
-	// builtins here to keep the test focused, not the dev-mode gate. See
-	// devmode_gate_test.go for dev-mode gate coverage.
+	// builtins still pass through uncapped.
 
 	tb := New(nil, nil, DefaultConfig())
 	tb.Builtins.RegisterBuiltins("self", []llmtypes.ToolDefinition{

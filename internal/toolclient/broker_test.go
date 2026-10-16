@@ -244,8 +244,7 @@ func TestGetToolsByNames_NoMCPManager(t *testing.T) {
 // it never actually filtered anything. Selection now returns every
 // registered tool directly, unranked, regardless of workspace/agent
 // scoping. Real narrowing happens downstream: permissions, the schema-v2
-// allowlist, the chat-surface filter, developer_mode, and progressive
-// discovery.
+// allowlist, the chat-surface filter, and progressive discovery.
 func TestSelectTools_AlwaysReturnsFullRegisteredCatalog(t *testing.T) {
 	tb := New(nil, nil, DefaultConfig())
 	tb.RegisterTools([]llmtypes.ToolDefinition{

@@ -22,9 +22,8 @@ const DefaultContextWindowTokens = 200000
 // TASKS/phase-4/05-wire-select-for-agent-to-read-agent-tools.md, and the
 // legacy tool_permissions/ToolClient.CheckPermission mechanism entirely as
 // of TASKS/adhoc/02-remove-tool-permissions-collapse-to-agent-tools.md),
-// the chat-role surface filter (applyChatSurfaceFilter), the
-// developer_mode dev-tool gate, and progressive discovery — none of
-// which lived in this Config.
+// the chat-role surface filter (applyChatSurfaceFilter), and progressive
+// discovery — none of which lived in this Config.
 type Config struct {
 	// ToolTokenBudgetPct is the fraction of the context window budget allocated to tool definitions.
 	// Default: 0.20 (20%).

@@ -105,11 +105,11 @@ import (
 // (codex reads MCP servers from config.toml, NOT from the Nanite
 // .mcp.json sidecar) is a separate, out-of-scope follow-up — see the
 // report.
-func codexConfigTOMLContent(writableRoots []string) (string, error) {
+func codexConfigTOMLContent(writableRoots []string, mcpServers ...provider.MCPServerSpec) (string, error) {
 	adapter := provider.NewCodexAdapter()
 	adapter.SandboxMode = codexSandboxMode
 	adapter.WritableRoots = writableRoots
-	return renderProviderConfigFile(adapter, "config.toml", provider.PlantContext{})
+	return renderProviderConfigFile(adapter, "config.toml", provider.PlantContext{MCPServers: mcpServers})
 }
 
 // codexSandboxMode is the sandbox_mode Nanite plants for codex: go-providers'

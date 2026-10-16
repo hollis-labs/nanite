@@ -135,10 +135,10 @@ func TestClassifyNilProvider_RuntimeKindAPI_StaysFatalForNonCLIName(t *testing.T
 // wire CLIAdapters" from "operator typed a bad provider name".
 func TestClassifyNilProvider_CLINoAdapter(t *testing.T) {
 	// CLI-shaped names that are not runtimes Nanite can launch: not in the
-	// registry, or (Antigravity) no Nanite boot-dir layout yet.
+	// registry.
 	s := &chatServiceImpl{agentDeps: &runtimeagent.Dependencies{}}
 
-	for _, name := range []string{"pty-nonsense", "sub-agy"} {
+	for _, name := range []string{"pty-nonsense", "sub-nonsense"} {
 		if got := s.classifyNilProvider("", name); got != nilProviderRouteCLINoAdapter {
 			t.Errorf("classifyNilProvider(%q) = %v, want nilProviderRouteCLINoAdapter", name, got)
 		}

@@ -50,6 +50,10 @@ func cmdPath(args []string) {
 	fmt.Fprintf(w, "plugin-data\t%s\n", filepath.Join(layout.DataDir(), "plugin-data"))
 	fmt.Fprintf(w, "plugin-cache\t%s\n", filepath.Join(layout.CacheDir(), "plugin-cache"))
 	fmt.Fprintf(w, "plugins\t%s\n", resolvePluginsDir())
+	if ap, authErr := resolveAuthPaths(""); authErr == nil {
+		fmt.Fprintf(w, "auth-dir\t%s\n", ap.dir)
+		fmt.Fprintf(w, "operator-token\t%s\n", ap.token)
+	}
 	if err := w.Flush(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s path: %v\n", brand.BinaryName, err)
 		os.Exit(1)

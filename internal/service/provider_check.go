@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/llm/keycheck"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
@@ -89,11 +90,16 @@ func (s *ProviderConfigService) TestConnection(ctx context.Context, id string) (
 }
 
 func (s *ProviderConfigService) checkAPIKey(ctx context.Context, spec APIProviderSpec) ProviderCheckResult {
-	key, _ := s.resolveKey(spec.ProviderID, spec.EnvKey)
-	if key == "" {
-		return ProviderCheckResult{Status: ProviderCheckNoKey,
-			Message: fmt.Sprintf("No API key is set for %s", spec.DisplayName)}
+	secret, _, rerr := s.keys.Resolve(ctx, spec.ProviderID)
+	if rerr != nil {
+		msg := fmt.Sprintf("No API key is set for %s", spec.DisplayName)
+		var ke *providerkeys.Error
+		if errors.As(rerr, &ke) {
+			msg = fmt.Sprintf("No usable API key for %s (%s): %s", spec.DisplayName, ke.Code(), ke.Guidance())
+		}
+		return ProviderCheckResult{Status: ProviderCheckNoKey, Message: msg}
 	}
+	key := secret.Reveal()
 
 	ctx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
 	defer cancel()

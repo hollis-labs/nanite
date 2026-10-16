@@ -110,13 +110,13 @@ func TestSelectAdapter_ClaudeArgvIsStrict(t *testing.T) {
 		dev  bool
 	}{
 		{"streaming", runtimes.ModeStreamingStdio, false},
-		{"streaming, developer mode", runtimes.ModeStreamingStdio, true},
+		{"streaming, yolo mode", runtimes.ModeStreamingStdio, true},
 		{"per turn, whose prompt follows a --", runtimes.ModeSubprocessPerTurn, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(StrictMCPEnv, "")
 			sel := RuntimeSelection{Runtime: runtimes.Claude, Mode: tc.mode}
-			a, err := selectAdapter(&Dependencies{DeveloperMode: tc.dev}, sel, "/work", boot)
+			a, err := selectAdapter(withYolo(&Dependencies{}, tc.dev), sel, "/work", boot)
 			if err != nil {
 				t.Fatalf("selectAdapter: %v", err)
 			}
@@ -143,7 +143,7 @@ func TestSelectAdapter_ClaudeArgvIsStrict(t *testing.T) {
 
 			// The kill switch restores the argv Nanite built before.
 			t.Setenv(StrictMCPEnv, "0")
-			a, err = selectAdapter(&Dependencies{DeveloperMode: tc.dev}, sel, "/work", boot)
+			a, err = selectAdapter(withYolo(&Dependencies{}, tc.dev), sel, "/work", boot)
 			if err != nil {
 				t.Fatalf("selectAdapter (kill switch): %v", err)
 			}

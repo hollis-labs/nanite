@@ -74,8 +74,8 @@ capability only if the view has that record, the turn has a submitting credentia
 (`service.WithSubmittedBy`, set from the authenticated principal at turn
 admission) and `NativeGrants` is wired. Otherwise the turn is tool-free.
 
-With a capability the turn is offered exactly what `NativeGrants.Offered` returns,
-minus `dev_*` tools while developer mode is off. At dispatch the chat loop asks
+With a capability the turn is offered exactly what `NativeGrants.Offered` returns. `dev_*` tools are offered like any other granted
+tool; the permission engine decides what runs. At dispatch the chat loop asks
 `NativeGrants.AuthorizeCapability`, and `ToolClient.CallTool` honors a
 `toolclient.NativeToolGate` carried in the context in place of the fabric grant
 check for that call. A gate that refuses is final; nothing falls through to the

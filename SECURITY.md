@@ -109,6 +109,17 @@ remains is defense in depth, not a boundary. User-initiated shell commands
 from the UI use the same denylist and secret filtering, and the session's
 `yolo` shell mode skips OS isolation.
 
+**Permission mode.** Tool calls are decided by the permission engine's rules
+and mode (`default`, `accept-edits`, `plan`, `yolo`; deny rules always win).
+Nanite boots in `default`. Set `NANITE_PERMISSION_MODE` or the `permission_mode`
+config key to start in another mode, or `PUT /api/permissions/mode` to change
+it at runtime. Nothing else selects `yolo`; there is no developer-mode setting.
+In `yolo`, approval prompts are bypassed, Claude CLI agents launch with
+`--dangerously-skip-permissions`, and each such launch and the boot itself log
+an `AUDIT` line. Which tools an agent may call is decided by its `agent_tools`
+grants and those rules. The one name-keyed refusal left is structural:
+`python_run` and `code_task` cannot be called from inside `python_run`.
+
 Agent CLIs that Nanite launches (Claude Code, Codex and the like) run as
 your user. Their own permission systems apply. A launched Claude is allowed
 the tools of Nanite's own MCP server (`--allowedTools=mcp__nanite__*`) and no
@@ -176,12 +187,24 @@ transcripts, agent profiles, plugin settings, and MCP server configurations.
 `nanite path` prints where it and Nanite's other state live (resolved from the
 XDG directories, or `NANITE_DB_PATH`); `--db` overrides it for `nanite serve`.
 
-Provider API keys and plugin configuration fields marked secret are stored in
-the OS keychain (macOS Keychain, Windows Credential Manager, or the Linux
-Secret Service), not in the database. When the keychain has no key for a
-provider, Nanite falls back to the conventional environment variable
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), which is how a container is
-configured.
+Plugin configuration fields marked secret are stored in the OS keychain
+(macOS Keychain, Windows Credential Manager, or the Linux Secret Service), not
+in the database.
+
+A provider API key is a *reference*, resolved when the provider is first used,
+never a value in the database or a config file. By default Nanite looks in the
+OS keychain; a provider can instead name another source with
+`nanite provider set-ref <id> <ref>` (`keychain://`, `helper://`, `file://`,
+`op://`). Save a key with `nanite provider set-key <id>`, which reads it from
+standard input so it never appears in a process list or shell history.
+`nanite provider status` shows, for each provider, whether a key resolves and
+from where, and never prints a key.
+
+The conventional environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+are **not** read unless you set `NANITE_PROVIDER_KEY_ENV=1`, which is how a
+container without a keychain is configured. With it on, the environment is
+consulted last and a provider running on it reports `env:<VARIABLE>` as its
+source. Resolved key values are scrubbed from Nanite's logs and error messages.
 
 MCP server `env` values and HTTP `headers` are stored in the database in
 plaintext. The API redacts them on read — key names stay visible, values are

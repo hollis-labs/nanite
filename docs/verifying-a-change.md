@@ -102,6 +102,16 @@ of one dial: the first changes what the runtime observes, the second changes how
 many chances it gets to observe it. A single `-race` run and twenty un-raced
 ones both leave the interesting window unexamined.
 
+## Running a real CLI agent while testing
+
+A test or experiment that starts a coding-agent CLI itself (for example
+`claude -p` to see how it treats a directory) inherits the user's Claude
+settings, including any plugin that reads or acknowledges the user's mail. Pass
+`--setting-sources project` so the child loads only the project settings. Nanite's
+own launches do not need this: `runtimeagent.Boot` plants an isolated boot dir
+and builds the child's environment explicitly. The opt-in live tests
+(`NANITE_SPIKE_CLAUDE=1`, `NANITE_LIVE_CLAUDE=1`) go through `Boot`.
+
 ## What this does not cover
 
 - **The UI build and the envelope generators.** `make build` and

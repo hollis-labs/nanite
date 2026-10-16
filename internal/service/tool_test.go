@@ -184,10 +184,8 @@ func TestSelectForAgent_ProgressiveDiscoverySeesGrantedBuiltinPastCap(t *testing
 	st := newKnownToolsTestStore(t)
 	ctx := context.Background()
 
-	// Deliberately NOT "dev_"-prefixed: SelectToolsAsProvider skips
-	// dev-category builtins entirely when developer_mode is off (the
-	// default here, no user_settings row), which would hide the tool for a
-	// reason unrelated to this regression.
+	// Deliberately NOT "dev_"-prefixed: this regression is about the
+	// selection cap, so the wanted builtin is an ordinary general tool.
 	const wantedBuiltin = "general_lookup"
 	const builtinFillerCount = toolclient.MaxSelectedTools + 5 // pushes wantedBuiltin itself past the cap
 	const mcpCount = ProgressiveDiscoveryThreshold + 5         // > threshold; also fully past the cap once builtins alone exceed it

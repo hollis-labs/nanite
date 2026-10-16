@@ -8,6 +8,8 @@ import (
 )
 
 // UserSettings holds global user-level configuration.
+// The user_settings.developer_mode column (migration 001) is deprecated: it is
+// left in the schema, no longer read or written, and has no field here.
 type UserSettings struct {
 	ProviderFallbackChain []string          `json:"provider_fallback_chain"`
 	DefaultAgent          string            `json:"default_agent"`
@@ -16,7 +18,6 @@ type UserSettings struct {
 	ToolCallDisplayMode   string            `json:"tool_call_display_mode"`
 	ToolStreamBehavior    string            `json:"tool_stream_behavior"`
 	ToolDrawerRetention   int               `json:"tool_drawer_retention"`
-	DeveloperMode         bool              `json:"developer_mode"`
 	RecoverMode           bool              `json:"recover_mode"`
 	ExtSettings           map[string]any    `json:"ext_settings,omitempty"`
 	ToolLoadPreferences   map[string]string `json:"tool_load_preferences,omitempty"`
@@ -114,7 +115,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	var utilProvider, utilModel, toolMode, settingsJSON string
 	var toolStreamBehavior string
 	var toolDrawerRetention int
-	var devMode, recoverMode bool
+	var recoverMode bool
 	var toolLoadPrefsJSON string
 	var taskBackend string
 	var embeddingProvider, embeddingModel, embeddingMode string
@@ -132,7 +133,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT provider_fallback_chain,
 		        default_agent, utility_provider, utility_model, tool_call_display_mode, settings,
-		        developer_mode, recover_mode, tool_stream_behavior, tool_drawer_retention,
+		        recover_mode, tool_stream_behavior, tool_drawer_retention,
 		        tool_load_preferences, task_backend,
 		        embedding_provider, embedding_model, embedding_mode,
 		        context_window_tokens, context_budget_pct,
@@ -147,7 +148,7 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		 FROM user_settings WHERE id = 1`,
 	).Scan(&chainJSON,
 		&agent, &utilProvider, &utilModel, &toolMode, &settingsJSON,
-		&devMode, &recoverMode, &toolStreamBehavior, &toolDrawerRetention,
+		&recoverMode, &toolStreamBehavior, &toolDrawerRetention,
 		&toolLoadPrefsJSON, &taskBackend,
 		&embeddingProvider, &embeddingModel, &embeddingMode,
 		&contextWindowTokens, &contextBudgetPct,
@@ -169,7 +170,6 @@ func (s *Store) GetUserSettings(ctx context.Context) (*UserSettings, error) {
 		ToolCallDisplayMode:            toolMode,
 		ToolStreamBehavior:             toolStreamBehavior,
 		ToolDrawerRetention:            toolDrawerRetention,
-		DeveloperMode:                  devMode,
 		RecoverMode:                    recoverMode,
 		TaskBackend:                    taskBackend,
 		EmbeddingProvider:              embeddingProvider,
@@ -329,7 +329,6 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 			utility_model = ?,
 			tool_call_display_mode = ?,
 			settings = ?,
-			developer_mode = ?,
 			recover_mode = ?,
 			tool_stream_behavior = ?,
 			tool_drawer_retention = ?,
@@ -361,7 +360,7 @@ func (s *Store) UpdateUserSettings(ctx context.Context, us *UserSettings) error 
 		 WHERE id = 1`,
 		string(chainJSON),
 		us.DefaultAgent, us.UtilityProvider, us.UtilityModel, us.ToolCallDisplayMode,
-		string(extJSON), us.DeveloperMode, us.RecoverMode,
+		string(extJSON), us.RecoverMode,
 		us.ToolStreamBehavior, us.ToolDrawerRetention, string(toolPrefsJSON),
 		taskBackend,
 		us.EmbeddingProvider, us.EmbeddingModel, embeddingMode,

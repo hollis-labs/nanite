@@ -443,17 +443,16 @@ func TestNaniteToolList_CrossServerSizeMeasurement(t *testing.T) {
 // without a positive test future code could quietly re-introduce it.
 //
 // The probe registers a non-nanite_*-prefixed tool (`dev_read`, the
-// canonical dev-mode shell tool) on the manager-fed inventory and asserts
+// canonical dev shell tool) on the manager-fed inventory and asserts
 // it appears in unfiltered tool_list output. Reach for any caller
-// to actually call dev_read is governed elsewhere (agent permissions +
-// dev-mode gate); the catalog primitive must surface it regardless.
+// to actually call dev_read is governed elsewhere (agent permissions); the catalog primitive must surface it regardless.
 func TestNaniteToolList_FullInventoryIncludesNonNanitePrefixed(t *testing.T) {
 	st := newSelfTools(t)
 	st.Inventory = &stubInventoryLookup{
 		tools: []llmtypes.ToolDefinition{
 			{
 				Name:        "dev_read",
-				Description: "Read a file from the workspace (dev-mode shell tool).",
+				Description: "Read a file from the workspace (dev shell tool).",
 			},
 			{
 				Name:        "web_fetch",

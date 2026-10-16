@@ -15,11 +15,12 @@ Reviewed tool grants for native views (operator credential required). A grant
 applies to one reviewed host settings revision; changing the settings means a
 new review. Every change needs --reason and is recorded with your credential.
 
+  tools                                         tool names a grant can name (underscored, e.g. dev_read)
   list <host-settings-id>                       authorities and their tools
   show <authority-id>
   create <host-settings-id> --reason R          review the host settings now in force
   revoke <authority-id> --reason R              end an authority (final)
-  grant <authority-id> <tool>... --reason R     grant available tools
+  grant <authority-id> <tool>... --reason R     grant available tools (see "tools"; dev.read is read as dev_read)
   ungrant <authority-id> <tool>... --reason R   remove grants`
 
 // parseAuthorityArgs separates positionals from --reason wherever it appears.
@@ -61,6 +62,11 @@ func cmdAuthority(args []string) {
 		}
 	}
 	switch args[0] {
+	case "tools":
+		if len(pos) != 0 {
+			fail("usage: nanite authority tools")
+		}
+		err = authCall(http.MethodGet, "/api/native-authority/tools", nil)
 	case "list":
 		if len(pos) != 1 {
 			fail("usage: nanite authority list <host-settings-id>")

@@ -53,14 +53,14 @@ func (s *AgentDefinitions) validateHostModel(ctx context.Context, h store.AgentH
 	}
 	if h.Settings.Runtime == "api" {
 		if s.Models == nil {
-			return ErrUnsupportedModel
+			return unsupportedModelCause(CauseModelAuthorizerMissing, "no model authorizer configured on this server")
 		}
 		model, err := s.Models.AuthorizeModel(ctx, DefinitionRefFromMesh(h.DefinitionRef), &ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model})
 		if err != nil {
 			return err
 		}
 		if model.Provider != h.Settings.Provider || model.Model != h.Settings.Model {
-			return ErrUnsupportedModel
+			return unsupportedModelCause(CauseModelSelectionMismatch, "authorized selection %s/%s differs from host settings %s/%s", model.Provider, model.Model, h.Settings.Provider, h.Settings.Model)
 		}
 	}
 	if h.Settings.Runtime == "cli" && (h.Settings.Provider == "" || h.Settings.Model == "") {

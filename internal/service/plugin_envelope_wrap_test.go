@@ -31,44 +31,10 @@ func TestBuildPluginEnvelopeWrap_OmitsEmptyRouting(t *testing.T) {
 	if _, ok := got["data"]; !ok {
 		t.Error("data missing from wrap")
 	}
-	for _, k := range []string{"target", "render_target", "render_target_blocked", "mode", "display_class", "dev_mode_only"} {
+	for _, k := range []string{"target", "render_target", "render_target_blocked", "mode", "display_class"} {
 		if _, ok := got[k]; ok {
 			t.Errorf("empty routing field %q should be omitted, got %v", k, got[k])
 		}
-	}
-}
-
-// TestBuildPluginEnvelopeWrap_EmitsDevModeOnly covers the wrap-level "DEV"
-// marker (CW-20260517-0008). Envelopes whose SSE emission is gated behind
-// developer mode set DevModeOnly so the FE renders a "DEV" badge —
-// operators recognize them as dev-mode telemetry rather than real alerts.
-// The flag rides at wrap level and is elided when false.
-//
-// Phase 0 item 12 (2026-08-18) removed the only production envelope that
-// exercised DevModeOnly (chat-loop-budget-soft-warning, a soft/telemetry-
-// only signal that never gated the loop). buildPluginEnvelopeWrap itself
-// takes the envelope type as a plain string and doesn't validate it
-// against the registry, so this test exercises the wrap-level DevModeOnly
-// code path directly with an arbitrary existing type name (report-card)
-// rather than asserting anything about a real dev-mode-gated envelope.
-func TestBuildPluginEnvelopeWrap_EmitsDevModeOnly(t *testing.T) {
-	payload := []byte(`{"title":"Status","metric":12}`)
-	wrap, err := buildPluginEnvelopeWrap("", "report-card", payload, EnvelopeRouting{
-		DisplayClass: EnvelopeDisplayClassAlert,
-		DevModeOnly:  true,
-	})
-	if err != nil {
-		t.Fatalf("buildPluginEnvelopeWrap: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(wrap, &got); err != nil {
-		t.Fatalf("unmarshal wrap: %v", err)
-	}
-	if got["dev_mode_only"] != true {
-		t.Errorf("dev_mode_only = %v, want true", got["dev_mode_only"])
-	}
-	if got["display_class"] != "alert" {
-		t.Errorf("display_class = %v, want alert", got["display_class"])
 	}
 }
 

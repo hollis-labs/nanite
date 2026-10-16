@@ -7,7 +7,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useArtifactUpload } from "@/hooks/useArtifactUpload";
 import { usePluginAction } from "@/hooks/usePluginAction";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
-import { useSettings } from "@/hooks/useSettings";
 import { useShellMode } from "@/hooks/useShellMode";
 import { useWorkSync } from "@/hooks/useWorkSync";
 import { api } from "@/lib/api";
@@ -20,7 +19,6 @@ import { useLayoutStore } from "@/stores/useLayoutStore";
 import { useShellStore } from "@/stores/useShellStore";
 import { useWorkStore } from "@/stores/useWorkStore";
 import { ComposerToolbar } from "./ComposerToolbar";
-import { StatusPill } from "./envelopes/primitives/StatusPill";
 import { FileMentionExtension, type FileResult } from "./extensions/FileMentionExtension";
 import { fileMentionSuggestion } from "./extensions/fileMentionSuggestion";
 import { type SlashCommand, SlashCommandExtension } from "./extensions/SlashCommandExtension";
@@ -535,9 +533,6 @@ export function ChatComposer({
 
   handleSendRef.current = handleSend;
 
-  const { data: settings } = useSettings();
-  const developerMode = settings?.developer_mode ?? false;
-
   const composerAboveSlots = usePluginSlots("composer-above");
   const composerBelowSlots = usePluginSlots("composer-below");
   const handlePluginAction = usePluginAction();
@@ -583,16 +578,6 @@ export function ChatComposer({
         onDrop={(e) => void handleDrop(e)}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-[2px] bg-brand opacity-85" />
-
-        {/* DEV mode indicator — floating top-right when developer_mode=true */}
-        {developerMode && (
-          <div className="pointer-events-none select-none absolute top-2 right-3 z-[2]">
-            <StatusPill tone="danger">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-danger animate-pulse shrink-0" />
-              DEV
-            </StatusPill>
-          </div>
-        )}
 
         {/* Shell info drawer — appears when user types ! */}
         {isShellInput && activeSessionId && (
@@ -689,9 +674,7 @@ export function ChatComposer({
         )}
 
         {/* Editor */}
-        <div
-          className={`bg-bg-elevated px-[14px] pt-[10px] pb-2 ${developerMode ? "pr-[88px]" : ""}`}
-        >
+        <div className="bg-bg-elevated px-[14px] pt-[10px] pb-2">
           <input
             ref={fileInputRef}
             type="file"

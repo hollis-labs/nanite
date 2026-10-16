@@ -42,8 +42,6 @@ func TestToolActorAdmissionRefusesBeforeBroker(t *testing.T) {
 				t.Fatal(err)
 			}
 			client := toolclient.New(nil, st, nil)
-			brokerCalls := 0
-			client.DeveloperModeFunc = func() bool { brokerCalls++; return true }
 			client.RegisterTools([]llmtypes.ToolDefinition{{Name: "private_probe", Description: "probe"}})
 			svc := NewToolService(client, nil, st)
 			if _, err := svc.SelectForAgent(ctx, "private", actor, "probe", "", 0); !errors.Is(err, store.ErrVerifiedActorRequired) {
@@ -57,9 +55,6 @@ func TestToolActorAdmissionRefusesBeforeBroker(t *testing.T) {
 			}
 			if tools, _ := client.HandleRequestToolsForAgent(ctx, actor, map[string]any{"tool_names": []any{"private_probe"}}); len(tools) != 0 {
 				t.Fatal("direct discovery exposed catalog exception")
-			}
-			if brokerCalls != 0 {
-				t.Fatalf("broker effects=%d", brokerCalls)
 			}
 		})
 	}

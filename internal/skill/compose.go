@@ -471,7 +471,7 @@ func loadDependencyDefinition(vendor VendorReader, rd DependencyAddress) (*Defin
 // terminal... bar a vanishingly rare race." That was flat wrong, not a
 // rare race: internal/subagent/service.go's Spawn, whenever trust
 // doesn't resolve to TrustTrusted AND the approval gate fires
-// (SubagentApprovalRequired && !DeveloperMode — the documented
+// (SubagentApprovalRequired — the documented
 // PRODUCTION DEFAULT, since SubagentApprovalRequired defaults to true —
 // or Mode == ModeInteractive), inserts the run as StatusRequested and
 // returns *before ever reaching* the ModeSync blocking-exec branch. This
@@ -600,7 +600,7 @@ var ErrForkNotConfigured = errors.New("skill: fork composition dependency not co
 // StatusRequested or StatusApproved instead of ever executing — i.e. the
 // spawn is gated on human approval under this deployment's trust/
 // approval policy (subagent.Service.Spawn's gate: trust isn't
-// TrustTrusted AND SubagentApprovalRequired && !DeveloperMode, or
+// TrustTrusted AND SubagentApprovalRequired, or
 // ModeInteractive). SubagentApprovalRequired defaults to true in
 // production, so this is a common, by-design outcome for any
 // non-trusted role — not a rare failure mode.

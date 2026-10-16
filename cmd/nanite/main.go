@@ -29,10 +29,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/learnings"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 
 	gosched "github.com/hollis-labs/libs/util/scheduler"
 	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
@@ -88,8 +90,23 @@ func loadServeRuntimeConfig(load serveRuntimeConfigLoader) (*config.RuntimeConfi
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, profile, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, chat, plugin, mcp, skill, profile, provider, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
+	}
+
+	args := os.Args[2:]
+	switch os.Args[1] {
+	case "plugin", "mcp", "skill", "profile", "agent", "auth", "authority":
+		// One -db for every offline/client subcommand; see dbflag.go.
+		cliDB, args = extractDBFlag(args)
+	}
+	switch os.Args[1] {
+	case "auth", "authority":
+		// -db finds the credentials; --url picks the server they are sent to.
+		if u, rest := extractURLFlag(args); u != "" {
+			_ = os.Setenv(brand.Env("API_URL"), u)
+			args = rest
+		}
 	}
 
 	switch os.Args[1] {
@@ -106,15 +123,17 @@ func main() {
 	case "chat":
 		cmdChat(os.Args[2:])
 	case "plugin":
-		cmdPlugin(os.Args[2:])
+		cmdPlugin(args)
 	case "mcp":
-		cmdMCP(os.Args[2:])
+		cmdMCP(args)
 	case "skill":
-		cmdSkill(os.Args[2:])
+		cmdSkill(args)
 	case "profile":
-		cmdProfile(os.Args[2:])
+		cmdProfile(args)
+	case "provider":
+		cmdProvider(args)
 	case "agent":
-		cmdAgent(os.Args[2:])
+		cmdAgent(args)
 	case "install":
 		cmdInstall(os.Args[2:])
 	case "message":
@@ -124,9 +143,9 @@ func main() {
 	case "path":
 		cmdPath(os.Args[2:])
 	case "auth":
-		cmdAuth(os.Args[2:])
+		cmdAuth(args)
 	case "authority":
-		cmdAuthority(os.Args[2:])
+		cmdAuthority(args)
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:
@@ -346,23 +365,27 @@ func cmdServeWithInitializers(
 	plugin.SetEnvelopeTypeRegistrar(chat.RegisterEnvelopeType)
 	plugin.SetEnvelopeTypeUnregistrar(chat.UnregisterEnvelopeType)
 
-	// B.11 strict envelope validation: cache developer_mode once at startup
-	// rather than querying the settings store on every FilterPluginEnvelopes
-	// call. Envelope filtering runs on every plugin command / event / MCP
-	// response, so a DB hit per envelope would be avoidable latency. Changes
-	// to developer_mode require a process restart to take effect in the
-	// envelope validator — acceptable because this is a developer-tooling
-	// knob, not a runtime-tunable behavior.
-	envelopeValidatorDevMode := false
-	if settings, err := s.GetUserSettings(envelopeCtx); err != nil {
-		slog.Warn("envelope validator dev mode: failed to read user settings at startup; defaulting to production-strict", "error", err)
-	} else {
-		envelopeValidatorDevMode = settings.DeveloperMode
+	// Plugin envelope validation is always strict: invalid envelopes are dropped.
+	// The permission engine's boot mode is explicit (env or config), never derived
+	// from another setting; yolo is logged as an audit line by the container.
+	bootPermissionMode := permissionlib.ModeDefault
+	var permConfigValue string
+	if cfg != nil {
+		permConfigValue = cfg.PermissionMode
 	}
-	plugin.SetEnvelopeValidatorDevModeFunc(func() bool { return envelopeValidatorDevMode })
+	if mode, source, permErr := service.ResolveBootPermissionMode(permConfigValue, os.Getenv(service.PermissionModeEnv)); permErr != nil {
+		slog.Warn("ignoring invalid permission mode; using default", "err", permErr)
+	} else {
+		bootPermissionMode = mode
+		if mode != permissionlib.ModeDefault {
+			slog.Info("permission mode set at boot", "mode", string(mode), "source", source)
+		}
+	}
 
 	// Set up provider registry (API keys, CLI adapters).
-	registry, providerCatalog := initProviders()
+	providerKeys := service.DefaultProviderKeys(s)
+	slogx.SetValueRedactor(providerkeys.Redactor().Redact)
+	registry, providerCatalog := initProviders(providerKeys)
 
 	slog.Info("app config loaded",
 		"cli_active_throttle_seconds", appCfg.Presence.CLIActiveThrottleSeconds,
@@ -497,6 +520,7 @@ func cmdServeWithInitializers(
 		HarnessProfiles:          harnessProfiles,
 		Store:                    s,
 		Providers:                registry,
+		ProviderKeys:             providerKeys,
 		MCP:                      mcpManager,
 		ToolClient:               tb,
 		Plugins:                  pluginHost,
@@ -510,7 +534,7 @@ func cmdServeWithInitializers(
 		MaxCLIProcesses:          maxCLIProcs,
 		CoordStore:               coord,
 		Worktrees:                wtMgr,
-		CLIDeveloperMode:         envelopeValidatorDevMode,
+		PermissionMode:           bootPermissionMode,
 		ProviderCatalog:          providerCatalog,
 		DisableEmbeddedTesseract: externalTesseract,
 		TesseractServerName:      tesseractServerName,
@@ -1049,39 +1073,45 @@ func cmdServeWithInitializers(
 // DevPTY constructor which sets SkipPermissions=true in the adapter itself —
 // CW-20260515-0003 dropped the legacy skipPermsAdapter wrapper that used to
 // append --dangerously-skip-permissions externally.
-func initProviders() (*provider.Registry, *providercatalog.Catalog) {
+func initProviders(keys *providerkeys.Manager) (*provider.Registry, *providercatalog.Catalog) {
 	registry := provider.NewRegistry()
 	catalog := providercatalog.New()
 
-	// The API provider table and its key resolution (keychain first, then
-	// environment) live in internal/service so the provider key endpoints
-	// can build the same adapters at runtime (CW-20260930-0101).
+	// The API provider table lives in internal/service so the provider key
+	// endpoints can build the same adapters at runtime (CW-20260930-0101).
+	// A provider's key is a reference (internal/providerkeys): it is checked
+	// here only to decide whether to register the provider, and the adapter
+	// fetches it again when a request first uses it. A provider with no usable
+	// key is not registered, and says why.
 	var registeredAPI, missingAPI []string
 	for _, spec := range service.APIProviderSpecs() {
-		key, source := service.ResolveAPIKey(spec.ProviderID, spec.EnvKey)
-		if key != "" {
-			registry.Register(spec.Name, spec.NewProvider(key))
+		st := keys.Status(context.Background(), spec.ProviderID)
+		if st.Usable {
+			registry.Register(spec.Name, spec.NewLazyProvider(keys.Func(spec.ProviderID)))
 			catalog.Add(providercatalog.Entry{
 				Name:        spec.Name,
 				DisplayName: spec.DisplayName,
 				RowID:       spec.ProviderID,
 			})
-			slog.Info("provider registered", "provider", spec.Name, "key_source", source)
+			slog.Info("provider registered", "provider", spec.Name, "key_source", st.Source)
 			registeredAPI = append(registeredAPI, spec.Name)
 		} else {
+			slog.Warn("provider not registered: no usable API key",
+				"provider", spec.Name, "code", st.Code, "ref", st.Ref, "guidance", st.Guidance)
 			missingAPI = append(missingAPI, spec.Name)
 		}
 	}
 
 	if len(missingAPI) > 0 && len(registeredAPI) == 0 {
-		slog.Warn("no API providers configured — chat will not work")
+		slog.Warn(fmt.Sprintf("no API providers configured — chat will not work; save a key with `%s provider set-key <provider-id>` (key on stdin); `%s provider status` shows why each provider is unusable",
+			brand.BinaryName, brand.BinaryName))
 	}
 
 	// CLI agents (claude / codex / opencode, and copilot / pi over ACP)
 	// spawn through internal/runtime/agent.Boot, which takes each runtime's
 	// adapter from the go-providers registry through go-agent-wrapper's
 	// launch.Select (CW-20260930-0113). There is no adapter list to build
-	// here; dev mode reaches Claude as ContainerConfig.CLIDeveloperMode.
+	// here; yolo permission mode selects Claude's developer variant at launch.
 	return registry, catalog
 }
 

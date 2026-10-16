@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"io"
 	"sync"
 
-	"github.com/hollis-labs/nanite/internal/secrets"
+	secrets "github.com/hollis-labs/libs/security/secrets"
+
+	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -19,11 +22,10 @@ import (
 type ProviderConfigService struct {
 	store ProviderStore
 
-	// Seams for TestConnection and SetAPIKey; tests replace them.
-	resolveKey   func(providerID, envKey string) (key, source string)
-	newVerifier  func(spec APIProviderSpec, key string) keyVerifier
-	setSecret    func(key, value string) error
-	deleteSecret func(key string) error
+	// keys resolves and writes provider keys by reference; newVerifier builds
+	// the throwaway adapter TestConnection checks a key on. Tests replace both.
+	keys        providerKeys
+	newVerifier func(spec APIProviderSpec, key string) keyVerifier
 
 	// keyMu serializes SetAPIKey and guards registry/catalog, the live
 	// provider runtime it swaps adapters in (SetProviderRuntime).
@@ -32,14 +34,26 @@ type ProviderConfigService struct {
 	catalog  providerCatalogWriter
 }
 
-func NewProviderConfigService(st ProviderStore) *ProviderConfigService {
-	return &ProviderConfigService{
-		store:        st,
-		resolveKey:   ResolveAPIKey,
-		newVerifier:  defaultKeyVerifier,
-		setSecret:    secrets.Set,
-		deleteSecret: secrets.DeleteChecked,
+// providerKeys is the part of *providerkeys.Manager the service uses.
+type providerKeys interface {
+	Resolve(ctx context.Context, providerID string) (secrets.Secret, providerkeys.Report, error)
+	Status(ctx context.Context, providerID string) providerkeys.Status
+	Func(providerID string) func(context.Context) (string, error)
+	SetKey(ctx context.Context, providerID string, r io.Reader) error
+	ClearKey(ctx context.Context, providerID string) error
+}
+
+// NewProviderConfigService returns the service. keys resolves provider keys;
+// nil builds the default manager over the OS keychain and st's key_ref
+// settings.
+func NewProviderConfigService(st ProviderStore, keys ...providerKeys) *ProviderConfigService {
+	s := &ProviderConfigService{store: st, newVerifier: defaultKeyVerifier}
+	if len(keys) > 0 && keys[0] != nil {
+		s.keys = keys[0]
+	} else {
+		s.keys = DefaultProviderKeys(st)
 	}
+	return s
 }
 
 // List returns every provider row.
@@ -55,6 +69,11 @@ func (s *ProviderConfigService) Get(ctx context.Context, id string) (*store.Prov
 // Update applies the non-nil fields of u to a provider row. An unknown id
 // is not an error; it updates nothing.
 func (s *ProviderConfigService) Update(ctx context.Context, id string, u store.ProviderUpdate) error {
+	if u.Settings != nil {
+		if err := providerkeys.ValidateSettings(*u.Settings); err != nil {
+			return err
+		}
+	}
 	return s.store.UpdateProvider(ctx, id, u)
 }
 

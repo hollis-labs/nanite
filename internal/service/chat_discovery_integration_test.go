@@ -71,7 +71,6 @@ func TestChatDiscovery_DescribeLoadAndExecute(t *testing.T) {
 				}
 			}
 			tc := toolclient.New(mgr, f.st, nil)
-			tc.DeveloperModeFunc = func() bool { return true }
 			f.svc.tools = discoveryInitialSurface{ToolService: NewToolService(tc, mgr, f.st), progressive: progressive}
 			events := f.run(t, "discovery-response")
 			readSucceeded := false

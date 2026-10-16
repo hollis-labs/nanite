@@ -70,8 +70,8 @@ func TestProviderCredentialUnavailable_SafeActionableHTTPError(t *testing.T) {
 			if code != http.StatusServiceUnavailable || body["code"] != "credential_store_unavailable" || body["environment_variable"] != "ANTHROPIC_API_KEY" || body["restart_required"] != true {
 				t.Fatalf("status=%d body=%v", code, body)
 			}
-			if strings.Contains(body["error"].(string), "private-key-must-not-escape") || !strings.Contains(body["error"].(string), "restart Nanite") {
-				t.Fatal("credential escaped or recovery guidance missing")
+			if strings.Contains(body["error"].(string), "private-key-must-not-escape") || !strings.Contains(body["error"].(string), "secret_unavailable") {
+				t.Fatalf("credential escaped or recovery guidance missing: %v", body["error"])
 			}
 			after, _ := a.Services.Providers.Get("anthropic")
 			if before != after {

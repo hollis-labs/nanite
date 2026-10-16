@@ -95,6 +95,7 @@ require (
 
 require (
 	github.com/hollis-labs/libs/plugin-mcp v0.2.0
+	github.com/hollis-labs/libs/security/secrets v0.1.0
 	github.com/hollis-labs/libs/ui-go v0.1.0
 	github.com/hollis-labs/libs/util v0.2.0
 	github.com/hollis-labs/libs/workflow v0.1.0

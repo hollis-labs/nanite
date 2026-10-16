@@ -109,9 +109,8 @@ export function ChatMessage({
   const handlePluginAction = usePluginAction();
 
   // F4 (CW-20260419-0029) — narration collapse-pill.
-  // dev-mode: default expanded; otherwise collapsed.
-  const developerMode = settings?.developer_mode ?? false;
-  const [narrationExpanded, setNarrationExpanded] = useState(developerMode);
+  // Narration starts collapsed.
+  const [narrationExpanded, setNarrationExpanded] = useState(false);
 
   // Parse structured message format (v=1) or fall through to legacy raw text.
   const { text: displayText, structured } = useMemo(

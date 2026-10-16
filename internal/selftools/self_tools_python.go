@@ -657,7 +657,7 @@ func (b *limitedSandboxBuffer) String() string {
 // naniteRunPythonToolDefinition returns the tool definition for
 // python_run. Reach for any caller (Chat, Planner, Worker, or a
 // custom agent profile) is governed by the agent profile's tool
-// permissions and the dev-mode gate, not by a hard-coded surface
+// permissions, not by a hard-coded surface
 // restriction in this definition.
 func naniteRunPythonToolDefinition() mcp.Tool {
 	return mcp.Tool{

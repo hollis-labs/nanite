@@ -37,18 +37,26 @@ func (f *fakeProfileResolver) GetOrDefault(name string) (*store.AgentProfile, er
 	return nil, nil
 }
 
+// stubKey adapts a plain lookup to the adapter's resolveKey seam: an empty
+// answer is a not-found error, as the real resolver reports.
+func stubKey(f func(string) string) func(context.Context, string) (string, error) {
+	return func(_ context.Context, id string) (string, error) {
+		if k := f(id); k != "" {
+			return k, nil
+		}
+		return "", errors.New("no key")
+	}
+}
+
 // newAdapterForTest builds an adapter with stubbed keychain seams so
 // tests don't touch the real OS keychain.
 func newAdapterForTest(profiles map[string]*store.AgentProfile, reg *provider.Registry, keys map[string]string) *recoveryCredentialsAdapter {
 	return &recoveryCredentialsAdapter{
 		agents:    &fakeProfileResolver{profiles: profiles},
 		providers: reg,
-		keyringLookup: func(k string) string {
-			return keys[k]
-		},
-		providerKeyName: func(provID string) string {
-			return "provider-api-key:" + provID
-		},
+		resolveKey: stubKey(func(provID string) string {
+			return keys["provider-api-key:"+provID]
+		}),
 	}
 }
 
@@ -123,12 +131,9 @@ func TestRefresh_ResolverError(t *testing.T) {
 	a := &recoveryCredentialsAdapter{
 		agents:    &fakeProfileResolver{err: errors.New("db unavailable")},
 		providers: provider.NewRegistry(),
-		keyringLookup: func(string) string {
+		resolveKey: stubKey(func(string) string {
 			return "x"
-		},
-		providerKeyName: func(string) string {
-			return "x"
-		},
+		}),
 	}
 
 	err := a.Refresh(context.Background(), "any")
@@ -232,8 +237,8 @@ func TestRefresh_KeychainMiss(t *testing.T) {
 	if err == nil {
 		t.Fatal("Refresh: expected error for empty keychain, got nil")
 	}
-	if !strings.Contains(err.Error(), "keychain has no key") {
-		t.Errorf("Refresh: expected keychain-miss message, got: %v", err)
+	if !strings.Contains(err.Error(), "no key for provider") {
+		t.Errorf("Refresh: expected no-key message, got: %v", err)
 	}
 }
 
@@ -266,10 +271,9 @@ func TestRefresh_RegistryNotWired(t *testing.T) {
 		"chat": {ID: "chat-1", Name: "chat", Slug: "chat", DefaultProvider: "anthropic"},
 	}
 	a := &recoveryCredentialsAdapter{
-		agents:          &fakeProfileResolver{profiles: profiles},
-		providers:       nil,
-		keyringLookup:   func(string) string { return "sk-x" },
-		providerKeyName: func(string) string { return "x" },
+		agents:     &fakeProfileResolver{profiles: profiles},
+		providers:  nil,
+		resolveKey: stubKey(func(string) string { return "sk-x" }),
 	}
 
 	err := a.Refresh(context.Background(), "chat")
@@ -293,11 +297,10 @@ func TestRefresh_RespectsCanceledContext(t *testing.T) {
 			},
 		},
 		providers: provider.NewRegistry(),
-		keyringLookup: func(string) string {
+		resolveKey: stubKey(func(string) string {
 			keyringCalls++
 			return "sk-x"
-		},
-		providerKeyName: func(s string) string { return "k:" + s },
+		}),
 	}
 	// Wrap the resolver to count calls — fakeProfileResolver doesn't
 	// expose that but the public Refresh path is the surface we care
@@ -334,9 +337,8 @@ func TestRefresh_RespectsTimeoutContext(t *testing.T) {
 				"chat": {DefaultProvider: "anthropic"},
 			},
 		},
-		providers:       provider.NewRegistry(),
-		keyringLookup:   func(string) string { return "sk-x" },
-		providerKeyName: func(s string) string { return "k:" + s },
+		providers:  provider.NewRegistry(),
+		resolveKey: stubKey(func(string) string { return "sk-x" }),
 	}
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
@@ -367,10 +369,9 @@ func TestRefresh_NilReceiver(t *testing.T) {
 // resolver; surface clean error.
 func TestRefresh_NilAgentsResolver(t *testing.T) {
 	a := &recoveryCredentialsAdapter{
-		agents:          nil,
-		providers:       provider.NewRegistry(),
-		keyringLookup:   func(string) string { return "" },
-		providerKeyName: func(string) string { return "" },
+		agents:     nil,
+		providers:  provider.NewRegistry(),
+		resolveKey: stubKey(func(string) string { return "" }),
 	}
 	err := a.Refresh(context.Background(), "x")
 	if err == nil {

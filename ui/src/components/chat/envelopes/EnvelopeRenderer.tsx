@@ -17,7 +17,6 @@ import type { Envelope } from "@/lib/types";
 import { ApprovalCard } from "./ApprovalCard";
 import { PluginLoadErrorCard } from "./PluginLoadErrorCard";
 import { ProposalCard } from "./ProposalCard";
-import { DevModeEnvelopeWrapper } from "./primitives/DevBadge";
 import { EnvelopeBody, EnvelopeHeader, Envelope as EnvelopeShell } from "./primitives/Envelope";
 import { RecoveryCancelButton } from "./RecoveryCancelButton";
 
@@ -70,20 +69,10 @@ interface EnvelopeRendererProps {
 
 /**
  * EnvelopeRenderer routes an envelope to its component / legacy / fallback
- * render path. When the envelope carries the wrap-level `dev_mode_only`
- * marker (CW-20260517-0008) the rendered output is wrapped in
- * DevModeEnvelopeWrapper so a "DEV" badge floats over the card regardless of
- * which path it took.
+ * render path.
  */
 export function EnvelopeRenderer(props: EnvelopeRendererProps) {
-  const content = renderEnvelopeContent(props);
-  if (content == null) {
-    return content;
-  }
-  if (props.envelope.dev_mode_only) {
-    return <DevModeEnvelopeWrapper>{content}</DevModeEnvelopeWrapper>;
-  }
-  return content;
+  return renderEnvelopeContent(props);
 }
 
 function renderEnvelopeContent({

@@ -99,17 +99,30 @@ func (l *LocalAuthority) CreateAuthority(ctx context.Context, grantedBy, hostSet
 	if !host.Enabled {
 		return out, errors.New("host settings are disabled")
 	}
-	rc, err := newReceipt(grantedBy, host.Revision, host.DefinitionRef.Digest, reason)
-	if err != nil {
-		return out, err
-	}
-	out = NativeAuthority{ID: uuid.NewString(), HostSettingsID: host.ID, HostSettingsRevision: host.Revision,
-		DefinitionID: host.DefinitionRef.ID, DefinitionRevision: host.DefinitionRef.Revision, SemanticDigest: host.DefinitionRef.Digest, Enabled: true}
 	tx, err := l.s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return NativeAuthority{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	created, err := createAuthorityTx(ctx, tx, host, grantedBy, reason)
+	if err != nil {
+		return NativeAuthority{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return NativeAuthority{}, err
+	}
+	return l.GetAuthority(ctx, created.ID)
+}
+
+// createAuthorityTx records the review inside the caller's transaction; the
+// caller commits. host must be the settings now in force.
+func createAuthorityTx(ctx context.Context, tx *sql.Tx, host AgentHostSettings, grantedBy, reason string) (NativeAuthority, error) {
+	rc, err := newReceipt(grantedBy, host.Revision, host.DefinitionRef.Digest, reason)
+	if err != nil {
+		return NativeAuthority{}, err
+	}
+	out := NativeAuthority{ID: uuid.NewString(), HostSettingsID: host.ID, HostSettingsRevision: host.Revision,
+		DefinitionID: host.DefinitionRef.ID, DefinitionRevision: host.DefinitionRef.Revision, SemanticDigest: host.DefinitionRef.Digest, Enabled: true}
 	// The revision is read inside the transaction's view of the write so a
 	// settings update between the read above and this insert is not blessed.
 	var current string
@@ -126,10 +139,7 @@ func (l *LocalAuthority) CreateAuthority(ctx context.Context, grantedBy, hostSet
 	if err = auditNative(ctx, tx, out.ID, "authority_created", "", grantedBy, reason); err != nil {
 		return NativeAuthority{}, err
 	}
-	if err = tx.Commit(); err != nil {
-		return NativeAuthority{}, err
-	}
-	return l.GetAuthority(ctx, out.ID)
+	return out, nil
 }
 
 // RevokeAuthority ends an authority permanently. Its grants stay as history but
@@ -165,19 +175,35 @@ func (l *LocalAuthority) GrantTool(ctx context.Context, grantedBy, authorityID, 
 	if !a.Enabled || a.RevokedAt != "" {
 		return ErrNativeAuthorityRevoked
 	}
-	rc, err := newReceipt(grantedBy, a.HostSettingsRevision, a.SemanticDigest, reason)
-	if err != nil {
-		return err
-	}
 	tx, err := l.s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = grantToolTx(ctx, tx, a, grantedBy, authorityID, toolName, reason); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// grantToolTx grants one available tool inside the caller's transaction; the
+// caller commits. A repeat grant is a no-op that keeps the original receipt.
+func grantToolTx(ctx context.Context, tx *sql.Tx, a NativeAuthority, grantedBy, authorityID, toolName, reason string) error {
+	rc, err := newReceipt(grantedBy, a.HostSettingsRevision, a.SemanticDigest, reason)
+	if err != nil {
+		return err
+	}
 	var toolID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, toolName).Scan(&toolID); err != nil {
+	err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, toolName).Scan(&toolID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Tool names use underscores (dev_read); accept the dotted spelling.
+		if alias := strings.ReplaceAll(toolName, ".", "_"); alias != toolName {
+			err = tx.QueryRowContext(ctx, `SELECT id FROM known_tools WHERE name=? AND status='available'`, alias).Scan(&toolID)
+		}
+	}
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: %q", ErrNativeToolNotGrantable, toolName)
+			return fmt.Errorf("%w: %q; list grantable names with `nanite authority tools`", ErrNativeToolNotGrantable, toolName)
 		}
 		return err
 	}
@@ -191,7 +217,7 @@ func (l *LocalAuthority) GrantTool(ctx context.Context, grantedBy, authorityID, 
 	if err = auditNative(ctx, tx, authorityID, "tool_granted", toolID, grantedBy, reason); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // RevokeTool removes one grant; revoking a tool that is not granted is a no-op.
@@ -205,7 +231,18 @@ func (l *LocalAuthority) RevokeTool(ctx context.Context, grantedBy, authorityID,
 	}
 	defer func() { _ = tx.Rollback() }()
 	var toolID string
-	if err = tx.QueryRowContext(ctx, `SELECT t.tool_id FROM native_authority_tools t JOIN known_tools k ON k.id=t.tool_id WHERE t.authority_id=? AND k.name=?`, authorityID, toolName).Scan(&toolID); err != nil {
+	granted := func(name string) error {
+		return tx.QueryRowContext(ctx, `SELECT t.tool_id FROM native_authority_tools t JOIN known_tools k ON k.id=t.tool_id WHERE t.authority_id=? AND k.name=?`, authorityID, name).Scan(&toolID)
+	}
+	err = granted(toolName)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Same dotted-alias rule as GrantTool, whether or not the tool is
+		// still available.
+		if alias := strings.ReplaceAll(toolName, ".", "_"); alias != toolName {
+			err = granted(alias)
+		}
+	}
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -316,6 +353,27 @@ func (l *LocalAuthority) ListAuthorities(ctx context.Context, hostSettingsID str
 			return nil, gerr
 		}
 		out = append(out, a)
+	}
+	return out, nil
+}
+
+// GrantableTool is one tool name a grant can name.
+type GrantableTool struct {
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Description string `json:"description,omitempty"`
+}
+
+// GrantableTools lists the available known tools, by the exact names GrantTool
+// accepts.
+func (l *LocalAuthority) GrantableTools(ctx context.Context) ([]GrantableTool, error) {
+	known, err := l.s.ListAvailableKnownTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GrantableTool, 0, len(known))
+	for _, k := range known {
+		out = append(out, GrantableTool{Name: k.Name, Source: k.Source, Description: k.Description})
 	}
 	return out, nil
 }

@@ -44,6 +44,7 @@ func TestQualificationExactSourceAndCatalogSurviveSQLiteRestart(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "exact-material.db")
+	seedMigratedDB(t, path)
 	productStore, err := nanitestore.New(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)

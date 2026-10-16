@@ -22,6 +22,7 @@ import (
 
 func TestApprovalWaitMaterializationAuthorizationAndRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "approval-wait.db")
+	seedMigratedDB(t, path)
 	productStore, err := nanitestore.New(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +159,7 @@ func (e *recordingWorkflowActivationEngine) Resume(_ context.Context, runID stri
 
 func TestTimerActivationProductionRouteIsRestartDurableAndIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "timer-activation.db")
+	seedMigratedDB(t, path)
 	productStore, err := nanitestore.New(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -339,6 +341,7 @@ func TestNaniteResponderAuthorizerPolicy(t *testing.T) {
 
 func TestRetryCoordinatorProductionActivationRouteSurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "retry-activation.db")
+	seedMigratedDB(t, path)
 	productStore, err := nanitestore.New(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)

@@ -174,6 +174,9 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 			// still owns canonical finalization from the committed row and intent.
 			ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Termination: end, RetainedTerminal: true}
 		}
+		// The run is over: end its execution capability before the stream
+		// closes, so a consumer that sees the close never observes it live.
+		endCapabilityBeforeClose(ctx, assistantMsgID)
 		close(ch)
 		// CW-20260418-0100: hold the stream's ring buffer for a grace
 		// window after completion so an SSE client that was disconnected

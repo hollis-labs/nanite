@@ -133,6 +133,38 @@ func copyNarrowing(n ToolNarrowing) ToolNarrowing {
 
 type executionCapabilityKey struct{}
 
+// endCapabilityBeforeCloseKey carries the hook a chat launch registers so its
+// generation can end the capability that launch issued before it closes the
+// stream.
+type endCapabilityBeforeCloseKey struct{}
+
+// endBeforeClose is that hook. turnID is the assistant message the launch
+// started: ctx values are inherited by anything derived from the turn's ctx (a
+// delegated worker, for one, runs under context.WithCancel of its caller's
+// ctx), so the hook only fires for the generation that owns it.
+type endBeforeClose struct {
+	turnID string
+	end    func()
+}
+
+// withEndBeforeClose returns ctx carrying end for the generation of turnID.
+func withEndBeforeClose(ctx context.Context, turnID string, end func()) context.Context {
+	return context.WithValue(ctx, endCapabilityBeforeCloseKey{}, endBeforeClose{turnID: turnID, end: end})
+}
+
+// endCapabilityBeforeClose runs the end function registered for turnID on ctx,
+// if any. A consumer that sees the stream close can then rely on the run's
+// capability already being gone; ending it only after the generation goroutine
+// returns left a window (past the runtime-turn drain) in which it was still
+// live. A generation for a different turn (a child that inherited ctx) leaves
+// the parent's capability alone. Ending is idempotent, so the launch's own
+// deferred end stays as the backstop.
+func endCapabilityBeforeClose(ctx context.Context, turnID string) {
+	if hook, ok := ctx.Value(endCapabilityBeforeCloseKey{}).(endBeforeClose); ok && hook.end != nil && hook.turnID == turnID {
+		hook.end()
+	}
+}
+
 func withExecutionCapability(ctx context.Context, c *executionCapability) context.Context {
 	return context.WithValue(ctx, executionCapabilityKey{}, c)
 }

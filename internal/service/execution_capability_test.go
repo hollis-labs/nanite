@@ -294,3 +294,47 @@ func TestCapabilityVerifierThroughTheRealForkAndHistoryPaths(t *testing.T) {
 		t.Fatal("ended child read history")
 	}
 }
+
+// A generation ends the capability its launch issued before it closes its
+// stream, so a consumer that sees the close never observes the capability live.
+// The hook is scoped to the launch's own turn: a capability that merely rides
+// the same ctx is left alone, and so is the parent's when a child generation
+// (a delegated worker runs under context.WithCancel of its caller's ctx)
+// inherits the hook through ctx values.
+func TestEndCapabilityBeforeCloseEndsOnlyTheOwningTurnsCapability(t *testing.T) {
+	reg := newCapabilityRegistry()
+	issued, err := reg.issueRoot("view-1", "turn-1", "run-1", "hs-1", "rev-1", "operator", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := reg.issueRoot("view-2", "turn-2", "run-2", "hs-1", "rev-1", "operator", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withExecutionCapability(t.Context(), other)
+
+	endCapabilityBeforeClose(ctx, "turn-1") // no hook registered: nothing ends
+	if !issued.isLive() || !other.isLive() {
+		t.Fatal("ending without a registered hook must not end any capability")
+	}
+
+	parentCtx := withEndBeforeClose(ctx, "turn-1", issued.end)
+
+	// A child generation derived from the parent's ctx inherits the hook, but
+	// runs a different turn: it must not end the parent's capability.
+	childCtx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+	endCapabilityBeforeClose(childCtx, "child-msg")
+	if !issued.isLive() {
+		t.Fatal("a child generation that inherited the hook ended the parent's capability")
+	}
+
+	endCapabilityBeforeClose(parentCtx, "turn-1")
+	if issued.isLive() {
+		t.Fatal("the owning turn's capability must be ended before its stream closes")
+	}
+	if !other.isLive() {
+		t.Fatal("a capability that only rides ctx must not be ended by the launch's hook")
+	}
+	endCapabilityBeforeClose(parentCtx, "turn-1") // idempotent with the launch's deferred end
+}

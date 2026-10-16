@@ -15,9 +15,9 @@ func TestInspectPlacedConfinesFilesAndRecordsMetadata(t *testing.T) {
 	}
 	// InspectPlaced reports the canonical path; t.TempDir() is not canonical on
 	// macOS (/var -> /private/var).
-	want, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		t.Fatal(err)
+	want, evalErr := filepath.EvalSymlinks(path)
+	if evalErr != nil {
+		t.Fatal(evalErr)
 	}
 	for _, input := range []string{"report.txt", path} {
 		got, err := InspectPlaced(root, input, "report.txt", "")

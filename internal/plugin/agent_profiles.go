@@ -76,7 +76,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/hollis-labs/nanite/internal/store"
 	"gopkg.in/yaml.v3"
@@ -270,7 +269,7 @@ func validateOptionalClass(class string) error {
 // than re-deriving that sweep here. Roles are only removed once zero
 // agent_profiles rows still reference them -- CountAgentsByRoleID guards
 // the case where a plugin-owned role was reused (read-only, see
-// resolveOrCreatePluginRole above) by an agent this plugin doesn't own.
+// plugin profile registration) by an agent this plugin doesn't own.
 func (h *Host) SweepPluginAgentProfiles(pluginID string) {
 	// Historical profile graphs are retained for explicit audited retirement.
 }
@@ -377,88 +376,4 @@ func applyPluginAgentProfile(ctx context.Context, host *Host, st *store.Store, p
 	}
 	// Old plugin profile documents must not create role/consumer rows or grants.
 	return store.ErrImmutableAgentProfile
-}
-
-// resolveOrCreatePluginRole resolves doc's role by slug. Three cases:
-//  1. No existing row -- create one, tagged PluginID=pluginID.
-//  2. An existing row already owned by this plugin -- re-sync its content
-//     (name/system_prompt/class) from the current file, matching this
-//     file's "construct/upsert" re-load semantics (see package doc comment).
-//  3. An existing row owned by someone else (empty PluginID = operator-
-//     created, or a different plugin's) -- reuse it READ-ONLY: bind the
-//     agent to it without mutating its content or claiming ownership, so
-//     plugin.Host.UnloadPlugin's sweep never deletes a role this plugin
-//     didn't actually create.
-func resolveOrCreatePluginRole(st *store.Store, pluginID string, r PluginAgentProfileRole) (*store.Role, error) {
-	existing, err := st.GetRoleBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, r.Slug)
-	if err != nil {
-		return nil, fmt.Errorf("look up role by slug: %w", err)
-	}
-	if existing != nil {
-		if existing.PluginID != pluginID {
-			return existing, nil
-		}
-		existing.Name = r.Name
-		existing.SystemPrompt = r.SystemPrompt
-		existing.DefaultClass = r.Class
-		if err := st.UpdateRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, existing); err != nil {
-			return nil, fmt.Errorf("update role: %w", err)
-		}
-		return existing, nil
-	}
-	role := &store.Role{
-		Slug:         r.Slug,
-		Name:         r.Name,
-		SystemPrompt: r.SystemPrompt,
-		DefaultClass: r.Class,
-		PluginID:     pluginID,
-	}
-	if err := st.CreateRole(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, role); err != nil {
-		return nil, fmt.Errorf("create role: %w", err)
-	}
-	return role, nil
-}
-
-// resolveOrCreateConsumer resolves (or creates) a consumers row by slug.
-// Consumer rows are deliberately NOT plugin.Host.UnloadPlugin-swept: per
-// architecture/01-agent-construction.md, a consumer is a lightweight,
-// durable ownership tag (the existing Loom seed row, migration 112, is
-// never torn down either) -- reused across plugin reinstalls/reloads
-// rather than churned, and safe to leave behind after an unload (an unused
-// consumer row is inert; DeleteConsumer is still available via the
-// existing consumers API for an operator who wants to clean it up).
-func resolveOrCreateConsumer(st *store.Store, slug string) (*store.Consumer, error) {
-	existing, err := st.GetConsumerBySlug(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, slug)
-	if err != nil {
-		return nil, fmt.Errorf("look up consumer by slug: %w", err)
-	}
-	if existing != nil {
-		return existing, nil
-	}
-	c := &store.Consumer{
-		Slug: slug,
-		Name: humanizeSlug(slug),
-	}
-	if err := st.CreateConsumer(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, c); err != nil {
-		return nil, fmt.Errorf("create consumer: %w", err)
-	}
-	return c, nil
-}
-
-// humanizeSlug turns a hyphen/underscore-separated slug into a Title Case
-// display name (e.g. "giphy-widgets" -> "Giphy Widgets") for a consumer row
-// auto-created from a plugin id, which has no separate human-readable name
-// to draw from.
-func humanizeSlug(slug string) string {
-	parts := strings.FieldsFunc(slug, func(r rune) bool { return r == '-' || r == '_' })
-	if len(parts) == 0 {
-		return slug
-	}
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, " ")
 }

@@ -432,9 +432,3 @@ func composeSystemPrompt(globalCfg *globalConfig, rolesDir string, roles []strin
 
 	return strings.Join(parts, "\n\n")
 }
-
-// dirExists returns true if path is an existing directory.
-func dirExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.IsDir()
-}

@@ -242,6 +242,7 @@ func (m *Manager) Start(ctx context.Context, init InitParams) (*Transport, error
 			}
 		},
 		OnExit: func(info pluginhost.ExitInfo, restarting bool) {
+			m.drainExitedConnection()
 			m.endGrantLease(true)
 			if m.cfg.OnDisconnect != nil {
 				m.cfg.OnDisconnect()
@@ -419,6 +420,27 @@ func (m *Manager) acquireDispatch(ctx context.Context) (*pluginhost.Conn, contex
 	}
 	return conn, permit, release, nil
 }
+
+// exitDrainTimeout bounds how long a process exit waits for the connection to
+// read the frames the child wrote before it died.
+const exitDrainTimeout = 2 * time.Second
+
+// drainExitedConnection waits for the connection to finish reading what the
+// child wrote before it exited. Ending the lease cancels every in-flight call, so
+// without this the child's final response races the cancellation and is lost.
+func (m *Manager) drainExitedConnection() {
+	m.mu.Lock()
+	exited := m.connection
+	m.mu.Unlock()
+	if exited == nil {
+		return
+	}
+	select {
+	case <-exited.Done():
+	case <-time.After(exitDrainTimeout):
+	}
+}
+
 func (m *Manager) endGrantLease(crashed bool) {
 	m.mu.Lock()
 	// Publish proven process death together with connection/lease removal.

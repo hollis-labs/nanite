@@ -226,8 +226,7 @@ Each turn's `execution_metrics` row records the profile name, the profile
 digest, and the effective values with the layer that supplied each (`profile_name`,
 `profile_digest`, `effective_limits_json`), so a result can be attributed to the
 exact profile content it ran under. They are returned by
-`GET /api/sessions/{id}/metrics` and, in developer mode, attached to the turn's
-inspector snapshot. Rows written before the columns existed, and utility calls,
+`GET /api/sessions/{id}/metrics` and attached to the turn's inspector snapshot. Rows written before the columns existed, and utility calls,
 carry none.
 
 `GET /api/sessions/{id}/harness-profile` resolves what the session's next turn

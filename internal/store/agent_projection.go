@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -84,7 +85,7 @@ func (s *Store) projectAgentHost(ctx context.Context, h AgentHostSettings) (*Age
 	if !h.Enabled {
 		status = "disabled"
 	}
-	return &AgentProfile{ID: h.ID, Name: h.Title, Slug: h.Slug, Revision: h.Revision, Source: h.Source, PluginID: h.PluginID, Status: status, SystemPrompt: strings.Join(parts, "\n\n"), Class: p.Class, DefinitionPolicy: &p, DefinitionReflex: bundle, NativeHost: &h.Settings, RuntimeKind: h.Settings.Runtime, Protocol: h.Settings.Protocol, Transport: h.Settings.Transport, DefaultProvider: h.Settings.Provider, DefaultModel: h.Settings.Model, Tools: "[]", Settings: "{}", Constraints: "{}", Tags: "[]", Directories: "[]", MCPServers: "[]"}, nil
+	return &AgentProfile{ID: h.ID, Name: h.Title, Slug: h.Slug, Revision: h.Revision, Source: h.Source, PluginID: h.PluginID, Status: status, SystemPrompt: strings.Join(parts, "\n\n"), Class: p.Class, DefinitionPolicy: &p, DefinitionReflex: bundle, NativeHost: &h.Settings, RuntimeKind: h.Settings.Runtime, Protocol: h.Settings.Protocol, Transport: h.Settings.Transport, DefaultProvider: h.Settings.Provider, DefaultModel: h.Settings.Model, Tools: "[]", Settings: "{}", Constraints: "{}", Tags: "[]", Directories: directoriesJSON(h.Settings.Directories), MCPServers: "[]", HostSettingsID: h.ID}, nil
 }
 
 var ErrImmutableAgentProfile = errors.New("mutable agent profiles are retired; author a pinned definition and configure host settings")
@@ -113,4 +114,17 @@ func (s *Store) GetAgentForActor(ctx context.Context, actorURI string) (*AgentPr
 	}
 	p.ID = actorURI
 	return p, nil
+}
+
+// directoriesJSON renders host-granted directories as the JSON array the
+// profile's Directories field carries.
+func directoriesJSON(dirs []string) string {
+	if len(dirs) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(dirs)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }

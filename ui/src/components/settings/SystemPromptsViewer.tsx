@@ -2,7 +2,6 @@
  * SystemPromptsViewer — CW-20260421-0005
  *
  * Read-only viewer for all LLM-facing system prompts in the Nanite harness.
- * Gated behind developer_mode — standard users never see this panel.
  *
  * V1: static catalog of code-owned prompts with file:line references.
  * No editing. Variable interpolation / composition pipeline preserved as-is.

@@ -1,10 +1,6 @@
 package toolclient
 
-import (
-	"context"
-
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-)
+import "context"
 
 // NativeToolGate decides, call by call, whether a turn of a Nanite-hosted native
 // view may run a tool. It stands in for the fabric-actor grant check in
@@ -27,20 +23,4 @@ func WithNativeToolGate(ctx context.Context, g NativeToolGate) context.Context {
 func nativeToolGateFrom(ctx context.Context) (NativeToolGate, bool) {
 	g, ok := ctx.Value(nativeToolGateKey{}).(NativeToolGate)
 	return g, ok && g != nil
-}
-
-// OmitUnavailableDevTools drops dev_* tools when developer mode is off, the
-// same selection-time filter ordinary agents get, so a native turn is not
-// offered a tool that CallTool would refuse.
-func (tb *ToolClient) OmitUnavailableDevTools(tools []llmtypes.ToolDefinition) []llmtypes.ToolDefinition {
-	if tb.developerModeEnabled() {
-		return tools
-	}
-	out := make([]llmtypes.ToolDefinition, 0, len(tools))
-	for _, t := range tools {
-		if !isDevTool(t.Name) {
-			out = append(out, t)
-		}
-	}
-	return out
 }

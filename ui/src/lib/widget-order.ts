@@ -1,4 +1,4 @@
-import { DEFAULT_WIDGET_ORDER, DEVELOPER_ONLY_WIDGETS } from '@/lib/builtin-widgets'
+import { DEFAULT_WIDGET_ORDER } from '@/lib/builtin-widgets'
 import type { PluginUIComponent } from '@/lib/types'
 
 /**
@@ -49,14 +49,12 @@ export function buildWidgetOrder(
   return result
 }
 
-/** Filter widget IDs based on developer_mode and per-widget visibility settings. */
+/** Filter widget IDs by per-widget visibility settings. */
 export function filterVisibleWidgets(
   ids: string[],
-  developerMode: boolean,
   visibility?: Record<string, boolean>,
 ): string[] {
   return ids.filter((id) => {
-    if (DEVELOPER_ONLY_WIDGETS.has(id) && !developerMode) return false
     if (!visibility) return true
     return visibility[id] !== false
   })

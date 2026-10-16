@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -437,5 +438,37 @@ func TestGetSession_RootSessionID_ThroughGrandchild(t *testing.T) {
 		if got != tc.wantRoot {
 			t.Errorf("session %s: root = %q, want %q", tc.id, got, tc.wantRoot)
 		}
+	}
+}
+
+// The developer_mode column is deprecated: it stays in the schema (no
+// destructive migration) but is neither read into UserSettings nor written back.
+func TestUserSettingsIgnoresDeprecatedDeveloperModeColumn(t *testing.T) {
+	s := newSeededStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `UPDATE user_settings SET developer_mode = 1 WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	us, err := s.GetUserSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(us)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "developer_mode") {
+		t.Fatalf("UserSettings still carries developer_mode: %s", raw)
+	}
+	us.DefaultAgent = "after-update"
+	if err := s.UpdateUserSettings(ctx, us); err != nil {
+		t.Fatal(err)
+	}
+	var col int
+	if err := s.DB.QueryRowContext(ctx, `SELECT developer_mode FROM user_settings WHERE id = 1`).Scan(&col); err != nil {
+		t.Fatal(err)
+	}
+	if col != 1 {
+		t.Fatalf("UpdateUserSettings rewrote the deprecated column: %d", col)
 	}
 }

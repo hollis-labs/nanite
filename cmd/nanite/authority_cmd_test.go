@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -30,5 +31,11 @@ func TestParseAuthorityArgs(t *testing.T) {
 				t.Fatalf("got %v %q, want %v %q", pos, reason, tc.pos, tc.reason)
 			}
 		})
+	}
+}
+
+func TestAuthorityUsageListsTools(t *testing.T) {
+	if !strings.Contains(authorityUsage, "tools ") {
+		t.Fatal("usage does not list the tools command")
 	}
 }

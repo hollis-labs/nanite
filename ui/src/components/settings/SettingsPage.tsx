@@ -26,7 +26,6 @@ import {
   updateSettingsHash,
 } from "@/hooks/useHashRoute";
 import { usePluginSlots } from "@/hooks/usePluginSlots";
-import { useSettings } from "@/hooks/useSettings";
 import { resolveIcon } from "@/lib/icons";
 import { getSlotComponent } from "@/lib/plugin-slot-lookup";
 import { useNavigationStore } from "@/stores/useNavigationStore";
@@ -80,7 +79,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { id: "agents", label: "Agents", icon: Bot },
       { id: "durable-agents", label: "Durable Agents", icon: Boxes },
       { id: "skills", label: "Skills", icon: Sparkles },
-      // "System Prompts" is injected here when developer_mode=true (see SettingsPage)
+      // "System Prompts" is injected here (see SettingsPage)
       { id: "memory", label: "Memory", icon: Brain },
     ],
   },
@@ -105,14 +104,14 @@ const BASE_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** Nav item injected into the AI group when developer_mode=true. */
+/** Nav item injected into the AI group. */
 const SYSTEM_PROMPTS_NAV_ITEM: NavItem = {
   id: "system-prompts",
   label: "System Prompts",
   icon: FileCode2,
 };
 
-/** Nav item injected into the System group when developer_mode=true (I1). */
+/** Nav item injected into the System group (I1). */
 const INSPECTOR_NAV_ITEM: NavItem = {
   id: "inspector",
   label: "Inspector",
@@ -136,8 +135,6 @@ export default function SettingsPage() {
   );
   const [sectionKey, setSectionKey] = useState(0);
   const pluginTabs = usePluginSlots("settings-tab");
-  const { data: settings } = useSettings();
-  const developerMode = settings?.developer_mode ?? false;
 
   const pluginItems: NavItem[] = pluginTabs.map((entry) => ({
     id: entry.id,
@@ -145,10 +142,9 @@ export default function SettingsPage() {
     icon: resolveIcon(entry.icon),
   }));
 
-  // Inject "System Prompts" into the AI group and "Inspector" into System when developer_mode is on.
+  // Inject "System Prompts" into the AI group and "Inspector" into the System group.
   const navGroups: NavGroup[] = BASE_NAV_GROUPS.map((group) => {
     if (group.label === "AI") {
-      if (!developerMode) return group;
       // Insert before "Memory" (keep logical order: Providers, Agents, Skills, System Prompts, Memory)
       const memoryIdx = group.items.findIndex((i) => i.id === "memory");
       const items =
@@ -161,7 +157,7 @@ export default function SettingsPage() {
           : [...group.items, SYSTEM_PROMPTS_NAV_ITEM];
       return { ...group, items };
     }
-    if (group.label === "System" && developerMode) {
+    if (group.label === "System") {
       // Append Inspector after existing System items.
       return { ...group, items: [...group.items, INSPECTOR_NAV_ITEM] };
     }
@@ -214,7 +210,7 @@ export default function SettingsPage() {
       case "skills":
         return <SkillsBrowser />;
       case "system-prompts":
-        return developerMode ? <SystemPromptsViewer /> : <PreferencesPanel />;
+        return <SystemPromptsViewer />;
       case "tools":
         return <ToolDashboard />;
       case "plugins":
@@ -230,7 +226,7 @@ export default function SettingsPage() {
       case "observability":
         return <ObservabilityDashboard />;
       case "inspector":
-        return developerMode ? <InspectorPanel /> : <PreferencesPanel />;
+        return <InspectorPanel />;
       default: {
         const pluginEntry = pluginTabs.find((e) => e.id === activeSection);
         if (pluginEntry?.component) {

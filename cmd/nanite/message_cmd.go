@@ -72,12 +72,7 @@ func cmdMessage(args []string) {
 	// non-default database without wrapping every subcommand in its own
 	// flag set. Any other form falls through to the subcommand dispatcher.
 	// An unset --db resolves via go-apppaths (CW-20260517-0061).
-	dbFlag := ""
-	remaining := args
-	if len(args) >= 2 && args[0] == "--db" {
-		dbFlag = args[1]
-		remaining = args[2:]
-	}
+	dbFlag, remaining := extractLeadingDBFlag(args)
 	dbPath := resolveDBPathWith(dbFlag)
 	if len(remaining) < 1 {
 		fmt.Fprintf(os.Stderr, "usage: %s message [--db path] <send|inbox|thread|ack|resolve|catch-up|handoff>\n", brand.BinaryName)

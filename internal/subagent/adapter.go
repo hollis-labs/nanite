@@ -25,7 +25,7 @@ func (a SettingsAdapter) GetUserSettings(ctx context.Context) (*core.Settings, e
 	if err != nil || s == nil {
 		return nil, err
 	}
-	return &core.Settings{SubagentApprovalRequired: s.SubagentApprovalRequired, SubagentApprovalTimeoutSeconds: s.SubagentApprovalTimeoutSeconds, DeveloperMode: s.DeveloperMode}, nil
+	return &core.Settings{SubagentApprovalRequired: s.SubagentApprovalRequired, SubagentApprovalTimeoutSeconds: s.SubagentApprovalTimeoutSeconds}, nil
 }
 
 type ProfileReader interface {

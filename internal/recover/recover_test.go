@@ -98,7 +98,7 @@ func TestClassify_WrongCardType_UnknownEnvelopeType(t *testing.T) {
 func TestClassify_None_PermissionDenied(t *testing.T) {
 	cases := []string{
 		`permission denied: tool "shell_exec" not permitted for agent "chat-1"`,
-		`permission denied: tool "x" requires developer_mode to be enabled`,
+		`permission denied: tool "x" not permitted by policy`,
 		"unauthorized",
 		"forbidden",
 		"http 401: unauthorized",

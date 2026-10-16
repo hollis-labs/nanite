@@ -37,13 +37,11 @@ func newProviderCheckService(t *testing.T, key string, v *fakeVerifier) (*Provid
 	if err := st.SeedProviders(context.Background()); err != nil {
 		t.Fatalf("SeedProviders: %v", err)
 	}
-	svc := NewProviderConfigService(st)
-	svc.resolveKey = func(string, string) (string, string) {
-		if key == "" {
-			return "", ""
-		}
-		return key, APIKeySourceKeychain
+	fk := &fakeKeys{keychain: map[string]string{}, env: map[string]string{}}
+	if key != "" {
+		fk.keychain["anthropic-001"], fk.keychain["openai-001"] = key, key
 	}
+	svc := NewProviderConfigService(st, fk)
 	var gotKeys []string
 	svc.newVerifier = func(_ APIProviderSpec, k string) keyVerifier {
 		gotKeys = append(gotKeys, k)

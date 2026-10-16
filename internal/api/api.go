@@ -64,6 +64,9 @@ type API struct {
 // New creates a new API instance from a service container.
 func New(svc *service.Container) *API {
 	deps := service.DefaultEmbedderSelectDeps()
+	if svc != nil && svc.ProviderKeys != nil {
+		deps = service.EmbedderSelectDepsFor(svc.ProviderKeys)
+	}
 	key := make([]byte, 32)
 	rand.Read(key)
 	return &API{
@@ -457,7 +460,6 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// (POST /api/skills/{id}/fork-to-user) is removed along with
 	// handleForkSkillToUser and ForkSkillToUserRequest — see
 	// internal/api/skills.go's doc comment at the old handler's site.
-	mux.HandleFunc("GET /api/dev-mode", a.handleGetDevMode)
 	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
 	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleRetiredAgentMutation)
 	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRetiredAgentMutation)
@@ -604,7 +606,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 
 	// Debug
 
-	// Inspector (I1 — dev-mode per-turn aggregator, CW-20260426-0004)
+	// Inspector (I1 — per-turn aggregator, CW-20260426-0004)
 	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns", a.handleInspectorListTurns)
 	mux.HandleFunc("GET /api/inspector/sessions/{session_id}/turns/{turn_id}", a.handleInspectorGetTurn)
 

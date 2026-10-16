@@ -51,6 +51,69 @@ ACP uses its real turn-scoped cancel. Native runtimes honestly report that
 turn cancellation is unsupported, so Nanite stops that exact wrapper and the
 next turn cold-boots instead of pretending a wire-level cancel occurred.
 
+## Defined CLI sessions
+
+A pinned definition plus host settings with `runtime: "cli"` runs a CLI agent
+through `POST /api/agent/v1/sessions`, the same route and event stream as a
+native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
+
+```json
+{"version":"1","runtime":"cli","provider":"claude","model":"haiku",
+ "directories":["/abs/path/to/work"],"native_loop":{}}
+```
+
+- **Work root and directories.** `directories` is required. The first entry is
+  the session's work root; every entry is granted to the CLI on its command
+  line (`--add-dir`), not only in the boot dir's `settings.json`, because Claude
+  ignores `additionalDirectories` from a workspace it has not been trusted in
+  and the ephemeral boot dir never is. Filesystem authority comes from the host
+  document, not the request.
+- **Model.** `model` is required for a CLI host and is passed to the CLI as
+  `--model`, the flag each of the four CLIs documents (`modelFlags` in
+  `factory.go`). OpenCode takes `provider/model`. A provider outside that table
+  (an ACP-only one such as Copilot or Pi) is refused when it names a model.
+- **Boot.** The view boots the host settings' projected profile (definition text
+  as the system prompt, provider, model, directories), resolved by host settings
+  ID, on the same `driveBootSession` path as other CLI chat. The view pins the
+  host revision it was admitted under; a turn after the host is edited or
+  disabled fails with `host_revision_changed`.
+- **Resume.** For Claude, OpenCode and Antigravity the provider session ID is
+  persisted, so a turn after a server restart resumes the CLI's own session. A
+  Codex session cannot be resumed by a later boot (it keeps its rollout under a
+  per-boot `CODEX_HOME`), so after a restart its context comes from Nanite's
+  recovery pack, not from Codex.
+- **Directories.** Claude and Antigravity are given each directory with
+  `--add-dir`; Codex gets them as `writable_roots` in its planted `config.toml`.
+- **Nanite MCP server.** Claude reads it from the planted `.mcp.json` (with the
+  strict-MCP flags and an allow rule); Codex reads it from `[mcp_servers.*]` in
+  the planted `config.toml`. agy discovers the plugin's `mcp_config.json`, but
+  its headless mode auto-denies a tool call that needs the `mcp` permission.
+  Nanite launches agy with `--dangerously-skip-permissions` only when the
+  permission engine's mode is yolo (the counterpart of Claude's developer
+  variant, with the same audit log line); otherwise the Nanite MCP tools are
+  unavailable to it, and the launch logs that. To use them without yolo, an
+  operator adds an allow-rule (`permissions.allow`) to agy's own
+  `~/.gemini/antigravity-cli/settings.json`; Nanite never writes that file, which
+  the Antigravity desktop app shares.
+- **Antigravity.** The boot dir carries `AGENTS.md`, `boot.md` and a workspace
+  plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP server. agy
+  has no config-dir variable and shares its global config with the desktop app,
+  so nothing is written there and, unlike Claude, its global MCP servers still
+  load alongside the planted one.
+- **Permissions.** The CLI runs under the boot dir's Claude permissions and the
+  planted strict `.mcp.json`; Nanite's tools reach it only through the Nanite
+  MCP server, so tool authorization is unchanged. The developer variant
+  (`--dangerously-skip-permissions`) is selected only when the permission
+  engine's mode is yolo, with an audit log line. A definition whose permission
+  profile is not `default` is refused: a CLI process cannot enforce read-only.
+- **Refusals.** A 422 from session create carries `error.cause`:
+  `runtime_unavailable`, `provider_not_launchable`, `read_only_unenforceable`,
+  `cli_host_unsupported_field` (`harness_profile`, a non-empty `native_loop`,
+  `recall_*`, `mcp_servers`, a relative directory, or a model the provider's
+  CLI does not take), `host_directories_missing`.
+- **Capabilities.** `runtime_kinds` lists `cli` with the providers this host can
+  launch.
+
 ## Subagent runtime
 
 A subagent's runtime follows its parent. A CLI process's calls to Nanite's own

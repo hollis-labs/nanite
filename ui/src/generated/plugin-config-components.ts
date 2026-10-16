@@ -2,8 +2,7 @@
 // Follows ADR-002: single registry with `source` field.
 //
 // Plugins can specify a `component` name on a ConfigField to replace the
-// default input with a custom React component. Overrides only render when
-// the user has `developer_mode` enabled; `recover_mode` bypasses all overrides.
+// default input with a custom React component. `recover_mode` bypasses all overrides.
 //
 // To register a custom config component:
 //   1. Create the component in ui/src/components/settings/config-overrides/

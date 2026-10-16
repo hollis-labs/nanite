@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { useSettings, useSettingsMutation } from '@/hooks/useSettings'
 import { PluginConfigPanel } from './PluginConfigPanel'
 import { WidgetDetailView } from './WidgetDetailView'
-import { DEVELOPER_ONLY_WIDGETS, isValidWidgetId } from '@/lib/builtin-widgets'
+import { isValidWidgetId } from '@/lib/builtin-widgets'
 import { buildWidgetOrder } from '@/lib/widget-order'
 import type { PluginUIComponent } from '@/lib/types'
 
@@ -32,8 +32,7 @@ export function WidgetManager() {
 
   const orderedIds = buildWidgetOrder(savedOrder, widgets)
 
-  const developerMode = settings?.developer_mode ?? false
-  const displayIds = orderedIds.filter((id) => !DEVELOPER_ONLY_WIDGETS.has(id) || developerMode)
+  const displayIds = orderedIds
 
   // Plugin config panel state.
   const [configuringPluginId, setConfiguringPluginId] = useState<string | null>(null)

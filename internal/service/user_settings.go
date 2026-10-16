@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"sync"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -29,7 +27,7 @@ type userSettingsStore interface {
 //
 // The rules transports apply to individual fields live here as well: the
 // enum validators for a settings update, tool load-preference validation
-// and merge, and the dev-mode check. Store errors are returned unwrapped,
+// and merge. Store errors are returned unwrapped,
 // because the API echoes some of them verbatim.
 type UserSettingsService struct {
 	store        userSettingsStore
@@ -184,31 +182,6 @@ func (s *UserSettingsService) UpdateToolLoadPreferences(ctx context.Context, upd
 		s.toolLoadSink(us.ToolLoadPreferences)
 	}
 	return us.ToolLoadPreferences, nil
-}
-
-// DevModeEnabled reports whether the dev-mode editor affordances are on:
-// NANITE_DEVMODE is truthy, or user_settings.developer_mode is set. A
-// settings read that fails counts as off.
-func (s *UserSettingsService) DevModeEnabled(ctx context.Context) bool {
-	if EnvDevModeOn() {
-		return true
-	}
-	us, err := s.store.GetUserSettings(ctx)
-	if err != nil || us == nil {
-		return false
-	}
-	return us.DeveloperMode
-}
-
-// EnvDevModeOn reports whether NANITE_DEVMODE is set to 1, true, yes or on
-// (case-insensitive, surrounding space ignored).
-func EnvDevModeOn() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("NANITE_DEVMODE")))
-	switch v {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
 }
 
 // IsSettingsValidation reports whether err is a *SettingsValidationError.

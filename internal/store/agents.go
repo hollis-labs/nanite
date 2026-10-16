@@ -17,6 +17,9 @@ type AgentProfile struct {
 	DefinitionPolicy *agentpolicy.NativePolicy `json:"-"`
 	DefinitionReflex *agentpolicy.ReflexBundle `json:"-"`
 	NativeHost       *NativeHostSettings       `json:"-"`
+	// HostSettingsID is the host settings row a projected profile came from;
+	// empty for any other profile. It is a runtime projection, never persisted.
+	HostSettingsID string `json:"-"`
 	// Revision is an opaque identity for the complete persisted profile and assignments.
 	Revision        string `json:"-"`
 	ID              string `json:"id"`

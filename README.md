@@ -109,7 +109,8 @@ go build ./cmd/nanite/
 
 Nanite's built UI includes first-run setup for when no provider is configured
 yet: one click to use `claude`/`codex` if either is found on `PATH`,
-otherwise an Anthropic/OpenAI API key (kept in the OS keychain) with a model
+otherwise an Anthropic/OpenAI API key (kept in the OS keychain; or save one
+from a terminal with `nanite provider set-key anthropic`) with a model
 picker. Skip it and configure a provider later from Settings if you'd
 rather. (`-dev` above serves a placeholder shell for the UI — run `cd ui &&
 npm run dev` in a second terminal to see it live.)

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/providerkeys"
+
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
 
 	"github.com/hollis-labs/substrate/agent/approval"
@@ -182,9 +184,12 @@ type Container struct {
 	RuntimeFeed *HostRuntimeFeed
 	Events      EventEmitter
 	Providers   *provider.Registry
-	Commands    *chat.CommandRegistry
-	Plugins     *plugin.Host
-	MCP         *mcp.Manager
+	// ProviderKeys resolves and writes native-provider API keys by
+	// reference. Never nil on a built Container.
+	ProviderKeys *providerkeys.Manager
+	Commands     *chat.CommandRegistry
+	Plugins      *plugin.Host
+	MCP          *mcp.Manager
 
 	// Messaging service — validates, persists, and fans out
 	// agent-to-agent messages plus handoff state transitions.
@@ -311,8 +316,7 @@ type Container struct {
 	// the field is left nil and the cancel endpoint returns 503.
 	Recovery *broker.Broker
 
-	// Inspector is the I1 per-turn dev-mode aggregator (CW-20260426-0004).
-	// nil when developer_mode is false.
+	// Inspector is the I1 per-turn aggregator (CW-20260426-0004).
 	Inspector *inspectsvc.Service
 
 	// LoopDetector is the I2 fingerprint-based loop detector (CW-20260420-0029).
@@ -391,10 +395,13 @@ type ContainerConfig struct {
 	DefaultDefinitionRef DefinitionRef
 	Store                *store.Store
 	Providers            *provider.Registry
-	MCP                  *mcp.Manager
-	ToolClient           *toolclient.ToolClient
-	Plugins              *plugin.Host
-	AppConfig            *config.TunablesConfig
+	// ProviderKeys resolves native-provider API keys by reference. Nil builds
+	// the default over the OS keychain and the provider rows' key_ref.
+	ProviderKeys *providerkeys.Manager
+	MCP          *mcp.Manager
+	ToolClient   *toolclient.ToolClient
+	Plugins      *plugin.Host
+	AppConfig    *config.TunablesConfig
 	// HarnessProfiles is the harness profile registry (D-33). nil means the
 	// embedded built-in profiles only.
 	HarnessProfiles *harnessprofile.Registry
@@ -436,11 +443,10 @@ type ContainerConfig struct {
 	// CLI process concurrency limit (0 = unlimited).
 	MaxCLIProcesses int
 
-	// CLIDeveloperMode runs native Claude agents in Claude's developer
-	// variant (--dangerously-skip-permissions). Adapters themselves come
-	// from the go-providers registry through launch.Select
-	// (CW-20260930-0113); there is no adapter slice to thread.
-	CLIDeveloperMode bool
+	// PermissionMode is the permission engine's mode at boot (see
+	// ResolveBootPermissionMode). Empty means default. Claude's developer
+	// launch variant follows the engine's effective mode, not a separate flag.
+	PermissionMode permissionlib.Mode
 
 	// ProviderCatalog is the registry-backed dropdown catalog
 	// (CW-20260526-0001). nil-safe — when nil, handleListProviders falls
@@ -517,9 +523,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 		defaultRef = embedded.Ref
 	}
+	providerKeys := cfg.ProviderKeys
+	if providerKeys == nil {
+		providerKeys = DefaultProviderKeys(cfg.Store)
+	}
 	models := cfg.ModelAuthorizer
 	if models == nil {
-		models = configuredNativeModel(cfg.Providers)
+		models = configuredNativeModel(cfg.Providers, providerKeys)
 	}
 	cognitiveViews := &CognitiveViews{Store: cfg.Store, Resolver: resolver, Models: models, DefaultDefinitionRef: defaultRef}
 	workingDir := cfg.WorkingDir
@@ -598,7 +608,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentConfig := NewAgentConfigService(cfg.Store, agentClassification, nil)
 	agentMembership := NewAgentMembershipService(cfg.Store, cfg.Store)
 	usage := NewUsageService(cfg.Store, cfg.Store)
-	providerConfig := NewProviderConfigService(cfg.Store)
+	providerConfig := NewProviderConfigService(cfg.Store, providerKeys)
 	// Saving an API key swaps the registered adapter live (CW-20260930-0101).
 	// providercatalog.Catalog is nil-receiver safe, so a nil ProviderCatalog
 	// (tests that don't wire one) is fine here.
@@ -976,14 +986,20 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	orchestrator := chat.NewOrchestrator(cfg.Providers, cfg.MCP)
 
-	// Permission engine. Yolo mode when developer_mode=1 so dev-mode sessions
-	// never hit approval prompts.
+	// Permission engine. The mode is explicit: default unless the operator set
+	// NANITE_PERMISSION_MODE or permission_mode, or changes it at runtime
+	// through PUT /api/permissions/mode. Nothing else selects yolo.
 	permissions := permissionlib.NewEngine(permissionlib.ModeDefault, nil,
 		permissionlib.WithFileEditTools("dev_edit", "dev_write"),
 		permissionlib.WithAuditor(permissionlib.SlogAuditor{}),
 	)
-	if us, err := cfg.Store.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us.DeveloperMode {
-		permissions.SetMode(permissionlib.ModeYolo)
+	if cfg.PermissionMode != "" && cfg.PermissionMode != permissionlib.ModeDefault {
+		permissions.SetMode(cfg.PermissionMode)
+	}
+	if permissions.Mode() == permissionlib.ModeYolo {
+		slog.Warn("AUDIT service container: permission mode is YOLO; approval prompts are bypassed and Claude CLI agents launch with --dangerously-skip-permissions")
+	} else {
+		slog.Info("service container: permission mode", "mode", string(permissions.Mode()))
 	}
 
 	// (pathGrants is constructed earlier and shared with ContextClient so the
@@ -1029,13 +1045,9 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		}
 	}()
 
-	// I1 (CW-20260426-0004): inspector service — dev-mode only.
-	// Created unconditionally but only populated/queried when developer_mode=true.
-	var inspectorSvc *inspectsvc.Service
-	if us, err := cfg.Store.GetUserSettings(catalogCtx); err == nil && us.DeveloperMode {
-		inspectorSvc = inspectsvc.NewService()
-		slog.Info("service container: inspector service enabled (developer_mode=true)")
-	}
+	// I1 (CW-20260426-0004): inspector service — always on; its endpoints sit
+	// behind the normal API auth like every other route.
+	inspectorSvc := inspectsvc.NewService()
 
 	// I2 (CW-20260420-0029): loop detector — always-on, per-session windows.
 	// Instantiated once at container boot; shared across all sessions.
@@ -1063,10 +1075,10 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Store:            cfg.Store,
 		PathGrants:       pathGrants,
 		Streams:          streams,
-		CLIDeveloperMode: cfg.CLIDeveloperMode,
 		DBPath:           cfg.Store.DBPath(catalogCtx),
 		MCP:              cfg.MCP,
 		Providers:        cfg.Providers,
+		ProviderKeys:     providerKeys,
 		APIBaseURL:       cfg.APIBaseURL,
 		AgentCredential:  cfg.AgentCredential,
 		CLIWritableRoots: cfg.DevToolsAllowedPaths,
@@ -1087,7 +1099,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	agentBridge := agentDepsBundle.Bridge
 	agentBootDir := agentDepsBundle.BootDirAdapter
 	slog.Info("service container: agent runtime dependencies built",
-		"cli_developer_mode", cfg.CLIDeveloperMode,
 		"workspaces_root", agentDeps.WorkspacesRoot,
 		"agent_protected_dirs", cfg.AgentControlPlane.Dirs,
 		"agent_writable_exceptions", cfg.AgentControlPlane.Writable)
@@ -1127,7 +1138,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		SubagentInbox:      messagingSvc,
 		DBPath:             cfg.Store.DBPath(catalogCtx),
 		AdapterRegistry:    adapterRegistry,
-		// I1 (CW-20260426-0004): inspector — nil when developer_mode=false.
+		// I1 (CW-20260426-0004): inspector.
 		Inspector: inspectorSvc,
 		// I2 (CW-20260420-0029): loop detector — always-on.
 		LoopDetector: loopDetector,
@@ -1444,6 +1455,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		RuntimeFeed:         runtimeFeed,
 		Events:              events,
 		Providers:           cfg.Providers,
+		ProviderKeys:        providerKeys,
 		Commands:            commands,
 		Plugins:             cfg.Plugins,
 		PluginConfig:        NewPluginConfigService(cfg.Store, cfg.Plugins),

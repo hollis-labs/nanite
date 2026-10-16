@@ -34,7 +34,7 @@ env > "$NANITE_TEST_PROBE_FILE.env"
 // (permissions.defaultMode "acceptEdits" in Claude's settings.json, Codex's
 // approval_policy "never" / sandbox_mode "workspace-write" in config.toml;
 // bootdir_claude_test.go and bootdir_codex_test.go pin those), and
-// developer mode keeps Claude's --dangerously-skip-permissions.
+// yolo mode keeps Claude's --dangerously-skip-permissions.
 func TestBoot_NativeLaunchCarriesNoPermissionPosture(t *testing.T) {
 	for _, tc := range []struct {
 		name, provider, cliEnv, script string
@@ -57,7 +57,7 @@ func TestBoot_NativeLaunchCarriesNoPermissionPosture(t *testing.T) {
 
 			deps, _ := makeBootDeps(t, tc.provider)
 			deps.NativeCLIAdapter = nil // the registry's own adapter, as in production
-			deps.DeveloperMode = tc.dev
+			withYolo(deps, tc.dev)
 			opts := Options{
 				Mode:     tc.mode,
 				Provider: tc.provider,

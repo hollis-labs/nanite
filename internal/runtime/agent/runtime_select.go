@@ -3,12 +3,14 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/harness/adapters"
 	"github.com/hollis-labs/substrate/harness/adapters/launch"
 	"github.com/hollis-labs/substrate/harness/adapters/registry"
+	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
 	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
@@ -140,9 +142,22 @@ func launchSupported(sel RuntimeSelection) bool {
 	return false
 }
 
+// launchExtra carries the per-launch arguments that come from the agent profile
+// rather than from the runtime selection.
+type launchExtra struct {
+	// Model is passed to the CLI when its flag is verified for the runtime
+	// (modelArgs).
+	Model string
+	// AddDirs are directories granted on the command line in addition to the
+	// work root. Claude ignores the boot dir's permissions.additionalDirectories
+	// until its workspace is trusted, and the ephemeral boot dir never is, so
+	// the command line is the grant that holds.
+	AddDirs []string
+}
+
 // selectAdapter builds the wrapper adapter for sel through launch.Select.
 // Native: the registry's own go-providers adapter, Claude's developer variant
-// when deps.DeveloperMode is set, with workRootArgs at the convention's extra
+// when the permission engine is in yolo mode, with workRootArgs at the convention's extra
 // slot. ACP: the shipped protocol adapter for the mode. deps.NativeCLIAdapter
 // and deps.ACPAdapterFactory are test seams; production leaves both nil.
 //
@@ -150,7 +165,11 @@ func launchSupported(sel RuntimeSelection) bool {
 // Claude launch gets the strict-MCP flags for its .mcp.json (strictMCPArgs)
 // and the allow rule for the planted server (claudeMCPAllowArgs) ahead of
 // workRootArgs, so the variadic --add-dir stays last.
-func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string) (adapters.Adapter, error) {
+func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir string, extra ...launchExtra) (adapters.Adapter, error) {
+	var x launchExtra
+	if len(extra) > 0 {
+		x = extra[0]
+	}
 	if sel.Mode == runtimes.ModePTY {
 		return nil, errTerminalLaunchUnsupported
 	}
@@ -170,7 +189,9 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 		ExtraArgs: slices.Concat(
 			strictMCPArgs(sel.Runtime, bootDir),
 			claudeMCPAllowArgs(sel.Runtime, bootDir, deps.MCPConfig),
-			workRootArgs(string(sel.Runtime), workRoot),
+			modelArgs(string(sel.Runtime), x.Model),
+			agyPermissionArgs(deps, sel.Runtime),
+			addDirArgs(string(sel.Runtime), workRoot, x.AddDirs),
 		),
 	}
 	if deps.NativeCLIAdapter != nil {
@@ -179,7 +200,37 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 		}
 	}
 	if selection.CLIAdapter == nil {
-		selection.DeveloperMode = deps.DeveloperMode && sel.Runtime == runtimes.Claude
+		if sel.Runtime == runtimes.Claude && deps.yoloMode() {
+			selection.DeveloperMode = true
+			slog.Warn("AUDIT agent launch: Claude developer variant (--dangerously-skip-permissions) because the permission mode is yolo")
+		}
 	}
 	return launch.Select(selection)
+}
+
+// yoloMode reports whether the permission engine is in yolo mode right now. It
+// is the only thing that selects Claude's developer launch variant.
+func (d *Dependencies) yoloMode() bool {
+	return d != nil && d.Permissions != nil && d.Permissions.Mode() == permissionlib.ModeYolo
+}
+
+// agyPermissionArgs is agy's counterpart of Claude's developer variant: the
+// library defines DeveloperMode only for Claude, so agy's
+// --dangerously-skip-permissions rides the extra args instead, under the same
+// condition (the permission engine is in yolo mode) and with the same audit line.
+//
+// Without it agy's headless mode auto-denies any tool call that needs a
+// permission it cannot prompt for, and the Nanite MCP server's tools are among
+// them. The alternative is an allow-rule in agy's own settings.json, which is
+// global, shared with the Antigravity desktop app, and never written by Nanite.
+func agyPermissionArgs(deps *Dependencies, runtime runtimes.ID) []string {
+	if runtime != runtimes.Antigravity {
+		return nil
+	}
+	if !deps.yoloMode() {
+		slog.Info("agy launch: the Nanite MCP tools are unavailable to it because the permission mode is not yolo; add an allow-rule to agy's settings.json (permissions.allow) to use them")
+		return nil
+	}
+	slog.Warn("AUDIT agent launch: agy --dangerously-skip-permissions because the permission mode is yolo")
+	return []string{"--dangerously-skip-permissions"}
 }

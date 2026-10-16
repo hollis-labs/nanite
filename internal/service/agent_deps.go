@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/providerkeys"
+
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -38,15 +40,14 @@ import (
 // runner and (eventually) the background dispatcher without re-creating the
 // shared wrapper session registry.
 type AgentDepsConfig struct {
-	Store            *store.Store
-	PathGrants       *permission.PathGrants
-	Streams          *StreamManager
-	CLIDeveloperMode bool
-	WorkspacesRoot   string
-	BinaryPath       string
-	DBPath           string
-	SandboxBaseProf  sandbox.Profile
-	Permissions      *permissionlib.Engine
+	Store           *store.Store
+	PathGrants      *permission.PathGrants
+	Streams         *StreamManager
+	WorkspacesRoot  string
+	BinaryPath      string
+	DBPath          string
+	SandboxBaseProf sandbox.Profile
+	Permissions     *permissionlib.Engine
 	// RuntimeFeed is the session-scoped, durable public projection of the
 	// canonical wrapper event stream. Nil keeps focused dependency tests and
 	// embedding callers on the legacy-only path.
@@ -88,6 +89,10 @@ type AgentDepsConfig struct {
 	// path entirely (Refresh returns an error and the broker escalates
 	// to Permanent).
 	Providers *provider.Registry
+
+	// ProviderKeys resolves the key the credentials adapter pushes onto a
+	// cached SDK client. Nil leaves the remediation path unwired.
+	ProviderKeys *providerkeys.Manager
 
 	// SkillVendor is the content-addressed vendored skill store
 	// (internal/skillvendor.Store) — TASKS/skills/10 wires this onto
@@ -226,7 +231,6 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		TypedEventCallback:  bridge.typedCallback,
 		Permissions:         cfg.Permissions,
 		ApprovalRequestSink: approvalRequestSink,
-		DeveloperMode:       cfg.CLIDeveloperMode,
 		MCPConfig: runtimeagent.MCPConfig{
 			BinaryPath: binPath,
 			DBPath:     dbPath,
@@ -300,7 +304,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		Envelope: &recoveryEnvelopeSink{
 			streams: cfg.Streams,
 		},
-		Credentials: newRecoveryCredentialsAdapter(resolver, cfg.Providers),
+		Credentials: newRecoveryCredentialsAdapter(resolver, cfg.Providers, keysOrNil(cfg.ProviderKeys)),
 		// HTTPRetry is deliberately left unwired here (Phase 0 task 04):
 		// the real adapter closes over chatServiceImpl.RetryLastMessage,
 		// and chatServiceImpl doesn't exist yet at this point in
@@ -1426,4 +1430,12 @@ func sessionNoticeText(ev events.Event) string {
 	default:
 		return ""
 	}
+}
+
+// keysOrNil avoids a typed-nil interface when no manager was wired.
+func keysOrNil(m *providerkeys.Manager) providerKeyResolver {
+	if m == nil {
+		return nil
+	}
+	return m
 }

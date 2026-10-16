@@ -1963,8 +1963,7 @@ func validateSourcesAgainstTurn(ctx context.Context, sources []map[string]any) e
 // routes through the permission engine on every tool invocation.
 //
 // Reach for the calling agent (Chat, Planner, Worker, or a custom agent
-// profile) is governed by the agent profile's tool permissions and the
-// dev-mode gate. There is no hard-coded role-based restriction at this
+// profile) is governed by the agent profile's tool permissions. There is no hard-coded role-based restriction at this
 // dispatch site; the previous "Worker/Planner-only" framing was removed
 // when the chat-surface enforcement was lifted.
 func (st *SelfToolsTransport) callRunPython(ctx context.Context, args map[string]any) (*mcp.ToolResult, error) {

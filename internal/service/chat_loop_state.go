@@ -298,7 +298,7 @@ type loopState struct {
 	scratchpad      map[string]any
 	scratchpadBytes int
 
-	// I1 (CW-20260426-0004): inspector turn ID for the dev-mode aggregator.
+	// I1 (CW-20260426-0004): inspector turn ID for the aggregator.
 	// Set by generateResponse after slot assembly; propagated into
 	// handleRequestTools and executeSingleTool so broker/tool producers
 	// can append to the same per-turn snapshot.

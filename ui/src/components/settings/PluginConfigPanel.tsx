@@ -120,7 +120,6 @@ function OverrideFieldRenderer({
 export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: PluginConfigPanelProps) {
   const queryClient = useQueryClient()
   const { data: userSettings } = useSettings()
-  const developerMode = userSettings?.developer_mode ?? false
   const recoverMode = userSettings?.recover_mode ?? false
   const [localSettings, setLocalSettings] = useState<Record<string, unknown>>({})
   const [dirty, setDirty] = useState(false)
@@ -219,7 +218,7 @@ export function PluginConfigPanel({ pluginId, pluginName, onBack, embedded }: Pl
               {field.description && field.type !== 'bool' && (
                 <p className="text-xs text-fg-muted mb-2">{field.description}</p>
               )}
-              {developerMode && !recoverMode && field.component ? (
+              {!recoverMode && field.component ? (
                 <OverrideFieldRenderer
                   field={field}
                   value={localSettings[field.key]}

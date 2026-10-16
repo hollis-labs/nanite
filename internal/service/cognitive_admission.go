@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -60,6 +59,7 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 	}
 	providerID, model := session.Provider, session.Model
 	defined := false
+	cliView := false
 	if reader, ok := s.store.(interface {
 		GetCognitiveView(context.Context, string) (store.CognitiveViewRecord, error)
 	}); ok {
@@ -71,6 +71,7 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 				return "", errors.New("invalid verified chat configuration")
 			}
 			providerID, model = cfg.Model.Provider, cfg.Model.Model
+			cliView = cfg.HostSettings != nil && cfg.HostSettings.Runtime == "cli"
 		} else if !errors.Is(readErr, sql.ErrNoRows) {
 			return "", readErr
 		}
@@ -81,7 +82,7 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 			return "", resolveErr
 		}
 		if agent.RuntimeKind != "" && agent.RuntimeKind != "api" {
-			return "", ErrUnsupportedModel
+			return "", unsupportedModelCause(CauseRuntimeNotAPI, "agent runtime %q is not native; native chat needs runtime \"api\"", agent.RuntimeKind)
 		}
 		if providerID == "" {
 			providerID = agent.DefaultProvider
@@ -90,11 +91,19 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 			model = agent.DefaultModel
 		}
 	}
-	if providerID == "" || model == "" {
-		return "", fmt.Errorf("%w: no provider and model selected for this view; set them on the agent's host settings or the launch request", ErrUnsupportedModel)
-	}
-	if _, ok := s.providers.Get(providerID); !ok {
-		return "", ErrUnsupportedModel
+	if cliView {
+		// A CLI view runs the provider's own CLI, which has no registry entry;
+		// launchability and the model were decided at create.
+		if providerID == "" {
+			return "", unsupportedModelCause(CauseModelNotSelected, "no provider selected for this view; set one in the agent's host settings")
+		}
+	} else {
+		if providerID == "" || model == "" {
+			return "", unsupportedModelCause(CauseModelNotSelected, "no provider and model selected for this view; set them on the agent's host settings or the launch request")
+		}
+		if _, ok := s.providers.Get(providerID); !ok {
+			return "", unsupportedModelCause(CauseProviderNotRegistered, "provider %q is not a registered native provider; check its API key status and restart the server", providerID)
+		}
 	}
 	s.activeGenMu.Lock()
 	count := 0

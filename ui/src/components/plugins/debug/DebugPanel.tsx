@@ -11,7 +11,7 @@ interface DebugPanelProps {
 }
 
 /**
- * Collapsible debug panel — only rendered in developer_mode.
+ * Collapsible debug panel.
  * Follows Variation F card pattern with compact header.
  */
 export function DebugPanel({ title, icon: Icon, children, defaultOpen = false, badge }: DebugPanelProps) {

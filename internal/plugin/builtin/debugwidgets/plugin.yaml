@@ -2,7 +2,7 @@ schema_version: 1
 name: debug-widgets
 id: debug-widgets
 version: 1.0.0
-description: Slot inspector and turn snapshot widgets (developer_mode only)
+description: Slot inspector and turn snapshot widgets
 author: Nanite
 license: Apache-2.0
 protocol: 1

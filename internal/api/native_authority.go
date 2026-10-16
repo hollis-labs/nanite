@@ -18,6 +18,7 @@ import (
 func (a *API) registerNativeAuthorityRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/native-authority", a.handleNativeAuthorityList)
 	mux.HandleFunc("POST /api/native-authority", a.handleNativeAuthorityCreate)
+	mux.HandleFunc("GET /api/native-authority/tools", a.handleNativeAuthorityTools)
 	mux.HandleFunc("GET /api/native-authority/{id}", a.handleNativeAuthorityGet)
 	mux.HandleFunc("POST /api/native-authority/{id}/revoke", a.handleNativeAuthorityRevoke)
 	mux.HandleFunc("PUT /api/native-authority/{id}/tools/{tool}", a.handleNativeAuthorityGrant)
@@ -110,6 +111,20 @@ func (a *API) handleNativeAuthorityList(w http.ResponseWriter, r *http.Request) 
 		out = append(out, nativeAuthorityView{NativeAuthority: item, Tools: tools})
 	}
 	a.jsonResp(w, http.StatusOK, out)
+}
+
+// handleNativeAuthorityTools lists the tool names a grant can name.
+func (a *API) handleNativeAuthorityTools(w http.ResponseWriter, r *http.Request) {
+	writer, _, ok := a.nativeAuthorityOperator(w, r)
+	if !ok {
+		return
+	}
+	tools, err := writer.GrantableTools(r.Context())
+	if err != nil {
+		a.nativeAuthorityError(w, err)
+		return
+	}
+	a.jsonResp(w, http.StatusOK, tools)
 }
 
 func (a *API) handleNativeAuthorityGet(w http.ResponseWriter, r *http.Request) {

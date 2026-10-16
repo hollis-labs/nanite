@@ -1,0 +1,35 @@
+name: Go test
+
+# CW-20261016-0128: nanite PR CI used to run only path-filtered suites, so a
+# green PR did not mean `go test ./...` ran. This runs the whole tree on Linux
+# for every PR and for main, without -race: the race build of the heavy
+# packages (store, api, service, workflowhost, cmd/nanite) exceeds go test's
+# 10m default and TestAgentClient_StreamEvents_SurfacesScanError streams 32MB
+# against a 5s deadline. Race coverage stays in the nightly Full-repo quality
+# gate and its macOS suite (CW-20261016-0127).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Run the full test suite
+        run: go test -count=1 -timeout=20m ./...

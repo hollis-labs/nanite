@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	"github.com/hollis-labs/nanite/internal/llm/keycheck"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // Provider check statuses reported by ProviderConfigService.TestConnection.

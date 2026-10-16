@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestCognitiveProviderEOFDoesNotCompleteTurn(t *testing.T) {

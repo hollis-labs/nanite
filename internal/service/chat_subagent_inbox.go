@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"strings"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 )
 
 // evaluateAndInjectSubagentResults surfaces pending kind=subagent_result

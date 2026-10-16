@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	mesh "github.com/hollis-labs/libs/mesh/core"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentauthor"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
-	mesh "github.com/hollis-labs/substrate/mesh"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 // runPinnedAgentCommand accepts authored v2 content. It has no old-format

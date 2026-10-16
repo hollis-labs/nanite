@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // errBootStreamFailure is the sentinel returned by drainBootSession when the

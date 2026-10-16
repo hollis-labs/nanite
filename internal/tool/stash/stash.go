@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // CategoryOther is the fallback category used when a Categorizer returns empty

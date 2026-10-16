@@ -5,13 +5,13 @@ import (
 	"log/slog"
 	"time"
 
-	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
+	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
 
+	costcalc "github.com/hollis-labs/libs/llm/core/costcalc"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	ledger "github.com/hollis-labs/libs/llm/core/usageledger"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/usagecost"
-	costcalc "github.com/hollis-labs/substrate/llm-core/costcalc"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 // Every streamed provider call, including post-loop synthesis/correction,

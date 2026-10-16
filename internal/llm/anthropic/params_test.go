@@ -7,10 +7,10 @@ import (
 
 	"github.com/hollis-labs/nanite/pkg/models"
 
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
 )
 
 // TestBuildSystemBlocks_NoSlotsNoCache asserts the simple case: a single

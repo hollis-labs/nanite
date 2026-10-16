@@ -19,7 +19,7 @@ package agent
 // The actual cmd-exec / HTTP-fetch execution — including every safety
 // property (cmd timeout + hard ceiling, stderr-tail capture, HTTP
 // timeout + body-size cap, status-code validation) — already lives in
-// the published github.com/hollis-labs/substrate/agent module's
+// the published github.com/hollis-labs/libs/agent/core module's
 // agentcontext/resolvers package. Nanite's boot-profile catalog never
 // reimplemented that logic; it built a thin SlotSpec-conversion adapter
 // on top (internal/bootprofile/agentcontext_adapter.go). This file is
@@ -37,9 +37,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hollis-labs/libs/harness/core/agentcontext"
+	"github.com/hollis-labs/libs/harness/core/agentcontext/resolvers"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/agentcontext"
-	"github.com/hollis-labs/substrate/agent/agentcontext/resolvers"
 )
 
 // ResolveContextBlocks drains a list of DB-configured

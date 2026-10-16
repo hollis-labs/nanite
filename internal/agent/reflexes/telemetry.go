@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	shared "github.com/hollis-labs/substrate/agent/reflexes"
+	shared "github.com/hollis-labs/libs/agent/core/reflexes"
 )
 
 // TraceStore is the narrow persistence surface EmitFirings needs: the

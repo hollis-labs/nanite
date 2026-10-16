@@ -36,10 +36,10 @@ import (
 	"testing"
 	"time"
 
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/nanite/internal/recovery/broker"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // canonicalHTTPChatMode is the canonical agent.Mode string the

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	nplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 

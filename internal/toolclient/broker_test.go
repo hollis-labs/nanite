@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestSelectTools_ReturnsTools(t *testing.T) {

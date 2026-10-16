@@ -9,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	agentservice "github.com/hollis-labs/substrate/agent/service"
+	agentservice "github.com/hollis-labs/libs/agent/core/service"
 
-	"github.com/hollis-labs/substrate/agent/approval"
+	"github.com/hollis-labs/libs/agent/core/approval"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/store"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 func TestFileDefinitionResolverPinsSourceAndRejectsCollisions(t *testing.T) {

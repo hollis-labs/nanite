@@ -12,13 +12,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentdefs"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 const agentSetupUsage = "usage: nanite agent setup <definition.md|archetype-id> --provider P --model M [--runtime api] [--tools all|a,b] [--slug S] [--title T] [--directories d1,d2] [--resources manifest.json] [--reason R]"

@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // Historical raw grants remain visible to export but cannot grant current

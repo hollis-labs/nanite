@@ -13,10 +13,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	mesh "github.com/hollis-labs/libs/mesh/core"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
-	mesh "github.com/hollis-labs/substrate/mesh"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 var (

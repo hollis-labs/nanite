@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	paths "github.com/hollis-labs/libs/util/apppaths"
+	paths "github.com/hollis-labs/libs/core/util/apppaths"
 	"github.com/hollis-labs/nanite/internal/config"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 )

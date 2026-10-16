@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/hollis-labs/libs/workflow/host/sqlstore"
-	workflowruntime "github.com/hollis-labs/libs/workflow/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/host/sqlstore"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
 

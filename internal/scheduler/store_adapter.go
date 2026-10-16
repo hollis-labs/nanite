@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -578,4 +578,15 @@ func formatScheduleTime(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// ErrPruneUnsupported is returned by the legacy adapter: gosched.Store.Prune
+// requires a durable per-schedule high-water fence that the agent_schedules
+// tables do not have. Retention is available through SQLStoreAdapter only.
+var ErrPruneUnsupported = errors.New("scheduler: legacy store does not support Prune; use SQLStoreAdapter")
+
+// Prune implements gosched.Store (util v0.4.0). It deliberately removes
+// nothing rather than deleting fires without the recreation fence.
+func (a *StoreAdapter) Prune(context.Context, time.Time) (int, error) {
+	return 0, ErrPruneUnsupported
 }

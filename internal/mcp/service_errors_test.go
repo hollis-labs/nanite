@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 )
 
 func TestServiceErrorResultKeepsCausePrivate(t *testing.T) {

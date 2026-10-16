@@ -12,7 +12,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/truncate"
 
-	pluginsdk "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	pluginsdk "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/safego"
 )

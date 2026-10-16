@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
 
 	"github.com/hollis-labs/nanite/internal/scheduler"
 	"github.com/hollis-labs/nanite/internal/store"

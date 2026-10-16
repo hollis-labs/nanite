@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	pluginhost "github.com/hollis-labs/libs/plugin-mcp/plugin-host"
+	pluginhost "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-host"
 )
 
 var ErrSubprocessGone = pluginhost.ErrGone

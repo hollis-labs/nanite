@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // delayedCompletionRunner is a test Runner that sleeps for a configured

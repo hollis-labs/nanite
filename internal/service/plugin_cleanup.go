@@ -3,7 +3,7 @@ package service
 import (
 	"log/slog"
 
-	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	fplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 )

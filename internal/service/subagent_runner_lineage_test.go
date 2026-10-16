@@ -12,10 +12,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // chatInvokerFunc adapts a function to the chatInvoker interface so the

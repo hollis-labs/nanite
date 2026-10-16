@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
 	"github.com/hollis-labs/nanite/internal/runtime/agent"
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
 )
 
 // Broker is the in-process subagent recovery broker. Construct with

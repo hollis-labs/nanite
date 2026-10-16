@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
 )
 
 const (

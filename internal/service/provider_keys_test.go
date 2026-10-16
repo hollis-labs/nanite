@@ -9,13 +9,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // fakeKeys is the key manager as the service sees it, over plain maps. The

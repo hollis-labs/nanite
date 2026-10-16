@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 // TestDeriveSubagentRuleSet_ParentDenyForwarded asserts the H1 acceptance:

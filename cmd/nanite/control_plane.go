@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	paths "github.com/hollis-labs/libs/util/apppaths"
+	paths "github.com/hollis-labs/libs/core/util/apppaths"
+	"github.com/hollis-labs/libs/harness/core/sandbox"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
-	"github.com/hollis-labs/substrate/harness/sandbox"
 )
 
 // agentControlPlane is the set of Nanite's own directories its agents may

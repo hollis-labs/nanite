@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
 var ErrLogicalAgentProvisionInput = errors.New("logical provisioning requires an explicit name, slug and definition pin")

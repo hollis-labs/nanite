@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
+	ledger "github.com/hollis-labs/libs/llm/core/usageledger"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // --- stubs for ChatService tests ---

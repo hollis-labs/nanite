@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 )
 
 // Turn failures go-providers classifies (CW-20260930-0113). Since

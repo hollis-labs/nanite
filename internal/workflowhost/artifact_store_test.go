@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 func TestArtifactStoreStreamsPreservesTypedMetadataAndSurvivesReopen(t *testing.T) {

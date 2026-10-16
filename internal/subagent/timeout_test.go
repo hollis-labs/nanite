@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	core "github.com/hollis-labs/substrate/agent/subagent"
+	core "github.com/hollis-labs/libs/agent/core/subagent"
 )
 
 // TestTimeoutInRange pins the Torque-parity validation window

@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // WriteGlass4Handoff validates and persists a self-authored Glass-4 handoff

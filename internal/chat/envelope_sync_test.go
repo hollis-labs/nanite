@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	envelopes "github.com/hollis-labs/libs/ui-go/envelopes"
+	envelopes "github.com/hollis-labs/libs/ui/ui-go/envelopes"
 )
 
 // TestEnvelopeRegistrySync verifies that every core component declared in the

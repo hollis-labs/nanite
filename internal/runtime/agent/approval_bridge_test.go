@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/harness/adapters/acp"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	"github.com/hollis-labs/libs/harness/core/adapters/acp"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 func TestBestEffortPermissionResponder_NilDependenciesKeepWrapperDefault(t *testing.T) {

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
-	credentialhost "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability/host"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability"
+	credentialhost "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability/host"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 )

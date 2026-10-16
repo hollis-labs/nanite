@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/libs/ui-go/chatstream/conformance"
-	"github.com/hollis-labs/substrate/agent/approval"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	"github.com/hollis-labs/libs/agent/core/approval"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
+	"github.com/hollis-labs/libs/ui/ui-go/chatstream/conformance"
 )
 
 // Permission approval cannot substitute for the absent verified actor issuer.

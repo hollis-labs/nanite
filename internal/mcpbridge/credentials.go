@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	credentialhost "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability/host"
+	credentialhost "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability/host"
 )
 
 var (

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
+	"github.com/hollis-labs/libs/harness/core/workspace/materialize"
 	"github.com/hollis-labs/nanite/internal/store"
-	plant "github.com/hollis-labs/substrate/harness/agentlaunch/planting"
-	"github.com/hollis-labs/substrate/harness/workspace/materialize"
 )
 
 // Historical roots retain their resume files and legacy manifest. The current

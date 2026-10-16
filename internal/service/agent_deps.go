@@ -17,6 +17,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 
 	"github.com/google/uuid"
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider/events"
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	"github.com/hollis-labs/libs/harness/core/sandbox"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
@@ -25,13 +32,6 @@ import (
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	"github.com/hollis-labs/substrate/harness/adapters/provider/events"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	"github.com/hollis-labs/substrate/harness/sandbox"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // AgentDepsConfig holds the inputs the chat-service composition root uses to

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/chat"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // TestDrainCapture_FastFailsOnErrorEvent confirms the working half of the

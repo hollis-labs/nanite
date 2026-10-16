@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // SubagentSpawner is the narrow surface dispatchSpawner needs from

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/util/scheduler/sqlstore"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/core/util/scheduler/sqlstore"
 )
 
 // SchedulerTimeLayout is the released SQLStore's nanosecond UTC encoding.
@@ -184,4 +184,10 @@ func (s *SchedulerSQLStore) TransitionFire(ctx context.Context, c gosched.FireTr
 // inside the same statement by the installed cutover triggers.
 func (s *SchedulerSQLStore) DisableSchedule(ctx context.Context, id string) error {
 	return s.shared.DisableSchedule(ctx, id)
+}
+
+// Prune forwards to the released SQLStore, which owns the durable high-water
+// fences that stop a pruned occurrence from being created again.
+func (s *SchedulerSQLStore) Prune(ctx context.Context, olderThan time.Time) (int, error) {
+	return s.shared.Prune(ctx, olderThan)
 }

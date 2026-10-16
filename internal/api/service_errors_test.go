@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 )
 
 func TestServiceErrorKeepsCauseOutOfFlatEnvelope(t *testing.T) {

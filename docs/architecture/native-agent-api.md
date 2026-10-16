@@ -13,7 +13,7 @@ idle-only admission; their retained inbox/result records remain available.
 
 ## Core ownership
 
-Nanite embeds `github.com/hollis-labs/substrate/agent`. The library owns native
+Nanite embeds `github.com/hollis-labs/libs/agent/core`. The library owns native
 iteration ordering, provider event observation, bounded tool scheduling,
 once-bound approvals, child lifecycle, canonical reduction and per-run HTTP
 encoding. `internal/service/cognitive_turns.go` projects Nanite producer events

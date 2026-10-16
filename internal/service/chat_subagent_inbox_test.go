@@ -15,12 +15,12 @@ import (
 	"sync"
 	"testing"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // fakeSubagentInbox is a small hand-rolled fake for SubagentResultInbox,

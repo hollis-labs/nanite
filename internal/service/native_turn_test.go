@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/approval"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/lifecycle"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/approval"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // NativeToolDefinitions lets the characterization tool service answer the native

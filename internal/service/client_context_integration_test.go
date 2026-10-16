@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func TestClientContextNativeQueueDetachAndPrivacy(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 )
 
 // serviceError maps the typed service carrier to Nanite's flat HTTP envelope.

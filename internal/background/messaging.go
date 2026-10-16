@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 )
 
 // envelopePostTimeout bounds the messaging.SendMessage call when

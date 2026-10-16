@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
-	"github.com/hollis-labs/libs/ui-go/envelopes"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"

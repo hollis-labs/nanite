@@ -3,7 +3,7 @@ package toolclient
 import (
 	"testing"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 func TestRegisterBuiltins(t *testing.T) {

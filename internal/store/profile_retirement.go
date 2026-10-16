@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	mesh "github.com/hollis-labs/substrate/mesh"
+	mesh "github.com/hollis-labs/libs/mesh/core"
 )
 
 var (

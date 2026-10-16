@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	pluginsdk "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	pluginsdk "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/nanite/internal/config"
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
 	hostplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 type blockingShutdownChatService struct {

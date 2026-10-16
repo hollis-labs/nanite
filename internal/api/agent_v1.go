@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	agentservice "github.com/hollis-labs/substrate/agent/service"
+	agentservice "github.com/hollis-labs/libs/agent/core/service"
 
 	"github.com/google/uuid"
 	"github.com/hollis-labs/nanite/internal/apiauth"

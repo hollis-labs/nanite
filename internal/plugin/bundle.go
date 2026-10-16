@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
+	"github.com/hollis-labs/libs/harness/core/sandbox/pathsafe"
 )
 
 // ResolveBundleFile checks a declared file against the installed bundle,

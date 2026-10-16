@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
-	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
+	"github.com/hollis-labs/libs/harness/core/sandbox/pathsafe"
 )
 
 // stagingDirName is the sibling directory under Store.root that Write

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
+	core "github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/store"
-	core "github.com/hollis-labs/substrate/agent/subagent"
 )
 
 type SettingsReader interface {

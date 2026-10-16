@@ -13,8 +13,8 @@ import (
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 
-	goplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/registry"
+	goplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/registry"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
 

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/harness/adapters"
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
 )
 
 func TestAddDirArgsWorkRootFirstDedupedClaudeOnly(t *testing.T) {

@@ -16,10 +16,19 @@ import (
 
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
 
-	"github.com/hollis-labs/substrate/agent/approval"
+	"github.com/hollis-labs/libs/agent/core/approval"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/util/worktree"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	"github.com/hollis-labs/libs/agent/core/loopdetect"
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/core/util/worktree"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	embedcontracts "github.com/hollis-labs/libs/llm/core/embedcontracts"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/libs/llm/core/modelsdev"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/agentimport"
@@ -59,15 +68,6 @@ import (
 	workflowapi "github.com/hollis-labs/nanite/internal/workflowapi"
 	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/nanite/pkg/models"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	"github.com/hollis-labs/substrate/agent/loopdetect"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	embedcontracts "github.com/hollis-labs/substrate/llm-core/embedcontracts"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	"github.com/hollis-labs/substrate/llm-core/modelsdev"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 	"github.com/hollis-labs/tesseract"
 )
 

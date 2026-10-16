@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/hollis-labs/substrate/harness/adapters/acp"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	"github.com/hollis-labs/libs/harness/core/adapters/acp"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 // bestEffortPermissionResponder adapts a provider-originated ACP

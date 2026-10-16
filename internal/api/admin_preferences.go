@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 
-	"github.com/hollis-labs/libs/ui-go/envelopes/admin"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes/admin"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )

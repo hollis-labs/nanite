@@ -26,10 +26,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // composeFixturesDir reuses the same testdata root resolver_test.go

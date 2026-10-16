@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/clientcontext"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 type clientContextSnapshotKey struct{}

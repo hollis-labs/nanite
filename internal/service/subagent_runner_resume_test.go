@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // CW-20260519-0075 (audit §P6) — ChatRunner resume / retry behavior.

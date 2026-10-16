@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
+	toolresult "github.com/hollis-labs/libs/agent/core/toolresult"
 	_ "modernc.org/sqlite"
 )
 

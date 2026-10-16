@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
-	"github.com/hollis-labs/libs/ui-go/envelopes"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes"
 )
 
 // pluginRegistryName is the key under which a plugin envelope type lives

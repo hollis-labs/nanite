@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 )
 
 // Anthropic rate-limit response headers — prefers the canonical

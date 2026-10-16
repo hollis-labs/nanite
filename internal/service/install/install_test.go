@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
-	"github.com/hollis-labs/substrate/harness/sandbox/pathsafe"
+	"github.com/hollis-labs/libs/harness/core/sandbox/atomicfile"
+	"github.com/hollis-labs/libs/harness/core/sandbox/pathsafe"
 )
 
 func TestInstallProjectOptions_Normalized_DefaultsNilIOStreams(t *testing.T) {

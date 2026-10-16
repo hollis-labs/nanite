@@ -4,9 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/hollis-labs/substrate/agent/approval"
+	"github.com/hollis-labs/libs/agent/core/approval"
 
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 // handleRespondApproval handles POST /api/sessions/{id}/approvals/{requestId}.

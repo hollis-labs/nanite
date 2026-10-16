@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	fplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
-	paths "github.com/hollis-labs/libs/util/apppaths"
+	paths "github.com/hollis-labs/libs/core/util/apppaths"
+	fplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"

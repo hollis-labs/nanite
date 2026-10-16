@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpbridge"
 	"github.com/hollis-labs/nanite/internal/selftools"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 func unsupportedProxyExecutor(tool condmcp.Tool) bool {

@@ -11,8 +11,8 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
 
-	mesh "github.com/hollis-labs/substrate/mesh"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
+	mesh "github.com/hollis-labs/libs/mesh/core"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 )
 
 // ErrAgentSetupConflict reports that the slug is already taken by host

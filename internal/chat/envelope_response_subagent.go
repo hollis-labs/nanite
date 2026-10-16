@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // SubagentApprovalHandler validates the server-persisted approval presentation.

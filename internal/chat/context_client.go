@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	feotel "github.com/hollis-labs/libs/util/otel"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
+	permissionsummary "github.com/hollis-labs/libs/security/policy/permission/summary"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tool"
 	wsutil "github.com/hollis-labs/nanite/internal/workspace"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	permissionsummary "github.com/hollis-labs/substrate/harness/interception/permission/summary"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 )
 

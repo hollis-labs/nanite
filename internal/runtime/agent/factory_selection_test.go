@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/hollis-labs/substrate/harness/adapters"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 )
 
 func TestSelectNativeAdapter_PreservesNaniteLaunchPolicy(t *testing.T) {

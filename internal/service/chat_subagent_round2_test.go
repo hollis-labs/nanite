@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	sdkprocess "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	sdkprocess "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 func TestSubagentZeroOwnerMultipleMessagesPreserveBaseBatch(t *testing.T) {

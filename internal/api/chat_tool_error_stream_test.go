@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
-	"github.com/hollis-labs/libs/ui-go/chatstream/framing"
+	agentservice "github.com/hollis-labs/libs/agent/core/service"
+	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
+	"github.com/hollis-labs/libs/ui/ui-go/chatstream/framing"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
-	agentservice "github.com/hollis-labs/substrate/agent/service"
 )
 
 // The service producer test exercises actual typed callbacks. This test covers

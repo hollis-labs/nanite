@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"sync"
 
-	chatstream "github.com/hollis-labs/libs/ui-go/chatstream"
-	streamhub "github.com/hollis-labs/libs/ui-go/streamhub"
+	agentservice "github.com/hollis-labs/libs/agent/core/service"
+	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
+	streamhub "github.com/hollis-labs/libs/ui/ui-go/streamhub"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
-	agentservice "github.com/hollis-labs/substrate/agent/service"
 )
 
 // CognitiveTurns binds opaque Nanite output and host event provenance to the

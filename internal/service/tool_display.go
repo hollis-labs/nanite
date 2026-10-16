@@ -3,8 +3,8 @@ package service
 import (
 	"unicode/utf8"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // This private value records schema assembly ownership in memory. It marshals

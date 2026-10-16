@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	"github.com/hollis-labs/libs/harness/core/broker"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	"github.com/hollis-labs/substrate/harness/broker"
 )
 
 // callExecuteTask handles task_execute — the Chat agent's

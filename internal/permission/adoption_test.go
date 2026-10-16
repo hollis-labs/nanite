@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 func TestSharedRules_DirectoryBoundaryAndInputKeys(t *testing.T) {

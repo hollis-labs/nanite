@@ -10,7 +10,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/hollis-labs/substrate/mesh/agentdef"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 )
 
 const (

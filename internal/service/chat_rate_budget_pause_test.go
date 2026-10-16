@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/nanite/internal/chat"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 func TestParseRateBudgetEstimate(t *testing.T) {

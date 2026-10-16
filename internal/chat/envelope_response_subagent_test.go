@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // newTestSubagentSvc builds a real subagent.Service backed by an in-memory

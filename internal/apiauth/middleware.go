@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/libs/ui-go/envelopes/admin"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes/admin"
 )
 
 // CookieName is the UI session cookie.

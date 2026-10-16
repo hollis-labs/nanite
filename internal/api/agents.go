@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	svcerr "github.com/hollis-labs/libs/util/svcerr"
+	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
 	"github.com/hollis-labs/nanite/internal/agentvalidation"
 	"github.com/hollis-labs/nanite/internal/safego"

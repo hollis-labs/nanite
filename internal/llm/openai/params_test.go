@@ -3,7 +3,7 @@ package openai
 import (
 	"testing"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
 // Chat Completions compatibility stays explicit while reasoning turns use Responses.

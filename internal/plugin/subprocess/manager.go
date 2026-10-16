@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	pluginhost "github.com/hollis-labs/libs/plugin-mcp/plugin-host"
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/capability"
-	sdksub "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/subprocess"
+	pluginhost "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-host"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/capability"
+	sdksub "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 )
 
 // ProcessState tracks the current state of a subprocess.

@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/util/scheduler/conformance"
-	"github.com/hollis-labs/libs/util/scheduler/sqlstore"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/core/util/scheduler/conformance"
+	"github.com/hollis-labs/libs/core/util/scheduler/sqlstore"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"

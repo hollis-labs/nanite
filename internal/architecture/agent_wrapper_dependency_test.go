@@ -37,7 +37,7 @@ func ownershipAllowance(count int, rationale string) agentOwnershipAllowance {
 }
 
 var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowance{
-	ownershipSymbol("internal/runtime/agent/bootdir_authority.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"): ownershipAllowance(4, "Retain exact complete/partial materialization results as custody evidence"),
+	ownershipSymbol("internal/runtime/agent/bootdir_authority.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"): ownershipAllowance(4, "Retain exact complete/partial materialization results as custody evidence"),
 	// Boot constructs exactly one wrapper and passes only wrapper-owned launch
 	// DTOs. It never constructs the child runtime or protocol client itself.
 	ownershipSymbol("internal/runtime/agent/agent.go", agentWrapperModule+"/wrapper", "Wrapper"):            ownershipAllowance(1, "Nanite stores the wrapper handle returned by Boot"),
@@ -52,7 +52,7 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/wrapper", "ErrTurnCancelUnsupported"):                      ownershipAllowance(1, "Nanite re-exports wrapper's honest native cancel ceiling"),
 	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/acp", "LifecycleError"):                                    ownershipAllowance(1, "Recovery preserves wrapper's classified ACP error"),
 	ownershipSymbol("internal/runtime/agent/manager.go", agentWrapperModule+"/acp", "StateProcessing"):                                   ownershipAllowance(1, "Takeover waits on wrapper-reported ACP state"),
-	ownershipSymbol("internal/runtime/agent/manager.go", "github.com/hollis-labs/substrate/harness/adapters/agentsessions", "ExitError"): ownershipAllowance(2, "Legacy recovery error translation only; no agentkit session ownership"),
+	ownershipSymbol("internal/runtime/agent/manager.go", "github.com/hollis-labs/libs/harness/core/adapters/agentsessions", "ExitError"): ownershipAllowance(2, "Legacy recovery error translation only; no agentkit session ownership"),
 
 	// SessionManager owns only Nanite runtime-ID bindings. The one shared ACP
 	// manager is injected into every wrapper; wrapper sessions remain its data.
@@ -75,7 +75,7 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	// Dependency and selection DTOs are Nanite composition inputs.
 	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule, "Transport"):                                                ownershipAllowance(1, "ACP adapter factory input DTO"),
 	ownershipSymbol("internal/runtime/agent/deps.go", agentWrapperModule, "Adapter"):                                                  ownershipAllowance(1, "ACP adapter factory output interface"),
-	ownershipSymbol("internal/runtime/agent/deps.go", "github.com/hollis-labs/substrate/harness/adapters/agentsessions", "ExitError"): ownershipAllowance(4, "Recovery and telemetry compatibility DTO only"),
+	ownershipSymbol("internal/runtime/agent/deps.go", "github.com/hollis-labs/libs/harness/core/adapters/agentsessions", "ExitError"): ownershipAllowance(4, "Recovery and telemetry compatibility DTO only"),
 	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule, "Transport"):                                         ownershipAllowance(1, "Pass the configured ACP transport to shipped adapters"),
 	ownershipSymbol("internal/runtime/agent/acp_adapter.go", agentWrapperModule, "Adapter"):                                           ownershipAllowance(1, "Return an adapter for wrapper ownership"),
 	ownershipSymbol("internal/runtime/agent/factory.go", agentWrapperModule, "Transport"):                                             ownershipAllowance(1, "Return the configured ACP transport DTO"),
@@ -121,32 +121,32 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 	//     session surface, and Nanite still decides every destination path
 	//     and mode itself (bootDirArtifactTree) rather than accepting
 	//     wrapper's legacy per-field conventions.
-	ownershipSymbol("internal/runtime/agent/bootdir.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):          ownershipAllowance(3, "Layout.Populate surfaces the materialization result"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):       ownershipAllowance(1, "Claude boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):     ownershipAllowance(8, "Compile Claude boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):   ownershipAllowance(6, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_agy.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):          ownershipAllowance(1, "Antigravity boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_agy.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):        ownershipAllowance(5, "Compile Antigravity boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_agy.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):      ownershipAllowance(6, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):        ownershipAllowance(1, "Codex boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):      ownershipAllowance(7, "Compile Codex boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):    ownershipAllowance(6, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "Planter"):     ownershipAllowance(1, "OpenCode boot-content planter conformance"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):   ownershipAllowance(8, "Compile OpenCode boot-content DTOs"),
-	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"): ownershipAllowance(6, "Return planted-content metadata"),
-	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantSpec"):      ownershipAllowance(3, "Consume the destination-agnostic planting DTO"),
-	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "PlantResult"):    ownershipAllowance(6, "Return exact planting outcomes"),
-	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/substrate/harness/agentlaunch/planting", "SharedPlanter"):  ownershipAllowance(1, "Write through agentkit's shared materialization engine"),
+	ownershipSymbol("internal/runtime/agent/bootdir.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"):          ownershipAllowance(3, "Layout.Populate surfaces the materialization result"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "Planter"):       ownershipAllowance(1, "Claude boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantSpec"):     ownershipAllowance(8, "Compile Claude boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_claude.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"):   ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_agy.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "Planter"):          ownershipAllowance(1, "Antigravity boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_agy.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantSpec"):        ownershipAllowance(5, "Compile Antigravity boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_agy.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"):      ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "Planter"):        ownershipAllowance(1, "Codex boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantSpec"):      ownershipAllowance(7, "Compile Codex boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_codex.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"):    ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "Planter"):     ownershipAllowance(1, "OpenCode boot-content planter conformance"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantSpec"):   ownershipAllowance(8, "Compile OpenCode boot-content DTOs"),
+	ownershipSymbol("internal/runtime/agent/bootdir_opencode.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"): ownershipAllowance(6, "Return planted-content metadata"),
+	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantSpec"):      ownershipAllowance(3, "Consume the destination-agnostic planting DTO"),
+	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "PlantResult"):    ownershipAllowance(6, "Return exact planting outcomes"),
+	ownershipSymbol("internal/runtime/agent/bootdir_plant.go", "github.com/hollis-labs/libs/harness/core/agentlaunch/planting", "SharedPlanter"):  ownershipAllowance(1, "Write through agentkit's shared materialization engine"),
 }
 
 const (
-	agentWrapperReleaseModule = "github.com/hollis-labs/substrate/harness"
-	agentWrapperModule        = "github.com/hollis-labs/substrate/harness/adapters"
-	agentWrapperVersion       = "v0.3.1"
+	agentWrapperReleaseModule = "github.com/hollis-labs/libs/harness/core"
+	agentWrapperModule        = "github.com/hollis-labs/libs/harness/core/adapters"
+	agentWrapperVersion       = "v0.10.0"
 	agentWrapperSum           = "h1:SgSikCp1S4ZTp923Q7ohPTosN/4CYmX2lCqQ4e+bde8="
 	agentWrapperGoModSum      = "h1:BCteU5BGFnLujwOQJK1USbwu35YoNLpr+oe0/3ZD+sU="
-	agentCoreModule           = "github.com/hollis-labs/substrate/agent"
-	agentCoreVersion          = "v0.3.0"
+	agentCoreModule           = "github.com/hollis-labs/libs/agent/core"
+	agentCoreVersion          = "v0.4.0"
 	agentCoreSum              = "h1:8muMrgQjTgr8tK2ZmArvV4iqvz7b+r04p1GI8NVG74c="
 	agentCoreGoModSum         = "h1:MT9wc4hfLHJsbTv8myyicXZpY88wf7jeXPS71HhUY/Y="
 )
@@ -214,7 +214,7 @@ func start(ctx context.Context) { _ = process.CommandContext(ctx, "agent") }`,
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 func start(ctx context.Context) {
     client := protocol.NewClient()
@@ -228,7 +228,7 @@ func start(ctx context.Context) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 func prompt(ctx context.Context, client protocol.Client) {
     _ = client.Prompt(ctx, "hello")
@@ -239,7 +239,7 @@ func prompt(ctx context.Context, client protocol.Client) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 func prompt(ctx context.Context) {
     client := protocol.NewClient()
@@ -252,7 +252,7 @@ func prompt(ctx context.Context) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 func prompt(ctx context.Context, client protocol.Client) {
     var alias = client
@@ -264,7 +264,7 @@ func prompt(ctx context.Context, client protocol.Client) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 func cancel(ctx context.Context, client protocol.Client) {
     var alias any
@@ -277,7 +277,7 @@ func cancel(ctx context.Context, client protocol.Client) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 type holder struct { client protocol.Client }
 func closeClient(ctx context.Context, value *holder) {
@@ -290,7 +290,7 @@ func closeClient(ctx context.Context, value *holder) {
 			source: `package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 var client protocol.Client
 var third = second
@@ -305,7 +305,7 @@ func prompt(ctx context.Context) {
 			source: `package agent
 import (
     "context"
-    bridge "github.com/hollis-labs/substrate/harness/adapters/claudeacp"
+    bridge "github.com/hollis-labs/libs/harness/core/adapters/claudeacp"
 )
 func start(ctx context.Context) {
     client := bridge.NewClient()
@@ -315,13 +315,13 @@ func start(ctx context.Context) {
 		},
 		"direct agentkit manager": {
 			source: `package agent
-import sessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+import sessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
 var manager = sessions.NewManager(nil)`,
 			want: []string{"agentsessions.NewManager"},
 		},
 		"blank ACP import": {
 			source: `package agent
-import _ "github.com/hollis-labs/substrate/harness/adapters/acp"`,
+import _ "github.com/hollis-labs/libs/harness/core/adapters/acp"`,
 			want: []string{"blank import has no reviewed Agent Host symbol use"},
 		},
 		"dot os StartProcess": {
@@ -359,7 +359,7 @@ func TestAgentOwnershipGuardDoesNotTaintUnrelatedIdentifiers(t *testing.T) {
 	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 type holder struct { client protocol.Client }
 type unrelated struct { client string }
@@ -382,7 +382,7 @@ func TestAgentOwnershipGuardDoesNotMergeShadowedHolderTypes(t *testing.T) {
 	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
 import (
     "context"
-    protocol "github.com/hollis-labs/substrate/harness/adapters/acp"
+    protocol "github.com/hollis-labs/libs/harness/core/adapters/acp"
 )
 type promptLike struct{}
 func (promptLike) Prompt(context.Context, string) error { return nil }
@@ -413,14 +413,14 @@ func TestAgentOwnershipGuardRejectsAllowanceOveruse(t *testing.T) {
 		symbol: ownershipAllowance(1, "test allowance must remain exact"),
 	}
 	files := fstest.MapFS{productionPath: {Data: []byte(`package agent
-import host "github.com/hollis-labs/substrate/harness/adapters/wrapper"
+import host "github.com/hollis-labs/libs/harness/core/adapters/wrapper"
 var first = host.New
 var second = host.New`)}}
 	violations, err := scanAgentOwnership(files, "internal/runtime/agent", allowed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsViolation(violations, "expected github.com/hollis-labs/substrate/harness/adapters/wrapper.New exactly 1 time(s), found 2") {
+	if !containsViolation(violations, "expected github.com/hollis-labs/libs/harness/core/adapters/wrapper.New exactly 1 time(s), found 2") {
 		t.Fatalf("exact allowance silently broadened:\n- %s", strings.Join(violations, "\n- "))
 	}
 }
@@ -689,7 +689,7 @@ func guardedOwnershipImport(importPath string) bool {
 			return false
 		}
 	}
-	return importPath == agentWrapperModule || strings.HasPrefix(importPath, agentWrapperModule+"/") || importPath == "github.com/hollis-labs/substrate/harness/agentlaunch/planting" || importPath == "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
+	return importPath == agentWrapperModule || strings.HasPrefix(importPath, agentWrapperModule+"/") || importPath == "github.com/hollis-labs/libs/harness/core/agentlaunch/planting" || importPath == "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
 }
 
 var directACPClientLifecycleMethods = map[string]bool{

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
-const MODULE = 'github.com/hollis-labs/libs/ui-go';
+const MODULE = 'github.com/hollis-labs/libs/ui/ui-go';
 const EXPORT_COMMAND = `${MODULE}/envelopes/cmd/envelopes-export`;
 
 function runExporter(root, format) {

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	messaging "github.com/hollis-labs/substrate/mesh/messaging"
-	"github.com/hollis-labs/substrate/mesh/messaging/delivery"
-	tether "github.com/hollis-labs/substrate/mesh/tetherclient"
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging"
+	"github.com/hollis-labs/libs/mesh/core/messaging/delivery"
+	tether "github.com/hollis-labs/libs/mesh/core/tetherclient"
 )
 
 var testRecipient = messaging.Address{

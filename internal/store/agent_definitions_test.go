@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	mesh "github.com/hollis-labs/substrate/mesh"
-	"github.com/hollis-labs/substrate/mesh/agentdef"
+	mesh "github.com/hollis-labs/libs/mesh/core"
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
 )
 
 func definitionTestBytes(id, revision, body string) []byte {

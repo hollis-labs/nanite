@@ -5,11 +5,11 @@ import (
 	"reflect"
 	"testing"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
 	"github.com/hollis-labs/nanite/internal/agent/reflexes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 func newRetiredDispatchFixture(t *testing.T, slug string) (*store.Store, *store.AgentProfile, *store.Session) {

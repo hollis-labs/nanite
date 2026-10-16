@@ -11,13 +11,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/substrate/llm-core/contracts/runtimes"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/substrate/agent/subagent"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // runtimeStore adds the two reads subagentRuntime resolves through to the

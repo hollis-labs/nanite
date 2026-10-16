@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
-	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )
 
 // Nanite has no user-level or app-level default provider or model

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/harness/adapters"
-	"github.com/hollis-labs/substrate/harness/adapters/acp"
-	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	"github.com/hollis-labs/libs/harness/core/adapters/acp"
+	agentsessions "github.com/hollis-labs/libs/harness/core/adapters/agentsessions"
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 )
 
 type bootACPTestAdapter struct{ client *bootACPTestClient }

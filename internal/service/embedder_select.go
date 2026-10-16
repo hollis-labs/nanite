@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
+	embedcontracts "github.com/hollis-labs/libs/llm/core/embedcontracts"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
-	embedcontracts "github.com/hollis-labs/substrate/llm-core/embedcontracts"
 )
 
 // Embedding status values returned by SelectEmbedder. Surfaced by the settings

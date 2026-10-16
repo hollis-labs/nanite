@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/hollis-labs/substrate/harness/adapters"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
+	"github.com/hollis-labs/libs/harness/core/adapters"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 )
 
 // withYolo puts d's permission engine in yolo mode when yolo is true. The

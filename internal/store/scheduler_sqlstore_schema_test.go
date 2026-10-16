@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	gosched "github.com/hollis-labs/libs/util/scheduler"
-	"github.com/hollis-labs/libs/util/scheduler/sqlstore"
+	gosched "github.com/hollis-labs/libs/core/util/scheduler"
+	"github.com/hollis-labs/libs/core/util/scheduler/sqlstore"
 )
 
 // The additive schema is removable only while it carries no material. Once

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // The submitting credential of a native turn rides the request context into the

@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	ledger "github.com/hollis-labs/libs/llm/core/usageledger"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/usagecost"
-	ctxpkg "github.com/hollis-labs/substrate/agent/contextwindow"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
-	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
 )
 
 func terminationUsage(reason string) llmtypes.StreamEvent {

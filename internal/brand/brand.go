@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	paths "github.com/hollis-labs/libs/util/apppaths"
+	paths "github.com/hollis-labs/libs/core/util/apppaths"
 )
 
 const (

@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	gmcpserver "github.com/hollis-labs/libs/plugin-mcp/go-mcp/server"
-	gmcphttp "github.com/hollis-labs/libs/plugin-mcp/go-mcp/transport/http"
+	gmcpserver "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/server"
+	gmcphttp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/transport/http"
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 )

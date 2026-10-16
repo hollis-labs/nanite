@@ -11,11 +11,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hollis-labs/substrate/agent/tooluse"
+	"github.com/hollis-labs/libs/agent/core/tooluse"
 
 	"github.com/hollis-labs/nanite/internal/store"
 
-	feotel "github.com/hollis-labs/libs/util/otel"
+	"github.com/hollis-labs/libs/agent/core/loopdetect"
+	toolresult "github.com/hollis-labs/libs/agent/core/toolresult"
+	feotel "github.com/hollis-labs/libs/core/util/otel"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
@@ -24,10 +28,6 @@ import (
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/safego"
 	"github.com/hollis-labs/nanite/internal/truncate"
-	"github.com/hollis-labs/substrate/agent/loopdetect"
-	toolresult "github.com/hollis-labs/substrate/agent/toolresult"
-	permissionlib "github.com/hollis-labs/substrate/harness/interception/permission"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )

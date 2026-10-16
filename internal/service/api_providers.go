@@ -6,9 +6,9 @@ import (
 	"os"
 	"strconv"
 
+	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
-	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"
 )
 
 // APIProviderSpec is one HTTP API provider Nanite has an adapter for.

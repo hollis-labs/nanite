@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	nctx "github.com/hollis-labs/libs/agent/core/contextwindow"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/internal/store"
-	nctx "github.com/hollis-labs/substrate/agent/contextwindow"
 )
 
 // TestUniversalRulesBlock_NonEmpty asserts the universal rules block is

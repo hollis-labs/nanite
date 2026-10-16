@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"net/url"
 
+	agentservice "github.com/hollis-labs/libs/agent/core/service"
+	"github.com/hollis-labs/libs/agent/core/transport/httpstream"
 	"github.com/hollis-labs/nanite/internal/store"
-	agentservice "github.com/hollis-labs/substrate/agent/service"
-	"github.com/hollis-labs/substrate/agent/transport/httpstream"
 
-	streamhub "github.com/hollis-labs/libs/ui-go/streamhub"
+	streamhub "github.com/hollis-labs/libs/ui/ui-go/streamhub"
 	"github.com/hollis-labs/nanite/internal/service"
 )
 

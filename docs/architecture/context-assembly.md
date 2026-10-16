@@ -59,7 +59,7 @@ documented state rather than a bug to fix.
 
 ## The contract, and where it actually lives
 
-Nanite consumes `github.com/hollis-labs/substrate/agent/contextwindow` from
+Nanite consumes `github.com/hollis-labs/libs/agent/core/contextwindow` from
 the pinned agent module. This is the published home of the former
 `go-context-window` extraction, replacing the legacy `agent/context` package.
 The agent-context provider and dynamic resolvers already use the same module's
@@ -164,7 +164,7 @@ invariants rather than from the slot content.
 
 ```bash
 # which slots the plan carries, in order
-agent_module=$(go list -m -f '{{.Dir}}' github.com/hollis-labs/substrate/agent)
+agent_module=$(go list -m -f '{{.Dir}}' github.com/hollis-labs/libs/agent/core)
 grep -n -A18 'var SlotOrder' "$agent_module/contextwindow/slot.go"
 # what the CLI boot prompt is built from
 grep -n 'func composeSystemPrompt\|func ResolveSystemPrompt\|func withCLINarration' internal/runtime/agent/prompt.go

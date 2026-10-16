@@ -4,10 +4,10 @@ import (
 	"math"
 	"testing"
 
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 
-	"github.com/hollis-labs/substrate/llm-core/modelsdev"
-	ledger "github.com/hollis-labs/substrate/llm-core/usageledger"
+	"github.com/hollis-labs/libs/llm/core/modelsdev"
+	ledger "github.com/hollis-labs/libs/llm/core/usageledger"
 )
 
 type testCatalog struct{ rates modelsdev.Pricing }

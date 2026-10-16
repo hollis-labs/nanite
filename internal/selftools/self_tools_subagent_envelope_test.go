@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/subagent"
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
-	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // gatedSubagentTestTransport wires a SelfToolsTransport with a

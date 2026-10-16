@@ -16,11 +16,11 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/brand"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	condmcp "github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/mcpbridge"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/toolclient"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // selfToolProxy is a toolTransport that forwards self-tool calls to a live

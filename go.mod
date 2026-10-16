@@ -75,7 +75,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
-	github.com/hollis-labs/plugin-sdk v0.6.1 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mattn/go-isatty v0.0.24
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -94,19 +93,24 @@ require (
 )
 
 require (
-	github.com/hollis-labs/libs/plugin-mcp v0.2.0
+	github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0
+	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
-	github.com/hollis-labs/libs/ui-go v0.1.0
-	github.com/hollis-labs/libs/util v0.2.0
-	github.com/hollis-labs/libs/workflow v0.1.0
+	github.com/hollis-labs/libs/ui/ui-go v0.1.0
+	github.com/hollis-labs/libs/core/util v0.4.0
+	github.com/hollis-labs/libs/workflow/engine v0.1.0
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.2.0
 	github.com/hollis-labs/plugins-catalog v0.1.0
-	github.com/hollis-labs/substrate/agent v0.3.0
-	github.com/hollis-labs/substrate/harness v0.3.1
-	github.com/hollis-labs/substrate/llm-core v0.1.0
-	github.com/hollis-labs/substrate/mesh v0.1.0
+	github.com/hollis-labs/libs/agent/core v0.4.0
+	github.com/hollis-labs/libs/harness/core v0.10.0
+	github.com/hollis-labs/libs/llm/core v0.2.0
+	github.com/hollis-labs/libs/mesh/core v0.4.0
 	github.com/hollis-labs/tesseract v0.11.0
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/mod v0.41.0
 )
+
+// pkg/pluginapi v0.2.0 on the proxy still imports the pre-group plugin-mcp
+// path; resolve the in-repo module until pkg/pluginapi/v0.3.0 is tagged.
+replace github.com/hollis-labs/nanite/pkg/pluginapi => ./pkg/pluginapi

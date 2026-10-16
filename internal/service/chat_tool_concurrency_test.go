@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/substrate/agent/tooluse"
+	"github.com/hollis-labs/libs/agent/core/tooluse"
 
+	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/store"
-	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
 // peakGauge tracks how many callers are inside enter/leave at once.

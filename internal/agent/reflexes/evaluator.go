@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	shared "github.com/hollis-labs/substrate/agent/reflexes"
+	shared "github.com/hollis-labs/libs/agent/core/reflexes"
 )
 
 var errUnsupportedAttr = errors.New(`unknown predicate kind "attr"`)

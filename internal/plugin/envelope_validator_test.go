@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
-	"github.com/hollis-labs/libs/ui-go/envelopes"
+	sdkplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/libs/ui/ui-go/envelopes"
 )
 
 const objectSchema = `{

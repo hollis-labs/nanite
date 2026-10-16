@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hollis-labs/libs/util/sqlite/sqlitekit"
+	"github.com/hollis-labs/libs/core/util/sqlite/sqlitekit"
 	_ "modernc.org/sqlite" // registers the sqlite driver for sqlitekit
 )
 

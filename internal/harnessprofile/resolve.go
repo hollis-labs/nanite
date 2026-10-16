@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	agentcontracts "github.com/hollis-labs/substrate/llm-core/contracts"
+	agentcontracts "github.com/hollis-labs/libs/llm/core/contracts"
 )
 
 // Inputs are what one run resolves against.

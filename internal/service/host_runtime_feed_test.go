@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	"github.com/hollis-labs/nanite/internal/store"
-	runtimeevents "github.com/hollis-labs/substrate/harness/adapters/runtimeevents"
 )
 
 func TestProjectHostRuntimePayloadHandlesReleasedVocabularyDefaultDeny(t *testing.T) {

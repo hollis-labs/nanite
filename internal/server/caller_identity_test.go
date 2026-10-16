@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/apiauth"
-	messaging "github.com/hollis-labs/substrate/mesh/messaging/mailbox"
 )
 
 // run sends one request through the middleware with an optional principal and

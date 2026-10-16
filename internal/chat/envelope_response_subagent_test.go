@@ -8,7 +8,8 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // newTestSubagentSvc builds a real subagent.Service backed by an in-memory
@@ -28,7 +29,7 @@ func newTestSubagentSvc(t *testing.T) *subagent.Service {
 	emitter := &stubApprovalEmitter{} // local fake
 	settings := subagentSettingsStub{required: true}
 
-	return subagent.NewService(s.DB, subagent.EchoRunner{}, nil, emitter, settings)
+	return subagenthost.NewService(s.DB, subagent.EchoRunner{}, nil, emitter, settings)
 }
 
 // stubApprovalEmitter: satisfies subagent.ApprovalEmitter without persisting.

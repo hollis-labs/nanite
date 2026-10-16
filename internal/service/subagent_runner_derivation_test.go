@@ -9,7 +9,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // TestChatRunner_ForwardsParentDeniesIntoChildSession asserts the W3

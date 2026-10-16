@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // handoffStashToolDefinition returns the handoff_stash self-tool —

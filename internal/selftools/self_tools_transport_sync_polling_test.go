@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // delayedCompletionRunner is a test Runner that sleeps for a configured
@@ -85,7 +86,7 @@ func newSyncPollingTestService(t *testing.T, delay time.Duration) (*subagent.Ser
 	t.Cleanup(func() { s.Close(context.Background()) })
 
 	runner := &delayedCompletionRunner{db: s.DB, delay: delay}
-	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
+	svc := subagenthost.NewService(s.DB, runner, nil, nil, nil)
 	return svc, &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
@@ -224,7 +225,7 @@ func TestSyncSubagentEnvelope_StatusError_ReturnsInternal(t *testing.T) {
 	}
 
 	runner := &delayedCompletionRunner{db: s.DB, delay: 100 * time.Millisecond}
-	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
+	svc := subagenthost.NewService(s.DB, runner, nil, nil, nil)
 	st := &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 
 	id, err := svc.Spawn(context.Background(), subagent.SpawnRequest{

@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	agentservice "github.com/hollis-labs/substrate/agent/service"
+
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	permissionlib "github.com/hollis-labs/go-permission"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -121,7 +125,7 @@ func TestDefinedViewPinAndConfigStaySeparateFromMetadata(t *testing.T) {
 	// A persisted snapshot survives event-log expiry and process replacement.
 	turn := "persisted-turn"
 	user := &store.Message{ID: "persisted-user", SessionID: view.ID, Content: "question"}
-	initial, _ := json.Marshal(CognitiveTurnSnapshot{SessionViewID: view.ID, TurnID: turn, RunID: turn, OutputMessageID: turn, State: "submitted"})
+	initial, _ := json.Marshal(agentservice.Snapshot[store.Message]{SessionViewID: view.ID, TurnID: turn, RunID: turn, OutputMessageID: turn, State: "submitted"})
 	if err = f.st.CreateCognitiveTurn(t.Context(), user, turn, string(initial)); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +145,7 @@ func TestNativeDefinitionPermissionPostureNarrowsHostYolo(t *testing.T) {
 	f.tools.definitions = []llmtypes.ToolDefinition{{Name: tool.Name, Description: "fixture write"}}
 	f.svc.tools = &writePermissionFixture{ToolService: f.tools}
 	f.svc.permissions = permissionlib.NewEngine(permissionlib.ModeYolo, nil)
-	f.svc.cognitiveApprovals = NewCognitiveApprovals(f.svc.permissions)
+	f.svc.cognitiveApprovals = approval.New(f.svc.permissions)
 	base, _ := EmbeddedDefinition()
 	d := *base.Definition
 	d.HarnessProfile.Permissions.Profile = "read-only"

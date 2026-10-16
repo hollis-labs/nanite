@@ -33,7 +33,7 @@ import (
 	"sort"
 	"strings"
 
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // SlotAction is the per-slot decision made by the assembly decider.

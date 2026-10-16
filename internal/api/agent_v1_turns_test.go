@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/store"
+	agentservice "github.com/hollis-labs/substrate/agent/service"
+
 	chatstream "github.com/hollis-labs/go-chatstream"
 	"github.com/hollis-labs/go-chatstream/conformance"
 	"github.com/hollis-labs/go-chatstream/framing"
@@ -127,7 +130,7 @@ func TestAgentV1RealTurnHTTPReplayStatusCancelAndRestart(t *testing.T) {
 		t.Fatal(reduced, err)
 	}
 	status = request("GET", turn.Links.Status, nil)
-	var snapshot service.CognitiveTurnSnapshot
+	var snapshot agentservice.Snapshot[store.Message]
 	if err = json.Unmarshal(status.Body.Bytes(), &snapshot); err != nil {
 		t.Fatal(err)
 	}

@@ -31,7 +31,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // SelfToolsTransport provides self-service tools that let the agent

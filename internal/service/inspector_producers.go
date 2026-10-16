@@ -9,8 +9,8 @@ package service
 
 import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // recordInspectorSlots builds a []inspector.SlotSnapshot from the

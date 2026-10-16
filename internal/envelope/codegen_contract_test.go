@@ -72,7 +72,7 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/libs/ui/ui-go v0.1.0\n") {
+	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/libs/ui/ui-go v0.4.0\n") {
 		t.Fatal("go.mod does not pin the released go-envelopes version")
 	}
 	if strings.Contains(string(goMod), "replace github.com/hollis-labs/libs/ui/ui-go") {

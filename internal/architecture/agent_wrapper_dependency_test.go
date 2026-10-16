@@ -142,9 +142,9 @@ var allowedAgentOwnershipSymbols = map[agentOwnershipSymbol]agentOwnershipAllowa
 const (
 	agentWrapperReleaseModule = "github.com/hollis-labs/libs/harness/core"
 	agentWrapperModule        = "github.com/hollis-labs/libs/harness/core/adapters"
-	agentWrapperVersion       = "v0.10.0"
-	agentWrapperSum           = "h1:4WZtd1t/EO4KKDkEb6qcyJYARLDLxfsDxcQmEMeq0k8="
-	agentWrapperGoModSum      = "h1:FzUVpc31CuypIrMS45cubAGjq2SjkDNTIRg0FnrvEh4="
+	agentWrapperVersion       = "v0.13.0"
+	agentWrapperSum           = "h1:JIiIr+B6qcsG2vbB+CJb6dHUlJVzp7cVjGR0CmS9TF0="
+	agentWrapperGoModSum      = "h1:hj9S3Chzguss5UkJs4vFK7wz9WL+CyOa50/wEn56tNs="
 	agentCoreModule           = "github.com/hollis-labs/libs/agent/core"
 	agentCoreVersion          = "v0.4.0"
 	agentCoreSum              = "h1:4cQovQwGvkPkeIPieoP3mZ3IATCzx1O/fOoWuv9yo1Y="

@@ -17,10 +17,10 @@ import (
 
 const (
 	messagingModule       = "github.com/hollis-labs/libs/mesh/core"
-	messagingVersion      = "v0.4.0"
+	messagingVersion      = "v0.8.0"
 	mailboxImport         = messagingModule + "/messaging/mailbox"
 	legacyMessagingImport = "github.com/hollis-labs/nanite/internal/messaging"
-	messagingModuleSum    = "h1:c9VyyMzFGRuE9kVckgvvlt5U8VHLnpv5sf/4TwwSoKA="
+	messagingModuleSum    = "h1:XFeak/8MRzBnCw3xj0nj2VBNv6GaUYY/WsP1rKVVsjc="
 	messagingGoModSum     = "h1:K1a1oeFXakkaJDyKogI/I2j+2lpKklTZgdtzSw45Bss="
 )
 

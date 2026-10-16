@@ -71,12 +71,12 @@ func runNaniteSwitchFixture(ctx context.Context, state *WorkflowStateStore, inpu
 		targetSet[target] = struct{}{}
 	}
 	for node := range targetSet {
-		if _, nodeErr := createQualificationNode(ctx, state, workflowruntime.NodeInvocationID{RunID: runID, NodeID: node}, base, false); nodeErr != nil {
+		if _, nodeErr := createBoundQualificationNode(ctx, state, workflowruntime.NodeInvocationID{RunID: runID, NodeID: node}, base); nodeErr != nil {
 			return nodeErr
 		}
 	}
 	sourceID := workflowruntime.NodeInvocationID{RunID: runID, NodeID: "source"}
-	if _, nodeErr := createQualificationNode(ctx, state, sourceID, base, false); nodeErr != nil {
+	if _, nodeErr := createBoundQualificationNode(ctx, state, sourceID, base); nodeErr != nil {
 		return nodeErr
 	}
 	if finishErr := finishQualificationNode(ctx, state, sourceID, workflowruntime.NodeSucceeded, "", base.Add(time.Second)); finishErr != nil {
@@ -116,14 +116,14 @@ func runNaniteCatchFixture(ctx context.Context, state *WorkflowStateStore, input
 		return err
 	}
 	sourceID := workflowruntime.NodeInvocationID{RunID: runID, NodeID: "source"}
-	if _, nodeErr := createQualificationNode(ctx, state, sourceID, base, false); nodeErr != nil {
+	if _, nodeErr := createBoundQualificationNode(ctx, state, sourceID, base); nodeErr != nil {
 		return nodeErr
 	}
 	targetSet := make(map[string]struct{})
 	for _, rule := range input.Catch {
 		for _, target := range rule.Targets {
 			targetSet[target] = struct{}{}
-			if _, nodeErr := createQualificationNode(ctx, state, workflowruntime.NodeInvocationID{RunID: runID, NodeID: target}, base, false); nodeErr != nil {
+			if _, nodeErr := createBoundQualificationNode(ctx, state, workflowruntime.NodeInvocationID{RunID: runID, NodeID: target}, base); nodeErr != nil {
 				return nodeErr
 			}
 		}
@@ -198,7 +198,7 @@ func runNaniteFinallyFixture(ctx context.Context, state *WorkflowStateStore, inp
 	}
 	for _, node := range input.Graph.Nodes {
 		id := workflowruntime.NodeInvocationID{RunID: runID, NodeID: node.ID}
-		if _, nodeErr := createQualificationNode(ctx, state, id, base, false); nodeErr != nil {
+		if _, nodeErr := createBoundQualificationNode(ctx, state, id, base); nodeErr != nil {
 			return nodeErr
 		}
 		if node.Finally == nil {
@@ -234,7 +234,7 @@ func runNaniteCompletionFixture(ctx context.Context, state *WorkflowStateStore, 
 	}
 	workflow := graph.Graph{Nodes: []graph.Node{{ID: "work"}, {ID: "cleanup", Finally: &graph.FinallySpec{}}}}
 	for _, node := range workflow.Nodes {
-		if _, nodeErr := createQualificationNode(ctx, state, workflowruntime.NodeInvocationID{RunID: runID, NodeID: node.ID}, base, false); nodeErr != nil {
+		if _, nodeErr := createBoundQualificationNode(ctx, state, workflowruntime.NodeInvocationID{RunID: runID, NodeID: node.ID}, base); nodeErr != nil {
 			return nodeErr
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hollis-labs/libs/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
 )
 
 // Version identifies the public host contract, independently of the Nanite

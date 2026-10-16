@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,24 +61,6 @@ func (registry *messagingAgentRegistry) RegisterAgent(_ context.Context, _, _ st
 	// Mail metadata and register_as cannot enroll an actor. A verified issuer
 	// port is not adopted; existing bound actors remain usable.
 	return store.ErrVerifiedActorRequired
-}
-
-func messagingAgentSlug(agentID string) string {
-	lower := strings.ToLower(agentID)
-	var slug strings.Builder
-	for _, char := range lower {
-		switch {
-		case char >= 'a' && char <= 'z', char >= '0' && char <= '9', char == '-':
-			slug.WriteRune(char)
-		case char == '_' || char == ' ' || char == '.' || char == '/':
-			slug.WriteRune('-')
-		}
-	}
-	cleaned := strings.Trim(slug.String(), "-")
-	if cleaned == "" {
-		return agentID
-	}
-	return cleaned
 }
 
 // SessionEvents implements both the mailbox EventStore seam and Nanite's

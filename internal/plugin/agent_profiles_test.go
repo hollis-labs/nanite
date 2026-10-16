@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,33 +12,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-// TestPhase5AgentProfiles_EndToEnd is Phase 5 item 03's Done-means
-// verification (TASKS/phase-5/03-wire-registers-agent-profiles.md): a real
-// test plugin declaring registers.agent_profiles[] in the new role/agent
-// composition shape, run through the exact same pipeline a genuine on-disk
-// plugin uses -- Host.LoadPlugin followed by applyManifestRegistrations
-// (mirroring loader.go's LoadDiscovered, not a shortcut around it) -- then
-// torn down via the real Host.UnloadPlugin.
-//
-// No real, currently-installed plugin declares registers.agent_profiles[]
-// today: the giphy reference plugin this shape's manifest-level {id, file}
-// fields were originally validated against (config_manifest_v1_test.go) was
-// cut in full (TASKS/phase-0/15a-cut-giphy.md) before this task landed, and
-// no other plugin.yaml in this workspace declares the section (confirmed by
-// grep across internal/plugin/builtin/*/plugin.yaml). This test is
-// therefore the "test plugin otherwise" branch of this task's Done-means,
-// not a migration of a real fixture that never existed on disk.
-//
-// "Dispatchable" is verified at the composition layer this task owns: the
-// constructed agent_profiles row resolves to a real role with a non-empty
-// system_prompt (ready for internal/service.ResolveAgentCascade -- the
-// actual cascade merge is covered separately by role_cascade_test.go, which
-// internal/plugin cannot import without a cycle), and carries real
-// agent_tools/agent_known_skills grants of the exact shape
-// internal/service/tool.go's filterToolsByAgentTools reads at dispatch
-// time. Exercising an actual LLM turn is out of this backend-only task's
-// scope.
-func TestPhase5AgentProfiles_EndToEnd(t *testing.T) {
+// A real loaded plugin cannot reintroduce mutable profiles or authority.
+func TestPhase5AgentProfiles_ImmutableRefusalHasNoInstallEffects(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "agent-profiles-e2e.db")
@@ -46,10 +22,7 @@ func TestPhase5AgentProfiles_EndToEnd(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = st.Close(context.
-
-			// A real skill row for agent.skills to grant against.
-			Background())
+		_ = st.Close(context.Background())
 	})
 
 	skill := &store.Skill{Name: "Wiki Classify", Slug: "wiki-classify", Description: "test skill"}
@@ -105,133 +78,40 @@ agent:
 	if err := host.LoadPlugin(p); err != nil {
 		t.Fatalf("LoadPlugin: %v", err)
 	}
-	if err := applyManifestRegistrations(host, manifest, p, pluginDir); err != nil {
-		t.Fatalf("applyManifestRegistrations: %v", err)
-	}
 
-	// --- install: agent appears and is dispatchable ---
-
-	agent, err := st.GetAgentBySlug(context.Background(), "demo-curator")
-	if err != nil {
-		t.Fatalf("GetAgentBySlug: %v", err)
-	}
-	if agent.PluginID != pluginID {
-		t.Errorf("agent.PluginID = %q, want %q", agent.PluginID, pluginID)
-	}
-	if agent.RoleID == "" {
-		t.Fatalf("agent.RoleID not set")
-	}
-	if agent.ConsumerID == "" {
-		t.Fatalf("agent.ConsumerID not set")
-	}
-	if agent.Status != "active" {
-		t.Errorf("agent.Status = %q, want active", agent.Status)
-	}
-	if agent.ActivationMode != "fresh-per-wake" {
-		t.Errorf("agent.ActivationMode = %q, want fresh-per-wake", agent.ActivationMode)
-	}
-
-	role, err := st.GetRole(context.Background(), agent.RoleID)
-	if err != nil {
-		t.Fatalf("GetRole: %v", err)
-	}
-	if role == nil {
-		t.Fatalf("GetRole returned nil for agent.RoleID %q", agent.RoleID)
-	}
-	if role.SystemPrompt == "" {
-		t.Errorf("role.SystemPrompt is empty -- the constructed agent would boot with no persona")
-	}
-	if agent.SystemPrompt != "" {
-		// Confirms the composition defers to the role via the cascade
-		// (internal/service.ResolveAgentCascade / applyScalarCascade)
-		// rather than duplicating the prompt onto the agent row.
-		t.Errorf("agent.SystemPrompt = %q, want empty (deferred to role via cascade)", agent.SystemPrompt)
-	}
-
-	consumer, err := st.GetConsumer(context.Background(), agent.ConsumerID)
-	if err != nil {
-		t.Fatalf("GetConsumer: %v", err)
-	}
-	if consumer == nil {
-		t.Fatalf("GetConsumer returned nil for agent.ConsumerID %q", agent.ConsumerID)
-	}
-	if consumer.Slug != pluginID {
-		t.Errorf("consumer.Slug = %q, want %q (default consumer_slug = plugin id)", consumer.Slug, pluginID)
-	}
-
-	grantedTools, err := st.ListAgentToolNames(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentToolNames: %v", err)
-	}
-	if !containsString(grantedTools, "tool_list") {
-		t.Errorf("granted tools = %v, want tool_list among them", grantedTools)
-	}
-
-	grantedSkills, err := st.ListAgentSkills(context.Background(), agent.ID)
-	if err != nil {
-		t.Fatalf("ListAgentSkills: %v", err)
-	}
-	foundSkill := false
-	for _, sk := range grantedSkills {
-		if sk.Slug == "wiki-classify" {
-			foundSkill = true
+	// A plugin declaration is not authored immutable content or actor enrollment.
+	tables := []string{"agent_profiles", "roles", "consumers", "agent_tools", "agent_known_skills", "agent_actor_bindings", "agent_host_settings"}
+	before := make([]int, len(tables))
+	for i, table := range tables {
+		if queryErr := st.DB.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&before[i]); queryErr != nil {
+			t.Fatal(queryErr)
 		}
 	}
-	if !foundSkill {
-		t.Errorf("agent skills = %+v, want wiki-classify among them", grantedSkills)
+	for range 2 {
+		if registrationErr := applyManifestRegistrations(host, manifest, p, pluginDir); !errors.Is(registrationErr, store.ErrImmutableAgentProfile) {
+			t.Fatalf("registration error=%v", registrationErr)
+		}
+		for i, table := range tables {
+			var after int
+			if queryErr := st.DB.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&after); queryErr != nil {
+				t.Fatal(queryErr)
+			}
+			if after != before[i] {
+				t.Fatalf("registration changed %s %d/%d", table, after, before[i])
+			}
+		}
 	}
-
-	// --- reload is an upsert, not a duplicate-create (this task's
-	// "construct/upsert" instruction) ---
-
-	if err := applyManifestRegistrations(host, manifest, p, pluginDir); err != nil {
-		t.Fatalf("applyManifestRegistrations (second load): %v", err)
+	if unloadErr := host.UnloadPlugin(pluginID); unloadErr != nil {
+		t.Fatal(unloadErr)
 	}
-	agentsAfterReload, err := st.ListAgentsByPluginID(context.Background(), pluginID)
-	if err != nil {
-		t.Fatalf("ListAgentsByPluginID: %v", err)
+	sourceRoot, rootErr := os.OpenRoot(pluginDir)
+	if rootErr != nil {
+		t.Fatal(rootErr)
 	}
-	if len(agentsAfterReload) != 1 {
-		t.Fatalf("expected exactly 1 plugin-owned agent after reload, got %d: %+v", len(agentsAfterReload), agentsAfterReload)
-	}
-	if agentsAfterReload[0].ID != agent.ID {
-		t.Errorf("reload minted a new agent row (id %q) instead of upserting the existing one (id %q)",
-			agentsAfterReload[0].ID, agent.ID)
-	}
-	if agentsAfterReload[0].Status != "active" {
-		// Regression guard: UpdateAgent (unlike CreateAgent) does not
-		// default an empty Status, so a reload that forgets to set it on
-		// the re-synced row would silently blank agent_profiles.status on
-		// the second load, breaking status-based filtering (e.g.
-		// ListAgentsFilter) without ever surfacing an error.
-		t.Errorf("agent.Status after reload = %q, want active", agentsAfterReload[0].Status)
-	}
-
-	// --- uninstall: agent is gone ---
-
-	if err := host.UnloadPlugin(pluginID); err != nil {
-		t.Fatalf("UnloadPlugin: %v", err)
-	}
-	if _, err := st.GetAgentBySlug(context.Background(), "demo-curator"); err == nil {
-		t.Errorf("agent %q still resolvable by slug after unload", "demo-curator")
-	}
-	if remainingAgents, err := st.ListAgentsByPluginID(context.Background(), pluginID); err != nil {
-		t.Fatalf("ListAgentsByPluginID after unload: %v", err)
-	} else if len(remainingAgents) != 0 {
-		t.Errorf("plugin-owned agents survived unload: %+v", remainingAgents)
-	}
-	if remainingRoles, err := st.ListRolesByPluginID(context.Background(), pluginID); err != nil {
-		t.Fatalf("ListRolesByPluginID after unload: %v", err)
-	} else if len(remainingRoles) != 0 {
-		t.Errorf("plugin-owned roles survived unload: %+v", remainingRoles)
-	}
-	// Consumer rows are deliberately NOT swept (resolveOrCreateConsumer's
-	// doc comment) -- assert it survives, distinguishing "not swept" from
-	// "sweep silently failed."
-	if c, err := st.GetConsumerBySlug(context.Background(), pluginID); err != nil {
-		t.Fatalf("GetConsumerBySlug after unload: %v", err)
-	} else if c == nil {
-		t.Errorf("consumer %q was unexpectedly swept on unload", pluginID)
+	defer sourceRoot.Close()
+	data, readErr := sourceRoot.ReadFile("agents/curator.yaml")
+	if readErr != nil || string(data) != profileYAML {
+		t.Fatalf("source changed %v", readErr)
 	}
 }
 

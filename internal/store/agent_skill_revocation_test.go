@@ -20,13 +20,13 @@ func TestDisabledActorSkillRevocationCannotReplayAuthority(t *testing.T) {
 	var pinned bool
 	var activations int
 	var reason, approval string
-	if err := s.DB.QueryRowContext(ctx, `SELECT pinned,activation_count,reason,COALESCE(approved_content_hash,'')||COALESCE(granted_at,'')||COALESCE(granted_by,'')||COALESCE(capabilities_granted,'') FROM actor_known_skills WHERE agent_id=?`, actor).Scan(&pinned, &activations, &reason, &approval); err != nil {
-		t.Fatal(err)
+	if operationErr := s.DB.QueryRowContext(ctx, `SELECT pinned,activation_count,reason,COALESCE(approved_content_hash,'')||COALESCE(granted_at,'')||COALESCE(granted_by,'')||COALESCE(capabilities_granted,'') FROM actor_known_skills WHERE agent_id=?`, actor).Scan(&pinned, &activations, &reason, &approval); operationErr != nil {
+		t.Fatal(operationErr)
 	}
 	if !pinned || activations != 7 || reason != "retain metadata" || approval != "" {
 		t.Fatalf("revocation changed metadata or left authority: %t %d %q %q", pinned, activations, reason, approval)
 	}
-	if _, err := s.DB.ExecContext(ctx, `UPDATE actor_known_skills SET approved_content_hash='old-hash' WHERE agent_id=?`, actor); err == nil {
+	if _, operationErr := s.DB.ExecContext(ctx, `UPDATE actor_known_skills SET approved_content_hash='old-hash' WHERE agent_id=?`, actor); operationErr == nil {
 		t.Fatal("disabled binding re-granted skill")
 	}
 	partitionExec(t, s, `UPDATE agent_actor_bindings SET enabled=1 WHERE actor_uri=?`, actor)

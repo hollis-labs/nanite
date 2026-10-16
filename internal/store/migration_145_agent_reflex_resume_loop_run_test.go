@@ -68,7 +68,7 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	id, err := migrationInsertHistoricalReflex(s, ctx, AgentReflex{
+	id, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		Name:        "resume-loop-run-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
@@ -80,7 +80,7 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex(resume_loop_run): %v", err)
 	}
-	row, err := migrationHistoricalReflex(s, ctx, id)
+	row, err := migrationHistoricalReflex(ctx, s, id)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 		t.Errorf("row.ProvenanceTier = %q, want system (created_by=system)", row.ProvenanceTier)
 	}
 
-	if _, err := migrationInsertHistoricalReflex(s, ctx, AgentReflex{
+	if _, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		Name:        "bogus-action-kind-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
@@ -173,7 +173,7 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 		t.Fatalf("goose Up (replay migration 145): %v", err)
 	}
 
-	row, err := migrationHistoricalReflex(s, ctx, "rfx-145-probe")
+	row, err := migrationHistoricalReflex(ctx, s, "rfx-145-probe")
 	if err != nil {
 		t.Fatalf("GetAgentReflex(pre-145 probe row) after migration 145: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 	}
 
 	// And the new capability actually works now that 145 has run.
-	newID, err := migrationInsertHistoricalReflex(s, ctx, AgentReflex{
+	newID, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		Name:        "post-145-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
@@ -194,7 +194,7 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex(resume_loop_run) after migration 145: %v", err)
 	}
-	if _, err := migrationHistoricalReflex(s, ctx, newID); err != nil {
+	if _, err := migrationHistoricalReflex(ctx, s, newID); err != nil {
 		t.Fatalf("GetAgentReflex(post-145 probe row): %v", err)
 	}
 }
@@ -274,7 +274,7 @@ func TestRealBackupAgentReflexesSurviveResumeLoopRunMigration(t *testing.T) {
 
 	// And the new capability actually works against this real, migrated
 	// copy.
-	if _, err := migrationInsertHistoricalReflex(rs, ctx, AgentReflex{
+	if _, err := migrationInsertHistoricalReflex(ctx, rs, AgentReflex{
 		Name:        "post-145-real-backup-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,

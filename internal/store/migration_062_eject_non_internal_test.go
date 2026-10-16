@@ -58,9 +58,9 @@ func TestMigration062_EjectsNonInternalProfiles(t *testing.T) {
 	// and the (just-run) migration 062 should not have touched them.
 	canonical := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range canonical {
-		got, err := migrationHistoricalAgentBySlug(s, context.Background(), slug)
-		if err != nil {
-			t.Fatalf("post-migration GetAgentBySlug %q: %v", slug, err)
+		got, operationErr := migrationHistoricalAgentBySlug(context.Background(), s, slug)
+		if operationErr != nil {
+			t.Fatalf("post-migration GetAgentBySlug %q: %v", slug, operationErr)
 		}
 		if got.Source != "internal" {
 			t.Errorf("canonical slug %q: Source = %q, want 'internal'", slug, got.Source)

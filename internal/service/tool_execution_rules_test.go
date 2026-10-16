@@ -43,8 +43,8 @@ func TestAgentToolsGrant_SelectionAndExecutionBothAccept(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertKnownTool: %v", err)
 	}
-	if err := grantTestActorTool(ctx, st, agent.ID, toolID, "explicit"); err != nil {
-		t.Fatalf("GrantAgentTool: %v", err)
+	if operationErr := grantTestActorTool(ctx, st, agent.ID, toolID, "explicit"); operationErr != nil {
+		t.Fatalf("GrantAgentTool: %v", operationErr)
 	}
 
 	// --- Selection side: SelectForAgent must offer the granted tool. ---

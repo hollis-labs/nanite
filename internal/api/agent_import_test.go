@@ -38,15 +38,6 @@ func writeAgentSource(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-func decodeImportResponse(t *testing.T, body []byte) ImportAgentResponse {
-	t.Helper()
-	var out ImportAgentResponse
-	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatalf("decode import response: %v; body: %s", err, body)
-	}
-	return out
-}
-
 func postAgentImport(t *testing.T, mux http.Handler, path string, body map[string]string) (*http.Response, []byte) {
 	t.Helper()
 	raw, err := json.Marshal(body)

@@ -1,18 +1,14 @@
 package api
 
 import (
-	"errors"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 
 	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
 	agentpkg "github.com/hollis-labs/nanite/internal/agent"
-	"github.com/hollis-labs/nanite/internal/agentvalidation"
 	"github.com/hollis-labs/nanite/internal/safego"
 
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -92,105 +88,6 @@ func (a *API) agentView(p store.AgentProfile) AgentProfileView {
 	})
 }
 
-func (a *API) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
-	var req CreateAgentRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.Name == "" || req.Slug == "" || req.SystemPrompt == "" {
-		a.errorResp(w, http.StatusBadRequest, "name, slug, and system_prompt are required")
-		return
-	}
-	// CW-20260512-0111: default omitted source to 'user' so callers that
-	// don't explicitly tag provenance don't insert an empty string (the
-	// error message below previously claimed "or omit" was equivalent to
-	// source='user', but the handler didn't actually default it — leaving
-	// an empty source column on the row).
-	if req.Source == "" {
-		req.Source = "user"
-	}
-	// source='internal' is reserved for compiled-in internal profiles
-	// (boot sync from internal/agent/builtin/profiles/). API-created agents
-	// cannot claim that provenance.
-	if req.Source == "internal" {
-		a.errorResp(w, http.StatusBadRequest, "source='internal' is reserved for compiled-in internal profiles; use source='user' (the default) or another non-reserved value")
-		return
-	}
-
-	agent := &store.AgentProfile{
-		ID:                      req.ID,
-		Name:                    req.Name,
-		Slug:                    req.Slug,
-		Avatar:                  req.Avatar,
-		SystemPrompt:            req.SystemPrompt,
-		Description:             req.Description,
-		Modes:                   req.Modes,
-		DefaultModel:            req.DefaultModel,
-		MCPServers:              req.MCPServers,
-		ToolPermissions:         req.ToolPermissions,
-		CanExecute:              req.CanExecute,
-		Settings:                req.Settings,
-		Tools:                   req.Tools,
-		Directories:             req.Directories,
-		Constraints:             req.Constraints,
-		Tags:                    req.Tags,
-		Status:                  req.Status,
-		Source:                  req.Source,
-		SourceRef:               req.SourceRef,
-		Icon:                    req.Icon,
-		ParentDispatchAllowlist: req.ParentDispatchAllowlist,
-		RoleTools:               req.RoleTools,
-		RoleSkills:              req.RoleSkills,
-		ContextPolicy:           req.ContextPolicy,
-		Durable:                 req.Durable,
-		ActivationMode:          req.ActivationMode,
-		Class:                   req.Class,
-		DefaultState:            req.DefaultState,
-		TetherManaged:           req.TetherManaged,
-		TetherURN:               req.TetherURN,
-	}
-	// Validate agent config before persisting.
-	if vr := agentvalidation.ValidateAgentConfig(agent); !vr.OK() {
-		a.jsonResp(w, http.StatusBadRequest, map[string]any{
-			"error":    "validation_failed",
-			"details":  vr.Errors,
-			"warnings": vr.Warnings,
-		})
-		return
-	} else if len(vr.Warnings) > 0 {
-		for _, w := range vr.Warnings {
-			slog.Warn("agent config warning", "slug", agent.Slug, "warning", w)
-		}
-	}
-
-	res, err := a.Services.AgentConfig.CreateWithAssignments(r.Context(), agent, nil, service.AgentAssignments{
-		RoleID: ptrOrNilString(req.RoleID), ConsumerID: ptrOrNilString(req.ConsumerID), ModelID: ptrOrNilString(req.ModelID), Protocol: ptrOrNilString(req.Protocol), Transport: ptrOrNilString(req.Transport),
-	})
-	if err != nil {
-		a.serviceError(w, r, err)
-		return
-	}
-	profile := res.Profile
-
-	view := a.agentView(*profile)
-	a.jsonResp(w, http.StatusCreated, view)
-}
-
-// ptrOrNilString returns nil for an empty string, or a pointer to v
-// otherwise. Used for CreateAgentRequest's plain (non-pointer) RoleID/
-// ConsumerID/ModelID fields, whose "not provided" and "explicitly empty"
-// cases are indistinguishable on create (matching every other plain-string
-// field on that struct) -- an empty value here is simply "don't set this
-// column," not "clear an existing one" (there is nothing to clear yet on a
-// freshly created agent).
-func ptrOrNilString(v string) *string {
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
 // Phase 0 item 21 ("Cut Modes, in full") removed the "modes" key this
 // response used to carry (a.Services.Agents.ListModes — Legacy Agent Mode
 // is gone). The frontend's AgentProfileManager.tsx / AgentDetailView.tsx
@@ -206,164 +103,6 @@ func (a *API) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, map[string]any{
 		"agent": a.agentView(*ag),
 	})
-}
-
-func (a *API) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	// Resolve through the AgentService; the stored provenance drives the
-	// database ownership classification below.
-	existing, err := a.Services.Agents.Get(r.Context(), id)
-	if err != nil {
-		a.serviceError(w, r, err)
-		return
-	}
-
-	// Editability gate. Operator-owned agents are writable in place; embedded
-	// internal and plugin/vendor agents are not — but instead of a
-	// dead-end we tell the client whether a copy-to-managed path is offered.
-	if class := a.Services.AgentConfig.Classify(existing); !class.Editable() {
-		a.writeNotManaged(w, existing, class)
-		return
-	}
-
-	// Snapshot the pre-edit profile so the write service has the original
-	// identity and provenance.
-	original := *existing
-
-	var req UpdateAgentRequest
-	if err = decodeAgentObject(r, &req, true); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-
-	if req.Name != nil {
-		existing.Name = *req.Name
-	}
-	if req.Slug != nil {
-		existing.Slug = *req.Slug
-	}
-	if req.Avatar != nil {
-		existing.Avatar = *req.Avatar
-	}
-	if req.SystemPrompt != nil {
-		existing.SystemPrompt = *req.SystemPrompt
-	}
-	if req.Description != nil {
-		existing.Description = *req.Description
-	}
-	if req.Modes != nil {
-		existing.Modes = *req.Modes
-	}
-	if req.DefaultModel != nil {
-		existing.DefaultModel = *req.DefaultModel
-	}
-	if req.DefaultProvider != nil {
-		existing.DefaultProvider = *req.DefaultProvider
-	}
-	if req.RuntimeKind != nil {
-		existing.RuntimeKind = *req.RuntimeKind
-	}
-	if req.MCPServers != nil {
-		existing.MCPServers = *req.MCPServers
-	}
-	if req.ToolPermissions != nil {
-		existing.ToolPermissions = *req.ToolPermissions
-	}
-	if req.CanExecute != nil {
-		existing.CanExecute = *req.CanExecute
-	}
-	if req.Settings != nil {
-		existing.Settings = *req.Settings
-	}
-	if req.Tools != nil {
-		existing.Tools = *req.Tools
-	}
-	if req.Directories != nil {
-		existing.Directories = *req.Directories
-	}
-	if req.Constraints != nil {
-		existing.Constraints = *req.Constraints
-	}
-	if req.Tags != nil {
-		existing.Tags = *req.Tags
-	}
-	if req.Status != nil {
-		existing.Status = *req.Status
-	}
-	if req.Icon != nil {
-		existing.Icon = *req.Icon
-	}
-	if req.ParentDispatchAllowlist != nil {
-		existing.ParentDispatchAllowlist = *req.ParentDispatchAllowlist
-	}
-	if req.RoleTools != nil {
-		existing.RoleTools = *req.RoleTools
-	}
-	if req.RoleSkills != nil {
-		existing.RoleSkills = *req.RoleSkills
-	}
-	if req.ContextPolicy != nil {
-		existing.ContextPolicy = *req.ContextPolicy
-	}
-	if req.Durable != nil {
-		existing.Durable = *req.Durable
-	}
-	if req.ActivationMode != nil {
-		existing.ActivationMode = *req.ActivationMode
-	}
-	if req.Class != nil {
-		existing.Class = *req.Class
-	}
-	if req.DefaultState != nil {
-		existing.DefaultState = *req.DefaultState
-	}
-	if req.TetherManaged != nil {
-		existing.TetherManaged = *req.TetherManaged
-	}
-	if req.TetherURN != nil {
-		existing.TetherURN = *req.TetherURN
-	}
-
-	for _, field := range []struct {
-		name  string
-		value *string
-	}{{"name", req.Name}, {"slug", req.Slug}, {"system_prompt", req.SystemPrompt}} {
-		if field.value != nil && strings.TrimSpace(*field.value) == "" {
-			a.errorResp(w, http.StatusBadRequest, field.name+" must not be empty")
-			return
-		}
-	}
-	// Validate agent config before persisting.
-	if vr := agentvalidation.ValidateAgentConfig(existing); !vr.OK() {
-		a.jsonResp(w, http.StatusBadRequest, map[string]any{
-			"error":    "validation_failed",
-			"details":  vr.Errors,
-			"warnings": vr.Warnings,
-		})
-		return
-	} else if len(vr.Warnings) > 0 {
-		for _, w := range vr.Warnings {
-			slog.Warn("agent config warning", "slug", existing.Slug, "warning", w)
-		}
-	}
-
-	// Procedures are relational capability rows and are untouched by profile
-	// edits; no filesystem round-trip is needed to preserve them.
-	res, err := a.Services.AgentConfig.UpdateWithAssignments(r.Context(), &original, existing, nil, req.Revision, service.AgentAssignments{RoleID: req.RoleID, ConsumerID: req.ConsumerID, ModelID: req.ModelID, Protocol: req.Protocol, Transport: req.Transport})
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAgentNotManaged):
-			a.writeNotManaged(w, &original, a.Services.AgentConfig.Classify(&original))
-		default:
-			a.serviceError(w, r, err)
-		}
-		return
-	}
-
-	profile := res.Profile
-
-	a.jsonResp(w, http.StatusOK, a.agentView(*profile))
 }
 
 // writeNotManaged emits the standard 409 response for an attempt to mutate a
@@ -388,63 +127,6 @@ func (a *API) writeNotManaged(w http.ResponseWriter, ag *store.AgentProfile, cla
 		"source_ref":      ag.SourceRef,
 		"slug":            ag.Slug,
 	})
-}
-
-// handleDeleteAgent removes an operator-managed database profile and its FK
-// children. Read-only
-// sources (internal/plugin/external) are rejected. The GUI gates this behind
-// an irreversible-confirmation dialog.
-func (a *API) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	existing, err := a.Services.Agents.Get(r.Context(), id)
-	if err != nil {
-		a.serviceError(w, r, err)
-		return
-	}
-	if class := a.Services.AgentConfig.Classify(existing); !class.Editable() {
-		a.writeNotManaged(w, existing, class)
-		return
-	}
-	if err := a.Services.AgentConfig.Delete(existing); err != nil {
-		if errors.Is(err, service.ErrAgentNotManaged) {
-			a.writeNotManaged(w, existing, a.Services.AgentConfig.Classify(existing))
-			return
-		}
-		a.serviceError(w, r, err)
-		return
-	}
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "deleted", "slug": existing.Slug})
-}
-
-// handleCopyAgentToManaged forks a plugin/vendor/external agent into a fresh
-// editable managed config with a new identity ("make editable"). Internal
-// harness profiles are read-only but deliberately not copyable.
-func (a *API) handleCopyAgentToManaged(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	source, err := a.Services.Agents.Get(r.Context(), id)
-	if err != nil {
-		a.serviceError(w, r, err)
-		return
-	}
-	class := a.Services.AgentConfig.Classify(source)
-	if !class.CopyToManagedAllowed() {
-		if class.Editable() {
-			a.serviceError(w, r, svcerr.Wrap(service.ErrAgentAlreadyManaged, svcerr.CodeConflict, "agent is already a managed config"))
-		} else {
-			a.writeNotManaged(w, source, class)
-		}
-		return
-	}
-	res, err := a.Services.AgentConfig.CopyToManaged(source, nil)
-	if err != nil {
-		if errors.Is(err, service.ErrAgentNotManaged) {
-			a.writeNotManaged(w, source, class)
-		} else {
-			a.serviceError(w, r, err)
-		}
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, a.agentView(*res.Profile))
 }
 
 func (a *API) handleListSessionAgents(w http.ResponseWriter, r *http.Request) {

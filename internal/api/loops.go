@@ -116,21 +116,6 @@ type loopGoalSpecRequest struct {
 	Source             string   `json:"source,omitempty"`
 }
 
-func (r loopGoalSpecRequest) toGoalSpec() *loop.GoalSpec {
-	return &loop.GoalSpec{
-		ParentGoalID:       r.ParentGoalID,
-		Intent:             r.Intent,
-		DesiredState:       r.DesiredState,
-		Constraints:        r.Constraints,
-		AcceptanceCriteria: r.AcceptanceCriteria,
-		Invariants:         r.Invariants,
-		Priority:           r.Priority,
-		Scope:              r.Scope,
-		Owner:              r.Owner,
-		Source:             r.Source,
-	}
-}
-
 // loopLaunchRequest is POST /api/loops' request body -- a JSON-friendly
 // mirror of loop.LoopLaunchRequest (launcher.go). Budget has an API-owned
 // request shape; ContinuationPolicy is an engine policy. Exactly one of
@@ -504,11 +489,4 @@ type loopBudgetRequest struct {
 	MaxRuntimeSeconds       int    `json:"max_runtime_seconds"`
 	MaxNoProgressIterations int    `json:"max_no_progress_iterations"`
 	OnExhausted             string `json:"on_exhausted"`
-}
-
-func (r *loopBudgetRequest) toStore() *store.Budget {
-	if r == nil {
-		return nil
-	}
-	return &store.Budget{MaxIterations: r.MaxIterations, MaxFailures: r.MaxFailures, MaxRuntimeSeconds: r.MaxRuntimeSeconds, MaxNoProgressIterations: r.MaxNoProgressIterations, OnExhausted: r.OnExhausted}
 }

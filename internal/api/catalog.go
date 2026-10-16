@@ -1,14 +1,11 @@
 package api
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -303,20 +300,4 @@ func (cs *catalogState) handleCatalogInstall(w http.ResponseWriter, r *http.Requ
 		"source":  entry.SourceName,
 		"message": fmt.Sprintf("Plugin %q v%s installed from %s.", entry.ID, entry.Version, entry.SourceName),
 	})
-}
-
-// checksumFile computes the sha256 checksum of a file.
-func checksumFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_ = f.Close() // Read-only file close is best-effort cleanup; read errors are handled separately.
-	}()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("sha256:%x", h.Sum(nil)), nil
 }

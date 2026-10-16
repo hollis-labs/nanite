@@ -13,7 +13,6 @@ import (
 
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 
-	goplugin "github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk"
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/registry"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 )
@@ -252,22 +251,6 @@ func TestPluginsRegistry_EnvelopeAndSlotFromDiscovered(t *testing.T) {
 	if _, ok := after.Contributions["slot"][registry.QualifiedKey(pluginID, "slot-"+hex.EncodeToString([]byte("composer-toolbar/synth-slot-entry")))]; ok {
 		t.Errorf("slot 'composer-toolbar' should be empty after unload: %+v", after.Contributions["slot"])
 	}
-}
-
-// synthPlugin is a minimal plugin.Plugin used by the discovered-loader test.
-type synthPlugin struct {
-	id string
-}
-
-func (s *synthPlugin) ID() string                 { return s.id }
-func (s *synthPlugin) Name() string               { return s.id }
-func (s *synthPlugin) Version() string            { return "0.0.1" }
-func (s *synthPlugin) Description() string        { return "synth" }
-func (s *synthPlugin) Dependencies() []string     { return nil }
-func (s *synthPlugin) Load(h goplugin.Host) error { return nil }
-func (s *synthPlugin) Unload() error              { return nil }
-func (s *synthPlugin) Status() goplugin.PluginStatus {
-	return goplugin.PluginStatus{Loaded: true, Enabled: true}
 }
 
 func TestPluginsRegistryRejectsUnserializableHostMetadata(t *testing.T) {

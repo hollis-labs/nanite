@@ -2,13 +2,11 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/skill"
 	"github.com/hollis-labs/nanite/internal/skillinstall"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -217,48 +215,6 @@ func (a *API) handleListAgentSkills(w http.ResponseWriter, r *http.Request) {
 	a.jsonResp(w, http.StatusOK, skillsToView(skills))
 }
 
-func (a *API) handleAssignAgentSkill(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-
-	var req AssignAgentSkillRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.SkillID == "" {
-		a.errorResp(w, http.StatusBadRequest, "skill_id is required")
-		return
-	}
-
-	// AssignSkill checks the agent (as a real agent_profiles row — the
-	// check that matches agent_known_skills' foreign key; see its doc
-	// comment), then the skill, then assigns.
-	skills, err := a.Services.AgentCapabilities.AssignSkill(r.Context(), agentID, req.SkillID, req.Config)
-	switch {
-	case errors.Is(err, service.ErrAgentNotFound):
-		a.errorResp(w, http.StatusNotFound, "agent not found")
-		return
-	case errors.Is(err, service.ErrSkillNotFound):
-		a.errorResp(w, http.StatusNotFound, "skill not found")
-		return
-	case err != nil:
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, skillsToView(skills))
-}
-
-func (a *API) handleRemoveAgentSkill(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
-	skillID := r.PathValue("skillId")
-
-	if err := a.Services.AgentCapabilities.RemoveSkill(r.Context(), agentID, skillID); err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
 // TASKS/skills/05: install/sync REST surface — the operator-facing trigger
 // for task 04's explicit, single-target install/sync pipeline (internal/
 // skillinstall.Installer), per docs/engineering/architecture/20-skills.md's
@@ -451,93 +407,6 @@ func (a *API) handleSyncSkill(w http.ResponseWriter, r *http.Request) {
 // granting a skill capability over REST is reachable by anything that can
 // reach this process's HTTP port at all, exactly as every other
 // agent-mutating endpoint already is.
-
-// handleGrantAgentSkill implements POST /api/agents/{id}/skills/{slug}/grant
-// — the real assign-with-approval action: ApprovedContentHash is always
-// set to the skill's current vendored ContentHash (never a caller-supplied
-// value — see AgentSkillGrantRequest's own doc comment), GrantedAt to now,
-// GrantedBy/CapabilitiesGranted from the request. Any pre-existing
-// telemetry/panel fields on the same agent_known_skills row (pinned,
-// activation_count, last_used_at, added_at, ttl_seconds, reason — whether
-// set by AssignSkillToAgent's bare assignment or the known-skills Panel)
-// are carried forward unchanged: AgentCapabilitiesService.GrantSkill copies
-// the row and overwrites only the grant state.
-func (a *API) handleGrantAgentSkill(w http.ResponseWriter, r *http.Request) {
-	agent, ok := a.requireMutableAgent(w, r)
-	if !ok {
-		return
-	}
-	slug := r.PathValue("slug")
-
-	sk, err := a.Services.Skills.GetBySlug(r.Context(), slug)
-	if err != nil {
-		a.errorResp(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if sk == nil {
-		a.errorResp(w, http.StatusNotFound, "skill not found: "+slug)
-		return
-	}
-	if sk.ContentHash == "" {
-		a.errorResp(w, http.StatusUnprocessableEntity,
-			fmt.Sprintf("skill %q has not been installed/vendored yet — nothing to approve", slug))
-		return
-	}
-
-	var req AgentSkillGrantRequest
-	if err := a.decode(r, &req); err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if strings.TrimSpace(req.GrantedBy) == "" {
-		a.errorResp(w, http.StatusBadRequest, "granted_by is required")
-		return
-	}
-
-	caps := skill.Capabilities{}
-	if req.Capabilities != nil {
-		caps = *req.Capabilities
-	}
-	capsJSON, err := json.Marshal(caps)
-	if err != nil {
-		a.errorResp(w, http.StatusBadRequest, "invalid capabilities: "+err.Error())
-		return
-	}
-
-	updated, err := a.Services.AgentCapabilities.GrantSkill(r.Context(), agent.ID, sk.Slug, service.SkillGrant{
-		ApprovedContentHash: sk.ContentHash,
-		GrantedBy:           req.GrantedBy,
-		CapabilitiesGranted: string(capsJSON),
-	})
-	if err != nil {
-		a.capabilityError(w, err, nil, "", "")
-		return
-	}
-	a.jsonResp(w, http.StatusCreated, knownSkillToView(updated))
-}
-
-// handleRevokeAgentSkillGrant implements
-// DELETE /api/agents/{id}/skills/{slug}/grant — clears only the
-// grant-state fields (ApprovedContentHash/GrantedAt/GrantedBy/
-// CapabilitiesGranted), preserving the rest of the agent_known_skills row
-// (pinned/activation_count/last_used_at/added_at/ttl_seconds/reason)
-// exactly the way RemoveSkillFromAgent (skills.go, task 02) already
-// preserves non-bare rows for the sibling assignment surface — revoking a
-// capability grant is not a reason to also forget an agent's pin/telemetry
-// state for a skill it may still legitimately be assigned (unapproved).
-func (a *API) handleRevokeAgentSkillGrant(w http.ResponseWriter, r *http.Request) {
-	agent, ok := a.requireMutableAgent(w, r)
-	if !ok {
-		return
-	}
-	slug := r.PathValue("slug")
-
-	if err := a.Services.AgentCapabilities.RevokeSkillGrant(r.Context(), agent.ID, slug); err != nil {
-		a.capabilityError(w, err, service.ErrNoSkillGrant, "no grant exists for this agent/skill", "")
-		return
-	}
-	a.jsonResp(w, http.StatusOK, map[string]string{"status": "revoked"})
-}
 
 // handleGetAgentSkillGrant implements
 // GET /api/agents/{id}/skills/{slug}/grant — the grants/policy view.

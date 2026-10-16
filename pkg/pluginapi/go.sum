@@ -1,2 +1,2 @@
-github.com/hollis-labs/libs/plugin-mcp v0.1.1 h1:213HZTZaWL6KFkQeU3d2HZU9UMI+C0jxixHUtD4JFR0=
-github.com/hollis-labs/libs/plugin-mcp v0.1.1/go.mod h1:3x5ZVgHJewzwEpdl1RNFfxXXkq9SKVNL6LJVcpLCGnQ=
+github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0 h1:m9rCjLop6UCALCTF9Ssh/bZe/Y/0Xl/qvAPim4ZK67U=
+github.com/hollis-labs/libs/mcp/plugin-mcp v0.3.0/go.mod h1:IdRr5l0H14XcxrduOCsPWXsCPmd/sgD5zlP/gEa+1NM=

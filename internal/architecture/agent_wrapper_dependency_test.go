@@ -143,12 +143,12 @@ const (
 	agentWrapperReleaseModule = "github.com/hollis-labs/libs/harness/core"
 	agentWrapperModule        = "github.com/hollis-labs/libs/harness/core/adapters"
 	agentWrapperVersion       = "v0.10.0"
-	agentWrapperSum           = "h1:SgSikCp1S4ZTp923Q7ohPTosN/4CYmX2lCqQ4e+bde8="
-	agentWrapperGoModSum      = "h1:BCteU5BGFnLujwOQJK1USbwu35YoNLpr+oe0/3ZD+sU="
+	agentWrapperSum           = "h1:4WZtd1t/EO4KKDkEb6qcyJYARLDLxfsDxcQmEMeq0k8="
+	agentWrapperGoModSum      = "h1:FzUVpc31CuypIrMS45cubAGjq2SjkDNTIRg0FnrvEh4="
 	agentCoreModule           = "github.com/hollis-labs/libs/agent/core"
 	agentCoreVersion          = "v0.4.0"
-	agentCoreSum              = "h1:8muMrgQjTgr8tK2ZmArvV4iqvz7b+r04p1GI8NVG74c="
-	agentCoreGoModSum         = "h1:MT9wc4hfLHJsbTv8myyicXZpY88wf7jeXPS71HhUY/Y="
+	agentCoreSum              = "h1:4cQovQwGvkPkeIPieoP3mZ3IATCzx1O/fOoWuv9yo1Y="
+	agentCoreGoModSum         = "h1:Pk4Etne7xARd9VeX3HNgZIDWLfKXy3yjvv6dfWnPbT8="
 )
 
 func TestAgentWrapperDependencyBoundary(t *testing.T) {

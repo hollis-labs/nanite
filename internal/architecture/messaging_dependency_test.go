@@ -20,8 +20,8 @@ const (
 	messagingVersion      = "v0.4.0"
 	mailboxImport         = messagingModule + "/messaging/mailbox"
 	legacyMessagingImport = "github.com/hollis-labs/nanite/internal/messaging"
-	messagingModuleSum    = "h1:CkUvYdoXSGVcSlXhVgc+0AYzyhXdd49c+AV47z0XvOs="
-	messagingGoModSum     = "h1:akUYHGaDVmF2Gwyr784nk8HuNr0KBsl1x97ApvTxcAM="
+	messagingModuleSum    = "h1:c9VyyMzFGRuE9kVckgvvlt5U8VHLnpv5sf/4TwwSoKA="
+	messagingGoModSum     = "h1:K1a1oeFXakkaJDyKogI/I2j+2lpKklTZgdtzSw45Bss="
 )
 
 func TestMessagingDependencyBoundary(t *testing.T) {

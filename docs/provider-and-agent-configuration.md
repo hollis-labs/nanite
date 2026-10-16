@@ -28,7 +28,7 @@ remain authoritative at the host boundary.
 ## Provider keys by reference
 
 A native provider's API key is a reference (`internal/providerkeys`, on
-`libs/go-secrets`), not a value Nanite stores. For each provider with an
+`libs/security/secrets`), not a value Nanite stores. For each provider with an
 adapter, resolution walks an ordered chain and reports which step answered:
 
 1. the `key_ref` field in the provider row's settings JSON, if set. It must be

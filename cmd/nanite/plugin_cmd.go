@@ -141,7 +141,7 @@ func resolvePluginsDir() string {
 // `cmd/nanite` entry point — the six former `./` + brand.DefaultDBName
 // CWD-relative defaults all funnel through resolveDBPathWith.
 //
-// A -db given to the subcommand (cliDB, see dbflag.go) is honoured; callers
+// A -db given to the subcommand (cliDB, see dbflag.go) is honored; callers
 // that parse their own flag pass it to resolveDBPathWith directly.
 func resolveDBPath() string {
 	return resolveDBPathWith(cliDB)

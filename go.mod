@@ -94,8 +94,8 @@ require (
 )
 
 require (
-	github.com/hollis-labs/go-secrets v0.0.0
 	github.com/hollis-labs/libs/plugin-mcp v0.2.0
+	github.com/hollis-labs/libs/security/secrets v0.1.0
 	github.com/hollis-labs/libs/ui-go v0.1.0
 	github.com/hollis-labs/libs/util v0.2.0
 	github.com/hollis-labs/libs/workflow v0.1.0
@@ -110,5 +110,3 @@ require (
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/mod v0.41.0
 )
-
-replace github.com/hollis-labs/go-secrets => ../../libs/go-secrets-worktrees/mvp

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	secrets "github.com/hollis-labs/go-secrets"
+	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/service"

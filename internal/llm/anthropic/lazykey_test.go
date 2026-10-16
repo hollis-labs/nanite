@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	secrets "github.com/hollis-labs/go-secrets"
+	secrets "github.com/hollis-labs/libs/security/secrets"
 )
 
 func lazyKeyServer(t *testing.T) (requests *atomic.Int32, lastKey *atomic.Value) {

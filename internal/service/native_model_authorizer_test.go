@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	secrets "github.com/hollis-labs/go-secrets"
-	"github.com/hollis-labs/go-secrets/secretstest"
+	secrets "github.com/hollis-labs/libs/security/secrets"
+	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/substrate/harness/adapters/provider"
 )

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-secrets/secretstest"
+	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"

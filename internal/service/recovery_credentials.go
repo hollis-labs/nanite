@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	secrets "github.com/hollis-labs/go-secrets"
+	secrets "github.com/hollis-labs/libs/security/secrets"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
 	"github.com/hollis-labs/nanite/internal/providerkeys"

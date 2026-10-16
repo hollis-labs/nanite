@@ -373,8 +373,8 @@ func cmdServeWithInitializers(
 	if cfg != nil {
 		permConfigValue = cfg.PermissionMode
 	}
-	if mode, source, err := service.ResolveBootPermissionMode(permConfigValue, os.Getenv(service.PermissionModeEnv)); err != nil {
-		slog.Warn("ignoring invalid permission mode; using default", "err", err)
+	if mode, source, permErr := service.ResolveBootPermissionMode(permConfigValue, os.Getenv(service.PermissionModeEnv)); permErr != nil {
+		slog.Warn("ignoring invalid permission mode; using default", "err", permErr)
 	} else {
 		bootPermissionMode = mode
 		if mode != permissionlib.ModeDefault {

@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
-	secrets "github.com/hollis-labs/go-secrets"
+	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	llmcontracts "github.com/hollis-labs/substrate/llm-core/llmcontracts"

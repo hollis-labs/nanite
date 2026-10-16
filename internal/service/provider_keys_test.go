@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	secrets "github.com/hollis-labs/go-secrets"
+	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/memory"
 	"github.com/hollis-labs/nanite/internal/providercatalog"
 	"github.com/hollis-labs/nanite/internal/providerkeys"

@@ -294,3 +294,36 @@ func TestCapabilityVerifierThroughTheRealForkAndHistoryPaths(t *testing.T) {
 		t.Fatal("ended child read history")
 	}
 }
+
+// A generation ends the capability its launch issued before it closes its
+// stream, so a consumer that sees the close never observes the capability live.
+// The hook ends only that launch's capability: a capability that merely rides
+// the same ctx (a subagent run reuses generateResponse with its own) is left
+// alone.
+func TestEndCapabilityBeforeCloseEndsOnlyTheLaunchesCapability(t *testing.T) {
+	reg := newCapabilityRegistry()
+	issued, err := reg.issueRoot("view-1", "turn-1", "run-1", "hs-1", "rev-1", "operator", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := reg.issueRoot("view-2", "turn-2", "run-2", "hs-1", "rev-1", "operator", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withExecutionCapability(t.Context(), other)
+
+	endCapabilityBeforeClose(ctx) // no hook registered: nothing ends
+	if !issued.isLive() || !other.isLive() {
+		t.Fatal("ending without a registered hook must not end any capability")
+	}
+
+	ctx = withEndBeforeClose(ctx, issued.end)
+	endCapabilityBeforeClose(ctx)
+	if issued.isLive() {
+		t.Fatal("the launch's capability must be ended before the stream closes")
+	}
+	if !other.isLive() {
+		t.Fatal("a capability that only rides ctx must not be ended by the launch's hook")
+	}
+	endCapabilityBeforeClose(ctx) // idempotent with the launch's deferred end
+}

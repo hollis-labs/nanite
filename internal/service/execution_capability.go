@@ -133,6 +133,29 @@ func copyNarrowing(n ToolNarrowing) ToolNarrowing {
 
 type executionCapabilityKey struct{}
 
+// endCapabilityBeforeCloseKey carries the function that ends the capability a
+// chat launch issued for its own run (nothing else), so the generation can end
+// it before it closes the stream.
+type endCapabilityBeforeCloseKey struct{}
+
+// withEndBeforeClose returns ctx carrying end, to be run by the generation just
+// before it closes its stream.
+func withEndBeforeClose(ctx context.Context, end func()) context.Context {
+	return context.WithValue(ctx, endCapabilityBeforeCloseKey{}, end)
+}
+
+// endCapabilityBeforeClose runs the end function a launch registered on ctx, if
+// any. A consumer that sees the stream close can then rely on the run's
+// capability already being gone; ending it only after the generation goroutine
+// returns left a window (past the runtime-turn drain) in which it was still
+// live. Ending is idempotent, so the launch's own deferred end stays as the
+// backstop.
+func endCapabilityBeforeClose(ctx context.Context) {
+	if end, ok := ctx.Value(endCapabilityBeforeCloseKey{}).(func()); ok && end != nil {
+		end()
+	}
+}
+
 func withExecutionCapability(ctx context.Context, c *executionCapability) context.Context {
 	return context.WithValue(ctx, executionCapabilityKey{}, c)
 }

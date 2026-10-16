@@ -92,6 +92,7 @@ func (s *chatServiceImpl) issueNativeCapability(ctx context.Context, viewID, tur
 	}
 	ctx = withExecutionCapability(ctx, c)
 	ctx = toolclient.WithNativeToolGate(ctx, nativeToolGate{grants: s.nativeGrants, cap: c})
+	ctx = withEndBeforeClose(ctx, c.end)
 	return ctx, c.end
 }
 

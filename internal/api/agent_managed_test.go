@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 type agentViewResp struct {
@@ -38,10 +36,6 @@ func mgReq(t *testing.T, mux http.Handler, method, path, body string) (*httptest
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	return w, w.Body.Bytes()
-}
-
-func storeAgent(slug, name, source string) *store.AgentProfile {
-	return &store.AgentProfile{Name: name, Slug: slug, SystemPrompt: "x", Source: source}
 }
 
 func TestRetiredManagedAgentLifecycleHasNoDatabaseOrFileEffects(t *testing.T) {

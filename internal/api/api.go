@@ -187,9 +187,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/{id}/revisions/{revisionId}/restore", a.handleRetiredAgentMutation)
 	mux.HandleFunc("DELETE /api/agents/{id}", a.handleRetiredAgentMutation)
 	mux.HandleFunc("POST /api/agents/{id}/copy-to-managed", a.handleRetiredAgentMutation)
-	// CW-20260910-0013: agent import/sync — the REST twin of
-	// `nanite agent install` / `nanite agent sync`, mirroring the skills
-	// pair below. See internal/api/agent_import.go's header.
+	// Retired profile import/sync endpoints retain an explicit refusal.
 	mux.HandleFunc("POST /api/agents/install", a.handleRetiredAgentMutation)
 	mux.HandleFunc("POST /api/agents/{slug}/sync", a.handleRetiredAgentMutation)
 	mux.HandleFunc("GET /api/agents/{id}/known-tools", a.handleListAgentKnownTools)

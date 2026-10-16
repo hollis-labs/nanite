@@ -295,19 +295,3 @@ func registryReactRange(host *naniteplugin.Host, owner string) string {
 	}
 	return ""
 }
-
-// buildUIURL composes the /api/plugins/{plugin}/ui/{file} path served by the
-// existing plugins.go handler. bundleDir is the in-repo subdir (e.g. "ui/dist")
-// — the host-side serving route at plugins.go:83-96 rewrites /ui/... to the
-// plugin's on-disk ui/ directory, so we need to strip any leading "ui/"
-// segment from bundleDir before joining (otherwise the frontend would fetch
-// /api/plugins/foo/ui/ui/dist/index.js which the serving route treats as
-// plugins/foo/ui/ui/dist/index.js on disk).
-func buildUIURL(pluginID, bundleDir, file string) string {
-	rel := path.Join(bundleDir, file)
-	// Strip leading "ui/" if present — the serve route already prefixes "ui/".
-	if len(rel) >= 3 && rel[:3] == "ui/" {
-		rel = rel[3:]
-	}
-	return path.Join("/api/plugins", pluginID, "ui", rel)
-}

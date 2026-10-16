@@ -114,37 +114,6 @@ func doJSONRequest(t *testing.T, mux *http.ServeMux, method, path string, body a
 	return w
 }
 
-func launchLoopViaAPI(t *testing.T, mux *http.ServeMux, req loopLaunchRequest) loopResultResponse {
-	t.Helper()
-	w := doJSONRequest(t, mux, http.MethodPost, "/api/loops", req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("launch status = %d, body = %s", w.Code, w.Body.String())
-	}
-	var resp loopResultResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal launch response: %v", err)
-	}
-	return resp
-}
-
-// forceEscalationViaAPI launches a fresh inline-goal loop with a budget
-// that escalates after exactly one iteration (mirrors internal/loop's own
-// forceEscalation, launcher_test.go, at the HTTP boundary instead of a
-// direct LoopLauncher.Launch call).
-func forceEscalationViaAPI(t *testing.T, mux *http.ServeMux, defName, profileID string) string {
-	t.Helper()
-	resp := launchLoopViaAPI(t, mux, loopLaunchRequest{
-		InlineGoal:     &loopGoalSpecRequest{Intent: "escalation fixture " + defName},
-		DefinitionName: defName,
-		AgentProfileID: profileID,
-		Budget:         &loopBudgetRequest{MaxIterations: 1},
-	})
-	if resp.Status != store.LoopRunStatusWaitingOnEscalation {
-		t.Fatalf("Status = %q, want waiting_on_escalation (last_decision %+v)", resp.Status, resp.LastDecision)
-	}
-	return resp.LoopRunID
-}
-
 // --- Goal CRUD ---
 
 func TestLoopsAPI_GoalCRUD_Lifecycle(t *testing.T) {

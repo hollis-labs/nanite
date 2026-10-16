@@ -186,12 +186,12 @@ func (s *Store) CompleteTeamRunLaunch(ctx context.Context, key, runID, runStatus
 		if memberStatus == "" {
 			memberStatus = TeamRunMemberStatusActive
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO team_run_members (id,workflow_run_id,slot_name,agent_id,session_id,resolved_at,status) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO actor_team_run_members (id,workflow_run_id,slot_name,agent_id,session_id,resolved_at,status) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
 			member.ID, runID, member.SlotName, member.AgentID, member.SessionID, resolvedAt, memberStatus); err != nil {
 			return fmt.Errorf("complete team run launch: insert member %s: %w", member.ID, err)
 		}
 		var actual TeamRunMember
-		if err := scanTeamRunMember(tx.QueryRowContext(ctx, `SELECT `+teamRunMemberColumns+` FROM team_run_members WHERE id=?`, member.ID), &actual); err != nil {
+		if err := scanTeamRunMember(tx.QueryRowContext(ctx, `SELECT `+teamRunMemberColumns+` FROM actor_team_run_members WHERE id=?`, member.ID), &actual); err != nil {
 			return fmt.Errorf("complete team run launch: verify member %s: %w", member.ID, err)
 		}
 		if actual.WorkflowRunID != runID || actual.SlotName != member.SlotName || actual.AgentID != member.AgentID || actual.SessionID != member.SessionID {
@@ -292,7 +292,7 @@ func (s *Store) CreateTeamRunMemberIntent(ctx context.Context, intent TeamRunMem
 	}
 	now := time.Now().UTC()
 	intent.CreatedAt, intent.UpdatedAt, intent.Status = now, now, TeamRunMemberIntentPlanned
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO team_run_member_intents (idempotency_key,ordinal,member_id,team_id,slot_name,agent_id,session_id,provisioning_kind,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO actor_team_run_member_intents (idempotency_key,ordinal,member_id,team_id,slot_name,agent_id,session_id,provisioning_kind,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		intent.IdempotencyKey, intent.Ordinal, intent.MemberID, intent.TeamID, intent.SlotName, intent.AgentID, intent.SessionID, intent.ProvisioningKind, intent.Status,
 		formatTimeRFC3339Nano(now), formatTimeRFC3339Nano(now))
 	if err == nil {
@@ -309,7 +309,7 @@ func (s *Store) CreateTeamRunMemberIntent(ctx context.Context, intent TeamRunMem
 }
 
 func (s *Store) GetTeamRunMemberIntent(ctx context.Context, key string, ordinal int) (*TeamRunMemberIntent, error) {
-	intent, err := scanTeamRunMemberIntent(s.DB.QueryRowContext(ctx, `SELECT idempotency_key,ordinal,member_id,team_id,slot_name,agent_id,session_id,provisioning_kind,status,created_at,updated_at FROM team_run_member_intents WHERE idempotency_key=? AND ordinal=?`, key, ordinal))
+	intent, err := scanTeamRunMemberIntent(s.DB.QueryRowContext(ctx, `SELECT idempotency_key,ordinal,member_id,team_id,slot_name,agent_id,session_id,provisioning_kind,status,created_at,updated_at FROM actor_team_run_member_intents WHERE idempotency_key=? AND ordinal=?`, key, ordinal))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTeamRunLaunchNotFound
 	}
@@ -323,7 +323,7 @@ func (s *Store) CompleteTeamRunMemberIntent(ctx context.Context, key string, ord
 	if sessionID == "" {
 		return nil, errors.New("complete team member intent: session id is required")
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE team_run_member_intents SET session_id=?,status='provisioned',updated_at=? WHERE idempotency_key=? AND ordinal=?`, sessionID, formatTimeRFC3339Nano(time.Now().UTC()), key, ordinal)
+	result, err := s.DB.ExecContext(ctx, `UPDATE actor_team_run_member_intents SET session_id=?,status='provisioned',updated_at=? WHERE idempotency_key=? AND ordinal=?`, sessionID, formatTimeRFC3339Nano(time.Now().UTC()), key, ordinal)
 	if err != nil {
 		return nil, fmt.Errorf("complete team member intent: %w", err)
 	}
@@ -399,7 +399,7 @@ func (s *Store) PrepareTeamSignalResolution(ctx context.Context, resolution Team
 		return nil, fmt.Errorf("prepare team signal resolution: load replay: %w", err)
 	}
 	for _, memberID := range resolution.MemberIDs {
-		result, updateErr := tx.ExecContext(ctx, `UPDATE team_run_members SET status='stopped' WHERE id=? AND workflow_run_id=? AND status='active'`, memberID, resolution.WorkflowRunID)
+		result, updateErr := tx.ExecContext(ctx, `UPDATE actor_team_run_members SET status='stopped' WHERE id=? AND workflow_run_id=? AND status='active'`, memberID, resolution.WorkflowRunID)
 		if updateErr != nil {
 			return nil, fmt.Errorf("prepare team signal resolution: stop member %s: %w", memberID, updateErr)
 		}
@@ -529,7 +529,7 @@ func (s *Store) StopTeamRunMembers(ctx context.Context, runID string) (int, erro
 	if runID == "" {
 		return 0, errors.New("stop team run members: run id is required")
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE team_run_members SET status='stopped' WHERE workflow_run_id=? AND status='active'`, runID)
+	result, err := s.DB.ExecContext(ctx, `UPDATE actor_team_run_members SET status='stopped' WHERE workflow_run_id=? AND status='active'`, runID)
 	if err != nil {
 		return 0, fmt.Errorf("stop team run members: %w", err)
 	}
@@ -549,11 +549,11 @@ func (s *Store) StopTerminalTeamRunMembers(ctx context.Context, limit int) (int,
 		limit = 100
 	}
 	result, err := s.DB.ExecContext(ctx, `
-UPDATE team_run_members
+UPDATE actor_team_run_members
 SET status='stopped'
 WHERE id IN (
   SELECT m.id
-  FROM team_run_members m
+  FROM actor_team_run_members m
   JOIN workflow_runs r ON r.id=m.workflow_run_id
   WHERE m.status='active'
     AND r.runtime_status IN ('succeeded','failed','canceled','timed_out','crashed')

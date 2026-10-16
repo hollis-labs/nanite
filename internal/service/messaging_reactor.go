@@ -100,6 +100,12 @@ func (r *messagingWakeReactor) ReactToMessage(ctx context.Context, msg *messagin
 // the same three-state vocabulary (chat.SubagentPolicy* constants)
 // rather than warranting a third, differently-shaped gating mechanism.
 func (s *chatServiceImpl) resolveMessageWakePolicy(ctx context.Context, sessionID string) string {
+	if p, defined := s.definitionNativePolicy(ctx, sessionID); defined {
+		if p != nil {
+			return p.MessageWakePolicy
+		}
+		return chat.SubagentPolicyRenderAndWait
+	}
 	var agentLayer override.OverrideConfig
 
 	// Read-only lookup deliberately: this is a fire-and-forget policy

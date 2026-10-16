@@ -30,8 +30,8 @@ func TestLoopRunMissingIssuerRefusesBeforeInlineGoalAndJournal(t *testing.T) {
 	queries := []string{"SELECT count(*) FROM goals", "SELECT count(*) FROM loop_runs", "SELECT count(*) FROM loop_run_iterations", "SELECT count(*) FROM workflow_runs", "SELECT count(*) FROM actor_instances", "SELECT count(*) FROM sessions"}
 	before := make([]int, len(queries))
 	for i, q := range queries {
-		if err := st.DB.QueryRowContext(t.Context(), q).Scan(&before[i]); err != nil {
-			t.Fatal(err)
+		if operationErr := st.DB.QueryRowContext(t.Context(), q).Scan(&before[i]); operationErr != nil {
+			t.Fatal(operationErr)
 		}
 	}
 	result, err := eng.Run(t.Context(), LoopDefinition{WorkflowName: "private-definition"}, LoopInput{AgentProfileID: actor.ID, Goal: &LoopGoalSpec{Intent: "must not persist"}})

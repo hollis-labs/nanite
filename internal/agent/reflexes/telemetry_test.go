@@ -32,13 +32,13 @@ import (
 func TestEmitFirings_InjectReminder_UnifiedTraceRecordAndTelemetry(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-telemetry-reminder", Name: "n", Slug: "agent-telemetry-reminder",
 		Class: "advisor", SystemPrompt: "test", Source: "test",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	id, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	id, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "advisor",
 		Name:        "reminder_telemetry_probe",
 		TriggerKind: store.ReflexTriggerEvent,
@@ -56,7 +56,7 @@ func TestEmitFirings_InjectReminder_UnifiedTraceRecordAndTelemetry(t *testing.T)
 	engine.SetPluginHooks(hooks)
 
 	const sessionID = "sess-telemetry-reminder"
-	out, err := engine.EvaluateState(ctx, "agent-telemetry-reminder", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-telemetry-reminder", "advisor", State{
 		SessionID:  sessionID,
 		AgentID:    "agent-telemetry-reminder",
 		AgentClass: "advisor",
@@ -70,7 +70,7 @@ func TestEmitFirings_InjectReminder_UnifiedTraceRecordAndTelemetry(t *testing.T)
 	}
 
 	// fired_count/last_fired_at bump.
-	reflex, err := st.GetAgentReflex(ctx, id)
+	reflex, err := declaredFixture(st).GetAgentReflex(ctx, id)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}
@@ -116,13 +116,13 @@ func TestEmitFirings_InjectReminder_UnifiedTraceRecordAndTelemetry(t *testing.T)
 func TestEmitFirings_ForceToolChoice_AlternativesConsideredPresent(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-telemetry-force", Name: "n", Slug: "agent-telemetry-force",
 		Class: "advisor", SystemPrompt: "test", Source: "test",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	loID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	loID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag: "advisor", Name: "force_low", Priority: 10,
 		TriggerKind: store.ReflexTriggerEvent, TriggerSpec: `{"name":"probe"}`,
 		ActionKind: store.ReflexActionForceToolChoice, ActionSpec: `{"tool_name":"tool_low"}`,
@@ -131,7 +131,7 @@ func TestEmitFirings_ForceToolChoice_AlternativesConsideredPresent(t *testing.T)
 	if err != nil {
 		t.Fatalf("InsertAgentReflex low: %v", err)
 	}
-	hiID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	hiID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag: "advisor", Name: "force_high", Priority: 90,
 		TriggerKind: store.ReflexTriggerEvent, TriggerSpec: `{"name":"probe"}`,
 		ActionKind: store.ReflexActionForceToolChoice, ActionSpec: `{"tool_name":"tool_high"}`,
@@ -143,7 +143,7 @@ func TestEmitFirings_ForceToolChoice_AlternativesConsideredPresent(t *testing.T)
 
 	engine := NewEngine(st, nil)
 	const sessionID = "sess-telemetry-force"
-	out, err := engine.EvaluateState(ctx, "agent-telemetry-force", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-telemetry-force", "advisor", State{
 		SessionID: sessionID, AgentID: "agent-telemetry-force", AgentClass: "advisor",
 		Events: []EventSignal{{EventType: "probe"}},
 	})
@@ -182,13 +182,13 @@ func TestEmitFirings_ForceToolChoice_AlternativesConsideredPresent(t *testing.T)
 func TestEmitFirings_HaltSession_UnifiedTraceRecordAndAlternatives(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-telemetry-halt", Name: "n", Slug: "agent-telemetry-halt",
 		Class: "advisor", SystemPrompt: "test", Source: "test",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	haltID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	haltID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag: "advisor", Name: "halt_telemetry_probe", Priority: 10,
 		TriggerKind: store.ReflexTriggerEvent, TriggerSpec: `{"name":"probe"}`,
 		ActionKind: store.ReflexActionHaltSession, ActionSpec: `{"reason":"telemetry test"}`,
@@ -203,7 +203,7 @@ func TestEmitFirings_HaltSession_UnifiedTraceRecordAndAlternatives(t *testing.T)
 	engine.SetPluginHooks(hooks)
 
 	const sessionID = "sess-telemetry-halt"
-	out, err := engine.EvaluateState(ctx, "agent-telemetry-halt", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-telemetry-halt", "advisor", State{
 		SessionID: sessionID, AgentID: "agent-telemetry-halt", AgentClass: "advisor",
 		Events: []EventSignal{{EventType: "probe"}},
 	})
@@ -214,7 +214,7 @@ func TestEmitFirings_HaltSession_UnifiedTraceRecordAndAlternatives(t *testing.T)
 		t.Fatalf("out = %+v, want exactly the halt action", out)
 	}
 
-	reflex, err := st.GetAgentReflex(ctx, haltID)
+	reflex, err := declaredFixture(st).GetAgentReflex(ctx, haltID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}

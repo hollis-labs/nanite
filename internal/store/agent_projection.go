@@ -23,8 +23,8 @@ func (s *Store) projectAgentHost(ctx context.Context, h AgentHostSettings) (*Age
 	if err != nil {
 		return nil, err
 	}
-	if err := agentpolicy.ValidateExecution(d); err != nil {
-		return nil, err
+	if operationErr := agentpolicy.ValidateExecution(d); operationErr != nil {
+		return nil, operationErr
 	}
 	// The actor runtime port has no enforced read-only posture. A native view
 	// may narrow permissions, but a compatibility DTO cannot imply enforcement.

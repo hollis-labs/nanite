@@ -17,10 +17,38 @@ import (
 )
 
 var (
-	once sync.Once
-	path string
-	err  error
+	once     sync.Once
+	path     string
+	buildErr error
+
+	dirsMu sync.Mutex
+	dirs   []string
 )
+
+// MkdirTemp creates a template directory that Cleanup removes. A test binary
+// that builds templates calls Cleanup from its TestMain once m.Run returns, so
+// the cache still serves every test in the binary and nothing is left in
+// $TMPDIR afterwards.
+func MkdirTemp(pattern string) (string, error) {
+	dir, mkErr := os.MkdirTemp("", pattern)
+	if mkErr != nil {
+		return "", mkErr
+	}
+	dirsMu.Lock()
+	dirs = append(dirs, dir)
+	dirsMu.Unlock()
+	return dir, nil
+}
+
+// Cleanup removes every directory MkdirTemp created.
+func Cleanup() {
+	dirsMu.Lock()
+	defer dirsMu.Unlock()
+	for _, dir := range dirs {
+		_ = os.RemoveAll(dir)
+	}
+	dirs = nil
+}
 
 // Copy writes a private copy of the process-wide migrated template to dst.
 //
@@ -32,14 +60,14 @@ func Copy(t testing.TB, dst string, build func(path string) error) {
 	t.Helper()
 	once.Do(func() {
 		var dir string
-		if dir, err = os.MkdirTemp("", "nanite-migrated-template-*"); err != nil {
+		if dir, buildErr = MkdirTemp("nanite-migrated-template-*"); buildErr != nil {
 			return
 		}
 		path = filepath.Join(dir, "template.db")
-		err = build(path)
+		buildErr = build(path)
 	})
-	if err != nil {
-		t.Fatalf("create migrated database template: %v", err)
+	if buildErr != nil {
+		t.Fatalf("create migrated database template: %v", buildErr)
 	}
 	if copyErr := copyFile(dst, path); copyErr != nil {
 		t.Fatalf("copy migrated database template: %v", copyErr)

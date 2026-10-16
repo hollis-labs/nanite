@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -49,7 +48,7 @@ func versionTemplatePath(t *testing.T, version int64) string {
 		return p
 	}
 
-	dir, err := os.MkdirTemp("", "nanite-store-v*-template-")
+	dir, err := migratedtemplate.MkdirTemp("nanite-store-v*-template-")
 	if err != nil {
 		t.Fatalf("create schema template dir: %v", err)
 	}

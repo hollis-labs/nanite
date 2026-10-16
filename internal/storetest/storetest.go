@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest/migratedtemplate"
 )
 
 var (
@@ -60,7 +61,7 @@ func prepare(dbPath string) error {
 
 func migratedTemplate() (string, error) {
 	templateOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "nanite-store-template-*")
+		dir, err := migratedtemplate.MkdirTemp("nanite-store-template-*")
 		if err != nil {
 			templateErr = err
 			return

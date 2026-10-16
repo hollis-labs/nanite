@@ -3,10 +3,19 @@ package migratedtemplate
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	code := m.Run()
+	Cleanup()
+	os.Exit(code)
+}
+
 func TestCopyBuildsOnceAndGivesEachCallerItsOwnFile(t *testing.T) {
+	// -count=N reruns the test in one process; start from an unbuilt template.
+	once, path, buildErr = sync.Once{}, "", nil
 	builds := 0
 	build := func(path string) error {
 		builds++

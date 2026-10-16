@@ -99,7 +99,7 @@ require (
 	github.com/hollis-labs/libs/ui/ui-go v0.1.0
 	github.com/hollis-labs/libs/core/util v0.4.0
 	github.com/hollis-labs/libs/workflow/engine v0.1.0
-	github.com/hollis-labs/nanite/pkg/pluginapi v0.2.0
+	github.com/hollis-labs/nanite/pkg/pluginapi v0.3.0
 	github.com/hollis-labs/plugins-catalog v0.1.0
 	github.com/hollis-labs/libs/agent/core v0.4.0
 	github.com/hollis-labs/libs/harness/core v0.10.0
@@ -110,7 +110,3 @@ require (
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/mod v0.41.0
 )
-
-// pkg/pluginapi v0.2.0 on the proxy still imports the pre-group plugin-mcp
-// path; resolve the in-repo module until pkg/pluginapi/v0.3.0 is tagged.
-replace github.com/hollis-labs/nanite/pkg/pluginapi => ./pkg/pluginapi

@@ -92,10 +92,15 @@ func (s *SchedulerSQLStore) ListDueFires(ctx context.Context, now time.Time, lim
 		limit = 100
 	}
 	rows, err := s.shared.DB().QueryContext(ctx, `SELECT id, schedule_id, scheduled_at, fired_at, claim_expires_at,
- attempt, status, next_attempt_at, last_error, retry_json, job_type, payload FROM gosched_fires
- WHERE (status IN ('pending','retrying') AND next_attempt_at <= ?) OR (status = 'claimed' AND claim_expires_at <= ?)
+ attempt, status, next_attempt_at, last_error, retry_json, job_type, payload,
+ COALESCE((SELECT options_json FROM gosched_fire_options WHERE fire_id=gosched_fires.id),'{}') FROM gosched_fires
+ WHERE ((status IN ('pending','retrying') AND next_attempt_at <= ?) OR (status = 'claimed' AND claim_expires_at <= ?))
+ AND NOT (
+  COALESCE((SELECT json_extract(options_json,'$.Overlap') FROM gosched_fire_options WHERE fire_id=gosched_fires.id),'')='queue'
+  AND EXISTS(SELECT 1 FROM gosched_fires active WHERE active.schedule_id=gosched_fires.schedule_id AND active.id<>gosched_fires.id AND active.status='claimed' AND active.claim_expires_at>?)
+ )
  ORDER BY CASE WHEN next_attempt_at = ? THEN scheduled_at ELSE next_attempt_at END, id LIMIT ?`,
-		schedulerTime(now), schedulerTime(now), schedulerTime(time.Time{}), limit)
+		schedulerTime(now), schedulerTime(now), schedulerTime(now), schedulerTime(time.Time{}), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -103,8 +108,8 @@ func (s *SchedulerSQLStore) ListDueFires(ctx context.Context, now time.Time, lim
 	var out []gosched.Fire
 	for rows.Next() {
 		var f gosched.Fire
-		var scheduled, fired, expires, next, retry string
-		if err := rows.Scan(&f.ID, &f.ScheduleID, &scheduled, &fired, &expires, &f.Attempt, &f.Status, &next, &f.LastError, &retry, &f.JobType, &f.Payload); err != nil {
+		var scheduled, fired, expires, next, retry, options string
+		if err := rows.Scan(&f.ID, &f.ScheduleID, &scheduled, &fired, &expires, &f.Attempt, &f.Status, &next, &f.LastError, &retry, &f.JobType, &f.Payload, &options); err != nil {
 			return nil, err
 		}
 		for _, field := range []struct {
@@ -120,6 +125,16 @@ func (s *SchedulerSQLStore) ListDueFires(ctx context.Context, now time.Time, lim
 		if err := json.Unmarshal([]byte(retry), &f.Retry); err != nil {
 			return nil, fmt.Errorf("scheduler fire %s retry: %w", f.ID, err)
 		}
+		var opts struct {
+			Overlap          gosched.OverlapPolicy
+			MaxQueuedFires   int
+			Reason           string
+			CoalescedThrough time.Time
+		}
+		if err := json.Unmarshal([]byte(options), &opts); err != nil {
+			return nil, fmt.Errorf("scheduler fire %s options: %w", f.ID, err)
+		}
+		f.Overlap, f.MaxQueuedFires, f.Reason, f.CoalescedThrough = opts.Overlap, opts.MaxQueuedFires, opts.Reason, opts.CoalescedThrough
 		out = append(out, f)
 	}
 	return out, rows.Err()

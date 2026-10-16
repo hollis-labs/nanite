@@ -116,6 +116,9 @@ func TestSQLStoreReceiptSingleStatement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Construction (sqlstore.New in util v0.4.0 applies connection pragmas) is not
+	// admission; count only the acceptance call.
+	statements.Store(0)
 	if accepted, checkedErr := facade.MarkScheduleFireDispatchAccepted(ctx, fire.ID, fire.Attempt, fire.FiredAt, sqlstoreAt); checkedErr != nil || !accepted {
 		t.Fatalf("accept: %v %v", accepted, checkedErr)
 	}

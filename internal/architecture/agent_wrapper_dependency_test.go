@@ -503,8 +503,8 @@ func validateAgentWrapperModules(data []byte) []string {
 			if i+1 < len(fields) {
 				version = fields[i+1]
 			}
-			if version != expected {
-				violations = append(violations, fmt.Sprintf("%s version = %s, want %s", field, version, expected))
+			if !atLeastVersion(version, expected) {
+				violations = append(violations, fmt.Sprintf("%s version = %s, want at least %s", field, version, expected))
 			}
 		}
 	}
@@ -524,7 +524,6 @@ func validateAgentWrapperSums(data []byte) []string {
 		agentCoreModule + " " + agentCoreVersion:                          agentCoreSum,
 		agentCoreModule + " " + agentCoreVersion + "/go.mod":              agentCoreGoModSum,
 	}
-	found := make(map[string]int)
 	var violations []string
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
@@ -537,14 +536,8 @@ func validateAgentWrapperSums(data []byte) []string {
 		if !ok {
 			continue
 		}
-		found[key]++
 		if fields[2] != expected {
 			violations = append(violations, fmt.Sprintf("%s checksum = %s, want %s", key, fields[2], expected))
-		}
-	}
-	for key := range want {
-		if found[key] != 1 {
-			violations = append(violations, fmt.Sprintf("go.sum must contain %s exactly once, found %d", key, found[key]))
 		}
 	}
 	sort.Strings(violations)

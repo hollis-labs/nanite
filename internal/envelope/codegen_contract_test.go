@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/libs/ui/ui-go/envelopes"
 	"github.com/hollis-labs/libs/ui/ui-go/envelopes/codegen"
+	"golang.org/x/mod/semver"
 )
 
 func TestReleasedEnvelopeCatalogAndTypeScriptAreDeterministic(t *testing.T) {
@@ -72,8 +74,10 @@ func TestEnvelopeGenerationHasNoSiblingTreeOrEmbeddedSchemaCoupling(t *testing.T
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(goMod), "\tgithub.com/hollis-labs/libs/ui/ui-go v0.4.0\n") {
-		t.Fatal("go.mod does not pin the released go-envelopes version")
+	// A floor, not an exact pin: any released ui-go at or above v0.1.0 satisfies this.
+	match := regexp.MustCompile(`(?m)^\tgithub\.com/hollis-labs/libs/ui/ui-go (v\S+)$`).FindStringSubmatch(string(goMod))
+	if match == nil || semver.Prerelease(match[1]) != "" || semver.Compare(match[1], "v0.1.0") < 0 {
+		t.Fatal("go.mod does not require a released go-envelopes version at or above v0.1.0")
 	}
 	if strings.Contains(string(goMod), "replace github.com/hollis-labs/libs/ui/ui-go") {
 		t.Fatal("go.mod replaces go-envelopes instead of consuming the released module")

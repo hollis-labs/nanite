@@ -29,7 +29,7 @@
       "staticcheck": 72,
       "unconvert": 3,
       "unparam": 26,
-      "unused": 128
+      "unused": 121
     }
   },
   "stage_2": {

@@ -1,9 +1,7 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,274 +11,154 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-func atomicAgentRequest(t *testing.T, h http.Handler, method, path string, body map[string]any, want int) *store.AgentProfile {
+// Historical fixtures bypass retired writers only inside this private database.
+// They never become runtime profiles or verified actors.
+func retiredAgentHistory(t *testing.T, a *testAPI, source string) *store.AgentProfile {
 	t.Helper()
-	raw, err := json.Marshal(body)
+	p := &store.AgentProfile{Name: "Retained", Slug: "retained-" + source, Source: source, SystemPrompt: "private historical prompt"}
+	if err := storetest.HistoricalProfile(t.Context(), a.store, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO agent_known_tools(agent_id,tool_name,reason) VALUES(?,?,?)`, p.ID, "historical-tool", "retained child"); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// Compare complete persisted rows, including historical children and fresh
+// definitions/settings/bindings/grants. A refusal must not convert or mutate
+// either graph, even when its response looks correct.
+func retiredAgentState(t *testing.T, a *testAPI) map[string][][]any {
+	t.Helper()
+	tables, err := a.store.DB.QueryContext(t.Context(), `SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'agent_%' OR name LIKE 'actor_%' OR name='session_actor_bindings') ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
-	r.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(w, r)
-	if w.Code != want {
-		t.Fatalf("%s %s: %d %s, want %d", method, path, w.Code, w.Body.String(), want)
-	}
-	if want != 200 && want != 201 {
-		var wire map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &wire); err != nil {
-			t.Fatal(err)
+	var names []string
+	for tables.Next() {
+		var name string
+		if scanErr := tables.Scan(&name); scanErr != nil {
+			t.Fatal(scanErr)
 		}
-		message, ok := wire["error"].(string)
-		if !ok || len(wire) != 1 || message == "" || strings.Contains(message, "write_secret") || strings.Contains(message, "SQLITE") {
-			t.Fatalf("unsafe error response: %s", w.Body.String())
-		}
-		return nil
+		names = append(names, name)
 	}
-	var p store.AgentProfile
-	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+	if rowsErr := tables.Err(); rowsErr != nil {
+		t.Fatal(rowsErr)
+	}
+	if closeErr := tables.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	state := make(map[string][][]any, len(names))
+	for _, name := range names {
+		rows, queryErr := a.store.DB.QueryContext(t.Context(), fmt.Sprintf(`SELECT * FROM %q ORDER BY rowid`, name))
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		columns, columnErr := rows.Columns()
+		if columnErr != nil {
+			t.Fatal(columnErr)
+		}
+		state[name] = make([][]any, 0)
+		for rows.Next() {
+			values := make([]any, len(columns))
+			targets := make([]any, len(columns))
+			for i := range values {
+				targets[i] = &values[i]
+			}
+			if scanErr := rows.Scan(targets...); scanErr != nil {
+				t.Fatal(scanErr)
+			}
+			for i, value := range values {
+				if raw, ok := value.([]byte); ok {
+					values[i] = string(raw)
+				}
+			}
+			state[name] = append(state[name], values)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			t.Fatal(rowsErr)
+		}
+		if closeErr := rows.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+	}
+	for _, required := range []string{"agent_profiles", "agent_definitions", "agent_host_settings", "agent_actor_bindings"} {
+		if _, ok := state[required]; !ok {
+			t.Fatalf("missing graph fixture table %s", required)
+		}
+	}
+	return state
+}
+
+func assertRetiredAgentState(t *testing.T, a *testAPI, before map[string][][]any) {
+	t.Helper()
+	after := retiredAgentState(t, a)
+	for table, rows := range before {
+		if !reflect.DeepEqual(rows, after[table]) {
+			t.Fatalf("refused request changed %s rows", table)
+		}
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("refused request changed graph tables")
+	}
+}
+
+func assertRetiredAgentResponse(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusGone {
+		t.Fatalf("retired route = %d: %s", w.Code, w.Body.String())
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &wire); err != nil {
 		t.Fatal(err)
 	}
-	return &p
-}
-
-func atomicAgentBody(slug, role string) map[string]any {
-	return map[string]any{"name": "Atomic Agent", "slug": slug, "system_prompt": "fixture", "role_id": role, "consumer_id": "blt-loom-001", "protocol": "acp", "transport": "stdio", "role_tools": `["atomic-fixture-tool"]`, "role_skills": `["atomic-skill"]`}
-}
-
-func TestAgentWritesAtomic(t *testing.T) {
-	for _, method := range []string{"POST", "PUT"} {
-		for _, failure := range []string{"protocol", "transport", "role_id", "consumer_id", "model_id", "duplicate slug", "trust write", "assignment write", "protocol write", "seed write", "grant write", "skill write", "saved read", "foreign key during write"} {
-			if method == "PUT" && failure == "trust write" {
-				continue
-			}
-			t.Run(method+"/"+failure, func(t *testing.T) {
-				st, h := serviceErrorRoutes(t)
-				toolID, seedErr := st.UpsertKnownTool(t.Context(), "atomic-fixture-tool", "internal", "active", "fixture")
-				if seedErr != nil {
-					t.Fatal(seedErr)
-				}
-				if err := st.CreateSkill(t.Context(), &store.Skill{Name: "Atomic Skill", Slug: "atomic-skill"}); err != nil {
-					t.Fatal(err)
-				}
-				role := &store.Role{Name: "Fixture Role", Slug: "atomic-role", SystemPrompt: "fixture"}
-				if err := st.CreateRole(t.Context(), role); err != nil {
-					t.Fatal(err)
-				}
-				body := atomicAgentBody("atomic-agent", role.ID)
-				path := "/api/agents"
-				var before *store.AgentProfile
-				if method == "PUT" {
-					before = atomicAgentRequest(t, h, "POST", path, map[string]any{"name": "Original", "slug": "original-agent", "system_prompt": "original"}, 201)
-					// Read the raw persisted profile instead of comparing API-only view fields.
-					var err error
-					before, err = st.GetAgent(t.Context(), before.ID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					path += "/" + before.ID
-				}
-				want := 400
-				trigger := ""
-				switch failure {
-				case "protocol":
-					body["protocol"] = "made-up"
-				case "transport":
-					body["transport"] = "made-up"
-				case "role_id", "consumer_id", "model_id":
-					body[failure] = "missing"
-				case "duplicate slug":
-					atomicAgentRequest(t, h, "POST", "/api/agents", map[string]any{"name": "Taken", "slug": "taken-agent", "system_prompt": "fixture"}, 201)
-					body["slug"] = "taken-agent"
-					want = 409
-				case "trust write":
-					trigger = `BEFORE UPDATE OF default_trust_tier ON agent_profiles`
-					want = 500
-				case "assignment write":
-					trigger = `BEFORE UPDATE OF role_id ON agent_profiles WHEN NEW.role_id IS NOT OLD.role_id`
-					want = 500
-				case "protocol write":
-					trigger = `BEFORE UPDATE OF protocol ON agent_profiles WHEN NEW.protocol IS NOT OLD.protocol`
-					want = 500
-				case "seed write":
-					body["role_tools"] = `["atomic-fixture-tool","second-failing-tool"]`
-					trigger = `BEFORE INSERT ON agent_known_tools WHEN NEW.tool_name='second-failing-tool'`
-					want = 500
-				case "grant write":
-					trigger = `BEFORE INSERT ON agent_tools`
-					want = 500
-				case "skill write":
-					trigger = `BEFORE INSERT ON agent_known_skills`
-					want = 500
-				case "saved read":
-					if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_atomic_write AFTER UPDATE OF protocol ON agent_profiles WHEN NEW.protocol IS NOT OLD.protocol BEGIN UPDATE agent_profiles SET tether_managed='invalid-bool' WHERE id=NEW.id; END`); err != nil {
-						t.Fatal(err)
-					}
-					want = 500
-				case "foreign key during write":
-					if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_atomic_write AFTER UPDATE OF role_id ON agent_profiles WHEN NEW.role_id IS NOT OLD.role_id BEGIN UPDATE agent_profiles SET role_id='missing-after-validation' WHERE id=NEW.id; END`); err != nil {
-						t.Fatal(err)
-					}
-				}
-				// Assignments are now merged into the initial INSERT, rather
-				// than written through a later UPDATE. Faults must follow the
-				// actual row mutation while preserving the rollback intent.
-				if method == "POST" {
-					switch failure {
-					case "assignment write":
-						trigger = `BEFORE INSERT ON agent_profiles WHEN NEW.role_id IS NOT NULL`
-					case "protocol write":
-						trigger = `BEFORE INSERT ON agent_profiles WHEN NEW.protocol IS NOT NULL`
-					case "saved read":
-						if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_atomic_write`); err != nil {
-							t.Fatal(err)
-						}
-						if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_atomic_write AFTER INSERT ON agent_profiles BEGIN UPDATE agent_profiles SET tether_managed='invalid-bool' WHERE id=NEW.id; END`); err != nil {
-							t.Fatal(err)
-						}
-					case "foreign key during write":
-						if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_atomic_write`); err != nil {
-							t.Fatal(err)
-						}
-						if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER fail_atomic_write AFTER INSERT ON agent_profiles BEGIN UPDATE agent_profiles SET role_id='missing-after-validation' WHERE id=NEW.id; END`); err != nil {
-							t.Fatal(err)
-						}
-					}
-				}
-				if trigger != "" {
-					if _, err := st.DB.ExecContext(t.Context(), "CREATE TRIGGER fail_atomic_write "+trigger+" BEGIN SELECT RAISE(ABORT,'write_secret private agent query'); END"); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if method == "PUT" && failure == "grant write" {
-					// A rejecting grant trigger proves an ordinary profile edit
-					// does not attempt to replay declarations into grants.
-					changed := atomicAgentRequest(t, h, method, path, body, 200)
-					names, err := st.ListAgentToolNames(t.Context(), changed.ID)
-					if err != nil || len(names) != 0 {
-						t.Fatalf("profile edit changed grants: %v, %v", names, err)
-					}
-					if changed.SystemPrompt != "fixture" || changed.Revision == before.Revision {
-						t.Fatal("edit did not commit profile/history")
-					}
-					return
-				}
-				atomicAgentRequest(t, h, method, path, body, want)
-				var children int
-				if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_known_tools WHERE tool_name IN ('atomic-fixture-tool','second-failing-tool')`).Scan(&children); err != nil {
-					t.Fatal(err)
-				}
-				var grants, skills int
-				if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_tools WHERE tool_id=?`, toolID).Scan(&grants); err != nil {
-					t.Fatal(err)
-				}
-				if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_known_skills WHERE skill_name='atomic-skill'`).Scan(&skills); err != nil {
-					t.Fatal(err)
-				}
-				if grants != 0 || skills != 0 {
-					t.Fatalf("failed request left grant/skill rows: %d/%d", grants, skills)
-				}
-				if children != 0 {
-					t.Fatalf("failed request left child rows: %d", children)
-				}
-				var count int
-				if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_profiles WHERE slug='atomic-agent'`).Scan(&count); err != nil {
-					t.Fatal(err)
-				}
-				if count != 0 {
-					t.Fatalf("failed request persisted an agent row: %d", count)
-				}
-				if before != nil {
-					after, err := st.GetAgent(t.Context(), before.ID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if !reflect.DeepEqual(before, after) {
-						t.Fatalf("failed PUT modified persisted profile: before=%+v after=%+v", before, after)
-					}
-				}
-				if failure == "duplicate slug" {
-					var rows int
-					if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_profiles WHERE slug='taken-agent'`).Scan(&rows); err != nil {
-						t.Fatal(err)
-					}
-					if rows != 1 {
-						t.Fatalf("duplicate request changed existing row count: %d", rows)
-					}
-				}
-				if trigger != "" || failure == "foreign key during write" || failure == "saved read" {
-					if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER fail_atomic_write`); err != nil {
-						t.Fatal(err)
-					}
-				}
-				success := 201
-				if method == "PUT" {
-					success = 200
-				}
-				retry := atomicAgentRequest(t, h, method, path, atomicAgentBody("atomic-agent", role.ID), success)
-				saved, err := st.GetAgentBySlug(t.Context(), "atomic-agent")
-				if err != nil {
-					t.Fatal(err)
-				}
-				if saved.ID != retry.ID || saved.RoleID != role.ID || saved.ConsumerID != "blt-loom-001" || saved.Protocol != "acp" || saved.Transport != "stdio" {
-					t.Fatalf("corrected retry failed to persist assignments: %+v", saved)
-				}
-				if before != nil && saved.ID != before.ID {
-					t.Fatalf("corrected update changed identity: %s -> %s", before.ID, saved.ID)
-				}
-				var granted int
-				wantGrants := 1
-				if method == "PUT" {
-					wantGrants = 0
-				}
-				if grantErr := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_tools WHERE agent_id=? AND tool_id=?`, saved.ID, toolID).Scan(&granted); grantErr != nil || granted != wantGrants {
-					t.Fatalf("corrected retry grant count=%d err=%v", granted, grantErr)
-				}
-				known, err := st.ListAgentKnownTools(t.Context(), saved.ID)
-				if err != nil || len(known) != 1 {
-					t.Fatalf("corrected retry seed: %+v err=%v", known, err)
-				}
-			})
-		}
+	message, ok := wire["error"].(string)
+	if !ok || len(wire) != 1 || !strings.Contains(message, "retired") || !strings.Contains(message, "pinned definition") || strings.Contains(message, "private historical prompt") || strings.Contains(message, "write_secret") {
+		t.Fatalf("unsafe or missing retirement guidance: %s", w.Body.String())
 	}
 }
 
-func TestAgentInvalidAssignmentsValidateBeforeWrite(t *testing.T) {
-	st, h := serviceErrorRoutes(t)
-	// If client validation were postponed until after the first write, this
-	// trigger would turn the 400 into a 500 (even with eventual rollback).
-	if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER forbid_agent_insert BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT,'write_secret insertion before validation'); END`); err != nil {
+func retiredAgentRequest(t *testing.T, h http.Handler, method, path, body string) {
+	t.Helper()
+	w, _ := mgReq(t, h, method, path, body)
+	assertRetiredAgentResponse(t, w)
+}
+
+func TestRetiredAgentWritesPreserveHistoricalAndFreshGraphs(t *testing.T) {
+	a, mux := newTestAPI(t)
+	p := retiredAgentHistory(t, a, "user")
+	before := retiredAgentState(t, a)
+	for _, request := range []struct{ method, path, body string }{
+		{"POST", "/api/agents", `{"name":"New","slug":"new-agent","role_tools":"[\"new-tool\"]","role_skills":"[\"new-skill\"]"}`},
+		{"PUT", "/api/agents/" + p.ID, `{"name":"Changed","system_prompt":"changed","role_id":"claimed-role"}`},
+		{"DELETE", "/api/agents/" + p.ID, ""},
+		{"POST", "/api/agents/" + p.ID + "/revisions/claimed-revision/restore", `{}`},
+	} {
+		t.Run(request.method+request.path, func(t *testing.T) {
+			retiredAgentRequest(t, mux, request.method, request.path, request.body)
+			assertRetiredAgentState(t, a, before)
+		})
+	}
+}
+
+func TestRetiredAgentInputsNeverReachProfileWrites(t *testing.T) {
+	a, mux := newTestAPI(t)
+	if _, err := a.store.DB.ExecContext(t.Context(), `CREATE TRIGGER forbid_retired_insert BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT,'write_secret retired writer reached'); END`); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"protocol", "role_id", "consumer_id", "model_id"} {
-		body := map[string]any{"name": "Invalid", "slug": "invalid-" + strings.ReplaceAll(field, "_", "-"), "system_prompt": "fixture", field: "missing"}
-		atomicAgentRequest(t, h, "POST", "/api/agents", body, 400)
-		_, err := st.GetAgentBySlug(t.Context(), body["slug"].(string))
-		if !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("invalid %s persisted: %v", field, err)
-		}
+	before := retiredAgentState(t, a)
+	for _, body := range []string{`{`, `{"slug":"user"}`, `{"slug":"../escape","source":"internal"}`, `{"protocol":"invalid","transport":"invalid","role_id":"missing","consumer_id":"missing","model_id":"missing"}`} {
+		retiredAgentRequest(t, mux, "POST", "/api/agents", body)
+		assertRetiredAgentState(t, a, before)
 	}
 }
 
-func TestAgentAssignmentsFailureMessageNamesFields(t *testing.T) {
-	_, h := serviceErrorRoutes(t)
-	for _, field := range []string{"protocol", "transport", "role_id", "consumer_id", "model_id"} {
-		body := fmt.Sprintf(`{"name":"Invalid","slug":"invalid-%s","system_prompt":"fixture",%q:"missing"}`, strings.ReplaceAll(field, "_", "-"), field)
-		message := serviceErrorRequest(t, h, "POST", "/api/agents", body, 400)
-		if field == "protocol" || field == "transport" {
-			if !strings.Contains(message, field) {
-				t.Fatalf("field missing from error: %s", message)
-			}
-		} else if message != "agent assignment does not reference an existing role, consumer, or model" {
-			t.Fatalf("assignment error contract changed: %s", message)
-		}
-	}
-}
-
-func TestAgentConcurrentCreateAddsOneProfile(t *testing.T) {
-	st, h := serviceErrorRoutes(t)
+func TestRetiredAgentConcurrentCreatesHaveNoEffects(t *testing.T) {
+	a, mux := newTestAPI(t)
+	before := retiredAgentState(t, a)
 	start := make(chan struct{})
 	results := make([]*httptest.ResponseRecorder, 2)
 	var wg sync.WaitGroup
@@ -290,51 +168,38 @@ func TestAgentConcurrentCreateAddsOneProfile(t *testing.T) {
 			defer wg.Done()
 			<-start
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequest("POST", "/api/agents", strings.NewReader(`{"name":"Concurrent","slug":"concurrent-agent","system_prompt":"fixture"}`)))
+			mux.ServeHTTP(w, httptest.NewRequest("POST", "/api/agents", strings.NewReader(`{"name":"Concurrent","slug":"same-agent"}`)))
 			results[i] = w
 		}()
 	}
 	close(start)
 	wg.Wait()
-	codes := map[int]int{}
 	for _, w := range results {
-		codes[w.Code]++
+		assertRetiredAgentResponse(t, w)
 	}
-	if codes[201] != 1 || codes[409] != 1 {
-		t.Fatalf("concurrent create results: %d %s; %d %s", results[0].Code, results[0].Body.String(), results[1].Code, results[1].Body.String())
-	}
-	var count int
-	if err := st.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_profiles WHERE slug='concurrent-agent'`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("concurrent persisted rows=%d err=%v", count, err)
-	}
+	assertRetiredAgentState(t, a, before)
 }
 
-func TestAgentCreateReservedSlugRejectedBeforeWrite(t *testing.T) {
-	st, h := serviceErrorRoutes(t)
-	if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER forbid_reserved_insert BEFORE INSERT ON agent_profiles BEGIN SELECT RAISE(ABORT,'write_secret insertion before validation'); END`); err != nil {
-		t.Fatal(err)
-	}
-	message := serviceErrorRequest(t, h, "POST", "/api/agents", `{"name":"Reserved","slug":"user","system_prompt":"fixture"}`, 400)
-	if message != `slug "user" is reserved for messaging` {
-		t.Fatalf("reserved slug error = %q", message)
-	}
-	if _, err := st.GetAgentBySlug(t.Context(), "user"); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("reserved slug persisted: %v", err)
-	}
-	if _, err := st.DB.ExecContext(t.Context(), `DROP TRIGGER forbid_reserved_insert`); err != nil {
-		t.Fatal(err)
-	}
-	atomicAgentRequest(t, h, "POST", "/api/agents", map[string]any{"name": "Corrected", "slug": "corrected-user", "system_prompt": "fixture"}, 201)
-}
-
-func TestAgentCreateInvalidACPPrecedesDuplicateSlug(t *testing.T) {
-	_, h := serviceErrorRoutes(t)
-	atomicAgentRequest(t, h, "POST", "/api/agents", map[string]any{"name": "Existing", "slug": "existing-acp", "system_prompt": "fixture"}, 201)
-	for _, field := range []string{"protocol", "transport"} {
-		body := fmt.Sprintf(`{"name":"Invalid","slug":"existing-acp","system_prompt":"fixture",%q:"invalid"}`, field)
-		message := serviceErrorRequest(t, h, "POST", "/api/agents", body, 400)
-		if !strings.Contains(message, field) {
-			t.Fatalf("invalid %s message: %s", field, message)
+func TestRetiredAgentMuxKeepsRoutingControls(t *testing.T) {
+	a, mux := newTestAPI(t)
+	before := retiredAgentState(t, a)
+	for _, request := range []struct {
+		method, path string
+		want         int
+	}{
+		{"GET", "/api/health", http.StatusOK},
+		{"GET", "/api/agent-definitions", http.StatusOK},
+		{"PATCH", "/api/agents/nonexistent", http.StatusMethodNotAllowed},
+		{"POST", "/api/agents/nonexistent/unregistered", http.StatusNotFound},
+	} {
+		w, _ := mgReq(t, mux, request.method, request.path, "")
+		if w.Code != request.want {
+			t.Fatalf("%s %s = %d, want %d", request.method, request.path, w.Code, request.want)
 		}
 	}
+	w, _ := mgReq(t, mux, "POST", "/api/agent-host-settings", `{`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("active host settings input control = %d: %s", w.Code, w.Body.String())
+	}
+	assertRetiredAgentState(t, a, before)
 }

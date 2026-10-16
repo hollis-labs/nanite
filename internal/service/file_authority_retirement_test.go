@@ -3,13 +3,11 @@ package service
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
@@ -46,7 +44,7 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 		Source:       "user",
 		Durable:      true,
 	}
-	if createErr := seedStore.CreateAgent(ctx, profile); createErr != nil {
+	if createErr := storetest.HistoricalProfile(ctx, seedStore, profile); createErr != nil {
 		t.Fatalf("create profile: %v", createErr)
 	}
 	instance := &store.DurableAgentInstance{
@@ -62,7 +60,8 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 		Status:           store.DurableAgentStatusSleeping,
 		MetadataJSON:     `{"managed_source":"managed_file","managed_config_path":".nanite/durable-agents/retired-file-source.yaml","managed_profile_slug":"retired-file-source"}`,
 	}
-	if createErr := seedStore.CreateDurableAgentInstance(ctx, instance); createErr != nil {
+	instance.ID = "retained-file-instance"
+	if _, createErr := seedStore.DB.ExecContext(ctx, `INSERT INTO durable_agent_instances(id,name,slug,profile_id,lifecycle_class,provider,model,runtime_kind,launch_source_type,launch_source_id,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, instance.ID, instance.Name, instance.Slug, instance.ProfileID, instance.LifecycleClass, instance.Provider, instance.Model, instance.RuntimeKind, instance.LaunchSourceType, instance.LaunchSourceID, instance.Status, instance.MetadataJSON); createErr != nil {
 		t.Fatalf("create durable instance: %v", createErr)
 	}
 	schedule := store.AgentSchedule{
@@ -82,7 +81,7 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 		JobType:      store.ScheduleJobTypeDurableAgentWake,
 		JobPayload:   `{"proof":true}`,
 	}
-	if scheduleErr := seedStore.InsertAgentSchedule(ctx, schedule); scheduleErr != nil {
+	if _, scheduleErr := seedStore.DB.ExecContext(ctx, `INSERT INTO agent_schedules(id,agent_id,name,schedule_kind,schedule_spec,body,priority,status,created_at,created_by,next_run,max_retries,on_fail,job_type,job_payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, schedule.ID, schedule.AgentID, schedule.Name, schedule.ScheduleKind, schedule.ScheduleSpec, schedule.Body, schedule.Priority, schedule.Status, schedule.CreatedAt, schedule.CreatedBy, schedule.NextRun, schedule.MaxRetries, schedule.OnFail, schedule.JobType, schedule.JobPayload); scheduleErr != nil {
 		t.Fatalf("create schedule: %v", scheduleErr)
 	}
 	if closeErr := seedStore.Close(ctx); closeErr != nil {
@@ -97,16 +96,12 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close(context.Background()) })
 
-	beforeBootInstance, err := reopened.GetDurableAgentInstanceBySlug(ctx, instance.Slug)
-	if err != nil {
-		t.Fatalf("durable instance missing immediately after migrations: %v", err)
+	beforeBoot, err := snapshotFormerFileManagedState(ctx, reopened)
+	if err != nil || len(beforeBoot.Instances) != 1 || len(beforeBoot.Schedules) != 1 {
+		t.Fatalf("retained historical state: %+v %v", beforeBoot, err)
 	}
-	beforeBootSchedule, err := reopened.GetAgentSchedule(ctx, schedule.ID)
-	if err != nil {
-		t.Fatalf("schedule missing immediately after migrations: %v", err)
-	}
-	if beforeBootInstance.Status != store.DurableAgentStatusSleeping {
-		t.Fatalf("migration changed durable status to %q", beforeBootInstance.Status)
+	if _, err := reopened.GetDurableAgentInstanceBySlug(ctx, instance.Slug); !errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
+		t.Fatalf("historical instance entered fresh runtime: %v", err)
 	}
 
 	container, err := NewContainer(ContainerConfig{
@@ -121,20 +116,14 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 	}
 	t.Cleanup(container.Shutdown)
 
-	afterBootInstance, err := reopened.GetDurableAgentInstanceBySlug(ctx, instance.Slug)
-	if err != nil {
-		t.Fatalf("durable instance missing after boot: %v", err)
+	afterBoot, err := snapshotFormerFileManagedState(ctx, reopened)
+	if err != nil || !reflect.DeepEqual(afterBoot, beforeBoot) {
+		t.Fatalf("boot changed retained historical state: before=%#v after=%#v err=%v", beforeBoot, afterBoot, err)
 	}
-	afterBootSchedule, err := reopened.GetAgentSchedule(ctx, schedule.ID)
-	if err != nil {
-		t.Fatalf("schedule missing after boot: %v", err)
+	if _, err := reopened.GetAgentForActor(ctx, profile.ID); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("historical profile became an actor: %v", err)
 	}
-	if !reflect.DeepEqual(afterBootInstance, beforeBootInstance) {
-		t.Fatalf("boot changed durable instance after source-file retirement:\n before: %#v\n  after: %#v", beforeBootInstance, afterBootInstance)
-	}
-	if !reflect.DeepEqual(afterBootSchedule, beforeBootSchedule) {
-		t.Fatalf("boot changed schedule after source-file retirement:\n before: %#v\n  after: %#v", beforeBootSchedule, afterBootSchedule)
-	}
+
 }
 
 // TestRetiredFileAuthorityRealDatabaseCopySurvivesMigrationAndBoot is an
@@ -293,41 +282,44 @@ func TestWritableDatabaseCopyRejectsLiveDatabaseAliases(t *testing.T) {
 	}
 }
 
-type formerFileManagedSnapshot struct {
-	Instances []store.DurableAgentInstance
-	Schedules []store.AgentSchedule
-}
+// Historical rows are inspected explicitly; ordinary instance/schedule readers
+// deliberately do not expose these rows after the fresh partition cut.
+type formerFileManagedSnapshot struct{ Instances, Schedules [][]any }
 
 func snapshotFormerFileManagedState(ctx context.Context, st *store.Store) (formerFileManagedSnapshot, error) {
-	instances, err := st.ListDurableAgentInstances(ctx, true)
+	read := func(query string) ([][]any, error) {
+		rows, err := st.DB.QueryContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		cols, err := rows.Columns()
+		if err != nil {
+			return nil, err
+		}
+		out := [][]any{}
+		for rows.Next() {
+			cells := make([]any, len(cols))
+			dest := make([]any, len(cols))
+			for i := range cells {
+				dest[i] = &cells[i]
+			}
+			if err := rows.Scan(dest...); err != nil {
+				return nil, err
+			}
+			for i, v := range cells {
+				if b, ok := v.([]byte); ok {
+					cells[i] = append([]byte(nil), b...)
+				}
+			}
+			out = append(out, cells)
+		}
+		return out, rows.Err()
+	}
+	instances, err := read(`SELECT * FROM durable_agent_instances WHERE json_extract(metadata_json,'$.managed_source')='managed_file' ORDER BY id`)
 	if err != nil {
 		return formerFileManagedSnapshot{}, err
 	}
-	out := formerFileManagedSnapshot{}
-	profileIDs := make(map[string]struct{})
-	for _, inst := range instances {
-		var meta map[string]any
-		if json.Unmarshal([]byte(inst.MetadataJSON), &meta) != nil || meta["managed_source"] != "managed_file" {
-			continue
-		}
-		out.Instances = append(out.Instances, inst)
-		profileIDs[inst.ProfileID] = struct{}{}
-	}
-	sort.Slice(out.Instances, func(i, j int) bool { return out.Instances[i].ID < out.Instances[j].ID })
-	seenSchedules := make(map[string]struct{})
-	for profileID := range profileIDs {
-		schedules, err := st.ListAgentSchedules(ctx, profileID)
-		if err != nil {
-			return formerFileManagedSnapshot{}, fmt.Errorf("list schedules for %s: %w", profileID, err)
-		}
-		for _, schedule := range schedules {
-			if _, seen := seenSchedules[schedule.ID]; seen {
-				continue
-			}
-			seenSchedules[schedule.ID] = struct{}{}
-			out.Schedules = append(out.Schedules, schedule)
-		}
-	}
-	sort.Slice(out.Schedules, func(i, j int) bool { return out.Schedules[i].ID < out.Schedules[j].ID })
-	return out, nil
+	schedules, err := read(`SELECT * FROM agent_schedules WHERE agent_id IN (SELECT profile_id FROM durable_agent_instances WHERE json_extract(metadata_json,'$.managed_source')='managed_file') ORDER BY id`)
+	return formerFileManagedSnapshot{Instances: instances, Schedules: schedules}, err
 }

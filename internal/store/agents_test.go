@@ -2,23 +2,44 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+// makeTestAgent simulates an ALREADY host-authorized binding in a private
+// database. It is not an enrollment port, and a host ID is never its actor ID.
 func makeTestAgent(t *testing.T, s *Store, slug string) *AgentProfile {
 	t.Helper()
-	a := &AgentProfile{
-		Name:         "Test Agent " + slug,
-		Slug:         slug,
-		SystemPrompt: "You are a test agent.",
+	slug = strings.ToLower(slug)
+	h := makeTestHost(t, s, slug)
+	actor := "msg://agent/private-fixture/" + slug
+	if _, err := s.DB.ExecContext(t.Context(), `INSERT INTO agent_actor_bindings(actor_uri,host_settings_id,binding_receipt) VALUES(?,?,?)`, actor, h.ID, "private-test-existing-host-authorization"); err != nil {
+		t.Fatal(err)
 	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	p, err := s.GetAgentForActor(t.Context(), actor)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return a
+	return p
+}
+
+func makeTestHost(t *testing.T, s *Store, slug string) AgentHostSettings {
+	t.Helper()
+	pin, err := s.InstallAgentDefinition(t.Context(), definitionTestBytes("def:private-test-host", "1", "You are a test agent."), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.CreateAgentHostSettings(t.Context(), AgentHostSettings{Slug: slug, Title: "Test Agent " + slug, DefinitionRef: pin, Settings: NativeHostSettings{Version: "1", Runtime: "api"}, Source: "explicit-private-test-authoring", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }
 
 // makeTestAgentRawSQL inserts an agent_profiles row using only the columns
@@ -49,326 +70,81 @@ func makeTestAgentRawSQL(t *testing.T, s *Store, slug string) *AgentProfile {
 	return &AgentProfile{ID: id, Name: "Test Agent " + slug, Slug: slug, SystemPrompt: "You are a test agent.", CreatedAt: now, UpdatedAt: now}
 }
 
-func TestCreateAgent(t *testing.T) {
+func TestRetiredAgentWritersPreserveHistoricalState(t *testing.T) {
 	s := newTestStore(t)
-
-	a := &AgentProfile{
-		Name:         "Bot",
-		Slug:         "bot",
-		SystemPrompt: "You are a bot.",
-	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	if a.ID == "" {
-		t.Error("expected ID to be generated")
-	}
-	if a.Modes != "[]" {
-		t.Errorf("expected default modes '[]', got %q", a.Modes)
-	}
-	if a.CreatedAt == "" {
-		t.Error("expected CreatedAt to be set")
-	}
-}
-
-// TestCreateAgent_ParentDispatchAllowlistDefault — CW-20260512-0107
-// (SP-20260512-0008 W2A). Creating an agent without specifying
-// parent_dispatch_allowlist must default to "[]" so the migration 059
-// column-default invariant holds in code.
-func TestCreateAgent_ParentDispatchAllowlistDefault(t *testing.T) {
-	s := newTestStore(t)
-	a := &AgentProfile{Name: "Plain", Slug: "plain-bot", SystemPrompt: "x"}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-	if a.ParentDispatchAllowlist != "[]" {
-		t.Errorf("ParentDispatchAllowlist = %q, want \"[]\" after default CreateAgent", a.ParentDispatchAllowlist)
-	}
-
-	got, err := s.GetAgent(context.Background(), a.ID)
+	ctx := t.Context()
+	old := makeTestAgentRawSQL(t, s, "historical-writer-target")
+	before, err := s.GetHistoricalAgentProfile(ctx, old.ID)
 	if err != nil {
-		t.Fatalf("GetAgent: %v", err)
+		t.Fatal(err)
 	}
-	if got.ParentDispatchAllowlist != "[]" {
-		t.Errorf("round-tripped ParentDispatchAllowlist = %q, want \"[]\"", got.ParentDispatchAllowlist)
+	changed := *before
+	changed.SystemPrompt = "attempted mutation"
+	role, protocol, transport := "claimed-role", "acp", "stdio"
+	attempts := []struct {
+		name  string
+		write func() error
+	}{
+		{"create", func() error { return s.CreateAgent(ctx, &AgentProfile{Name: "New", Slug: "new-retired-writer"}) }},
+		{"update", func() error { return s.UpdateAgent(ctx, &changed) }},
+		{"delete", func() error { return s.DeleteAgent(ctx, old.Slug) }},
+		{"delete-id", func() error { return s.DeleteAgentByID(ctx, old.ID) }},
+		{"composition", func() error { return s.UpdateAgentComposition(ctx, old.ID, &role, nil, nil) }},
+		{"protocol", func() error { return s.UpdateAgentACPConfig(ctx, old.ID, &protocol, &transport) }},
+		{"config", func() error {
+			_, e := s.UpdateAgentConfigRevision(ctx, &changed, AgentAssignments{}, AgentConfigSeeds{Tools: []string{"admin"}}, before.Revision, "")
+			return e
+		}},
+		{"clone", func() error { _, e := s.CloneAgent(ctx, old.ID, "clone-retired", "Clone"); return e }},
 	}
-}
-
-// TestCreateAgent_ParentDispatchAllowlistRoundTrip — non-default value
-// must round-trip through INSERT + scan unchanged.
-func TestCreateAgent_ParentDispatchAllowlistRoundTrip(t *testing.T) {
-	s := newTestStore(t)
-	a := &AgentProfile{
-		Name:                    "Trusted",
-		Slug:                    "trusted-bot",
-		SystemPrompt:            "x",
-		ParentDispatchAllowlist: `["researcher","planner","worker"]`,
+	for _, attempt := range attempts {
+		t.Run(attempt.name, func(t *testing.T) {
+			if writeErr := attempt.write(); !errors.Is(writeErr, ErrImmutableAgentProfile) {
+				t.Fatal(writeErr)
+			}
+		})
 	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	after, err := s.GetHistoricalAgentProfile(ctx, old.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("historical profile mutated: %+v %v", after, err)
 	}
-	got, err := s.GetAgent(context.Background(), a.ID)
-	if err != nil {
-		t.Fatalf("GetAgent: %v", err)
-	}
-	if got.ParentDispatchAllowlist != `["researcher","planner","worker"]` {
-		t.Errorf("ParentDispatchAllowlist round-trip = %q, want canonical 3-role list", got.ParentDispatchAllowlist)
-	}
-}
-
-// TestUpdateAgent_ParentDispatchAllowlistPersists — UPDATE must persist
-// the new column.
-func TestUpdateAgent_ParentDispatchAllowlistPersists(t *testing.T) {
-	s := newTestStore(t)
-	a := makeTestAgent(t, s, "update-target")
-	a.ParentDispatchAllowlist = `["worker"]`
-	if err := s.UpdateAgent(context.Background(), a); err != nil {
-		t.Fatalf("UpdateAgent: %v", err)
-	}
-	got, err := s.GetAgent(context.Background(), a.ID)
-	if err != nil {
-		t.Fatalf("GetAgent: %v", err)
-	}
-	if got.ParentDispatchAllowlist != `["worker"]` {
-		t.Errorf("ParentDispatchAllowlist after UPDATE = %q, want [\"worker\"]", got.ParentDispatchAllowlist)
+	if _, err = s.GetAgentBySlug(ctx, "clone-retired"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("retired clone installed runtime state", err)
 	}
 }
 
-func TestGetAgent(t *testing.T) {
+func TestFreshAgentHostProjectionAndSessionBinding(t *testing.T) {
 	s := newTestStore(t)
-	a := makeTestAgent(t, s, "get-agent")
-
-	got, err := s.GetAgent(context.Background(), a.ID)
-	if err != nil {
-		t.Fatalf("GetAgent: %v", err)
+	ctx := t.Context()
+	host := makeTestHost(t, s, "projection-host")
+	got, err := s.GetAgentBySlug(ctx, host.Slug)
+	if err != nil || got.ID != host.ID || !strings.Contains(got.SystemPrompt, "You are a test agent.") {
+		t.Fatal(got, err)
 	}
-	if got.ID != a.ID {
-		t.Errorf("ID mismatch: got %q, want %q", got.ID, a.ID)
+	all, err := s.ListAgents(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatal(all, err)
 	}
-	if got.Slug != "get-agent" {
-		t.Errorf("Slug mismatch: got %q, want %q", got.Slug, "get-agent")
+	session := makeTestSession(t, s)
+	if err = s.EnsureSessionAgent(ctx, session.ID, host.ID, "default", true); !errors.Is(err, ErrVerifiedActorRequired) {
+		t.Fatal("host UUID gained actor authority", err)
 	}
-	if got.SystemPrompt != "You are a test agent." {
-		t.Errorf("SystemPrompt mismatch: got %q", got.SystemPrompt)
+	actor := makeTestAgent(t, s, "bound-session-actor")
+	if err = s.EnsureSessionAgent(ctx, session.ID, actor.ID, "default", true); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestGetAgentBySlug(t *testing.T) {
-	s := newTestStore(t)
-	a := makeTestAgent(t, s, "slug-test")
-
-	got, err := s.GetAgentBySlug(context.Background(), "slug-test")
-	if err != nil {
-		t.Fatalf("GetAgentBySlug: %v", err)
+	primary, err := s.GetSessionPrimaryAgent(ctx, session.ID)
+	if err != nil || primary.AgentID != actor.ID {
+		t.Fatal(primary, err)
 	}
-	if got.ID != a.ID {
-		t.Errorf("ID mismatch: got %q, want %q", got.ID, a.ID)
+	members, err := s.ListSessionAgents(ctx, session.ID)
+	if err != nil || len(members) != 1 || members[0].AgentID != actor.ID {
+		t.Fatal(members, err)
 	}
-}
-
-func TestListAgents(t *testing.T) {
-	s := newTestStore(t)
-	// CW-20260512-0111: migration 060 seeds 4 internal profile rows
-	// (default, worker, planner, hint-selector). Capture the baseline
-	// after migrations, then assert the two newly-created rows on top.
-	baseline, err := s.ListAgents(context.Background())
-	if err != nil {
-		t.Fatalf("ListAgents baseline: %v", err)
+	if _, err = s.DB.ExecContext(ctx, `UPDATE agent_actor_bindings SET enabled=0 WHERE actor_uri=?`, actor.ID); err != nil {
+		t.Fatal(err)
 	}
-	baselineCount := len(baseline)
-
-	makeTestAgent(t, s, "agent-a")
-	makeTestAgent(t, s, "agent-b")
-
-	agents, err := s.ListAgents(context.Background())
-	if err != nil {
-		t.Fatalf("ListAgents: %v", err)
-	}
-	if got, want := len(agents), baselineCount+2; got != want {
-		t.Fatalf("expected %d agents (baseline %d + 2 test-created), got %d", want, baselineCount, got)
-	}
-}
-
-func TestEnsureSessionAgent(t *testing.T) {
-	s := newTestStore(t)
-	a := makeTestAgent(t, s, "ensure-agent")
-
-	sess := &Session{}
-	if err := s.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	// First call: insert.
-	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a.ID, "default", true); err != nil {
-		t.Fatalf("EnsureSessionAgent (insert): %v", err)
-	}
-
-	// Second call: upsert (should not error).
-	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a.ID, "coder", true); err != nil {
-		t.Fatalf("EnsureSessionAgent (upsert): %v", err)
-	}
-
-	// Verify mode was updated.
-	sa, err := s.GetSessionPrimaryAgent(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatalf("GetSessionPrimaryAgent: %v", err)
-	}
-	if sa.Mode != "coder" {
-		t.Errorf("expected mode 'coder', got %q", sa.Mode)
-	}
-}
-
-func TestGetSessionPrimaryAgent(t *testing.T) {
-	s := newTestStore(t)
-	a := makeTestAgent(t, s, "primary-agent")
-
-	sess := &Session{}
-	if err := s.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a.ID, "default", true); err != nil {
-		t.Fatalf("EnsureSessionAgent: %v", err)
-	}
-
-	sa, err := s.GetSessionPrimaryAgent(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatalf("GetSessionPrimaryAgent: %v", err)
-	}
-	if sa.AgentID != a.ID {
-		t.Errorf("AgentID mismatch: got %q, want %q", sa.AgentID, a.ID)
-	}
-	if !sa.IsPrimary {
-		t.Error("expected IsPrimary to be true")
-	}
-}
-
-func TestListSessionAgents(t *testing.T) {
-	s := newTestStore(t)
-	a1 := makeTestAgent(t, s, "list-sa-1")
-	a2 := makeTestAgent(t, s, "list-sa-2")
-
-	sess := &Session{}
-	if err := s.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a1.ID, "default", true); err != nil {
-		t.Fatalf("EnsureSessionAgent 1: %v", err)
-	}
-	if err := s.EnsureSessionAgent(context.Background(), sess.ID, a2.ID, "default", false); err != nil {
-		t.Fatalf("EnsureSessionAgent 2: %v", err)
-	}
-
-	agents, err := s.ListSessionAgents(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatalf("ListSessionAgents: %v", err)
-	}
-	if len(agents) != 2 {
-		t.Fatalf("expected 2 session agents, got %d", len(agents))
-	}
-}
-
-// TestDeleteAgent_NoPragmaToggle verifies DeleteAgent removes the profile and
-// its junction-table references atomically. Regression guard for the audit
-// finding where PRAGMA foreign_keys=OFF was applied pool-wide around the
-// operation. Asserts:
-//   - agent_profiles row is gone
-//   - agent_known_skills, session_agents rows are gone
-//   - messages rows remain with agent_id NULLed (user data preserved)
-//   - FK enforcement is still ON after the operation (run an FK-violating
-//     INSERT and expect it to fail).
-//
-// TASKS/skills/02: this test used to seed via the old, now-dropped
-// per-agent skill join table (Skill + AssignSkillToAgent). AssignSkillToAgent
-// is rewired onto agent_known_skills in this same task, so the
-// skill-assignment junction this test exercises is now agent_known_skills
-// directly.
-func TestDeleteAgent_NoPragmaToggle(t *testing.T) {
-	s := newTestStore(t)
-	agent := makeTestAgent(t, s, "del-agent")
-
-	// skill assignment (agent_known_skills — see comment above)
-	ctx := context.Background()
-	if err := s.InsertAgentKnownSkill(ctx, AgentKnownSkill{AgentID: agent.ID, SkillName: "s-del"}); err != nil {
-		t.Fatalf("InsertAgentKnownSkill: %v", err)
-	}
-
-	// session + message referencing the agent
-	sess := &Session{}
-	if err := s.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := s.EnsureSessionAgent(context.Background(), sess.ID, agent.ID, "default", true); err != nil {
-		t.Fatalf("EnsureSessionAgent: %v", err)
-	}
-	msg := &Message{SessionID: sess.ID, AgentID: agent.ID, Role: "assistant", Content: "hi"}
-	if err := s.CreateMessage(context.Background(), msg); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-
-	if err := s.DeleteAgent(context.Background(), "del-agent"); err != nil {
-		t.Fatalf("DeleteAgent: %v", err)
-	}
-
-	// agent_profiles row gone
-	var n int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM agent_profiles WHERE id = ?", agent.ID).Scan(&n); err != nil {
-		t.Fatalf("count agent_profiles: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("expected agent_profiles row to be gone, got %d", n)
-	}
-
-	// junctions cleared
-	for _, table := range []string{"agent_known_skills", "session_agents"} {
-		if err := s.DB.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE agent_id = ?", agent.ID).Scan(&n); err != nil {
-			t.Fatalf("count %s: %v", table, err)
-		}
-		if n != 0 {
-			t.Errorf("expected %s rows cleared, got %d", table, n)
-		}
-	}
-
-	// message preserved, agent_id nulled
-	var agentIDVal *string
-	if err := s.DB.QueryRow("SELECT agent_id FROM messages WHERE id = ?", msg.ID).Scan(&agentIDVal); err != nil {
-		t.Fatalf("select message after delete: %v", err)
-	}
-	if agentIDVal != nil {
-		t.Errorf("expected message.agent_id to be NULL, got %q", *agentIDVal)
-	}
-
-	// FK enforcement still ON — insert with bogus session_id should fail.
-	_, err := s.DB.Exec(
-		`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
-		 VALUES ('no-such-session', 'no-such-agent', 'default', '2026-01-01', 0)`,
-	)
-	if err == nil {
-		t.Error("expected FK failure after DeleteAgent; FK enforcement appears disabled")
-	}
-}
-
-func TestCreateAgent_RejectsUserSlug(t *testing.T) {
-	s := newTestStore(t)
-	profile := &AgentProfile{
-		Slug: "user",
-		Name: "sneaky",
-	}
-	if err := s.CreateAgent(context.Background(), profile); err == nil {
-		t.Fatal("expected error for slug=user, got nil")
-	}
-}
-
-func TestCreateAgent_RejectsUserID(t *testing.T) {
-	s := newTestStore(t)
-	profile := &AgentProfile{
-		ID:   "user",
-		Slug: "not-user",
-		Name: "also sneaky",
-	}
-	if err := s.CreateAgent(context.Background(), profile); err == nil {
-		t.Fatal("expected error for id=user, got nil")
+	if err = s.EnsureSessionAgent(ctx, session.ID, actor.ID, "default", true); !errors.Is(err, ErrVerifiedActorRequired) {
+		t.Fatal("disabled binding admitted", err)
 	}
 }

@@ -8,11 +8,11 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
-// makeTestAgentProfile creates a real agent_profiles row -- agent_schedules.
-// agent_id is a real FK (foreign_keys=ON on this store's connection, per
-// migration 071/127) so every test below needs one.
+// makeTestAgentProfile supplies a private preexisting actor binding for
+// schedule controls. It does not enroll an actor through a public API.
 func makeTestAgentProfile(t *testing.T, s *store.Store, slug string) *store.AgentProfile {
 	t.Helper()
 	a := &store.AgentProfile{
@@ -20,8 +20,8 @@ func makeTestAgentProfile(t *testing.T, s *store.Store, slug string) *store.Agen
 		Slug:         slug,
 		SystemPrompt: "You are a test agent.",
 	}
-	if err := s.CreateAgent(context.Background(), a); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if err := storetest.PriorAuthorizedActor(context.Background(), s, a); err != nil {
+		t.Fatalf("PriorAuthorizedActor: %v", err)
 	}
 	return a
 }

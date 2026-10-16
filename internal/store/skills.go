@@ -229,8 +229,8 @@ func (s *Store) ListAgentSkills(ctx context.Context, agentID string) ([]Skill, e
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+skillColumns+`
 		 FROM skills sk
-		 JOIN agent_known_skills aks ON aks.skill_name = sk.slug
-		 WHERE aks.agent_id = ?
+		 JOIN actor_known_skills aks ON aks.skill_name = sk.slug
+		 WHERE aks.agent_id = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=aks.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)
 		 ORDER BY sk.name`, agentID,
 	)
 	if err != nil {
@@ -264,22 +264,7 @@ func (s *Store) ListAgentSkills(ctx context.Context, agentID string) ([]Skill, e
 // agent_profiles(id) the dropped table used to enforce, so an assignment
 // against a nonexistent agent_id is still rejected at the DB level.
 func (s *Store) AssignSkillToAgent(ctx context.Context, agentID, skillID, _ string) error {
-	sk, err := s.GetSkill(ctx, skillID)
-	if err != nil {
-		return fmt.Errorf("assign skill to agent: %w", err)
-	}
-	if sk == nil {
-		return fmt.Errorf("assign skill to agent: skill %q not found", skillID)
-	}
-	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO agent_known_skills (agent_id, skill_name) VALUES (?, ?)
-		 ON CONFLICT(agent_id, skill_name) DO NOTHING`,
-		agentID, sk.Slug,
-	)
-	if err != nil {
-		return fmt.Errorf("assign skill to agent: %w", err)
-	}
-	return nil
+	return ErrVerifiedActorRequired
 }
 
 // RemoveSkillFromAgent removes a skill assignment from an agent.
@@ -322,7 +307,7 @@ func (s *Store) RemoveSkillFromAgent(ctx context.Context, agentID, skillID strin
 		return nil
 	}
 	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_known_skills WHERE agent_id = ? AND skill_name = ?`,
+		`DELETE FROM actor_known_skills WHERE agent_id = ? AND skill_name = ?`,
 		agentID, sk.Slug,
 	)
 	if err != nil {
@@ -341,8 +326,8 @@ func (s *Store) RemoveSkillFromAgent(ctx context.Context, agentID, skillID strin
 func (s *Store) ListDanglingSkillGrants(ctx context.Context, agentID string) ([]string, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT aks.skill_name
-		   FROM agent_known_skills aks
-		  WHERE aks.agent_id = ?
+		   FROM actor_known_skills aks
+		  WHERE aks.agent_id = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=aks.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)
 		    AND aks.skill_name NOT IN (SELECT slug FROM skills)
 		  ORDER BY aks.skill_name`, agentID)
 	if err != nil {

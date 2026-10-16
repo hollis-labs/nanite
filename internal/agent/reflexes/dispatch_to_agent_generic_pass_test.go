@@ -25,7 +25,7 @@ import (
 func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-dispatch-probe",
 		Name:         "Agent Dispatch Probe",
 		Slug:         "agent-dispatch-probe",
@@ -36,7 +36,7 @@ func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	dispatchID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	dispatchID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "advisor",
 		Name:        "dispatch_probe",
 		TriggerKind: store.ReflexTriggerEvent,
@@ -52,7 +52,7 @@ func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 	engine := NewEngine(st, nil)
 	engine.SetPluginHooks(hooks)
 
-	out, err := engine.EvaluateState(ctx, "agent-dispatch-probe", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-dispatch-probe", "advisor", State{
 		SessionID:  "sess-dispatch-probe",
 		AgentID:    "agent-dispatch-probe",
 		AgentClass: "advisor",
@@ -69,7 +69,7 @@ func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 		t.Fatalf("FiredReflexes = %+v, want none", out.FiredReflexes)
 	}
 
-	reflex, err := st.GetAgentReflex(ctx, dispatchID)
+	reflex, err := declaredFixture(st).GetAgentReflex(ctx, dispatchID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass(t *testing.T) {
 func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-mixed-probe",
 		Name:         "Agent Mixed Probe",
 		Slug:         "agent-mixed-probe",
@@ -110,7 +110,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	dispatchID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	dispatchID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "advisor",
 		Name:        "dispatch_probe_mixed",
 		Priority:    20,
@@ -122,7 +122,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 	if err != nil {
 		t.Fatalf("InsertAgentReflex dispatch: %v", err)
 	}
-	reminderID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	reminderID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "advisor",
 		Name:        "reminder_probe_mixed",
 		Priority:    10,
@@ -139,7 +139,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 	engine := NewEngine(st, nil)
 	engine.SetPluginHooks(hooks)
 
-	out, err := engine.EvaluateState(ctx, "agent-mixed-probe", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-mixed-probe", "advisor", State{
 		SessionID:  "sess-mixed-probe",
 		AgentID:    "agent-mixed-probe",
 		AgentClass: "advisor",
@@ -159,7 +159,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 		t.Fatalf("FiredReflexes = %+v, want exactly the reminder reflex", out.FiredReflexes)
 	}
 
-	reminder, err := st.GetAgentReflex(ctx, reminderID)
+	reminder, err := declaredFixture(st).GetAgentReflex(ctx, reminderID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex reminder: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 		t.Errorf("reminder FiredCount = %d, want 1 — the 5 non-dispatch action kinds must keep bumping fired_count", reminder.FiredCount)
 	}
 
-	dispatch, err := st.GetAgentReflex(ctx, dispatchID)
+	dispatch, err := declaredFixture(st).GetAgentReflex(ctx, dispatchID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex dispatch: %v", err)
 	}
@@ -183,8 +183,8 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 
 // TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass
 // is TASKS/teams/05-agent-reflexes-run-scoping.md's own regression
-// requirement: migration 131_agent_reflexes_workflow_run_scoping.sql adds
-// agent_reflexes.workflow_run_id, and this test confirms
+// requirement: migration 131_private_declared_reflexes_workflow_run_scoping.sql adds
+// private_declared_reflexes.workflow_run_id, and this test confirms
 // TestEvaluateState_DispatchToAgent_ExcludedFromGenericPass's exclusion
 // (TASKS/phase-4/09-fix-dispatch-to-agent-generic-pass-leak.md, above)
 // still holds unchanged for a dispatch_to_agent row that carries a
@@ -201,7 +201,7 @@ func TestEvaluateState_DispatchToAgent_DoesNotBlockOtherActionKinds(t *testing.T
 func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-dispatch-run-scoped-probe",
 		Name:         "Agent Dispatch Run Scoped Probe",
 		Slug:         "agent-dispatch-run-scoped-probe",
@@ -212,7 +212,7 @@ func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	// agent_reflexes.workflow_run_id REFERENCES workflow_runs(id) — a real
+	// private_declared_reflexes.workflow_run_id REFERENCES workflow_runs(id) — a real
 	// row is required for the FK-enforced insert below (foreign_keys is
 	// ON by default, sqlitekit.WriterOptions).
 	if _, err := st.DB.ExecContext(ctx,
@@ -222,7 +222,7 @@ func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t
 		t.Fatalf("insert test workflow_runs row: %v", err)
 	}
 
-	dispatchID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	dispatchID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:      "advisor",
 		Name:          "dispatch_run_scoped_generic_pass_probe",
 		TriggerKind:   store.ReflexTriggerEvent,
@@ -239,7 +239,7 @@ func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t
 	engine := NewEngine(st, nil)
 	engine.SetPluginHooks(hooks)
 
-	out, err := engine.EvaluateState(ctx, "agent-dispatch-run-scoped-probe", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-dispatch-run-scoped-probe", "advisor", State{
 		SessionID:  "sess-dispatch-run-scoped-probe",
 		AgentID:    "agent-dispatch-run-scoped-probe",
 		AgentClass: "advisor",
@@ -256,7 +256,7 @@ func TestEvaluateState_DispatchToAgent_RunScopedRowAlsoExcludedFromGenericPass(t
 		t.Fatalf("FiredReflexes = %+v, want none", out.FiredReflexes)
 	}
 
-	reflex, err := st.GetAgentReflex(ctx, dispatchID)
+	reflex, err := declaredFixture(st).GetAgentReflex(ctx, dispatchID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}

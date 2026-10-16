@@ -8,26 +8,23 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/hollis-labs/libs/core/util/sqlite/sqlitekit"
-)
-
-var (
-	testStoreTemplateOnce sync.Once
-	testStoreTemplatePath string
-	testStoreTemplateErr  error
+	"github.com/hollis-labs/nanite/internal/storetest/migratedtemplate"
 )
 
 // newTestStore creates an in-memory Store for testing.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	templatePath := testStoreTemplate(t)
-	if err := copyFile(dbPath, templatePath); err != nil {
-		t.Fatalf("copy test store template: %v", err)
-	}
+	migratedtemplate.Copy(t, dbPath, func(path string) error {
+		s, err := New(context.Background(), path)
+		if err != nil {
+			return err
+		}
+		return s.Close(context.Background())
+	})
 	absPath, err := filepath.Abs(dbPath)
 	if err != nil {
 		t.Fatalf("resolve test db path: %v", err)
@@ -42,31 +39,6 @@ func newTestStore(t *testing.T) *Store {
 	s := &Store{DB: db, dbPath: absPath}
 	t.Cleanup(func() { s.Close(context.Background()) })
 	return s
-}
-
-func testStoreTemplate(t *testing.T) string {
-	t.Helper()
-	testStoreTemplateOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "nanite-store-template-*")
-		if err != nil {
-			testStoreTemplateErr = err
-			return
-		}
-		testStoreTemplatePath = filepath.Join(dir, "template.db")
-		s, err := New(context.Background(), testStoreTemplatePath)
-		if err != nil {
-			testStoreTemplateErr = err
-			return
-		}
-		if err := s.Close(context.Background()); err != nil {
-			testStoreTemplateErr = err
-			return
-		}
-	})
-	if testStoreTemplateErr != nil {
-		t.Fatalf("create test store template: %v", testStoreTemplateErr)
-	}
-	return testStoreTemplatePath
 }
 
 func copyFile(dst, src string) error {

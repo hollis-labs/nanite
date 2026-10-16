@@ -309,6 +309,7 @@ func TestWorkflowStateEventsAreConcurrentOrderedAndAppendOnly(t *testing.T) {
 
 func openWorkflowStateTest(t *testing.T, path string) (*nanitestore.Store, *WorkflowStateStore) {
 	t.Helper()
+	seedMigratedDB(t, path)
 	store, err := nanitestore.New(context.Background(), path)
 	if err != nil {
 		t.Fatalf("store.New(%q): %v", path, err)

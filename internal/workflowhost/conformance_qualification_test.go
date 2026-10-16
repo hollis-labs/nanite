@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -25,6 +26,7 @@ import (
 	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest/migratedtemplate"
 )
 
 // naniteConformanceHost deliberately opens the same migrated SQLite store used
@@ -45,7 +47,12 @@ func (r *naniteSQLiteRunner) Run(ctx context.Context, fixture conformance.Fixtur
 
 func (h naniteConformanceHost) sqliteFactory(run func(context.Context, conformance.Fixture, *WorkflowStateStore) error) conformance.Factory {
 	return func() (conformance.Runner, error) {
-		store, err := nanitestore.New(context.Background(), filepath.Join(h.t.TempDir(), "conformance.db"))
+		// Opening a fresh store runs every migration (~30s under -race), once
+		// per fixture. Each fixture still gets its own private, fully migrated
+		// database: a copy of one migrated once per process.
+		dbPath := filepath.Join(h.t.TempDir(), "conformance.db")
+		seedMigratedDB(h.t, dbPath)
+		store, err := nanitestore.New(context.Background(), dbPath)
 		if err != nil {
 			return nil, err
 		}
@@ -749,4 +756,22 @@ func finishQualificationNode(ctx context.Context, state *WorkflowStateStore, id 
 	}
 	_, err = state.FinishNodeAttempt(ctx, workflowruntime.FinishNodeAttemptRequest{InvocationID: id, AttemptNumber: started.Attempt.ID.Number, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: status, NextNodeStatus: status, Failure: failure, At: at})
 	return err
+}
+
+// seedMigratedDB makes path a fully migrated Nanite database unless it already
+// exists. Opening a fresh store runs every migration (~30s under -race), so a
+// test's first open copies a database migrated once per process; reopening an
+// existing path leaves it untouched.
+func seedMigratedDB(t testing.TB, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	migratedtemplate.Copy(t, path, func(template string) error {
+		seed, err := nanitestore.New(context.Background(), template)
+		if err != nil {
+			return err
+		}
+		return seed.Close(context.Background())
+	})
 }

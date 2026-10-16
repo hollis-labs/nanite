@@ -177,7 +177,9 @@ jobs:
           while IFS= read -r package; do
             packages+=("$package")
           done < "$RUNNER_TEMP/tracked-go-packages.txt"
-          go test -race -count=1 "${packages[@]}"
+          # PROVISIONAL -timeout while the macOS duration is measured (CW-20261016-0127).
+          go test -race -count=1 -timeout=60m \
+            -gcflags='modernc.org/...=-d=checkptr=0' "${packages[@]}"
 
       - name: Report bare goroutine usage (safego adoption sweep)
         shell: bash

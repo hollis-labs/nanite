@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
 
@@ -21,7 +22,7 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	ctx := context.Background()
 	st := newSeededStore(t)
 	agent := &store.AgentProfile{Slug: "reflex-http-agent", Name: "HTTP seed target", SystemPrompt: "test"}
-	if checkErr := st.CreateAgent(ctx, agent); checkErr != nil {
+	if checkErr := storetest.HistoricalProfile(ctx, st, agent); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	root := t.TempDir()
@@ -42,20 +43,21 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	host := naniteplugin.NewHost(mux, naniteplugin.NewLogger("reflex-http-test"))
 	host.SetReflexSeedRegistrar(service.NewPluginReflexSeeds(st))
 	pms := &pluginManagerState{pluginHost: host}
+	const query = `SELECT * FROM agent_reflexes ORDER BY id`
+	a := &testAPI{store: st}
+	before := retiredAPISnapshot(t, a, query)
+	if pms.runPluginLoadIntoHost(path, dir) {
+		t.Fatal("legacy mutable seed activated")
+	}
+	retiredAPIHistoryUnchanged(t, a, query, before)
+	// The HTTP transport remains supported when the plugin makes no retired
+	// mutable policy registration. Its identity does not confer actor grants.
+	block.Registers.ReflexSeeds = nil
+	path = writeAPIPluginBundle(t, dir, "nanite.feature", "Feature", block)
 	if !pms.runPluginLoadIntoHost(path, dir) {
-		t.Fatal("load failed")
+		t.Fatal("seed-free HTTP load failed")
 	}
 	t.Cleanup(func() { _ = host.UnloadPlugin("nanite.feature") })
-	candidates, err := st.ListAgentReflexesForAgent(ctx, agent.ID, "")
-	id := ""
-	for _, row := range candidates {
-		if row.CreatedBy == "plugin:nanite.feature" {
-			id = row.ID
-		}
-	}
-	if err != nil || id == "" {
-		t.Fatalf("accepted seed inactive: %+v %v", candidates, err)
-	}
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 		target := "/api/plugins/nanite.feature/items/one%2Ftwo?a=1&a=2&empty=&bare"
 		if method == "POST" {
@@ -96,15 +98,6 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	if !pms.unloadPluginFromHost(path) {
 		t.Fatal("unload failed")
 	}
-	candidates, err = st.ListAgentReflexesForAgent(ctx, agent.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range candidates {
-		if row.ID == id {
-			t.Fatal("unloaded seed remained eligible")
-		}
-	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/plugins/nanite.feature/items", nil))
 	if rec.Code != 404 {
@@ -112,19 +105,6 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	}
 	if !pms.runPluginLoadIntoHost(path, dir) {
 		t.Fatal("reload failed")
-	}
-	candidates, err = st.ListAgentReflexesForAgent(ctx, agent.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, row := range candidates {
-		if row.ID == id {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("reload changed seed identity")
 	}
 	// Stop the SDK child directly: the loader-owned OnUnload must revoke
 	// source eligibility even without Host.UnloadPlugin's redundant cleanup.
@@ -135,15 +115,6 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	}
 	if checkErr := child.Unload(); checkErr != nil {
 		t.Fatal(checkErr)
-	}
-	candidates, err = st.ListAgentReflexesForAgent(ctx, agent.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range candidates {
-		if row.ID == id {
-			t.Fatal("child stop retained seed eligibility")
-		}
 	}
 	// A later registration conflict leaves durable defaults inactive.
 	if !pms.unloadPluginFromHost(path) {
@@ -158,13 +129,5 @@ func TestPluginReflexHTTPApprovedSDKLifecycle(t *testing.T) {
 	if pms.runPluginLoadIntoHost(path, dir) {
 		t.Fatal("conflicting registration succeeded")
 	}
-	candidates, err = st.ListAgentReflexesForAgent(ctx, agent.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range candidates {
-		if row.ID == id {
-			t.Fatal("failed registration activated seed")
-		}
-	}
+	retiredAPIHistoryUnchanged(t, a, query, before)
 }

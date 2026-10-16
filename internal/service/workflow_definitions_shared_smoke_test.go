@@ -55,7 +55,7 @@ func TestWorkflowDefinitionsSharedSmokeWorkerReviewerGate(t *testing.T) {
 		&fakeProviderResolver{providers: map[string]llmcontracts.Provider{"anthropic": provider}},
 		nil,
 	)
-	launcher := NewWorkflowLauncher(registry, host, executor, NewDurableAgentService(productStore))
+	launcher := NewWorkflowLauncher(registry, host, executor, newPriorWorkflowLifecycleFixture(productStore))
 
 	result, err := launcher.Launch(context.Background(), WorkflowLaunchRequest{
 		WorkflowName: definition.Name, AgentProfileID: profile.ID,

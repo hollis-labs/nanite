@@ -8,6 +8,7 @@ create an actor or grant tools and skills.
 
 ```sh
 nanite agent setup <flat.md | archetype-id> --provider anthropic --model <model> --tools all \
+  [--runtime api|cli] \
   [--slug S] [--title T] [--resources resources.json] [--reason "why"] [-db path]
 ```
 
@@ -17,11 +18,21 @@ all in one transaction. It prints the definition ref, host settings id and
 revision, the authority id, the granted tools, and a ready
 `POST /api/agent/v1/sessions` body.
 
-Everything that can be checked is checked first and refuses without writing:
-the definition parses, the runtime is supported (`api` today; `cli` is refused
-until it lands), the provider is a native API provider with a usable key (the
-refusal names the remedy, e.g. `provider set-key`; keys are never printed), and
-every named tool exists. `--tools all` grants every tool the catalog lists as
+Setup checks the definition, execution policy and runtime before creating the
+agent. API agents require a provider and model and a resolvable API key; a key
+refusal names the remedy without printing the credential. CLI agents use their
+provider CLI's login and accept an optional model:
+
+```sh
+nanite agent setup agent.md --runtime cli --provider claude --model haiku --tools all
+nanite agent setup agent.md --runtime cli --provider codex --slug codex-agent --tools all
+```
+
+CLI setup uses session creation's admission checks: supported provider runtime,
+default permission profile, absolute directories and support for passing a model.
+The CLI executable and its login must be available to the user running Nanite;
+setup does not authenticate with the provider or execute a trial turn. Setup also
+checks that every named tool exists. `--tools all` grants every tool the catalog lists as
 available; it is a grant recorded like any other, not a bypass. The catalog is
 filled when the server starts, so start it once on a new database before
 asking for more than the always-included tools. Dotted names (`dev.read`) are

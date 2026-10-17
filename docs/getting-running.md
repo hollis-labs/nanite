@@ -4,8 +4,7 @@ A runbook for a fresh database with API auth ON: build, serve, define an agent,
 run one API agent and one CLI agent, each through a turn. `scripts/smoke-agents.sh`
 does the same sequence unattended.
 
-Host settings and sessions are created with the definition and host-settings
-steps below.
+`nanite agent setup` creates each agent; its output supplies the session request.
 
 ## 0. Prerequisites
 
@@ -46,7 +45,7 @@ export NANITE_PROVIDER_KEY_ENV=1 ANTHROPIC_API_KEY=...
 
 A key already in your keychain wins over the environment.
 
-## 4. Install a definition
+## 4. Author a definition
 
 ```sh
 cat > agent.md <<'DEF'
@@ -68,7 +67,6 @@ continuity:
 ---
 Answer arithmetic questions with the number only.
 DEF
-./nanite agent install agent.md        # prints the pin: id, revision, digest (and name, identity_digest)
 ```
 
 ## 5. Serve with auth ON
@@ -84,45 +82,38 @@ curl -s -o /dev/null -w '%{http_code}\n' localhost:$NANITE_PORT/api/agent-host-s
 
 Every call below sends `Authorization: Bearer $TOKEN` (the `api` function in step 6).
 
-## 6. Host settings, session, turn
+## 6. Set up an agent, create a session, send a turn
 
-Host settings pick the runtime, provider and model for a pinned definition.
-The pin from step 4 is `{id, revision, digest}` on the host-settings route and
-`{definition_id, revision, semantic_digest}` on the session route.
+After the server starts and records its tool catalog, setup installs the
+pinned definition, creates host settings and records tool grants. Use the same
+database as the server. Give each runtime a distinct slug:
 
 ```sh
 api() { curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$@"; }
-PIN=$(./nanite agent install agent.md | jq -c '{id, revision, digest}')
-# API agent
-HOST=$(api -X POST localhost:$NANITE_PORT/api/agent-host-settings -d "{
-  \"title\":\"api agent\",\"slug\":\"api-agent\",\"definition_ref\":$PIN,\"enabled\":true,
-  \"settings\":{\"version\":\"1\",\"runtime\":\"api\",\"provider\":\"anthropic\",\"model\":\"<model id>\",\"native_loop\":{}}}")
-SREF=$(echo "$PIN" | jq -c '{definition_id:.id,revision,semantic_digest:.digest}')
-SID=$(api -X POST localhost:$NANITE_PORT/api/agent/v1/sessions -d "{
-  \"definition_ref\":$SREF,
-  \"host_settings\":{\"id\":\"$(echo "$HOST"|jq -r .id)\",\"revision\":\"$(echo "$HOST"|jq -r .revision)\"}}" | jq -r .session_view_id)
+SETUP=$(./nanite agent setup agent.md --runtime api --provider anthropic \
+  --model '<model id>' --slug api-agent --tools all --reason 'local validation')
+SID=$(api -X POST localhost:$NANITE_PORT/api/agent/v1/sessions \
+  -d "$(echo "$SETUP" | jq -c '.session_request.body')" | jq -r .session_view_id)
 api -X POST localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/turns \
   -d '{"content":[{"kind":"text","text":"What is 17 times 3? Reply with the number only."}],"delivery":"at_idle"}'
 api localhost:$NANITE_PORT/api/agent/v1/sessions/$SID/messages | jq '.items[]|{role,content}'
 ```
 
-The reply is the assistant message (`51`).
-
-For a CLI agent only the settings differ. A CLI host needs `directories`; the
-first is the agent's work root and the rest are added to its reach. Provider and
-model are both required:
+Poll messages until the assistant replies `51`. For Claude or Codex, use the
+same session and turn commands with one of these setup outputs:
 
 ```sh
-mkdir -p /tmp/cli-work
-HOST=$(api -X POST localhost:$NANITE_PORT/api/agent-host-settings -d "{
-  \"title\":\"cli agent\",\"slug\":\"cli-agent\",\"definition_ref\":$PIN,\"enabled\":true,
-  \"settings\":{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"claude\",\"model\":\"haiku\",
-    \"directories\":[\"/tmp/cli-work\"],\"native_loop\":{}}}")
+SETUP=$(./nanite agent setup agent.md --runtime cli --provider claude \
+  --model haiku --slug claude-agent --tools all --reason 'local validation')
+SETUP=$(./nanite agent setup agent.md --runtime cli --provider codex \
+  --slug codex-agent --tools all --reason 'local validation')
 ```
 
-Create the session and send the turn exactly as above. `codex`, `opencode` and
-`agy` take their own model ids. Nanite's MCP tools reach claude and codex; agy
-gets them only when the permission mode is yolo, and opencode not yet.
+CLI agents use their CLI login, without an API-key preflight. Omitting `--model`
+lets the CLI select its default. Setup creates a private work directory beside
+the database; use `--directories /absolute/work,/absolute/shared` to choose the
+work root and additional directories. Tools are explicitly granted by `--tools`;
+`all` means the available catalog, not a policy bypass.
 
 ## 7. Stop and resume
 
@@ -130,7 +121,7 @@ Cancel a running turn with `POST /api/agent/v1/sessions/{id}/turns/{turnId}/canc
 the session answers the next turn. A session keeps its history: after the server
 restarts, send another turn to the same `session_view_id`. A CLI session resumes
 from the provider's session, or from Nanite's recovery pack when the provider
-cannot resume. The smoke script exercises both for the CLI agent.
+cannot resume. The smoke script exercises restart recovery and cancellation for both runtimes.
 
 ## Known refusals
 

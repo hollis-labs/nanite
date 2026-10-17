@@ -4,7 +4,7 @@
 #
 #   scripts/smoke-agents.sh                 # API half (needs a provider key), CLI half skipped
 #   SMOKE_API_PROVIDER=anthropic SMOKE_API_MODEL=<model> ANTHROPIC_API_KEY=... scripts/smoke-agents.sh
-#   SMOKE_CLI=1 scripts/smoke-agents.sh     # also the CLI half (needs B2 and a logged-in claude)
+#   SMOKE_CLI=1 scripts/smoke-agents.sh     # also the CLI half (needs a logged-in claude)
 #
 # Key resolution is the real one (provider key_ref, then the keychain, then the
 # environment when NANITE_PROVIDER_KEY_ENV=1 as set below), so a key already in
@@ -35,8 +35,12 @@ trap cleanup EXIT
 export NANITE_DB_PATH=$db NANITE_API_URL=$base NANITE_PORT=$port
 # The environment is only read for provider keys when this is set.
 export NANITE_PROVIDER_KEY_ENV=1
+# Isolate Nanite's other stores and artifacts as well as its main database.
+# Keep HOME so provider CLIs can use their existing login.
+export XDG_DATA_HOME="$work/data" XDG_STATE_HOME="$work/state"
+export XDG_CACHE_HOME="$work/cache" XDG_CONFIG_HOME="$work/config"
 
-# 1. definition (offline install straight into the scratch DB)
+# 1. authored definition (installed by agent setup below)
 cat >"$work/def.md" <<'DEF'
 ---
 schema_version: "2"
@@ -56,9 +60,6 @@ continuity:
 ---
 Follow the user's instruction exactly and briefly.
 DEF
-# install prints more than the pin (name, identity_digest); the routes take {id, revision, digest}.
-pin=$("$bin" agent install -db "$db" "$work/def.md" | jq -c '{id, revision, digest}') && ok "definition installed" || { bad "definition install"; exit 1; }
-
 # 2. serve with auth ON
 start_server() {
   "$bin" serve -db "$db" -port "$port" -dev >>"$work/serve.log" 2>&1 &
@@ -90,16 +91,16 @@ wait_reply() {
   bad "$label: no matching reply within 180s; last assistant message: $(printf '%s' "$h" | jq -r '[.items[] | select(.role=="assistant") | .content] | last // "none" | .[0:240]' 2>/dev/null)"; return 1
 }
 
-# resume_check SESSION: restart the server, then ask something only the earlier
-# turn can answer. The CLI's own session (provider_session_id) must carry it.
+# resume_check SESSION NAME: restart, then ask something only the earlier
+# turn can answer. This checks that the runtime restores conversation context.
 resume_check() {
-  local sid=$1
+  local sid=$1 name=$2
   kill "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
   start_server
   set_yolo
   curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$sid/turns" \
     -d '{"content":[{"kind":"text","text":"Add 1 to your previous answer. Reply with the number only."}],"delivery":"at_idle"}' >/dev/null
-  wait_reply "$sid" 52 "cli: resumed after a server restart with context"
+  wait_reply "$sid" 52 "$name: resumed after a server restart with context"
 }
 
 # send_turn SESSION TEXT: post a turn, print the response body
@@ -108,17 +109,27 @@ send_turn() {
     -d "$(jq -nc --arg t "$2" '{content:[{kind:"text",text:$t}],delivery:"at_idle"}')"
 }
 
-# stop_check SESSION: cancel a running turn, then expect the session to answer the next one.
+# stop_check SESSION NAME: cancel an active turn, then require another reply.
 stop_check() {
-  local sid=$1 turn tid code
+  local sid=$1 name=$2 turn status_path cancel_path state code
   turn=$(send_turn "$sid" "Count from 1 to 400 as a comma separated list, nothing else.")
-  tid=$(printf '%s' "$turn" | jq -r '.stream_url' | sed -n 's#.*/turns/\([^/]*\)/.*#\1#p')
-  sleep 4
-  code=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" -X POST "$base/api/agent/v1/sessions/$sid/turns/$tid/cancel")
-  case "$code" in 2??) ok "cli: running turn cancelled ($code)";; *) bad "cli: cancel returned $code";; esac
+  status_path=$(printf '%s' "$turn" | jq -er '.links.status')
+  cancel_path=$(printf '%s' "$turn" | jq -er '.links.cancel')
+  state=
+  for _ in $(seq 1 50); do
+    state=$(curl -fs "${auth[@]}" "$base$status_path" | jq -r '.state')
+    [ "$state" = working ] && break
+    sleep 0.1
+  done
+  if [ "$state" != working ]; then
+    bad "$name: no active turn to cancel (state=$state)"
+    return 1
+  fi
+  code=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" -X POST "$base$cancel_path")
+  case "$code" in 2??) ok "$name: active turn cancel accepted ($code)";; *) bad "$name: cancel returned $code"; return 1;; esac
   sleep 3
   send_turn "$sid" "Reply with the single word BANANA." >/dev/null
-  wait_reply "$sid" BANANA "cli: session answers after a cancel"
+  wait_reply "$sid" BANANA "$name: session answers after a cancel"
 }
 
 # mcp_check SESSION: the Nanite MCP server must be visible to the CLI.
@@ -128,34 +139,32 @@ mcp_check() {
   wait_reply "$sid" TOOL_OK "cli: Nanite MCP tool callable" || true
 }
 
-# one agent: host settings -> session -> turn -> reply
-run_agent() { # name settings-json
-  local name=$1 settings=$2 host hid hrev sid sref turn
-  host=$(curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent-host-settings" \
-    -d "{\"title\":\"smoke $name\",\"slug\":\"smoke-$name\",\"definition_ref\":$pin,\"enabled\":true,\"settings\":$settings}")
-  hid=$(printf '%s' "$host" | jq -r '.id // empty' 2>/dev/null || true)
-  hrev=$(printf '%s' "$host" | jq -r '.revision // empty' 2>/dev/null || true)
-  # The session route names the same pin definition_id / semantic_digest.
-  sref=$(printf '%s' "$pin" | jq -c '{definition_id: .id, revision, semantic_digest: .digest}')
-  [ -n "$hid" ] && ok "$name: host settings created" || { bad "$name: host settings: $(printf '%s' "$host" | head -c 300)"; return; }
-  sid=$(curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions" \
-    -d "{\"definition_ref\":$sref,\"host_settings\":{\"id\":\"$hid\",\"revision\":\"$hrev\"}}")
-  case "$sid" in *session_view_id*) ok "$name: session created";; *) bad "$name: session: $(printf '%s' "$sid" | head -c 300)"; return;; esac
+# one agent: setup -> its emitted session request -> turn -> reply
+run_agent() { # runtime provider model
+  local name=$1 provider=$2 model=$3 setup request sid turn
+  if ! setup=$("$bin" agent setup -db "$db" "$work/def.md" \
+    --runtime "$name" --provider "$provider" --model "$model" \
+    --slug "smoke-$name" --directories "$work/$name-work" \
+    --tools all --reason "scratch agent smoke test"); then
+    bad "$name: agent setup failed"
+    return 1
+  fi
+  ok "$name: agent setup completed"
+  request=$(printf '%s' "$setup" | jq -c '.session_request.body')
+  sid=$(curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions" -d "$request")
+  case "$sid" in *session_view_id*) ok "$name: session created";; *) bad "$name: session: $(printf '%s' "$sid" | head -c 300)"; return 1;; esac
   sid=$(printf '%s' "$sid" | jq -r '.session_view_id')
-  turn=$(curl -s "${auth[@]}" -H 'Content-Type: application/json' -X POST "$base/api/agent/v1/sessions/$sid/turns" \
-    -d '{"content":[{"kind":"text","text":"What is 17 times 3? Reply with the number only."}],"delivery":"at_idle"}')
+  turn=$(send_turn "$sid" "What is 17 times 3? Reply with the number only.")
   say "      turn accepted: $(printf '%s' "$turn" | head -c 120)"
   wait_reply "$sid" 51 "$name: turn completed with a reply" || return
-  if [ "$name" = cli ]; then
-    resume_check "$sid"
-    stop_check "$sid"
-    if [ -n "${SMOKE_MCP:-}" ]; then mcp_check "$sid"; fi
-  fi
+  resume_check "$sid" "$name"
+  stop_check "$sid" "$name"
+  if [ "$name" = cli ] && [ -n "${SMOKE_MCP:-}" ]; then mcp_check "$sid"; fi
 }
 
 # 3. API agent
 if [ -n "$api_model" ] && "$bin" provider status "$api_provider" >/dev/null 2>&1; then
-  run_agent api "{\"version\":\"1\",\"runtime\":\"api\",\"provider\":\"$api_provider\",\"model\":\"$api_model\",\"native_loop\":{}}"
+  run_agent api "$api_provider" "$api_model"
 else
   skp "api agent: set SMOKE_API_MODEL and provide a key for '$api_provider' (e.g. ANTHROPIC_API_KEY)"
 fi
@@ -165,7 +174,7 @@ if [ -n "${SMOKE_CLI:-}" ]; then
   # A CLI agent's work root is the first host directory.
   mkdir -p "$work/cli-work"
   cli_model=${SMOKE_CLI_MODEL-haiku}
-  run_agent cli "{\"version\":\"1\",\"runtime\":\"cli\",\"provider\":\"${SMOKE_CLI_PROVIDER:-claude}\",\"model\":\"$cli_model\",\"directories\":[\"$work/cli-work\"],\"native_loop\":{}}"
+  run_agent cli "${SMOKE_CLI_PROVIDER:-claude}" "$cli_model"
 else
   skp "cli agent: set SMOKE_CLI=1 (and the CLI must be logged in)"
 fi

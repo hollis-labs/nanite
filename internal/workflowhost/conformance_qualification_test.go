@@ -725,6 +725,17 @@ func createQualificationNode(ctx context.Context, state *WorkflowStateStore, id 
 	return transition.Snapshot, err
 }
 
+// createBoundQualificationNode creates a pending node with its empty input set
+// already bound. Control-flow fixtures have no plan inputs, and the coordinator
+// refuses to make a node ready until its inputs are durably bound.
+func createBoundQualificationNode(ctx context.Context, state *WorkflowStateStore, id workflowruntime.NodeInvocationID, at time.Time) (workflowruntime.NodeInvocationSnapshot, error) {
+	inputs, err := state.SaveValues(ctx, workflowruntime.SaveValuesRequest{Owner: workflowruntime.ValueOwner{Kind: "node-inputs", RunID: id.RunID, Invocation: &id}, Values: values.ValueSet{}})
+	if err != nil {
+		return workflowruntime.NodeInvocationSnapshot{}, err
+	}
+	return state.CreateNodeInvocation(ctx, workflowruntime.CreateNodeInvocationRequest{Snapshot: workflowruntime.NodeInvocationSnapshot{ID: id, Inputs: &inputs, Status: workflowruntime.NodePending, CreatedAt: at, UpdatedAt: at}})
+}
+
 func finishQualificationNode(ctx context.Context, state *WorkflowStateStore, id workflowruntime.NodeInvocationID, status workflowruntime.NodeStatus, failureCode string, at time.Time) error {
 	node, err := state.LoadNodeInvocation(ctx, id)
 	if err != nil {

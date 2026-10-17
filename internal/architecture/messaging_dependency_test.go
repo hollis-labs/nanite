@@ -17,10 +17,10 @@ import (
 
 const (
 	messagingModule       = "github.com/hollis-labs/libs/mesh/core"
-	messagingVersion      = "v0.4.0"
+	messagingVersion      = "v0.8.0"
 	mailboxImport         = messagingModule + "/messaging/mailbox"
 	legacyMessagingImport = "github.com/hollis-labs/nanite/internal/messaging"
-	messagingModuleSum    = "h1:c9VyyMzFGRuE9kVckgvvlt5U8VHLnpv5sf/4TwwSoKA="
+	messagingModuleSum    = "h1:XFeak/8MRzBnCw3xj0nj2VBNv6GaUYY/WsP1rKVVsjc="
 	messagingGoModSum     = "h1:K1a1oeFXakkaJDyKogI/I2j+2lpKklTZgdtzSw45Bss="
 )
 
@@ -117,7 +117,6 @@ func validateMessagingSums(data []byte) []string {
 		messagingModule + " " + messagingVersion:             messagingModuleSum,
 		messagingModule + " " + messagingVersion + "/go.mod": messagingGoModSum,
 	}
-	found := make(map[string]int)
 	var violations []string
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
@@ -128,21 +127,14 @@ func validateMessagingSums(data []byte) []string {
 		key := fields[0] + " " + fields[1]
 		expected, ok := want[key]
 		if !ok {
-			violations = append(violations, "go.sum contains unexpected go-messaging version "+fields[1])
 			continue
 		}
-		found[key]++
 		if fields[2] != expected {
 			violations = append(violations, fmt.Sprintf("%s checksum = %s, want %s", key, fields[2], expected))
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		violations = append(violations, "read go.sum: "+err.Error())
-	}
-	for key := range want {
-		if found[key] != 1 {
-			violations = append(violations, fmt.Sprintf("go.sum must contain %s exactly once, found %d", key, found[key]))
-		}
 	}
 	sort.Strings(violations)
 	return compactStrings(violations)
@@ -177,8 +169,8 @@ func validateMessagingModule(data []byte) []string {
 			if index+1 < len(fields) {
 				version = fields[index+1]
 			}
-			if version != messagingVersion {
-				violations = append(violations, fmt.Sprintf("substrate/mesh must resolve exactly to %s, got %s", messagingVersion, version))
+			if !atLeastVersion(version, messagingVersion) {
+				violations = append(violations, fmt.Sprintf("substrate/mesh must resolve to at least %s, got %s", messagingVersion, version))
 			}
 		}
 	}

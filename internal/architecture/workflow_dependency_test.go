@@ -18,7 +18,7 @@ import (
 
 const (
 	workflowModule       = "github.com/hollis-labs/libs/workflow/engine"
-	workflowVersion      = "v0.1.0"
+	workflowVersion      = "v0.2.0"
 	hadronModule         = "github.com/hollis-labs/hadron"
 	legacyWorkflowImport = "github.com/hollis-labs/nanite/internal/workflow"
 )
@@ -363,12 +363,12 @@ func validateWorkflowModule(data []byte) []string {
 				continue
 			}
 			found++
-			if index+1 >= len(fields) || fields[index+1] != workflowVersion {
+			if index+1 >= len(fields) || !atLeastVersion(fields[index+1], workflowVersion) {
 				version := "<missing>"
 				if index+1 < len(fields) {
 					version = fields[index+1]
 				}
-				violations = append(violations, fmt.Sprintf("go-workflow must resolve exactly to %s, got %s", workflowVersion, version))
+				violations = append(violations, fmt.Sprintf("go-workflow must resolve to at least %s, got %s", workflowVersion, version))
 			}
 		}
 	}

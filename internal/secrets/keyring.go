@@ -3,19 +3,25 @@
 package secrets
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
+	shared "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/brand"
-	"github.com/zalando/go-keyring"
+	"github.com/hollis-labs/nanite/internal/redaction"
 )
 
 var serviceName = brand.ID
 
 // Set stores a secret in the OS keychain under the given key.
 func Set(key, value string) error {
-	if err := keyring.Set(serviceName, key, value); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	redaction.Sink{}.Add(value)
+	if err := shared.NewKeyringStore().Set(ctx, serviceName, key, shared.FromString(value)); err != nil {
 		return fmt.Errorf("keyring set %q: %w", key, err)
 	}
 	return nil
@@ -23,11 +29,14 @@ func Set(key, value string) error {
 
 // Get retrieves a secret from the OS keychain. Returns empty string if not found.
 func Get(key string) string {
-	val, err := keyring.Get(serviceName, key)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	val, err := shared.NewKeyringStore().Get(ctx, serviceName, key)
 	if err == nil {
-		return val
+		redaction.Sink{}.Add(val.Reveal())
+		return val.Reveal()
 	}
-	if errors.Is(err, keyring.ErrNotFound) {
+	if errors.Is(err, shared.ErrNotFound) {
 		slog.Debug("secrets: key not found", "key", key)
 		return ""
 	}
@@ -45,7 +54,9 @@ func Delete(key string) {
 // DeleteChecked reports backend failures to callers that must not claim a
 // credential was removed when the keychain is unavailable. Missing is success.
 func DeleteChecked(key string) error {
-	if err := keyring.Delete(serviceName, key); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := shared.NewKeyringStore().Delete(ctx, serviceName, key); err != nil && !errors.Is(err, shared.ErrNotFound) {
 		return fmt.Errorf("keyring delete %q: %w", key, err)
 	}
 	return nil

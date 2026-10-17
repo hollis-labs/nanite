@@ -13,6 +13,9 @@ import (
 	"os"
 
 	feotel "github.com/hollis-labs/libs/core/util/otel"
+	spanredaction "github.com/hollis-labs/libs/core/util/otel/redaction"
+	"github.com/hollis-labs/libs/security/redact"
+	"github.com/hollis-labs/nanite/internal/redaction"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace/noop"
 )
@@ -60,5 +63,14 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 	}
 
 	slog.Info("otel: enabled", "service", cfg.ServiceName)
-	return feotel.Init(ctx, feotel.WithServiceName(cfg.ServiceName))
+	return feotel.Init(ctx, feotel.WithServiceName(cfg.ServiceName), feotel.WithSpanRedaction(spanRedactionOptions()...))
+}
+
+func spanRedactionOptions() []spanredaction.ExporterOption {
+	return []spanredaction.ExporterOption{
+		spanredaction.WithKeyFilter(func(key string) bool {
+			return spanredaction.ShouldRedact(key) || redact.SensitiveName(key)
+		}),
+		spanredaction.WithValueRedactor(redaction.TelemetryText),
+	}
 }

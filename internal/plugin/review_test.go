@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/hollis-labs/nanite/internal/plugin/plugintest"
 	"github.com/hollis-labs/nanite/internal/secrets"
-	"github.com/zalando/go-keyring"
 )
 
 func reviewBundle(t *testing.T) (string, string) {
@@ -141,7 +141,7 @@ func TestBundleDigestCancellation(t *testing.T) {
 }
 
 func TestReviewedLaunchResolvesOnlyDeclaredPluginSecretsAndCapabilities(t *testing.T) {
-	keyring.MockInit()
+	secretstest.Install(t)
 	root, directory := reviewBundle(t)
 	t.Setenv("EXAMPLE_TOKEN", "")
 	t.Setenv("UNDECLARED_KEY", "host-private")

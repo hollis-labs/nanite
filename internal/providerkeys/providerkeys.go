@@ -29,6 +29,7 @@ import (
 	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/libs/security/secrets/redact"
 	"github.com/hollis-labs/nanite/internal/brand"
+	"github.com/hollis-labs/nanite/internal/redaction"
 	legacykeys "github.com/hollis-labs/nanite/internal/secrets"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -133,6 +134,7 @@ func New(o Options) *Manager {
 		opts := []secrets.Option{
 			secrets.WithLegacy(brand.ID, legacyAccount),
 			secrets.WithRedactor(o.Redact),
+			secrets.WithRedactor(redaction.Sink{}),
 			secrets.WithEnvLookup(o.LookupEnv),
 			secrets.WithAudit(func(ev secrets.Event) {
 				// Names only: the event never carries a value.
@@ -303,6 +305,7 @@ func (m *Manager) Resolve(ctx context.Context, providerID string) (secrets.Secre
 	for _, ref := range refs {
 		got, rerr := m.res.Resolve(ctx, ref)
 		if rerr == nil {
+			redaction.Sink{}.Add(got.Secret.Reveal())
 			return got.Secret, Report{Ref: got.Ref, Source: got.Source}, nil
 		}
 		var se *secrets.Error

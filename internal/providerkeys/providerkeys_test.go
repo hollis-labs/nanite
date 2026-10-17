@@ -10,6 +10,7 @@ import (
 	secrets "github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
+	"github.com/hollis-labs/nanite/internal/redaction"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -257,6 +258,18 @@ func TestResolvedKeyIsRegisteredWithTheRedactor(t *testing.T) {
 	}
 	if got := providerkeys.Redactor().Redact("auth failed for " + key); strings.Contains(got, key) {
 		t.Fatalf("not redacted: %s", got)
+	}
+}
+
+func TestResolvedOpaqueKeyIsScrubbedFromTelemetry(t *testing.T) {
+	const opaque = "unlabeled-fixture-value-892731"
+	m, fs, _, _ := harness(t, "", nil, false)
+	fs.Put(secrets.DefaultService, "nanite/provider/"+pid, opaque)
+	if _, _, err := m.Resolve(context.Background(), pid); err != nil {
+		t.Fatal(err)
+	}
+	if got := redaction.TelemetryText("diagnostic " + opaque); got != "diagnostic [REDACTED]" {
+		t.Fatal("resolved credential was not registered with telemetry sanitizer")
 	}
 }
 

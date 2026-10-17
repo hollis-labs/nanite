@@ -31,7 +31,6 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hollis-labs/libs/core/panics v0.1.0 // indirect
-	github.com/hollis-labs/libs/security/redact v0.1.0 // indirect
 	github.com/hollis-labs/plugin-sdk v0.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
@@ -97,18 +96,19 @@ require (
 
 require (
 	github.com/hollis-labs/libs/agent/core v0.4.0
-	github.com/hollis-labs/libs/core/util v0.5.0
+	github.com/hollis-labs/libs/core/util v0.6.0
 	github.com/hollis-labs/libs/harness/core v0.13.0
 	github.com/hollis-labs/libs/llm/core v0.2.0
-	github.com/hollis-labs/libs/mcp/plugin-mcp v0.4.0
+	github.com/hollis-labs/libs/mcp/plugin-mcp v0.5.0
 	github.com/hollis-labs/libs/mesh/core v0.8.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
+	github.com/hollis-labs/libs/security/redact v0.2.0
 	github.com/hollis-labs/libs/security/secrets v0.1.0
 	github.com/hollis-labs/libs/ui/ui-go v0.4.0
 	github.com/hollis-labs/libs/workflow/engine v0.2.0
 	github.com/hollis-labs/nanite/pkg/pluginapi v0.3.0
-	github.com/hollis-labs/plugins-catalog v0.1.0
-	github.com/hollis-labs/tesseract v0.13.0
+	github.com/hollis-labs/plugins-catalog v0.1.8
+	github.com/hollis-labs/tesseract v0.13.3
 	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.28.0
 	golang.org/x/mod v0.41.0

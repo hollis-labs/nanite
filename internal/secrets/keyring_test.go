@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/zalando/go-keyring"
 )
 
@@ -20,7 +21,7 @@ func captureKeyringLogs(t *testing.T) *bytes.Buffer {
 }
 
 func TestGetLogsMissingKeyAtDebug(t *testing.T) {
-	keyring.MockInit()
+	secretstest.Install(t)
 	t.Cleanup(keyring.MockInit)
 	logs := captureKeyringLogs(t)
 
@@ -40,7 +41,8 @@ func TestGetLogsMissingKeyAtDebug(t *testing.T) {
 }
 
 func TestGetLogsKeyringAccessErrorAtWarn(t *testing.T) {
-	keyringErr := errors.New("keychain unavailable")
+	secretstest.Install(t)
+	keyringErr := errors.New("keychain unavailable: backend-credential-must-not-escape")
 	keyring.MockInitWithError(keyringErr)
 	t.Cleanup(keyring.MockInit)
 	logs := captureKeyringLogs(t)
@@ -49,11 +51,14 @@ func TestGetLogsKeyringAccessErrorAtWarn(t *testing.T) {
 		t.Fatalf("Get = %q, want empty string for a keyring access error", got)
 	}
 	logOutput := logs.String()
+	if strings.Contains(logOutput, "backend-credential-must-not-escape") {
+		t.Fatal("raw credential-store error escaped into logs")
+	}
 	for _, want := range []string{
 		`"level":"WARN"`,
 		`"msg":"secrets: get failed"`,
 		`"key":"provider-api-key:anthropic"`,
-		`"err":"` + keyringErr.Error() + `"`,
+		`"err":"secrets: unavailable: the credential store is unavailable"`,
 	} {
 		if !strings.Contains(logOutput, want) {
 			t.Errorf("warning log %q missing from %s", want, logOutput)
@@ -62,7 +67,7 @@ func TestGetLogsKeyringAccessErrorAtWarn(t *testing.T) {
 }
 
 func TestGetDoesNotLogSecretValue(t *testing.T) {
-	keyring.MockInit()
+	secretstest.Install(t)
 	t.Cleanup(keyring.MockInit)
 	logs := captureKeyringLogs(t)
 	const secret = "credential-that-must-not-be-logged"
@@ -79,7 +84,7 @@ func TestGetDoesNotLogSecretValue(t *testing.T) {
 }
 
 func TestDeleteChecked_ReportsUnavailableAndAllowsMissing(t *testing.T) {
-	keyring.MockInit()
+	secretstest.Install(t)
 	t.Cleanup(keyring.MockInit)
 	if err := DeleteChecked("missing"); err != nil {
 		t.Fatal(err)

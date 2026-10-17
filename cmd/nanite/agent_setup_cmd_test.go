@@ -87,7 +87,9 @@ func TestAgentSetupRefusesBeforeWriting(t *testing.T) {
 	}{
 		{"no key", false, []string{"--provider", "anthropic", "--model", "m", "--tools", "all"}, "provider set-key anthropic"},
 		{"unknown provider", true, []string{"--provider", "nowhere", "--model", "m", "--tools", "all"}, "not a native API provider"},
-		{"runtime cli", true, []string{"--provider", "anthropic", "--model", "m", "--runtime", "cli", "--tools", "all"}, "runtime cli"},
+		{"cli unknown provider", false, []string{"--provider", "nowhere", "--runtime", "cli", "--tools", "all"}, "cannot be launched"},
+		{"cli no provider", false, []string{"--runtime", "cli", "--tools", "all"}, "--provider is required for runtime cli"},
+		{"unknown runtime", true, []string{"--provider", "anthropic", "--model", "m", "--runtime", "vm", "--tools", "all"}, "--runtime api or cli"},
 		{"no model", true, []string{"--provider", "anthropic", "--tools", "all"}, "--provider and --model"},
 		{"no tools flag", true, []string{"--provider", "anthropic", "--model", "m"}, "--tools is required"},
 		{"unknown tool", true, []string{"--provider", "anthropic", "--model", "m", "--tools", "no_such"}, "authority tools"},
@@ -186,5 +188,81 @@ func TestAgentSetupRerunReportsEveryGrantAndAddsOnly(t *testing.T) {
 	}
 	if added, _ := second["tools_added"].([]any); len(added) != 0 {
 		t.Fatalf("tools_added = %v", added)
+	}
+}
+
+func TestAgentSetupCLIRuntimeSkipsKeyAndSharesAdmission(t *testing.T) {
+	for _, tc := range []struct{ provider, model string }{
+		{"claude", "haiku"}, {"claude", ""}, {"codex", "gpt-6.1-sol"}, {"codex", ""},
+	} {
+		t.Run(tc.provider+"/"+tc.model, func(t *testing.T) {
+			st, keys, def := setupFixture(t, false) // CLI login is independent of an API key.
+			ws := t.TempDir()
+			args := []string{def, "--provider", tc.provider, "--runtime", "cli", "--tools", "dev.read"}
+			if tc.model != "" {
+				args = append(args, "--model", tc.model)
+			}
+			var out bytes.Buffer
+			if err := runAgentSetup(t.Context(), st, keys, ws, args, &out); err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Created        bool   `json:"created"`
+				AuthorityID    string `json:"authority_id"`
+				SessionRequest struct {
+					Body struct {
+						DefinitionRef service.DefinitionRef    `json:"definition_ref"`
+						HostSettings  *service.HostSettingsRef `json:"host_settings"`
+					} `json:"body"`
+				} `json:"session_request"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if !got.Created || got.SessionRequest.Body.HostSettings == nil {
+				t.Fatalf("output = %s", out.String())
+			}
+			views := service.CognitiveViews{Store: st, Resolver: &service.StoredDefinitionResolver{Store: st}}
+			session, err := views.Create(t.Context(), service.CreateDefinedView{
+				DefinitionRef: got.SessionRequest.Body.DefinitionRef,
+				HostSettings:  got.SessionRequest.Body.HostSettings,
+			})
+			if err != nil {
+				t.Fatalf("setup's emitted request was refused by session admission: %v", err)
+			}
+			if session.Provider != tc.provider || session.Model != tc.model {
+				t.Fatalf("session selected %s/%s, want %s/%s", session.Provider, session.Model, tc.provider, tc.model)
+			}
+			firstAuthority, firstHost := got.AuthorityID, *got.SessionRequest.Body.HostSettings
+			out.Reset()
+			if err := runAgentSetup(t.Context(), st, keys, ws, args, &out); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Created || got.AuthorityID != firstAuthority || *got.SessionRequest.Body.HostSettings != firstHost {
+				t.Fatalf("repeated CLI setup changed identity: %s", out.String())
+			}
+		})
+	}
+}
+
+func TestAgentSetupCLIRefusesReadOnlyDefinitionBeforeWriting(t *testing.T) {
+	st, keys, def := setupFixture(t, false)
+	data, err := os.ReadFile(def) //nolint:gosec // G304: test fixture path from t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro := filepath.Join(t.TempDir(), "ro.md")
+	if err = os.WriteFile(ro, []byte(strings.Replace(string(data), "profile: default", "profile: read-only", 1)), 0o600); err != nil { //nolint:gosec // G703: test fixture written under t.TempDir
+		t.Fatal(err)
+	}
+	err = runAgentSetup(context.Background(), st, keys, t.TempDir(), []string{ro, "--provider", "claude", "--runtime", "cli", "--tools", "all"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cannot run as a CLI agent") {
+		t.Fatalf("err = %v", err)
+	}
+	if n := rowsAfterSetup(t, st); n != 0 {
+		t.Fatalf("refusal wrote %d rows", n)
 	}
 }

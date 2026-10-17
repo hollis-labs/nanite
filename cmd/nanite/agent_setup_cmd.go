@@ -21,7 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-const agentSetupUsage = "usage: nanite agent setup <definition.md|archetype-id> --provider P --model M [--runtime api] [--tools all|a,b] [--slug S] [--title T] [--directories d1,d2] [--resources manifest.json] [--reason R]"
+const agentSetupUsage = "usage: nanite agent setup <definition.md|archetype-id> --provider P [--model M] [--runtime api|cli] [--tools all|a,b] [--slug S] [--title T] [--directories d1,d2] [--resources manifest.json] [--reason R]"
 
 // setupCLIActor is the accountable actor recorded for authority created from
 // the offline CLI: whoever can write the database is the operator.
@@ -33,9 +33,9 @@ const setupCLIActor = "cli:agent-setup"
 func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Manager, workspaceRoot string, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("agent setup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	provider := fs.String("provider", "", "provider name (anthropic, openai)")
+	provider := fs.String("provider", "", "provider name (api: anthropic, openai; cli: claude, codex)")
 	model := fs.String("model", "", "model id")
-	runtime := fs.String("runtime", "api", "api (cli arrives with slice B)")
+	runtime := fs.String("runtime", "api", "api (native provider) or cli (a local CLI agent such as claude)")
 	toolsFlag := fs.String("tools", "", "comma-separated tool names, or all")
 	slug := fs.String("slug", "", "host settings slug (default: from the definition id)")
 	dirsFlag := fs.String("directories", "", "comma-separated directories the agent may work in (default: a private workspace beside the database)")
@@ -71,15 +71,18 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 	switch *runtime {
 	case "api":
 	case "cli":
-		return errors.New("runtime cli is not supported by setup yet; use --runtime api")
 	default:
-		return fmt.Errorf("runtime %q is not supported; use --runtime api", *runtime)
+		return fmt.Errorf("runtime %q is not supported; use --runtime api or cli", *runtime)
 	}
-	if *provider == "" || *model == "" {
-		return errors.New("--provider and --model are required for runtime api\n" + agentSetupUsage)
-	}
-	if err = preflightProviderKey(ctx, keys, *provider); err != nil {
-		return err
+	if *runtime == "api" {
+		if *provider == "" || *model == "" {
+			return errors.New("--provider and --model are required for runtime api\n" + agentSetupUsage)
+		}
+		if err = preflightProviderKey(ctx, keys, *provider); err != nil {
+			return err
+		}
+	} else if *provider == "" {
+		return errors.New("--provider is required for runtime cli (for example claude); --model is optional\n" + agentSetupUsage)
 	}
 	requested := splitTools(*toolsFlag)
 	if len(requested) == 0 {
@@ -114,7 +117,7 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 	if err != nil {
 		return err
 	}
-	if _, err = service.MapChatDefinition(service.VerifiedDefinition{
+	chatCfg, err := service.MapChatDefinition(service.VerifiedDefinition{
 		Ref:        service.DefinitionRef{DefinitionID: parsed.DefinitionID, Revision: parsed.Revision, SemanticDigest: digest},
 		Definition: parsed,
 		ReadResource: func(_ context.Context, ref agentdef.Ref) ([]byte, error) {
@@ -123,7 +126,8 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 			}
 			return nil, fmt.Errorf("resource %q was not supplied; pass --resources", ref.URI)
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("this definition cannot run on native chat: %w", err)
 	}
 
@@ -139,6 +143,12 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 			return absErr
 		}
 		dirs[i] = abs
+	}
+	if *runtime == "cli" {
+		// The same admission session creation applies, before any write.
+		if err = service.AdmitCLIHost(store.NativeHostSettings{Version: "1", Runtime: "cli", Provider: *provider, Model: *model, Directories: dirs}, chatCfg.PermissionProfile); err != nil {
+			return fmt.Errorf("this agent cannot run as a CLI agent: %w", err)
+		}
 	}
 	for _, d := range dirs {
 		if err = os.MkdirAll(d, 0o700); err != nil {

@@ -52,17 +52,18 @@ func (h releasedStoreConformanceHost) factory() conformance.Factory {
 		if err != nil {
 			return nil, fmt.Errorf("open workflow store: %w", err)
 		}
-		h.t.Cleanup(func() { _ = db.Close() })
-		return &releasedStoreConformanceRunner{t: h.t, state: state}, nil
+		return &releasedStoreConformanceRunner{t: h.t, state: state, db: db}, nil
 	}
 }
 
 type releasedStoreConformanceRunner struct {
+	db    *releasedTestDB
 	t     *testing.T
 	state *SQLWorkflowStateStore
 }
 
 func (r *releasedStoreConformanceRunner) Run(ctx context.Context, fixture conformance.Fixture) error {
+	defer func() { _ = r.db.Close() }()
 	if err := r.productionStoreProbe(ctx, fixture); err != nil {
 		return err
 	}

@@ -15,7 +15,7 @@ import (
 
 // TransitionNode implements runtime.StateStore with atomic node, lease, and
 // lifecycle-event persistence.
-func (s *WorkflowStateStore) TransitionNode(ctx context.Context, request workflowruntime.NodeTransitionRequest) (workflowruntime.NodeTransitionResult, error) {
+func (s *legacyWorkflowStateStore) TransitionNode(ctx context.Context, request workflowruntime.NodeTransitionRequest) (workflowruntime.NodeTransitionResult, error) {
 	if err := validateWorkflowNodeTransition(request); err != nil {
 		return workflowruntime.NodeTransitionResult{}, workflowInvalid(err)
 	}
@@ -148,7 +148,7 @@ func (s *WorkflowStateStore) TransitionNode(ctx context.Context, request workflo
 
 // StartNodeAttempt implements runtime.StateStore with one transaction for the
 // node transition, attempt creation, and lifecycle event.
-func (s *WorkflowStateStore) StartNodeAttempt(ctx context.Context, request workflowruntime.StartNodeAttemptRequest) (workflowruntime.StartNodeAttemptResult, error) {
+func (s *legacyWorkflowStateStore) StartNodeAttempt(ctx context.Context, request workflowruntime.StartNodeAttemptRequest) (workflowruntime.StartNodeAttemptResult, error) {
 	if err := validateWorkflowStartAttempt(request); err != nil {
 		return workflowruntime.StartNodeAttemptResult{}, workflowInvalid(err)
 	}
@@ -246,7 +246,7 @@ func (s *WorkflowStateStore) StartNodeAttempt(ctx context.Context, request workf
 
 // FinishNodeAttempt implements runtime.StateStore with one transaction for the
 // running attempt, aggregate node, lease release, and lifecycle event.
-func (s *WorkflowStateStore) FinishNodeAttempt(ctx context.Context, request workflowruntime.FinishNodeAttemptRequest) (workflowruntime.FinishNodeAttemptResult, error) {
+func (s *legacyWorkflowStateStore) FinishNodeAttempt(ctx context.Context, request workflowruntime.FinishNodeAttemptRequest) (workflowruntime.FinishNodeAttemptResult, error) {
 	if err := validateWorkflowFinishAttempt(request); err != nil {
 		return workflowruntime.FinishNodeAttemptResult{}, workflowInvalid(err)
 	}
@@ -363,7 +363,7 @@ func (s *WorkflowStateStore) FinishNodeAttempt(ctx context.Context, request work
 }
 
 // LoadAttempt implements runtime.StateStore.
-func (s *WorkflowStateStore) LoadAttempt(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.AttemptSnapshot, error) {
+func (s *legacyWorkflowStateStore) LoadAttempt(ctx context.Context, id workflowruntime.AttemptID) (workflowruntime.AttemptSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.AttemptSnapshot{}, err
 	}
@@ -371,7 +371,7 @@ func (s *WorkflowStateStore) LoadAttempt(ctx context.Context, id workflowruntime
 }
 
 // ListAttempts implements runtime.StateStore in attempt-number order.
-func (s *WorkflowStateStore) ListAttempts(ctx context.Context, id workflowruntime.NodeInvocationID) ([]workflowruntime.AttemptSnapshot, error) {
+func (s *legacyWorkflowStateStore) ListAttempts(ctx context.Context, id workflowruntime.NodeInvocationID) ([]workflowruntime.AttemptSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}

@@ -13,13 +13,13 @@ import (
 )
 
 var (
-	_ workflowruntime.MemoStore        = (*WorkflowStateStore)(nil)
-	_ workflowruntime.PinStore         = (*WorkflowStateStore)(nil)
-	_ workflowruntime.OutputReuseStore = (*WorkflowStateStore)(nil)
-	_ workflowruntime.ValueRecordStore = (*WorkflowStateStore)(nil)
+	_ workflowruntime.MemoStore        = (*legacyWorkflowStateStore)(nil)
+	_ workflowruntime.PinStore         = (*legacyWorkflowStateStore)(nil)
+	_ workflowruntime.OutputReuseStore = (*legacyWorkflowStateStore)(nil)
+	_ workflowruntime.ValueRecordStore = (*legacyWorkflowStateStore)(nil)
 )
 
-func (s *WorkflowStateStore) LoadValueRecord(ctx context.Context, ref values.ValueSetRef) (workflowruntime.ValueRecord, error) {
+func (s *legacyWorkflowStateStore) LoadValueRecord(ctx context.Context, ref values.ValueSetRef) (workflowruntime.ValueRecord, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.ValueRecord{}, err
 	}
@@ -63,7 +63,7 @@ func loadWorkflowValueRecord(ctx context.Context, query workflowSQL, ref values.
 	return record, nil
 }
 
-func (s *WorkflowStateStore) RecordMemoEntry(ctx context.Context, entry workflowruntime.MemoEntry) (workflowruntime.MemoEntry, workflowruntime.IdempotencyOutcome, error) {
+func (s *legacyWorkflowStateStore) RecordMemoEntry(ctx context.Context, entry workflowruntime.MemoEntry) (workflowruntime.MemoEntry, workflowruntime.IdempotencyOutcome, error) {
 	entry = cloneWorkflowMemoEntry(entry)
 	entry.CreatedAt, entry.ExpiresAt = entry.CreatedAt.UTC(), entry.ExpiresAt.UTC()
 	if err := entry.Validate(); err != nil {
@@ -138,7 +138,7 @@ func (s *WorkflowStateStore) RecordMemoEntry(ctx context.Context, entry workflow
 	return cloneWorkflowMemoEntry(result), outcome, nil
 }
 
-func (s *WorkflowStateStore) LoadMemoEntry(ctx context.Context, key string) (workflowruntime.MemoEntry, error) {
+func (s *legacyWorkflowStateStore) LoadMemoEntry(ctx context.Context, key string) (workflowruntime.MemoEntry, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.MemoEntry{}, err
 	}
@@ -162,7 +162,7 @@ func (s *WorkflowStateStore) LoadMemoEntry(ctx context.Context, key string) (wor
 	return entry, nil
 }
 
-func (s *WorkflowStateStore) BindPin(ctx context.Context, request workflowruntime.BindPinRequest) (workflowruntime.BindPinResult, error) {
+func (s *legacyWorkflowStateStore) BindPin(ctx context.Context, request workflowruntime.BindPinRequest) (workflowruntime.BindPinResult, error) {
 	request.Binding = cloneWorkflowPinBinding(request.Binding)
 	request.Binding.BoundAt = request.Binding.BoundAt.UTC()
 	if err := request.Validate(); err != nil {
@@ -275,7 +275,7 @@ func replayWorkflowPin(requestJSON, resultJSON string, request workflowruntime.B
 	return nil
 }
 
-func (s *WorkflowStateStore) LoadPin(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.PinBinding, error) {
+func (s *legacyWorkflowStateStore) LoadPin(ctx context.Context, id workflowruntime.NodeInvocationID) (workflowruntime.PinBinding, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.PinBinding{}, err
 	}
@@ -296,7 +296,7 @@ func (s *WorkflowStateStore) LoadPin(ctx context.Context, id workflowruntime.Nod
 	return result.Binding, nil
 }
 
-func (s *WorkflowStateStore) ReuseNodeOutputs(ctx context.Context, request workflowruntime.ReuseNodeOutputsRequest) (workflowruntime.ReuseNodeOutputsResult, error) {
+func (s *legacyWorkflowStateStore) ReuseNodeOutputs(ctx context.Context, request workflowruntime.ReuseNodeOutputsRequest) (workflowruntime.ReuseNodeOutputsResult, error) {
 	request.Policy.Attributes = cloneWorkflowStringMap(request.Policy.Attributes)
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {

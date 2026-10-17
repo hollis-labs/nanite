@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	_ workflowruntime.RecoveryStore  = (*WorkflowStateStore)(nil)
-	_ workflowruntime.ReplayStore    = (*WorkflowStateStore)(nil)
-	_ workflowruntime.NodeInputStore = (*WorkflowStateStore)(nil)
+	_ workflowruntime.RecoveryStore  = (*legacyWorkflowStateStore)(nil)
+	_ workflowruntime.ReplayStore    = (*legacyWorkflowStateStore)(nil)
+	_ workflowruntime.NodeInputStore = (*legacyWorkflowStateStore)(nil)
 )
 
 func cloneWorkflowRetryActivationPointer(input *workflowruntime.RetryActivationSnapshot) *workflowruntime.RetryActivationSnapshot {
@@ -25,7 +25,7 @@ func cloneWorkflowRetryActivationPointer(input *workflowruntime.RetryActivationS
 	return &cloned
 }
 
-func (s *WorkflowStateStore) BindNodeInputs(ctx context.Context, request workflowruntime.BindNodeInputsRequest) (workflowruntime.BindNodeInputsResult, error) {
+func (s *legacyWorkflowStateStore) BindNodeInputs(ctx context.Context, request workflowruntime.BindNodeInputsRequest) (workflowruntime.BindNodeInputsResult, error) {
 	request.At = request.At.UTC()
 	if err := request.Validate(); err != nil {
 		return workflowruntime.BindNodeInputsResult{}, workflowInvalid(err)
@@ -137,7 +137,7 @@ func (s *WorkflowStateStore) BindNodeInputs(ctx context.Context, request workflo
 	return result, nil
 }
 
-func (s *WorkflowStateStore) ReconcileCrashedAttempt(ctx context.Context, request workflowruntime.ReconcileCrashedAttemptRequest) (workflowruntime.ReconcileCrashedAttemptResult, error) {
+func (s *legacyWorkflowStateStore) ReconcileCrashedAttempt(ctx context.Context, request workflowruntime.ReconcileCrashedAttemptRequest) (workflowruntime.ReconcileCrashedAttemptResult, error) {
 	if err := request.Validate(); err != nil {
 		return workflowruntime.ReconcileCrashedAttemptResult{}, workflowInvalid(err)
 	}
@@ -279,7 +279,7 @@ func (s *WorkflowStateStore) ReconcileCrashedAttempt(ctx context.Context, reques
 	return result, nil
 }
 
-func (s *WorkflowStateStore) BeginReplay(ctx context.Context, request workflowruntime.BeginReplayRequest) (workflowruntime.BeginReplayResult, error) {
+func (s *legacyWorkflowStateStore) BeginReplay(ctx context.Context, request workflowruntime.BeginReplayRequest) (workflowruntime.BeginReplayResult, error) {
 	request = canonicalWorkflowReplayRequest(request)
 	if err := request.Validate(); err != nil {
 		return workflowruntime.BeginReplayResult{}, workflowInvalid(err)
@@ -479,7 +479,7 @@ func (s *WorkflowStateStore) BeginReplay(ctx context.Context, request workflowru
 	return result, nil
 }
 
-func (s *WorkflowStateStore) ListRunInvocations(ctx context.Context, runID workflowruntime.RunID) ([]workflowruntime.NodeInvocationSnapshot, error) {
+func (s *legacyWorkflowStateStore) ListRunInvocations(ctx context.Context, runID workflowruntime.RunID) ([]workflowruntime.NodeInvocationSnapshot, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return nil, err
 	}
@@ -505,7 +505,7 @@ func (s *WorkflowStateStore) ListRunInvocations(ctx context.Context, runID workf
 	return result, nil
 }
 
-func (s *WorkflowStateStore) LoadReplayProvenance(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.ReplayProvenance, error) {
+func (s *legacyWorkflowStateStore) LoadReplayProvenance(ctx context.Context, runID workflowruntime.RunID) (workflowruntime.ReplayProvenance, error) {
 	if err := checkWorkflowContext(ctx); err != nil {
 		return workflowruntime.ReplayProvenance{}, err
 	}

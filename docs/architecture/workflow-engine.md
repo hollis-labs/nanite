@@ -15,7 +15,7 @@ next workflow node or maintain a second workflow state machine.
 ## Storage and startup
 
 The Nanite facade delegates canonical runtime operations to the released
-`go-workflow-host/sqlstore` over the existing physical `workflow_*` tables.
+`github.com/hollis-labs/libs/workflow/engine/host/sqlstore` over the existing physical `workflow_*` tables.
 Mandatory hooks project run and node changes in the same transaction. The
 facade exposes runtime interfaces, without exposing the underlying database or
 an unhooked transaction API. Nanite-owned material, projection metadata,

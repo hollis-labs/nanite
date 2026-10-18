@@ -45,18 +45,18 @@ func preflightEachID(ctx context.Context, tx workflowSQL, validation, table, col
 	s.count(validation, 0)
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			return s.finding("fatal", validation, table, "scan", "readable record id", err)
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			return s.finding("fatal", validation, table, "scan", "readable record id", scanErr)
 		}
 		s.count(validation, 1)
-		if err := load(id); err != nil {
-			if err := s.finding("fatal", validation, table, column+"="+id, "valid persisted record", err); err != nil {
-				return err
+		if loadErr := load(id); loadErr != nil {
+			if findingErr := s.finding("fatal", validation, table, column+"="+id, "valid persisted record", loadErr); findingErr != nil {
+				return findingErr
 			}
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return s.finding("fatal", validation, table, "scan", "complete record scan", err)
+	if iterationErr := rows.Err(); iterationErr != nil {
+		return s.finding("fatal", validation, table, "scan", "complete record scan", iterationErr)
 	}
 	return nil
 }
@@ -69,13 +69,13 @@ func preflightRelation(ctx context.Context, tx workflowSQL, validation, table, s
 	}
 	for rows.Next() {
 		var id, expected, actual string
-		if err := rows.Scan(&id, &expected, &actual); err != nil {
+		if scanErr := rows.Scan(&id, &expected, &actual); scanErr != nil {
 			closeRows(rows)
-			return s.finding("fatal", validation, table, "scan", "readable relationship", err)
+			return s.finding("fatal", validation, table, "scan", "readable relationship", scanErr)
 		}
-		if err := s.finding(severity, validation, table, id, expected, actual); err != nil {
+		if findingErr := s.finding(severity, validation, table, id, expected, actual); findingErr != nil {
 			closeRows(rows)
-			return err
+			return findingErr
 		}
 	}
 	err = rows.Err()
@@ -84,8 +84,8 @@ func preflightRelation(ctx context.Context, tx workflowSQL, validation, table, s
 		return s.finding("fatal", validation, table, "scan", "complete relationship scan", err)
 	}
 	var count int64
-	if err := tx.QueryRowContext(ctx, source).Scan(&count); err != nil {
-		return s.finding("fatal", validation, table, "scan", "counted logical source rows", err)
+	if scanErr := tx.QueryRowContext(ctx, source).Scan(&count); scanErr != nil {
+		return s.finding("fatal", validation, table, "scan", "counted logical source rows", scanErr)
 	}
 	s.count(validation, count)
 	return nil

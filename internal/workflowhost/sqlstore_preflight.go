@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
@@ -35,10 +35,10 @@ func preflightWorkflowSnapshot(ctx context.Context, tx workflowSQL) error {
 	ctx = context.WithValue(ctx, workflowPreflightKey{}, state)
 	for _, check := range []func(context.Context, workflowSQL) error{
 		preflightWorkflowSchema, preflightWorkflowReferences, preflightWorkflowEnvelopes,
-		preflightWorkflowRecords, preflightWorkflowRuns, preflightWorkflowIdempotency,
+		preflightWorkflowRecords, preflightWorkflowSnapshotFamilies, preflightWorkflowRuns, preflightWorkflowIdempotency,
 	} {
-		if err := check(ctx, tx); err != nil {
-			return err
+		if checkErr := check(ctx, tx); checkErr != nil {
+			return checkErr
 		}
 	}
 	if !state.collect {
@@ -57,16 +57,16 @@ func preflightWorkflowRuns(ctx context.Context, tx workflowSQL) error {
 	s.count("run-bindings", 0)
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			return s.finding("fatal", "run-bindings", "workflow_runs", "scan", "readable run id", err)
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			return s.finding("fatal", "run-bindings", "workflow_runs", "scan", "readable run id", scanErr)
 		}
 		s.count("run-bindings", 1)
-		if err := preflightWorkflowRun(ctx, tx, workflowruntime.RunID(id)); err != nil {
-			return err
+		if checkErr := preflightWorkflowRun(ctx, tx, workflowruntime.RunID(id)); checkErr != nil {
+			return checkErr
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return s.finding("fatal", "run-bindings", "workflow_runs", "scan", "complete run scan", err)
+	if iterationErr := rows.Err(); iterationErr != nil {
+		return s.finding("fatal", "run-bindings", "workflow_runs", "scan", "complete run scan", iterationErr)
 	}
 	return nil
 }
@@ -82,8 +82,8 @@ func preflightWorkflowEnvelopes(ctx context.Context, tx workflowSQL) error {
 		table := strings.TrimPrefix(key, "table:")
 		rows, err := tx.QueryContext(ctx, `PRAGMA table_info("`+table+`")`) //nolint:gosec // Table names come from the compiled schema manifest.
 		if err != nil {
-			if err := s.finding("fatal", "envelopes", table, "columns", "readable columns", err); err != nil {
-				return err
+			if findingErr := s.finding("fatal", "envelopes", table, "columns", "readable columns", err); findingErr != nil {
+				return findingErr
 			}
 			continue
 		}
@@ -94,9 +94,9 @@ func preflightWorkflowEnvelopes(ctx context.Context, tx workflowSQL) error {
 			var cid, notNull, primaryKey int
 			var name, kind string
 			var defaultValue sql.NullString
-			if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			if scanErr := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); scanErr != nil {
 				closeRows(rows)
-				return s.finding("fatal", "envelopes", table, "columns", "readable column declaration", err)
+				return s.finding("fatal", "envelopes", table, "columns", "readable column declaration", scanErr)
 			}
 			column := `"` + name + `"`
 			if primaryKey > 0 {
@@ -122,20 +122,20 @@ func preflightWorkflowEnvelopes(ctx context.Context, tx workflowSQL) error {
 			statement := `SELECT ` + rowExpression + `,quote("` + check.name + `"),typeof("` + check.name + `") FROM "` + table + `" WHERE ` + check.predicate
 			rows, err := tx.QueryContext(ctx, statement)
 			if err != nil {
-				if err := s.finding("fatal", "envelopes", table, "column="+check.name, check.expected, err); err != nil {
-					return err
+				if findingErr := s.finding("fatal", "envelopes", table, "column="+check.name, check.expected, err); findingErr != nil {
+					return findingErr
 				}
 				continue
 			}
 			for rows.Next() {
 				var id, value, kind string
-				if err := rows.Scan(&id, &value, &kind); err != nil {
+				if scanErr := rows.Scan(&id, &value, &kind); scanErr != nil {
 					closeRows(rows)
-					return s.finding("fatal", "envelopes", table, "scan", check.expected, err)
+					return s.finding("fatal", "envelopes", table, "scan", check.expected, scanErr)
 				}
-				if err := s.finding("fatal", "envelopes", table, id+" column="+check.name, check.expected, value+" ("+kind+")"); err != nil {
+				if findingErr := s.finding("fatal", "envelopes", table, id+" column="+check.name, check.expected, value+" ("+kind+")"); findingErr != nil {
 					closeRows(rows)
-					return err
+					return findingErr
 				}
 			}
 			err = rows.Err()
@@ -144,8 +144,8 @@ func preflightWorkflowEnvelopes(ctx context.Context, tx workflowSQL) error {
 				return s.finding("fatal", "envelopes", table, "scan", check.expected, err)
 			}
 			var count int64
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM "`+table+`"`).Scan(&count); err != nil {
-				return s.finding("fatal", "envelopes", table, "scan", "counted source rows", err)
+			if scanErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM "`+table+`"`).Scan(&count); scanErr != nil {
+				return s.finding("fatal", "envelopes", table, "scan", "counted source rows", scanErr)
 			}
 			s.count("envelopes:"+table+":"+check.name, count)
 		}
@@ -156,24 +156,24 @@ func preflightWorkflowEnvelopes(ctx context.Context, tx workflowSQL) error {
 func preflightWorkflowSchema(ctx context.Context, tx workflowSQL) error {
 	s := preflightState(ctx)
 	var foreignKeys int
-	if err := tx.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
-		return s.finding("fatal", "foreign-key-enforcement", "PRAGMA foreign_keys", "connection", "1", err)
+	if scanErr := tx.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); scanErr != nil {
+		return s.finding("fatal", "foreign-key-enforcement", "PRAGMA foreign_keys", "connection", "1", scanErr)
 	}
 	s.count("foreign-key-enforcement", 1)
 	if foreignKeys != 1 {
-		if err := s.finding("fatal", "foreign-key-enforcement", "PRAGMA foreign_keys", "connection", "1", foreignKeys); err != nil {
-			return err
+		if findingErr := s.finding("fatal", "foreign-key-enforcement", "PRAGMA foreign_keys", "connection", "1", foreignKeys); findingErr != nil {
+			return findingErr
 		}
 	}
 	var version sql.NullInt64
 	var ledgerRows int64
-	if err := tx.QueryRowContext(ctx, `SELECT max(version_id),count(*) FROM goose_db_version WHERE is_applied=1`).Scan(&version, &ledgerRows); err != nil {
-		return s.finding("fatal", "migration-ledger", "goose_db_version", "is_applied=1", "applied ledger floor >=172", err)
+	if scanErr := tx.QueryRowContext(ctx, `SELECT max(version_id),count(*) FROM goose_db_version WHERE is_applied=1`).Scan(&version, &ledgerRows); scanErr != nil {
+		return s.finding("fatal", "migration-ledger", "goose_db_version", "is_applied=1", "applied ledger floor >=172", scanErr)
 	}
 	s.count("migration-ledger", ledgerRows)
 	if !version.Valid || version.Int64 < 172 {
-		if err := s.finding("fatal", "migration-ledger", "goose_db_version", "max applied version", ">=172", version.Int64); err != nil {
-			return err
+		if findingErr := s.finding("fatal", "migration-ledger", "goose_db_version", "max applied version", ">=172", version.Int64); findingErr != nil {
+			return findingErr
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_master WHERE tbl_name LIKE 'workflow\_%' ESCAPE '\' AND sql IS NOT NULL AND tbl_name NOT IN ('workflow_scheduled_activations','workflow_activation_schedules','workflow_activation_fires') ORDER BY type,name`)
@@ -185,8 +185,8 @@ func preflightWorkflowSchema(ctx context.Context, tx workflowSQL) error {
 	s.count("schema-shape", 0)
 	for rows.Next() {
 		var kind, name, statement string
-		if err := rows.Scan(&kind, &name, &statement); err != nil {
-			return s.finding("fatal", "schema-shape", "sqlite_master", "scan", "readable CREATE statement", err)
+		if scanErr := rows.Scan(&kind, &name, &statement); scanErr != nil {
+			return s.finding("fatal", "schema-shape", "sqlite_master", "scan", "readable CREATE statement", scanErr)
 		}
 		s.count("schema-shape", 1)
 		key := kind + ":" + name
@@ -196,19 +196,19 @@ func preflightWorkflowSchema(ctx context.Context, tx workflowSQL) error {
 			expected = "absent (unqualified object)"
 		}
 		if expected != actual {
-			if err := s.finding("fatal", "schema drift in "+key, "sqlite_master", key, expected, actual); err != nil {
-				return err
+			if findingErr := s.finding("fatal", "schema drift in "+key, "sqlite_master", key, expected, actual); findingErr != nil {
+				return findingErr
 			}
 		}
 		seen[key] = true
 	}
-	if err := rows.Err(); err != nil {
-		return s.finding("fatal", "schema-shape", "sqlite_master", "scan", "complete object scan", err)
+	if iterationErr := rows.Err(); iterationErr != nil {
+		return s.finding("fatal", "schema-shape", "sqlite_master", "scan", "complete object scan", iterationErr)
 	}
 	for _, key := range preflightSchemaKeys() {
 		if !seen[key] {
-			if err := s.finding("fatal", "missing schema object", "sqlite_master", key, workflowStorageSchema[key], "absent"); err != nil {
-				return err
+			if findingErr := s.finding("fatal", "missing schema object", "sqlite_master", key, workflowStorageSchema[key], "absent"); findingErr != nil {
+				return findingErr
 			}
 		}
 	}
@@ -233,8 +233,8 @@ func preflightWorkflowReferences(ctx context.Context, tx workflowSQL) error {
 		table := strings.TrimPrefix(key, "table:")
 		rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check("`+table+`")`) //nolint:gosec // Identifier is from the compiled schema manifest.
 		if err != nil {
-			if err := s.finding("fatal", "foreign-keys", table, "scan", "valid references", err); err != nil {
-				return err
+			if findingErr := s.finding("fatal", "foreign-keys", table, "scan", "valid references", err); findingErr != nil {
+				return findingErr
 			}
 			continue
 		}
@@ -242,13 +242,13 @@ func preflightWorkflowReferences(ctx context.Context, tx workflowSQL) error {
 			var child, parent string
 			var rowID sql.NullInt64
 			var constraint int
-			if err := rows.Scan(&child, &rowID, &parent, &constraint); err != nil {
+			if scanErr := rows.Scan(&child, &rowID, &parent, &constraint); scanErr != nil {
 				closeRows(rows)
-				return s.finding("fatal", "foreign-keys", table, "scan", "readable FK result", err)
+				return s.finding("fatal", "foreign-keys", table, "scan", "readable FK result", scanErr)
 			}
-			if err := s.finding("fatal", "foreign-keys", child, fmt.Sprintf("rowid=%d fk=%d", rowID.Int64, constraint), "referenced row in "+parent, "missing parent row"); err != nil {
+			if findingErr := s.finding("fatal", "foreign-keys", child, fmt.Sprintf("rowid=%d fk=%d", rowID.Int64, constraint), "referenced row in "+parent, "missing parent row"); findingErr != nil {
 				closeRows(rows)
-				return err
+				return findingErr
 			}
 		}
 		err = rows.Err()
@@ -257,9 +257,9 @@ func preflightWorkflowReferences(ctx context.Context, tx workflowSQL) error {
 			return s.finding("fatal", "foreign-keys", table, "scan", "complete FK scan", err)
 		}
 		var count int64
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM "`+table+`"`).Scan(&count); err != nil {
-			if err := s.finding("fatal", "foreign-keys", table, "scan", "counted source rows", err); err != nil {
-				return err
+		if scanErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM "`+table+`"`).Scan(&count); scanErr != nil {
+			if findingErr := s.finding("fatal", "foreign-keys", table, "scan", "counted source rows", scanErr); findingErr != nil {
+				return findingErr
 			}
 			continue
 		}
@@ -268,31 +268,14 @@ func preflightWorkflowReferences(ctx context.Context, tx workflowSQL) error {
 	return nil
 }
 
-func preflightStrings(ctx context.Context, tx workflowSQL, statement string, args ...any) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, statement, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRows(rows)
-	var result []string
-	for rows.Next() {
-		var id string
-		if checkErr := rows.Scan(&id); checkErr != nil {
-			return nil, checkErr
-		}
-		result = append(result, id)
-	}
-	return result, rows.Err()
-}
-
 func preflightWorkflowRun(ctx context.Context, tx workflowSQL, id workflowruntime.RunID) error {
 	s := preflightState(ctx)
 	row := "id=" + string(id)
 	var kind, contract, name string
 	var digest, revision, status sql.NullString
 	var generation int64
-	if err := tx.QueryRowContext(ctx, `SELECT engine_kind,engine_contract_version,definition_name,plan_digest,definition_revision_id,runtime_status,runtime_generation FROM workflow_runs WHERE id=?`, id).Scan(&kind, &contract, &name, &digest, &revision, &status, &generation); err != nil {
-		return s.finding("fatal", "run structural integrity", "workflow_runs", row, "readable run metadata", err)
+	if scanErr := tx.QueryRowContext(ctx, `SELECT engine_kind,engine_contract_version,definition_name,plan_digest,definition_revision_id,runtime_status,runtime_generation FROM workflow_runs WHERE id=?`, id).Scan(&kind, &contract, &name, &digest, &revision, &status, &generation); scanErr != nil {
+		return s.finding("fatal", "run structural integrity", "workflow_runs", row, "readable run metadata", scanErr)
 	}
 	if kind == "nanite_builtin_v1" && contract == "" {
 		if digest.Valid || status.Valid || generation != 0 {
@@ -300,9 +283,9 @@ func preflightWorkflowRun(ctx context.Context, tx workflowSQL, id workflowruntim
 		}
 		return nil
 	}
-	run, err := loadWorkflowRun(ctx, tx, id)
-	if err != nil {
-		return s.finding("fatal", "run structural integrity", "workflow_runs", row, "valid run envelope and positive generation", fmt.Errorf("%w; runtime_generation=%d runtime_status=%q engine=%q/%q plan_digest=%v", err, generation, status.String, kind, contract, digest.String))
+	run, runErr := loadWorkflowRun(ctx, tx, id)
+	if runErr != nil {
+		return s.finding("fatal", "run structural integrity", "workflow_runs", row, "valid run envelope and positive generation", fmt.Errorf("%w; runtime_generation=%d runtime_status=%q engine=%q/%q plan_digest=%v", runErr, generation, status.String, kind, contract, digest.String))
 	}
 	severity := "fatal"
 	validation := fmt.Sprintf("run %q blocked", id)
@@ -314,50 +297,50 @@ func preflightWorkflowRun(ctx context.Context, tx workflowSQL, id workflowruntim
 		return s.finding(severity, validation, "workflow_runs", row, expected, actual)
 	}
 	if (kind != EngineKindGoWorkflow || contract != EngineContractVersion) && (kind != EngineKindPilotHadron || contract != PilotContractVersion) {
-		if err := problem("supported engine identity "+EngineKindGoWorkflow+"/"+EngineContractVersion+" or "+EngineKindPilotHadron+"/"+PilotContractVersion, fmt.Sprintf("unsupported engine identity %q/%q", kind, contract)); err != nil {
-			return err
+		if findingErr := problem("supported engine identity "+EngineKindGoWorkflow+"/"+EngineContractVersion+" or "+EngineKindPilotHadron+"/"+PilotContractVersion, fmt.Sprintf("unsupported engine identity %q/%q", kind, contract)); findingErr != nil {
+			return findingErr
 		}
 	}
 	check := s.material(ctx, tx, run.Plan.Digest)
 	if check.materialErr != nil {
-		if err := problem("valid frozen material for plan "+run.Plan.Digest, check.materialErr); err != nil {
-			return err
+		if findingErr := problem("valid frozen material for plan "+run.Plan.Digest, check.materialErr); findingErr != nil {
+			return findingErr
 		}
 	} else {
 		material := check.material
 		if planRef(material.Plan) != run.Plan || material.ProductDefinitionName != name {
-			if err := problem(fmt.Sprintf("plan=%+v definition=%q", run.Plan, name), fmt.Sprintf("material plan=%+v definition=%q", planRef(material.Plan), material.ProductDefinitionName)); err != nil {
-				return err
+			if findingErr := problem(fmt.Sprintf("plan=%+v definition=%q", run.Plan, name), fmt.Sprintf("material plan=%+v definition=%q", planRef(material.Plan), material.ProductDefinitionName)); findingErr != nil {
+				return findingErr
 			}
 		}
 		s.qualify(ctx, check)
 		if check.kind != kind {
-			if err := problem("frozen host contract for engine "+kind, "material host contract belongs to "+check.kind); err != nil {
-				return err
+			if findingErr := problem("frozen host contract for engine "+kind, "material host contract belongs to "+check.kind); findingErr != nil {
+				return findingErr
 			}
 		}
 		if check.identityErr != nil {
-			if err := problem("exact installed StepKind/verifier/host identity", check.identityErr); err != nil {
-				return err
+			if findingErr := problem("exact installed StepKind/verifier/host identity", check.identityErr); findingErr != nil {
+				return findingErr
 			}
 		}
 		if check.planErr != nil {
-			if err := problem("compiled plan accepted by installed binary", check.planErr); err != nil {
-				return err
+			if findingErr := problem("compiled plan accepted by installed binary", check.planErr); findingErr != nil {
+				return findingErr
 			}
 		}
 	}
 	if !revision.Valid {
-		if err := problem("non-NULL exact immutable revision for resumable execution", "definition_revision_id=NULL (historical/conformance binding)"); err != nil {
-			return err
+		if findingErr := problem("non-NULL exact immutable revision for resumable execution", "definition_revision_id=NULL (historical/conformance binding)"); findingErr != nil {
+			return findingErr
 		}
 	} else {
 		var boundName, boundPlan, boundKind, boundContract, boundSource, boundLocator, boundFormat, boundSchema, boundGraph string
 		var content []byte
 		err := tx.QueryRowContext(ctx, `SELECT definition_name,compiled_plan_digest,engine_kind,engine_contract_version,source_digest,source_content,source_locator,source_format,schema_version,compiled_graph_digest FROM workflow_definition_revisions WHERE revision_id=?`, revision.String).Scan(&boundName, &boundPlan, &boundKind, &boundContract, &boundSource, &content, &boundLocator, &boundFormat, &boundSchema, &boundGraph)
 		if err != nil {
-			if err := problem("readable exact revision "+revision.String, err); err != nil {
-				return err
+			if findingErr := problem("readable exact revision "+revision.String, err); findingErr != nil {
+				return findingErr
 			}
 		} else {
 			expected := fmt.Sprintf("name=%q plan=%q engine=%q/%q", name, digest.String, kind, contract)
@@ -370,17 +353,17 @@ func preflightWorkflowRun(ctx context.Context, tx workflowSQL, id workflowruntim
 				actual += fmt.Sprintf(" source=%q locator=%q format=%q schema=%q graph=%q", boundSource, boundLocator, boundFormat, boundSchema, boundGraph)
 			}
 			if mismatch {
-				if err := problem("immutable revision binding "+expected, actual); err != nil {
-					return err
+				if findingErr := problem("immutable revision binding "+expected, actual); findingErr != nil {
+					return findingErr
 				}
 			}
 		}
 	}
 	for _, ref := range []*values.ValueSetRef{run.Inputs, run.Outputs} {
 		if ref != nil {
-			if _, err := loadWorkflowValues(ctx, tx, *ref); err != nil {
-				if err := s.finding("fatal", "run value reference", "workflow_runs", row, "readable values "+ref.ID+" digest="+ref.Digest, err); err != nil {
-					return err
+			if _, loadErr := loadWorkflowValues(ctx, tx, *ref); loadErr != nil {
+				if findingErr := s.finding("fatal", "run value reference", "workflow_runs", row, "readable values "+ref.ID+" digest="+ref.Digest, loadErr); findingErr != nil {
+					return findingErr
 				}
 			}
 		}
@@ -391,36 +374,36 @@ func preflightWorkflowRun(ctx context.Context, tx workflowSQL, id workflowruntim
 	}
 	for rows.Next() {
 		scanner := preflightRecordScanner{row: rows, keys: []int{0, 1, 2}, names: []string{"run_id", "node_id", "iteration"}}
-		node, err := scanWorkflowNode(&scanner)
-		if err != nil {
-			if err := s.finding("fatal", "node references", "workflow_node_invocations", scanner.id, "valid node record", err); err != nil {
+		node, nodeErr := scanWorkflowNode(&scanner)
+		if nodeErr != nil {
+			if findingErr := s.finding("fatal", "node references", "workflow_node_invocations", scanner.id, "valid node record", nodeErr); findingErr != nil {
 				closeRows(rows)
-				return err
+				return findingErr
 			}
 			continue
 		}
 		if node.Wait != nil {
-			if _, err := loadWorkflowWait(ctx, tx, node.Wait.ID); err != nil {
-				if err := s.finding("fatal", "node wait reference", "workflow_node_invocations", scanner.id, "readable wait "+string(node.Wait.ID), err); err != nil {
+			if _, loadErr := loadWorkflowWait(ctx, tx, node.Wait.ID); loadErr != nil {
+				if findingErr := s.finding("fatal", "node wait reference", "workflow_node_invocations", scanner.id, "readable wait "+string(node.Wait.ID), loadErr); findingErr != nil {
 					closeRows(rows)
-					return err
+					return findingErr
 				}
 			}
 		}
 		if node.LatestAttempt > 0 {
-			if _, err := loadWorkflowAttempt(ctx, tx, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt}); err != nil {
-				if err := s.finding("fatal", "node attempt reference", "workflow_node_invocations", scanner.id, fmt.Sprintf("readable attempt %d", node.LatestAttempt), err); err != nil {
+			if _, loadErr := loadWorkflowAttempt(ctx, tx, workflowruntime.AttemptID{Invocation: node.ID, Number: node.LatestAttempt}); loadErr != nil {
+				if findingErr := s.finding("fatal", "node attempt reference", "workflow_node_invocations", scanner.id, fmt.Sprintf("readable attempt %d", node.LatestAttempt), loadErr); findingErr != nil {
 					closeRows(rows)
-					return err
+					return findingErr
 				}
 			}
 		}
 		for _, ref := range []*values.ValueSetRef{node.Inputs, node.Outputs} {
 			if ref != nil {
-				if _, err := loadWorkflowValues(ctx, tx, *ref); err != nil {
-					if err := s.finding("fatal", "node value reference", "workflow_node_invocations", scanner.id, "readable values "+ref.ID+" digest="+ref.Digest, err); err != nil {
+				if _, loadErr := loadWorkflowValues(ctx, tx, *ref); loadErr != nil {
+					if findingErr := s.finding("fatal", "node value reference", "workflow_node_invocations", scanner.id, "readable values "+ref.ID+" digest="+ref.Digest, loadErr); findingErr != nil {
 						closeRows(rows)
-						return err
+						return findingErr
 					}
 				}
 			}
@@ -456,17 +439,17 @@ func preflightWorkflowIdempotency(ctx context.Context, tx workflowSQL) error {
 		{"run-start-replay", "workflow_run_start_idempotency", func(requestJSON, resultJSON string) error {
 			var request workflowruntime.CreateRunRequest
 			var result workflowruntime.RunSnapshot
-			if err := decodeWorkflowJSON("run start request", requestJSON, &request); err != nil {
-				return err
+			if decodeErr := decodeWorkflowJSON("run start request", requestJSON, &request); decodeErr != nil {
+				return decodeErr
 			}
-			if err := decodeWorkflowJSON("run start result", resultJSON, &result); err != nil {
-				return err
+			if decodeErr := decodeWorkflowJSON("run start result", resultJSON, &result); decodeErr != nil {
+				return decodeErr
 			}
-			if err := validateWorkflowCreateRun(request); err != nil {
-				return err
+			if validationErr := validateWorkflowCreateRun(request); validationErr != nil {
+				return validationErr
 			}
-			if err := result.Validate(); err != nil {
-				return err
+			if validationErr := result.Validate(); validationErr != nil {
+				return validationErr
 			}
 			if result.ID != request.ID || result.Plan != request.Plan || result.Status != request.Status || result.Generation != 1 || !result.CreatedAt.Equal(request.CreatedAt) || !result.UpdatedAt.Equal(request.CreatedAt) || !equalWorkflowValueRef(result.Inputs, request.Inputs) || result.Outputs != nil {
 				return fmt.Errorf("expected replay id=%q plan=%q status=%q generation=1 timestamps=%s inputs=%v outputs=NULL; actual id=%q plan=%q status=%q generation=%d timestamps=%s/%s inputs=%v outputs=%v", request.ID, request.Plan.Digest, request.Status, request.CreatedAt, request.Inputs, result.ID, result.Plan.Digest, result.Status, result.Generation, result.CreatedAt, result.UpdatedAt, result.Inputs, result.Outputs)
@@ -477,17 +460,17 @@ func preflightWorkflowIdempotency(ctx context.Context, tx workflowSQL) error {
 		{"claim-replay", "workflow_claim_idempotency", func(requestJSON, resultJSON string) error {
 			var request workflowruntime.ClaimNodeRequest
 			var result workflowruntime.ClaimResult
-			if err := decodeWorkflowJSON("claim request", requestJSON, &request); err != nil {
-				return err
+			if decodeErr := decodeWorkflowJSON("claim request", requestJSON, &request); decodeErr != nil {
+				return decodeErr
 			}
-			if err := decodeWorkflowJSON("claim result", resultJSON, &result); err != nil {
-				return err
+			if decodeErr := decodeWorkflowJSON("claim result", resultJSON, &result); decodeErr != nil {
+				return decodeErr
 			}
-			if err := validateWorkflowClaim(request); err != nil {
-				return err
+			if validationErr := validateWorkflowClaim(request); validationErr != nil {
+				return validationErr
 			}
-			if err := validateWorkflowClaimResult(result); err != nil {
-				return err
+			if validationErr := validateWorkflowClaimResult(result); validationErr != nil {
+				return validationErr
 			}
 			node, err := loadWorkflowNode(ctx, tx, request.InvocationID)
 			if err != nil {
@@ -501,31 +484,31 @@ func preflightWorkflowIdempotency(ctx context.Context, tx workflowSQL) error {
 	} {
 		rows, err := tx.QueryContext(ctx, `SELECT idempotency_key,request_json,result_json FROM `+check.table)
 		if err != nil {
-			if err := s.finding("fatal", check.name, check.table, "scan", "readable idempotency records", err); err != nil {
-				return err
+			if findingErr := s.finding("fatal", check.name, check.table, "scan", "readable idempotency records", err); findingErr != nil {
+				return findingErr
 			}
 			continue
 		}
 		s.count(check.name, 0)
 		for rows.Next() {
 			var key, request, result string
-			if err := rows.Scan(&key, &request, &result); err != nil {
+			if scanErr := rows.Scan(&key, &request, &result); scanErr != nil {
 				closeRows(rows)
-				return s.finding("fatal", check.name, check.table, "scan", "readable replay record", err)
+				return s.finding("fatal", check.name, check.table, "scan", "readable replay record", scanErr)
 			}
 			s.count(check.name, 1)
-			if err := check.validate(request, result); err != nil {
-				if err := s.finding("fatal", check.name, check.table, "idempotency_key="+key, "valid replay bound to request and referenced rows", err); err != nil {
+			if validationErr := check.validate(request, result); validationErr != nil {
+				if findingErr := s.finding("fatal", check.name, check.table, "idempotency_key="+key, "valid replay bound to request and referenced rows", validationErr); findingErr != nil {
 					closeRows(rows)
-					return err
+					return findingErr
 				}
 			}
 		}
 		err = rows.Err()
 		closeRows(rows)
 		if err != nil {
-			if err := s.finding("fatal", check.name, check.table, "scan", "complete replay scan", err); err != nil {
-				return err
+			if findingErr := s.finding("fatal", check.name, check.table, "scan", "complete replay scan", err); findingErr != nil {
+				return findingErr
 			}
 		}
 	}
@@ -552,8 +535,8 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 	for _, check := range checks {
 		rows, err := tx.QueryContext(ctx, check.statement)
 		if err != nil {
-			if err := s.finding("fatal", check.name, check.table, "scan", "readable persisted records", err); err != nil {
-				return err
+			if findingErr := s.finding("fatal", check.name, check.table, "scan", "readable persisted records", err); findingErr != nil {
+				return findingErr
 			}
 			continue
 		}
@@ -566,18 +549,18 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 				return s.finding("fatal", check.name, check.table, "scan", "readable record columns", columnErr)
 			}
 			scanner := preflightRecordScanner{row: rows, keys: check.keys, names: check.names, columns: columns}
-			if err := check.scan(&scanner); err != nil {
-				if err := s.finding("fatal", check.name, check.table, scanner.id, "valid persisted record", fmt.Errorf("%w; stored fields: %s", err, scanner.actual)); err != nil {
+			if checkErr := check.scan(&scanner); checkErr != nil {
+				if findingErr := s.finding("fatal", check.name, check.table, scanner.id, "valid persisted record", fmt.Errorf("%w; stored fields: %s", checkErr, scanner.actual)); findingErr != nil {
 					closeRows(rows)
-					return err
+					return findingErr
 				}
 			}
 		}
 		err = rows.Err()
 		closeRows(rows)
 		if err != nil {
-			if err := s.finding("fatal", check.name, check.table, "scan", "complete record scan", err); err != nil {
-				return err
+			if findingErr := s.finding("fatal", check.name, check.table, "scan", "complete record scan", err); findingErr != nil {
+				return findingErr
 			}
 		}
 	}
@@ -587,8 +570,8 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 		{"event-cursor-ledger", "workflow_event_sequences", "fatal", `SELECT 'run_id='||s.run_id,'max committed sequence='||coalesce((SELECT max(e.sequence) FROM workflow_events e WHERE e.run_id=s.run_id),0),'last_sequence='||s.last_sequence FROM workflow_event_sequences s WHERE s.last_sequence!=coalesce((SELECT max(e.sequence) FROM workflow_events e WHERE e.run_id=s.run_id),0)`, `SELECT count(*) FROM workflow_event_sequences`},
 		{"product-step-references", "workflow_run_steps", "warning", `SELECT 'id='||s.id||' workflow_run_id='||s.workflow_run_id,'workflow_runs.id='||s.workflow_run_id,'missing product parent' FROM workflow_run_steps s LEFT JOIN workflow_runs r ON r.id=s.workflow_run_id WHERE r.id IS NULL`, `SELECT count(*) FROM workflow_run_steps`},
 	} {
-		if err := preflightRelation(ctx, tx, check.name, check.table, check.severity, check.statement, check.source); err != nil {
-			return err
+		if checkErr := preflightRelation(ctx, tx, check.name, check.table, check.severity, check.statement, check.source); checkErr != nil {
+			return checkErr
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT sequence,digest FROM workflow_value_sets ORDER BY sequence`)
@@ -599,16 +582,16 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 	for rows.Next() {
 		var sequence int64
 		var digest string
-		if err := rows.Scan(&sequence, &digest); err != nil {
+		if scanErr := rows.Scan(&sequence, &digest); scanErr != nil {
 			closeRows(rows)
-			return s.finding("fatal", "value-sets", "workflow_value_sets", "scan", "readable value reference", err)
+			return s.finding("fatal", "value-sets", "workflow_value_sets", "scan", "readable value reference", scanErr)
 		}
 		s.count("value-sets", 1)
 		ref := values.ValueSetRef{ID: workflowValueID(sequence), Digest: digest}
-		if _, err := loadWorkflowValues(ctx, tx, ref); err != nil {
-			if err := s.finding("fatal", "value-sets", "workflow_value_sets", fmt.Sprintf("sequence=%d id=%s", sequence, ref.ID), "valid values with digest="+digest, err); err != nil {
+		if _, loadErr := loadWorkflowValueRecord(ctx, tx, ref); loadErr != nil {
+			if findingErr := s.finding("fatal", "value-sets", "workflow_value_sets", fmt.Sprintf("sequence=%d id=%s", sequence, ref.ID), "valid values with digest="+digest, loadErr); findingErr != nil {
 				closeRows(rows)
-				return err
+				return findingErr
 			}
 		}
 	}
@@ -624,25 +607,25 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 	s.count("frozen-material", 0)
 	for rows.Next() {
 		var digest string
-		if err := rows.Scan(&digest); err != nil {
+		if scanErr := rows.Scan(&digest); scanErr != nil {
 			closeRows(rows)
-			return s.finding("fatal", "frozen-material", "workflow_plan_materials", "scan", "readable plan digest", err)
+			return s.finding("fatal", "frozen-material", "workflow_plan_materials", "scan", "readable plan digest", scanErr)
 		}
 		s.count("frozen-material", 1)
 		check := s.material(ctx, tx, digest)
 		if check.materialErr != nil {
 			var total, active int64
-			if err := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN runtime_status IN ('succeeded','failed','canceled','timed_out','crashed') THEN 0 ELSE 1 END),0) FROM workflow_runs WHERE plan_digest=?`, digest).Scan(&total, &active); err != nil {
+			if scanErr := tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(CASE WHEN runtime_status IN ('succeeded','failed','canceled','timed_out','crashed') THEN 0 ELSE 1 END),0) FROM workflow_runs WHERE plan_digest=?`, digest).Scan(&total, &active); scanErr != nil {
 				closeRows(rows)
-				return s.finding("fatal", "frozen-material", "workflow_plan_materials", "plan_digest="+digest, "readable referencing runs", err)
+				return s.finding("fatal", "frozen-material", "workflow_plan_materials", "plan_digest="+digest, "readable referencing runs", scanErr)
 			}
 			severity := "fatal"
 			if total > 0 && active == 0 {
 				severity = "warning"
 			}
-			if err := s.finding(severity, "frozen-material", "workflow_plan_materials", "plan_digest="+digest, "valid frozen material", check.materialErr); err != nil {
+			if findingErr := s.finding(severity, "frozen-material", "workflow_plan_materials", "plan_digest="+digest, "valid frozen material", check.materialErr); findingErr != nil {
 				closeRows(rows)
-				return err
+				return findingErr
 			}
 		}
 	}
@@ -665,8 +648,8 @@ func preflightWorkflowRecords(ctx context.Context, tx workflowSQL) error {
 		}},
 		{"reactor-continuations", "workflow_reactor_continuations", "idempotency_key", `SELECT idempotency_key FROM workflow_reactor_continuations`, func(id string) error { _, err := loadWorkflowReactorContinuation(ctx, tx, id); return err }},
 	} {
-		if err := preflightEachID(ctx, tx, check.name, check.table, check.column, check.statement, check.load); err != nil {
-			return err
+		if checkErr := preflightEachID(ctx, tx, check.name, check.table, check.column, check.statement, check.load); checkErr != nil {
+			return checkErr
 		}
 	}
 	return nil

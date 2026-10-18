@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/go-workflow/compile"
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
-	workflowwait "github.com/hollis-labs/go-workflow/wait"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
+	workflowwait "github.com/hollis-labs/libs/workflow/engine/wait"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -394,8 +394,8 @@ func TestSQLStoragePreflightCanceledStartupReleasesTransaction(t *testing.T) {
 	entered := false
 	checkErr := f.host.SQLWorkflowStateStore.write(ctx, "mid-transaction cancellation", func(tx workflowSQL) error {
 		entered = true
-		if err := preflightWorkflowSchema(ctx, tx); err != nil {
-			return err
+		if checkErr := preflightWorkflowSchema(ctx, tx); checkErr != nil {
+			return checkErr
 		}
 		cancel()
 		return preflightWorkflowSnapshot(ctx, tx)

@@ -2,9 +2,13 @@ package workflowhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 )
@@ -22,15 +26,15 @@ func TestSQLPreflightTerminalCompatibilityWarnings(t *testing.T) {
 	for _, terminal := range []bool{true, false} {
 		t.Run(fmt.Sprint(terminal), func(t *testing.T) {
 			f := newSQLFacadeFixture(t, false, true)
-			if _, _, err := f.state.CreateRun(t.Context(), f.createRequest()); err != nil {
-				t.Fatal(err)
+			if _, _, checkErr := f.state.CreateRun(t.Context(), f.createRequest()); checkErr != nil {
+				t.Fatal(checkErr)
 			}
 			status := "pending"
 			if terminal {
 				status = "succeeded"
 			}
-			if _, err := f.product.DB.ExecContext(t.Context(), `UPDATE workflow_runs SET runtime_status=?,definition_revision_id=NULL WHERE id='host-run'`, status); err != nil {
-				t.Fatal(err)
+			if _, checkErr := f.product.DB.ExecContext(t.Context(), `UPDATE workflow_runs SET runtime_status=?,definition_revision_id=NULL WHERE id='host-run'`, status); checkErr != nil {
+				t.Fatal(checkErr)
 			}
 			state, err := collectWorkflowPreflight(t, f)
 			if terminal {
@@ -64,30 +68,30 @@ func TestSQLPreflightPilotEraTerminalRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.host.RecordPlanMaterial(t.Context(), compiled.material); err != nil {
-		t.Fatal(err)
+	if checkErr := f.host.RecordPlanMaterial(t.Context(), compiled.material); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 	// Persist the migration-150 pilot identity from the first insert, with the
 	// pre-154 NULL revision. No current-engine launch or relabeling is involved.
-	if _, err := f.product.DB.ExecContext(t.Context(), `INSERT INTO workflow_runs(id,definition_name,status,started_at,updated_at,engine_kind,engine_contract_version,plan_digest,runtime_status,runtime_generation) VALUES('pilot-history',?,'completed',?,?,?,?,?,'succeeded',3)`, compiled.material.ProductDefinitionName, workflowTime(workflowTestTime()), workflowTime(workflowTestTime()), EngineKindPilotHadron, PilotContractVersion, compiled.material.Plan.Digest); err != nil {
-		t.Fatal(err)
+	if _, checkErr := f.product.DB.ExecContext(t.Context(), `INSERT INTO workflow_runs(id,definition_name,status,started_at,updated_at,engine_kind,engine_contract_version,plan_digest,runtime_status,runtime_generation) VALUES('pilot-history',?,'completed',?,?,?,?,?,'succeeded',3)`, compiled.material.ProductDefinitionName, workflowTime(workflowTestTime()), workflowTime(workflowTestTime()), EngineKindPilotHadron, PilotContractVersion, compiled.material.Plan.Digest); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 	state, err := collectWorkflowPreflight(t, f)
 	if err != nil || state.warnings == 0 {
 		t.Fatalf("pilot terminal warnings=%d err=%v", state.warnings, err)
 	}
-	if err := PreflightWorkflowStorage(t.Context(), f.product); err != nil {
-		t.Fatal(err)
+	if checkErr := PreflightWorkflowStorage(t.Context(), f.product); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 }
 
 func TestSQLPreflightProductOrphanIsWarning(t *testing.T) {
 	f := newSQLFacadeFixture(t, false, true)
-	if _, _, err := f.state.CreateRun(t.Context(), f.createRequest()); err != nil {
-		t.Fatal(err)
+	if _, _, checkErr := f.state.CreateRun(t.Context(), f.createRequest()); checkErr != nil {
+		t.Fatal(checkErr)
 	}
-	if _, err := f.product.DB.ExecContext(t.Context(), `INSERT INTO workflow_run_steps(id,workflow_run_id,step_id,kind) VALUES('orphan','missing','work','tool')`); err != nil {
-		t.Fatal(err)
+	if _, checkErr := f.product.DB.ExecContext(t.Context(), `INSERT INTO workflow_run_steps(id,workflow_run_id,step_id,kind) VALUES('orphan','missing','work','tool')`); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 	state, err := collectWorkflowPreflight(t, f)
 	if err != nil || state.warnings != 1 {
@@ -97,16 +101,16 @@ func TestSQLPreflightProductOrphanIsWarning(t *testing.T) {
 	if finding.Severity != "warning" || finding.Table != "workflow_run_steps" || !strings.Contains(finding.Row, "orphan") || !strings.Contains(finding.Row, "missing") || finding.Expected == "" || finding.Actual == "" {
 		t.Fatalf("orphan diagnostic=%+v", finding)
 	}
-	if err := PreflightWorkflowStorage(t.Context(), f.product); err != nil {
-		t.Fatal(err)
+	if checkErr := PreflightWorkflowStorage(t.Context(), f.product); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 }
 
 func TestSQLPreflightMemoizesDistinctPlansForThousandsOfRuns(t *testing.T) {
 	f := newSQLFacadeFixture(t, false, true)
-	registry, err := newFrozenRegistry(&recordingStepExecutor{})
-	if err != nil {
-		t.Fatal(err)
+	registry, registryErr := newFrozenRegistry(&recordingStepExecutor{})
+	if registryErr != nil {
+		t.Fatal(registryErr)
 	}
 	materials := []PlanMaterial{f.material}
 	for i := 1; i < 3; i++ {
@@ -115,17 +119,17 @@ func TestSQLPreflightMemoizesDistinctPlansForThousandsOfRuns(t *testing.T) {
 			t.Fatal(err)
 		}
 		material.CreatedAt = workflowTestTime()
-		if err := f.host.RecordPlanMaterial(t.Context(), material); err != nil {
-			t.Fatal(err)
+		if checkErr := f.host.RecordPlanMaterial(t.Context(), material); checkErr != nil {
+			t.Fatal(checkErr)
 		}
-		if _, err := f.host.publishDefinition(t.Context(), material); err != nil {
-			t.Fatal(err)
+		if _, checkErr := f.host.publishDefinition(t.Context(), material); checkErr != nil {
+			t.Fatal(checkErr)
 		}
 		materials = append(materials, material)
 	}
 	for index, material := range materials {
-		if _, err := f.product.DB.ExecContext(t.Context(), `WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<1200) INSERT INTO workflow_runs(id,definition_name,status,started_at,updated_at,engine_kind,engine_contract_version,plan_digest,runtime_status,runtime_generation,definition_revision_id) SELECT ?||n,?,'running',?,?,?, ?,?,'pending',1,(SELECT revision_id FROM workflow_definition_revisions WHERE compiled_plan_digest=?) FROM ids`, fmt.Sprintf("batch-%d-", index), material.ProductDefinitionName, workflowTime(workflowTestTime()), workflowTime(workflowTestTime()), EngineKindGoWorkflow, EngineContractVersion, material.Plan.Digest, material.Plan.Digest); err != nil {
-			t.Fatal(err)
+		if _, checkErr := f.product.DB.ExecContext(t.Context(), `WITH RECURSIVE ids(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ids WHERE n<1200) INSERT INTO workflow_runs(id,definition_name,status,started_at,updated_at,engine_kind,engine_contract_version,plan_digest,runtime_status,runtime_generation,definition_revision_id) SELECT ?||n,?,'running',?,?,?, ?,?,'pending',1,(SELECT revision_id FROM workflow_definition_revisions WHERE compiled_plan_digest=?) FROM ids`, fmt.Sprintf("batch-%d-", index), material.ProductDefinitionName, workflowTime(workflowTestTime()), workflowTime(workflowTestTime()), EngineKindGoWorkflow, EngineContractVersion, material.Plan.Digest, material.Plan.Digest); checkErr != nil {
+			t.Fatal(checkErr)
 		}
 	}
 	state, err := collectWorkflowPreflight(t, f)
@@ -139,12 +143,12 @@ func TestSQLPreflightMemoizesDistinctPlansForThousandsOfRuns(t *testing.T) {
 
 func TestSQLPreflightCollectsAllNamedFindings(t *testing.T) {
 	f := newSQLFacadeFixture(t, false, true)
-	if _, _, err := f.state.CreateRun(t.Context(), f.createRequest()); err != nil {
-		t.Fatal(err)
+	if _, _, checkErr := f.state.CreateRun(t.Context(), f.createRequest()); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 	for _, statement := range []string{`UPDATE workflow_runs SET definition_revision_id=NULL,engine_contract_version='old-contract' WHERE id='host-run'`, `INSERT INTO workflow_event_sequences(run_id,last_sequence) VALUES('host-run',17)`, `INSERT INTO workflow_run_steps(id,workflow_run_id,step_id,kind) VALUES('orphan','missing','work','tool')`} {
-		if _, err := f.product.DB.ExecContext(t.Context(), statement); err != nil {
-			t.Fatal(err)
+		if _, checkErr := f.product.DB.ExecContext(t.Context(), statement); checkErr != nil {
+			t.Fatal(checkErr)
 		}
 	}
 	state, err := collectWorkflowPreflight(t, f)
@@ -164,11 +168,38 @@ func TestSQLPreflightCollectsAllNamedFindings(t *testing.T) {
 func TestSQLPreflightScopesSchemaAndForeignKeys(t *testing.T) {
 	f := newSQLFacadeFixture(t, false, true)
 	for _, statement := range []string{`CREATE TABLE workflowX_unrelated(id TEXT PRIMARY KEY,run_id TEXT REFERENCES workflow_runs(id))`, `PRAGMA foreign_keys=OFF`, `INSERT INTO workflowX_unrelated VALUES('unrelated','absent')`, `PRAGMA foreign_keys=ON`} {
-		if _, err := f.product.DB.ExecContext(t.Context(), statement); err != nil {
-			t.Fatal(err)
+		if _, checkErr := f.product.DB.ExecContext(t.Context(), statement); checkErr != nil {
+			t.Fatal(checkErr)
 		}
 	}
-	if err := PreflightWorkflowStorage(t.Context(), f.product); err != nil {
-		t.Fatalf("unowned table blocked workflow storage: %v", err)
+	if checkErr := PreflightWorkflowStorage(t.Context(), f.product); checkErr != nil {
+		t.Fatalf("unowned table blocked workflow storage: %v", checkErr)
+	}
+}
+
+func TestSQLPreflightRetrySnapshotCorruption(t *testing.T) {
+	f := newSQLFacadeFixture(t, false, true)
+	_, started, proof := sqlFacadeStartAttempt(t, f)
+	at := workflowTestTime().Add(3 * time.Second)
+	_, err := f.state.ScheduleNodeRetry(t.Context(), workflowruntime.ScheduleNodeRetryRequest{Activation: workflowruntime.RetryActivationSnapshot{ID: "retry", Attempt: started.Attempt.ID, Status: workflowruntime.RetryScheduled, FireAt: at.Add(time.Minute), Failure: workflowruntime.Failure{Code: "transient", Message: "retry failure", Retryable: true}}, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeFailed, At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = PreflightWorkflowStorage(t.Context(), f.product); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.product.DB.ExecContext(t.Context(), `UPDATE workflow_retry_activations SET snapshot_json='{}' WHERE activation_id='retry'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.host.SQLWorkflowStateStore.LoadRetryActivation(t.Context(), "retry"); !errors.Is(err, workflowruntime.ErrInvalidRecord) {
+		t.Fatalf("released reader: %v", err)
+	}
+	err = PreflightWorkflowStorage(t.Context(), f.product)
+	if err == nil || !strings.Contains(err.Error(), "retry") || !strings.Contains(err.Error(), "host-run") {
+		t.Fatalf("startup admitted unreadable retry or omitted its identity: %v", err)
+	}
+	report, err := collectWorkflowPreflight(t, f)
+	if err == nil || report.counts["records:retry-activations"] != 1 {
+		t.Fatalf("collect err=%v counts=%v", err, report.counts)
 	}
 }

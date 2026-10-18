@@ -2,27 +2,26 @@ package workflowhost
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/go-workflow/graph"
-	workflowruntime "github.com/hollis-labs/go-workflow/runtime"
-	"github.com/hollis-labs/go-workflow/values"
+	"github.com/hollis-labs/libs/workflow/engine/graph"
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
+	"github.com/hollis-labs/libs/workflow/engine/values"
 )
 
 func preflightPlantSQL(t *testing.T, f sqlFacadeFixture, statement string, args ...any) {
 	t.Helper()
-	if _, err := f.product.DB.ExecContext(t.Context(), statement, args...); err != nil {
-		t.Fatal(err)
+	if _, checkErr := f.product.DB.ExecContext(t.Context(), statement, args...); checkErr != nil {
+		t.Fatal(checkErr)
 	}
 }
 
 func preflightMutateImmutable(t *testing.T, f sqlFacadeFixture, trigger, statement string, args ...any) {
 	t.Helper()
 	var restore string
-	if err := f.product.DB.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name=?`, trigger).Scan(&restore); err != nil {
-		t.Fatal(err)
+	if scanErr := f.product.DB.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name=?`, trigger).Scan(&restore); scanErr != nil {
+		t.Fatal(scanErr)
 	}
 	preflightPlantSQL(t, f, `DROP TRIGGER "`+trigger+`"`)
 	preflightPlantSQL(t, f, statement, args...)
@@ -34,8 +33,8 @@ func plantPreflightReactor(t *testing.T, f sqlFacadeFixture, invalid bool) {
 	at := workflowTestTime()
 	digest := f.material.Plan.Digest
 	snapshot := workflowruntime.ReactorSnapshot{Identity: workflowruntime.ReactorIdentity{ID: "reactor-record", RegistrationID: "events", RegistrationGeneration: 1, Correlation: "project-1", Definition: graph.DefinitionRef{Authority: "project", Kind: "workflow", ID: "fixture", Version: "v1", Digest: digest}, Plan: planRef(f.material.Plan), Provenance: graph.Provenance{Authority: "project", Origin: "source", Digest: values.SHA256Digest([]byte("provenance"))}}, CurrentGeneration: 1, CurrentRunID: "host-run", ContinueAfterEvents: 10, Status: workflowruntime.ReactorWaiting, Generation: 1, CreatedAt: at, UpdatedAt: at}
-	if err := snapshot.Validate(); err != nil {
-		t.Fatal(err)
+	if validationErr := snapshot.Validate(); validationErr != nil {
+		t.Fatal(validationErr)
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -58,12 +57,12 @@ func TestSQLPreflightNegativeChecksNameRows(t *testing.T) {
 		}},
 		{"claim-replay-lease", "claim-replay", "workflow_claim_idempotency", "claim", func(t *testing.T, f sqlFacadeFixture) {
 			var encoded string
-			if err := f.product.DB.QueryRowContext(t.Context(), `SELECT result_json FROM workflow_claim_idempotency WHERE idempotency_key='claim'`).Scan(&encoded); err != nil {
-				t.Fatal(err)
+			if scanErr := f.product.DB.QueryRowContext(t.Context(), `SELECT result_json FROM workflow_claim_idempotency WHERE idempotency_key='claim'`).Scan(&encoded); scanErr != nil {
+				t.Fatal(scanErr)
 			}
 			var result workflowruntime.ClaimResult
-			if err := json.Unmarshal([]byte(encoded), &result); err != nil {
-				t.Fatal(err)
+			if checkErr := json.Unmarshal([]byte(encoded), &result); checkErr != nil {
+				t.Fatal(checkErr)
 			}
 			result.Lease.Owner = "wrong-owner"
 			bytes, err := json.Marshal(result)
@@ -77,6 +76,27 @@ func TestSQLPreflightNegativeChecksNameRows(t *testing.T) {
 		}},
 		{"json-envelope", "envelopes", "workflow_memo_entries", "entry_json", func(t *testing.T, f sqlFacadeFixture) {
 			preflightPlantSQL(t, f, `INSERT INTO workflow_memo_entries(cache_key,source_run_id,source_node_id,source_attempt,entry_json,created_at,expires_at) VALUES('memo','host-run','work',1,'not-json',?,?)`, workflowTime(workflowTestTime()), workflowTime(workflowTestTime()))
+		}},
+		{"fanouts-decoder", "records:fanouts", "workflow_fanouts", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_fanouts(run_id,node_id,status,max_concurrency,generation,snapshot_json) VALUES('host-run','work','running',1,1,'{}')`)
+		}},
+		{"services-decoder", "records:services", "workflow_services", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_services(run_id,node_id,status,generation,updated_at,snapshot_json) VALUES('host-run','work','ready',1,'2026-01-01T00:00:00Z','{}')`)
+		}},
+		{"cancellation-intents-decoder", "records:cancellation-intents", "workflow_cancellation_intents", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_cancellation_intents(intent_id,run_id,kind,status,requested_at,generation,snapshot_json) VALUES('intent','host-run','run','pending','2026-01-01T00:00:00Z',1,'{}')`)
+		}},
+		{"control-decisions-decoder", "records:control-decisions", "workflow_control_decisions", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_control_decisions(run_id,node_id,kind,outcome,source_generation,generation,created_at,snapshot_json) VALUES('host-run','work','switch','selected',1,1,'2026-01-01T00:00:00Z','{}')`)
+		}},
+		{"run-policy-decisions-decoder", "records:run-policy-decisions", "workflow_run_policy_decisions", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_run_policy_decisions(run_id,idempotency_key,request_json,snapshot_json,created_at) VALUES('host-run','policy','{}','{}','2026-01-01T00:00:00Z')`)
+		}},
+		{"replay-provenance-decoder", "records:replay-provenance", "workflow_replay_provenance", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_replay_provenance(run_id,source_run_id,from_node_id,plan_digest,idempotency_key,created_at,request_json,snapshot_json) VALUES('host-run','host-run','work','digest','replay','2026-01-01T00:00:00Z','{}','{}')`)
+		}},
+		{"memo-entries-decoder", "records:memo-entries", "workflow_memo_entries", "host-run", func(t *testing.T, f sqlFacadeFixture) {
+			preflightPlantSQL(t, f, `INSERT INTO workflow_memo_entries(cache_key,source_run_id,source_node_id,source_attempt,entry_json,created_at,expires_at) VALUES('memo','host-run','work',1,'{}','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z')`)
 		}},
 		{"generation-type", "envelopes", "workflow_services", "generation", func(t *testing.T, f sqlFacadeFixture) {
 			preflightPlantSQL(t, f, `INSERT INTO workflow_services(run_id,node_id,status,generation,updated_at,snapshot_json) VALUES('host-run','work','ready',1.5,?,'{}')`, workflowTime(workflowTestTime()))
@@ -119,8 +139,8 @@ func TestSQLPreflightNegativeChecksNameRows(t *testing.T) {
 				t.Fatal(err)
 			}
 			material.CreatedAt = workflowTestTime()
-			if err := f.host.RecordPlanMaterial(t.Context(), material); err != nil {
-				t.Fatal(err)
+			if checkErr := f.host.RecordPlanMaterial(t.Context(), material); checkErr != nil {
+				t.Fatal(checkErr)
 			}
 			preflightMutateImmutable(t, f, "workflow_plan_materials_no_update", `UPDATE workflow_plan_materials SET source_content=x'00' WHERE plan_digest=?`, material.Plan.Digest)
 		}},
@@ -139,8 +159,8 @@ func TestSQLPreflightNegativeChecksNameRows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSQLFacadeFixture(t, false, true)
 			sqlFacadeStartAttempt(t, f)
-			if err := PreflightWorkflowStorage(t.Context(), f.product); err != nil {
-				t.Fatalf("baseline is not qualified: %v", err)
+			if checkErr := PreflightWorkflowStorage(t.Context(), f.product); checkErr != nil {
+				t.Fatalf("baseline is not qualified: %v", checkErr)
 			}
 			tc.plant(t, f)
 			state, err := collectWorkflowPreflight(t, f)
@@ -182,5 +202,5 @@ func TestSQLPreflightSchemaDriftNamesBothDigests(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal(fmt.Sprintf("missing named schema object: %+v", state.findings))
+	t.Fatalf("missing named schema object: %+v", state.findings)
 }

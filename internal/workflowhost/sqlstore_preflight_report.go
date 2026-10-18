@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/hollis-labs/go-workflow/compile"
+	"github.com/hollis-labs/libs/workflow/engine/compile"
 )
 
 const preflightDisposition = "operator: keep the service stopped; roll back to the previous binary (database untouched, no new migration), or restore the verified backup"
@@ -62,8 +62,8 @@ func (s *workflowPreflight) count(name string, n int64) {
 
 func (s *workflowPreflight) finding(severity, validation, table, row, expected string, actual any) error {
 	f := workflowStorageFinding{Severity: severity, Validation: validation, Table: table, Row: row, Expected: expected, Actual: fmt.Sprint(actual)}
-	if err, ok := actual.(error); ok {
-		f.cause = err
+	if checkErr, ok := actual.(error); ok {
+		f.cause = checkErr
 	}
 	if s.collect {
 		s.findings = append(s.findings, f)

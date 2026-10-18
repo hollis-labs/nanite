@@ -13,6 +13,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	workflowruntime "github.com/hollis-labs/libs/workflow/engine/runtime"
 )
 
 func TestPreflightCopyReadOnlyProcess(t *testing.T) {
@@ -171,5 +174,50 @@ func TestPreflightCopyRefusalPreservesBytes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, preflightCopyFileBytes(t, path)) || strings.Contains(output.String(), "PASS") || !strings.Contains(output.String(), "validation=run-bindings rows_scanned=1") {
 		t.Fatalf("refusal mutated copy or misreported coverage: %s", &output)
+	}
+}
+
+func TestPreflightCopySharedSnapshotParity(t *testing.T) {
+	for _, scenario := range []string{"retry", "corrupt-retry", "terminal-history", "resumable-missing-revision"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newSQLFacadeFixture(t, false, true)
+			_, started, proof := sqlFacadeStartAttempt(t, f)
+			if strings.Contains(scenario, "retry") {
+				at := workflowTestTime().Add(3 * time.Second)
+				_, err := f.state.ScheduleNodeRetry(t.Context(), workflowruntime.ScheduleNodeRetryRequest{Activation: workflowruntime.RetryActivationSnapshot{ID: "retry", Attempt: started.Attempt.ID, Status: workflowruntime.RetryScheduled, FireAt: at.Add(time.Minute), Failure: workflowruntime.Failure{Code: "transient", Message: "retry failure", Retryable: true}}, ExpectedNodeGeneration: started.Node.Generation, ExpectedAttemptGeneration: started.Attempt.Generation, Claim: proof, AttemptStatus: workflowruntime.NodeFailed, At: at})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if scenario == "corrupt-retry" {
+					preflightPlantSQL(t, f, `UPDATE workflow_retry_activations SET snapshot_json='{}' WHERE activation_id='retry'`)
+				}
+			} else {
+				preflightPlantSQL(t, f, `UPDATE workflow_runs SET definition_revision_id=NULL WHERE id='host-run'`)
+				if scenario == "terminal-history" {
+					preflightPlantSQL(t, f, `UPDATE workflow_runs SET runtime_status='succeeded' WHERE id='host-run'`)
+				}
+			}
+			startupErr := PreflightWorkflowStorage(t.Context(), f.product)
+			path := f.product.DBPath(t.Context())
+			before := preflightCopyFileBytes(t, path)
+			var output bytes.Buffer
+			copyErr := PreflightWorkflowStorageCopy(t.Context(), path, &output)
+			wantPass := scenario == "retry" || scenario == "terminal-history"
+			if (startupErr == nil) != wantPass || (copyErr == nil) != wantPass || strings.Contains(output.String(), "workflow storage preflight: PASS") != wantPass {
+				t.Fatalf("startup=%v copy=%v output=%s", startupErr, copyErr, &output)
+			}
+			if !reflect.DeepEqual(before, preflightCopyFileBytes(t, path)) {
+				t.Fatal("copy preflight changed supplied files")
+			}
+			if strings.Contains(scenario, "retry") && !strings.Contains(output.String(), "validation=records:retry-activations rows_scanned=1") {
+				t.Fatalf("missing semantic retry coverage: %s", &output)
+			}
+			if scenario == "corrupt-retry" && (!strings.Contains(copyErr.Error(), "activation_id=retry run_id=host-run") || !strings.Contains(output.String(), "severity=fatal")) {
+				t.Fatalf("missing named retry finding: %v %s", copyErr, &output)
+			}
+			if scenario == "terminal-history" && (!strings.Contains(output.String(), "severity=warning") || !strings.Contains(output.String(), "definition_revision_id=NULL")) {
+				t.Fatalf("missing terminal compatibility warning: %s", &output)
+			}
+		})
 	}
 }

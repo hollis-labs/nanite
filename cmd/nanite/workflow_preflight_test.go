@@ -39,7 +39,7 @@ func TestWorkflowPreflightCLI(t *testing.T) {
 	}
 	stdout.Reset()
 	err = cmdWorkflow(t.Context(), []string{"preflight", "--db", product.DBPath(t.Context())}, &stdout, &stderr)
-	if err == nil || !strings.Contains(err.Error(), `run "legacy-run" blocked`) || strings.Contains(stdout.String(), "PASS") {
+	if err == nil || !strings.Contains(err.Error(), `row="id=legacy-run"`) || strings.Contains(stdout.String(), "PASS") {
 		t.Fatalf("refusal=%v stdout=%s", err, &stdout)
 	}
 }
@@ -87,7 +87,7 @@ func TestWorkflowPreflightProcessExit(t *testing.T) {
 			}
 		} else {
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), `run "exit-run" blocked`) || !strings.Contains(stderr.String(), "operator: keep the service stopped") || strings.Contains(stdout.String(), "workflow storage preflight: PASS") {
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), `row="id=exit-run"`) || !strings.Contains(stderr.String(), "operator: keep the service stopped") || strings.Contains(stdout.String(), "workflow storage preflight: PASS") {
 				t.Fatalf("refusal: %v stdout=%s stderr=%s", err, &stdout, &stderr)
 			}
 		}

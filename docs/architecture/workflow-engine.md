@@ -109,7 +109,10 @@ validators as startup without migrating, seeding, running cutover, or starting
 workers or a server. It prints each reached validation and its logical rows
 scanned to stdout, followed by a PASS line on success (exit 0). Refusal exits 1
 with the same named startup diagnostic and operator disposition on stderr;
-stdout contains coverage reached before refusal, without a PASS line. Counts
+stdout contains coverage and all collected findings, without a PASS line.
+Terminal compatibility warnings are printed with `severity=warning` and permit
+a pass. Retry coverage (`records:retry-activations`) counts semantic snapshot
+loads, separately from JSON envelope checks. Counts
 include repeated scans when different validations inspect the same records.
 
 Use a stable database copy: either copy the DB and its `-wal` together while

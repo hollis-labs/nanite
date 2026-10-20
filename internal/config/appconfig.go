@@ -24,6 +24,18 @@ type TunablesConfig struct {
 	Logging   LoggingConfig   `yaml:"logging"`
 	Recipes   RecipesConfig   `yaml:"recipes"`
 	Harness   HarnessConfig   `yaml:"harness"`
+	Bus       BusConfig       `yaml:"bus"`
+}
+
+// BusConfig controls publishing Nanite's lifecycle events to the shared event
+// hub. Off by default; the hub itself is found through HOLLIS_EVENTS_URL, so
+// with no URL nothing is sent even when this is on.
+type BusConfig struct {
+	// Enabled turns publishing on.
+	Enabled bool `yaml:"enabled"`
+	// SpoolDir keeps events the hub has not yet taken, across restarts. Empty
+	// means events wait in memory only.
+	SpoolDir string `yaml:"spool_dir"`
 }
 
 // HarnessConfig selects the harness profile a run uses when it names none, and
@@ -283,6 +295,9 @@ func DefaultAppConfig() *TunablesConfig {
 			IdleTimeoutSeconds:       120,
 			MaxRequestBodyBytes:      10 << 20, // 10 MiB
 			MaxUploadBodyBytes:       32 << 20, // 32 MiB (matches pre-existing multipart cap)
+		},
+		Bus: BusConfig{
+			SpoolDir: "data/events-hub",
 		},
 		Logging: LoggingConfig{
 			Format:    "json",

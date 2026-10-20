@@ -785,3 +785,63 @@ func TestNewRefusesNonLoopbackBind(t *testing.T) {
 		}
 	}
 }
+
+// ListenAndServeReady says "ready" only once the socket is bound: on an occupied
+// port it returns the bind error and never calls ready.
+func TestListenAndServeReadyOnlyAfterBind(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	s := newTestServer(t, config.HTTPConfig{BindAddress: "127.0.0.1"})
+	s.port = occupied.Addr().(*net.TCPAddr).Port
+	called := false
+	if serveErr := s.ListenAndServeReady(func() { called = true }); serveErr == nil {
+		t.Fatal("serving on an occupied port should fail")
+	}
+	if called {
+		t.Fatal("ready was called although the port could not be bound")
+	}
+
+	// A free port, bound by the test's own listener (so there is no reserve,
+	// close and rebind race): ready is called after the bind, a connection
+	// succeeds then, and closing the listener ends the server and is joined.
+	lnCh := make(chan net.Listener, 1)
+	s = newTestServer(t, config.HTTPConfig{BindAddress: "127.0.0.1"})
+	s.port = 0
+	s.listen = func(network, addr string) (net.Listener, error) {
+		ln, listenErr := net.Listen(network, addr)
+		lnCh <- ln
+		return ln, listenErr
+	}
+	readyErr := make(chan error, 1)
+	served := make(chan error, 1)
+	go func() {
+		served <- s.ListenAndServeReady(func() {
+			ln := <-lnCh
+			c, dialErr := net.Dial("tcp", ln.Addr().String())
+			if dialErr == nil {
+				_ = c.Close()
+			}
+			lnCh <- ln // hand it back for the test's cleanup
+			readyErr <- dialErr
+		})
+	}()
+	select {
+	case dialErr := <-readyErr:
+		if dialErr != nil {
+			t.Fatalf("not accepting connections when ready was called: %v", dialErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ready was never called on a free port")
+	}
+	ln := <-lnCh
+	_ = ln.Close()
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server did not stop after its listener was closed")
+	}
+}

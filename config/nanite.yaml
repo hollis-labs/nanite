@@ -61,3 +61,12 @@ harness:
   #
   # cli_models:
   #   claude: claude-opus-5
+
+bus:
+  # Publish Nanite's lifecycle (starting, running, stopped, failed) to the shared
+  # event hub as resource.state_changed events. Off by default. The hub is found
+  # through the environment (HOLLIS_EVENTS_URL, plus HOLLIS_AUTH_TOKEN_FILE_NANITE
+  # for the credential); with no URL nothing is sent even when this is true.
+  enabled: false
+  # Events the hub has not yet taken wait here across restarts.
+  spool_dir: data/events-hub

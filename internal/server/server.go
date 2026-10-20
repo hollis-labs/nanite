@@ -58,8 +58,11 @@ var uploadPathPrefixes = []string{
 
 // Server is the HTTP server for Nanite Chat.
 type Server struct {
-	store      *store.Store
-	port       int
+	store *store.Store
+	port  int
+	// listen binds the listening socket; nil means net.Listen. Tests inject it
+	// to own the listener they are served on.
+	listen     func(network, addr string) (net.Listener, error)
 	dev        bool
 	mux        *http.ServeMux
 	api        *api.API
@@ -252,7 +255,13 @@ func (s *Server) handlerChain() http.Handler {
 	)
 }
 
-func (s *Server) ListenAndServe() error {
+func (s *Server) ListenAndServe() error { return s.ListenAndServeReady(nil) }
+
+// ListenAndServeReady is ListenAndServe that calls ready (when not nil) once the
+// listening socket is bound, so a caller can tell "serving" from "about to try".
+// A bind failure (an occupied port, a bad address) returns its error and never
+// calls ready.
+func (s *Server) ListenAndServeReady(ready func()) error {
 	handler := s.handlerChain()
 	addr := s.listenAddress()
 	s.logStartupPosture(addr)
@@ -265,7 +274,18 @@ func (s *Server) ListenAndServe() error {
 		WriteTimeout:      time.Duration(s.httpCfg.WriteTimeoutSeconds) * time.Second,
 		IdleTimeout:       time.Duration(s.httpCfg.IdleTimeoutSeconds) * time.Second,
 	}
-	return httpSrv.ListenAndServe()
+	listen := s.listen
+	if listen == nil {
+		listen = net.Listen
+	}
+	ln, err := listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	if ready != nil {
+		ready()
+	}
+	return httpSrv.Serve(ln)
 }
 
 func (s *Server) listenAddress() string {

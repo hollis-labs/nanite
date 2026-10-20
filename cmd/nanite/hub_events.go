@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -13,11 +15,18 @@ import (
 	"github.com/hollis-labs/nanite/internal/hubevents"
 )
 
-// hubLifecycle announces Nanite's service lifecycle to the event hub.
+// hubLifecycle announces Nanite's service lifecycle to the event hub. It says a
+// state only once it is true and never replaces a terminal state: after failed
+// or stopped nothing else is announced. Every method is safe on a nil
+// *hubLifecycle and does nothing when bus.enabled is off.
 type hubLifecycle struct {
 	em      *hubevents.Emitter
 	closeFn func(context.Context) error
-	once    sync.Once
+
+	mu      sync.Mutex
+	running bool // the listener was bound
+	done    bool // a terminal state (stopped or failed) was announced
+	closed  bool
 }
 
 // startHubEvents returns the lifecycle announcer. With bus.enabled false (the
@@ -49,34 +58,96 @@ func startHubEvents(cfg config.BusConfig) *hubLifecycle {
 	return h
 }
 
-// starting, running and failed announce those states; they are safe on a nil or
-// disabled announcer.
+// starting announces that startup began.
 func (h *hubLifecycle) starting() {
-	h.em.ServiceState(context.Background(), "", hubevents.StateStarting, "", "system")
-}
-
-func (h *hubLifecycle) running() {
-	h.em.ServiceState(context.Background(), hubevents.StateStarting, hubevents.StateRunning, "", "system")
-}
-
-func (h *hubLifecycle) failed() {
-	h.em.ServiceState(context.Background(), "", hubevents.StateFailed, "", "system")
-}
-
-// stopped announces the stop once, however many paths reach it, and gives the
-// client a moment to hand the event over before the process exits.
-func (h *hubLifecycle) stopped() {
 	if h == nil {
 		return
 	}
-	h.once.Do(func() {
-		h.em.ServiceState(context.Background(), "", hubevents.StateStopped, "", "system")
-		if h.closeFn != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if err := h.closeFn(ctx); err != nil {
-				slog.Warn("hub events: close", "err", err)
-			}
-		}
-	})
+	h.em.ServiceState(context.Background(), "", hubevents.StateStarting, "", "system")
+}
+
+// ready announces running. Call it only once the listener is bound.
+func (h *hubLifecycle) ready() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.done {
+		return
+	}
+	h.running = true
+	h.em.ServiceState(context.Background(), hubevents.StateStarting, hubevents.StateRunning, "", "system")
+}
+
+// failed announces failed, the terminal state of a start or run that ended in
+// an error. Nothing is announced after it.
+func (h *hubLifecycle) failed() { h.terminal(hubevents.StateFailed) }
+
+// stopped announces the stop of a service that was running. A service that never
+// reached running did not stop; it failed to start.
+func (h *hubLifecycle) stopped() { h.terminal(hubevents.StateStopped) }
+
+func (h *hubLifecycle) terminal(to string) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.done {
+		return
+	}
+	if to == hubevents.StateStopped && !h.running {
+		to = hubevents.StateFailed
+	}
+	h.done = true
+	h.em.ServiceState(context.Background(), "", to, "", "system")
+	h.closeLocked()
+}
+
+// finish is the deferred end of cmdServe: whatever has not been announced is,
+// then the client is closed. Leaving before the listener was bound is a failed
+// start, not a stop.
+func (h *hubLifecycle) finish() {
+	if h == nil {
+		return
+	}
+	h.stopped()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closeLocked()
+}
+
+// closeLocked gives the client a moment to hand the last event over. The caller
+// holds h.mu.
+func (h *hubLifecycle) closeLocked() {
+	if h.closed || h.closeFn == nil {
+		return
+	}
+	h.closed = true
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := h.closeFn(ctx); err != nil {
+		slog.Warn("hub events: close", "err", err)
+	}
+}
+
+// readyServer is the part of the HTTP server serveAnnouncing runs.
+type readyServer interface {
+	ListenAndServeReady(ready func()) error
+}
+
+// serveAnnouncing serves, announcing running only once the listener is bound,
+// and the end of serving as stopped (a clean close) or failed (any other error,
+// a bind failure included). The error is returned unchanged.
+func serveAnnouncing(srv readyServer, h *hubLifecycle) error {
+	err := srv.ListenAndServeReady(h.ready)
+	switch {
+	case err == nil:
+	case errors.Is(err, http.ErrServerClosed):
+		h.stopped()
+	default:
+		h.failed()
+	}
+	return err
 }

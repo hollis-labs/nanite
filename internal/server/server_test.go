@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -783,5 +784,53 @@ func TestNewRefusesNonLoopbackBind(t *testing.T) {
 		if _, err := New(nil, nil, 0, false, nil, config.HTTPConfig{BindAddress: bind}, Auth{}); err != nil && strings.Contains(err.Error(), "refusing to bind") {
 			t.Errorf("New refused loopback bind %q: %v", bind, err)
 		}
+	}
+}
+
+// ListenAndServeReady says "ready" only once the socket is bound: on an occupied
+// port it returns the bind error and never calls ready.
+func TestListenAndServeReadyOnlyAfterBind(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+
+	s := newTestServer(t, config.HTTPConfig{BindAddress: "127.0.0.1"})
+	s.port = occupied.Addr().(*net.TCPAddr).Port
+	called := false
+	if serveErr := s.ListenAndServeReady(func() { called = true }); serveErr == nil {
+		t.Fatal("serving on an occupied port should fail")
+	}
+	if called {
+		t.Fatal("ready was called although the port could not be bound")
+	}
+
+	// A free port: ready is called after the bind, so a connection succeeds.
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := free.Addr().(*net.TCPAddr).Port
+	_ = free.Close()
+	s = newTestServer(t, config.HTTPConfig{BindAddress: "127.0.0.1"})
+	s.port = port
+	readyErr := make(chan error, 1)
+	go func() {
+		_ = s.ListenAndServeReady(func() {
+			c, dialErr := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+			if dialErr == nil {
+				_ = c.Close()
+			}
+			readyErr <- dialErr
+		})
+	}()
+	select {
+	case dialErr := <-readyErr:
+		if dialErr != nil {
+			t.Fatalf("not accepting connections when ready was called: %v", dialErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ready was never called on a free port")
 	}
 }

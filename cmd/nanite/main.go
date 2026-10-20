@@ -281,7 +281,7 @@ func cmdServeWithInitializers(
 	// Tell the event hub the service is starting. Off unless bus.enabled.
 	hubLife := startHubEvents(appCfg.Bus)
 	hubLife.starting()
-	defer hubLife.stopped()
+	defer hubLife.finish()
 
 	// Initialize OpenTelemetry tracing via the internal/otel wrapper.
 	// The wrapper honors NANITE_OTEL_DISABLED=1 (env takes precedence)
@@ -1077,9 +1077,7 @@ func cmdServeWithInitializers(
 	})
 	startBackgroundWorkers(daemonLifecycle, container, s)
 
-	hubLife.running()
-	if err := srv.ListenAndServe(); err != nil {
-		hubLife.failed()
+	if err := serveAnnouncing(srv, hubLife); err != nil {
 		slog.Error("server error", "err", err)
 		return fmt.Errorf("server error: %w", err)
 	}

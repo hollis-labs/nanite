@@ -278,6 +278,11 @@ func cmdServeWithInitializers(
 		slog.Warn("failed to load app config, using defaults", "err", appCfgErr)
 	}
 
+	// Tell the event hub the service is starting. Off unless bus.enabled.
+	hubLife := startHubEvents(appCfg.Bus)
+	hubLife.starting()
+	defer hubLife.stopped()
+
 	// Initialize OpenTelemetry tracing via the internal/otel wrapper.
 	// The wrapper honors NANITE_OTEL_DISABLED=1 (env takes precedence)
 	// and TunablesConfig.OTel.Disabled — either installs a no-op tracer
@@ -1028,6 +1033,7 @@ func cmdServeWithInitializers(
 			slog.Error("daemon lifecycle shutdown", "err", err)
 		}
 		container.Shutdown()
+		hubLife.stopped()
 		os.Exit(0)
 	})
 
@@ -1071,7 +1077,9 @@ func cmdServeWithInitializers(
 	})
 	startBackgroundWorkers(daemonLifecycle, container, s)
 
+	hubLife.running()
 	if err := srv.ListenAndServe(); err != nil {
+		hubLife.failed()
 		slog.Error("server error", "err", err)
 		return fmt.Errorf("server error: %w", err)
 	}

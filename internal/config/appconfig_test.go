@@ -96,3 +96,25 @@ func TestLoadAppConfigRejectsInvalidBindAddress(t *testing.T) {
 		t.Fatalf("LoadAppConfig error = %q, want host-only bind diagnostic", err)
 	}
 }
+
+func TestLoadAppConfigBus(t *testing.T) {
+	def, err := LoadAppConfig(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAppConfig: %v", err)
+	}
+	if def.Bus.Enabled || def.Bus.SpoolDir != "data/events-hub" {
+		t.Fatalf("default bus = %+v, want disabled with the default spool dir", def.Bus)
+	}
+
+	path := filepath.Join(t.TempDir(), "nanite.yaml")
+	if writeErr := os.WriteFile(path, []byte("bus:\n  enabled: true\n  spool_dir: /var/spool/nanite-events\n"), 0o600); writeErr != nil {
+		t.Fatalf("write config: %v", writeErr)
+	}
+	cfg, err := LoadAppConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAppConfig: %v", err)
+	}
+	if !cfg.Bus.Enabled || cfg.Bus.SpoolDir != "/var/spool/nanite-events" {
+		t.Fatalf("bus = %+v, want the file's values", cfg.Bus)
+	}
+}

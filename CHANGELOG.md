@@ -168,6 +168,8 @@ lives in the git log.
 
 ### Added
 
+- **Service lifecycle events to the event hub, off by default.** With `bus.enabled: true` in `config/nanite.yaml` and `HOLLIS_EVENTS_URL` set, Nanite publishes `resource.state_changed` (entity type `service`, subject `msg://service/nanite/nanite`) for starting, running, stopped and failed, through `mesh/eventbus` with a disk spool for when the hub is away. Best effort: nothing waits on the hub, a start problem is logged, and with no URL nothing is sent. Needs `harness/core` v0.15.0 (now required). Worker, job and plugin-event publishing are not part of this.
+
 - **Provider keys by reference.** A provider's API key is a reference
   (`keychain://`, `helper://`, `file://`, `op://`), set with `nanite provider
   set-ref` or the `key_ref` setting, and resolved when the provider is first

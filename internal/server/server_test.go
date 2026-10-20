@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -806,22 +805,27 @@ func TestListenAndServeReadyOnlyAfterBind(t *testing.T) {
 		t.Fatal("ready was called although the port could not be bound")
 	}
 
-	// A free port: ready is called after the bind, so a connection succeeds.
-	free, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := free.Addr().(*net.TCPAddr).Port
-	_ = free.Close()
+	// A free port, bound by the test's own listener (so there is no reserve,
+	// close and rebind race): ready is called after the bind, a connection
+	// succeeds then, and closing the listener ends the server and is joined.
+	lnCh := make(chan net.Listener, 1)
 	s = newTestServer(t, config.HTTPConfig{BindAddress: "127.0.0.1"})
-	s.port = port
+	s.port = 0
+	s.listen = func(network, addr string) (net.Listener, error) {
+		ln, listenErr := net.Listen(network, addr)
+		lnCh <- ln
+		return ln, listenErr
+	}
 	readyErr := make(chan error, 1)
+	served := make(chan error, 1)
 	go func() {
-		_ = s.ListenAndServeReady(func() {
-			c, dialErr := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		served <- s.ListenAndServeReady(func() {
+			ln := <-lnCh
+			c, dialErr := net.Dial("tcp", ln.Addr().String())
 			if dialErr == nil {
 				_ = c.Close()
 			}
+			lnCh <- ln // hand it back for the test's cleanup
 			readyErr <- dialErr
 		})
 	}()
@@ -832,5 +836,12 @@ func TestListenAndServeReadyOnlyAfterBind(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("ready was never called on a free port")
+	}
+	ln := <-lnCh
+	_ = ln.Close()
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server did not stop after its listener was closed")
 	}
 }

@@ -58,8 +58,11 @@ var uploadPathPrefixes = []string{
 
 // Server is the HTTP server for Nanite Chat.
 type Server struct {
-	store      *store.Store
-	port       int
+	store *store.Store
+	port  int
+	// listen binds the listening socket; nil means net.Listen. Tests inject it
+	// to own the listener they are served on.
+	listen     func(network, addr string) (net.Listener, error)
 	dev        bool
 	mux        *http.ServeMux
 	api        *api.API
@@ -271,7 +274,11 @@ func (s *Server) ListenAndServeReady(ready func()) error {
 		WriteTimeout:      time.Duration(s.httpCfg.WriteTimeoutSeconds) * time.Second,
 		IdleTimeout:       time.Duration(s.httpCfg.IdleTimeoutSeconds) * time.Second,
 	}
-	ln, err := net.Listen("tcp", addr)
+	listen := s.listen
+	if listen == nil {
+		listen = net.Listen
+	}
+	ln, err := listen("tcp", addr)
 	if err != nil {
 		return err
 	}

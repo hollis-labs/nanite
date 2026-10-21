@@ -6,6 +6,10 @@ lives in the git log.
 
 ## Unreleased
 
+### Security
+
+- Go toolchain 1.26.10 (`go` directive and CI pin) for GO-2026-6809 (crypto/x509); no behavior change.
+
 ### Breaking
 
 - **Provider API keys are read from the environment only when enabled.**

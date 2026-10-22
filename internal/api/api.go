@@ -177,6 +177,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// Agents
 	a.registerAgentDefinitionRoutes(mux)
 	a.registerNativeAuthorityRoutes(mux)
+	a.registerAgentManagementRoutes(mux)
 	a.registerLogicalAgentProvisionRoutes(mux)
 	a.registerProfileRetirementRoutes(mux)
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)

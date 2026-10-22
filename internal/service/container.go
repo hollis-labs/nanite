@@ -75,6 +75,9 @@ import (
 // single wiring point — created once in main.go and passed to the API layer.
 type Container struct {
 	AgentDefinitions *AgentDefinitions
+	// AgentSetup installs, configures and authorizes an agent in one
+	// transaction; it backs POST /api/agent-setup and `nanite agent setup`.
+	AgentSetup *AgentSetupService
 	// NativeAuthority is the operator-only writer of native-view tool authority.
 	NativeAuthority *NativeAuthorityAdmin
 	// NativeGrants decides native-view tool authority per call; the credential
@@ -1441,6 +1444,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Sessions:            sessions,
 		CognitiveViews:      cognitiveViews,
 		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
+		AgentSetup:          &AgentSetupService{Store: cfg.Store, Keys: providerKeys},
 		NativeAuthority:     &NativeAuthorityAdmin{Writer: cfg.Store.LocalAuthority()},
 		NativeGrants:        nativeGrants,
 		Agents:              agents,

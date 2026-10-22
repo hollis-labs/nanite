@@ -9,12 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
-	"github.com/hollis-labs/libs/mesh/core/agentdef"
-	"github.com/hollis-labs/nanite/internal/agentdefs"
-	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -62,27 +58,18 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 	if err != nil {
 		return err
 	}
-	parsed, err := agentdef.Parse(data, agentpolicy.Option())
-	if err != nil {
-		return fmt.Errorf("definition is not valid: %w", err)
-	}
-
-	// --- preflight: nothing below writes ---------------------------------
+	// --- flag-level checks; the service checks the rest before writing -----
 	switch *runtime {
 	case "api":
-	case "cli":
-	default:
-		return fmt.Errorf("runtime %q is not supported; use --runtime api or cli", *runtime)
-	}
-	if *runtime == "api" {
 		if *provider == "" || *model == "" {
 			return errors.New("--provider and --model are required for runtime api\n" + agentSetupUsage)
 		}
-		if err = preflightProviderKey(ctx, keys, *provider); err != nil {
-			return err
+	case "cli":
+		if *provider == "" {
+			return errors.New("--provider is required for runtime cli (for example claude); --model is optional\n" + agentSetupUsage)
 		}
-	} else if *provider == "" {
-		return errors.New("--provider is required for runtime cli (for example claude); --model is optional\n" + agentSetupUsage)
+	default:
+		return fmt.Errorf("runtime %q is not supported; use --runtime api or cli", *runtime)
 	}
 	requested := splitTools(*toolsFlag)
 	if len(requested) == 0 {
@@ -99,44 +86,7 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 			return err
 		}
 	}
-	// The slug names a directory below: validate it before any path is joined.
-	name := *slug
-	if name == "" {
-		name = store.AgentSetupSlug(parsed.DefinitionID)
-	}
-	if err = store.ValidateHostSlug(name); err != nil {
-		return err
-	}
-	// Refuse a definition the native runtime would refuse at launch, so setup
-	// never returns a session body that cannot be admitted.
-	byURI := map[string][]byte{}
-	for _, r := range resources {
-		byURI[r.URI] = r.Content
-	}
-	digest, err := agentdef.Digest(parsed)
-	if err != nil {
-		return err
-	}
-	chatCfg, err := service.MapChatDefinition(service.VerifiedDefinition{
-		Ref:        service.DefinitionRef{DefinitionID: parsed.DefinitionID, Revision: parsed.Revision, SemanticDigest: digest},
-		Definition: parsed,
-		ReadResource: func(_ context.Context, ref agentdef.Ref) ([]byte, error) {
-			if body, ok := byURI[ref.URI]; ok {
-				return body, nil
-			}
-			return nil, fmt.Errorf("resource %q was not supplied; pass --resources", ref.URI)
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("this definition cannot run on native chat: %w", err)
-	}
-
 	dirs := splitTools(*dirsFlag)
-	if len(dirs) == 0 {
-		// An agent with no directories cannot run, so give each its own
-		// workspace beside the database rather than the server's cwd.
-		dirs = []string{filepath.Join(workspaceRoot, name)}
-	}
 	for i, d := range dirs {
 		abs, absErr := filepath.Abs(d)
 		if absErr != nil {
@@ -144,62 +94,13 @@ func runAgentSetup(ctx context.Context, st *store.Store, keys *providerkeys.Mana
 		}
 		dirs[i] = abs
 	}
-	if *runtime == "cli" {
-		// The same admission session creation applies, before any write.
-		if err = service.AdmitCLIHost(store.NativeHostSettings{Version: "1", Runtime: "cli", Provider: *provider, Model: *model, Directories: dirs}, chatCfg.PermissionProfile); err != nil {
-			return fmt.Errorf("this agent cannot run as a CLI agent: %w", err)
-		}
-	}
-	for _, d := range dirs {
-		if err = os.MkdirAll(d, 0o700); err != nil {
-			return fmt.Errorf("create agent directory %s: %w", d, err)
-		}
-	}
-
-	res, err := st.SetupAgent(ctx, store.AgentSetup{Definition: data, Resources: resources, Slug: *slug, Title: *title, Directories: dirs,
-		Provider: *provider, Model: *model, Runtime: *runtime, Tools: requested, GrantedBy: setupCLIActor, Reason: *reason})
+	svc := &service.AgentSetupService{Store: st, Keys: keys, WorkspaceRoot: workspaceRoot}
+	res, err := svc.Setup(ctx, service.AgentSetupRequest{Definition: data, Resources: resources, Slug: *slug, Title: *title, Directories: dirs,
+		Provider: *provider, Model: *model, Runtime: *runtime, Tools: requested, Reason: *reason}, setupCLIActor)
 	if err != nil {
 		return err
 	}
-	ref := service.DefinitionRef{DefinitionID: res.DefinitionRef.ID, Revision: res.DefinitionRef.Revision, SemanticDigest: res.DefinitionRef.Digest}
-	hostRef := service.HostSettingsRef{ID: res.HostSettings.ID, Revision: res.HostSettings.Revision}
-	return json.NewEncoder(out).Encode(map[string]any{
-		"created":          res.Created,
-		"definition_ref":   ref,
-		"host_settings":    hostRef,
-		"host_settings_id": res.HostSettings.ID,
-		"slug":             res.HostSettings.Slug,
-		"authority_id":     res.AuthorityID,
-		"tools":            res.Tools,
-		"tools_added":      res.Added,
-		"directories":      res.HostSettings.Settings.Directories,
-		"session_request": map[string]any{
-			"method": "POST", "path": "/api/agent/v1/sessions",
-			"body": map[string]any{"definition_ref": ref, "host_settings": hostRef},
-		},
-	})
-}
-
-// preflightProviderKey refuses when the provider is unknown or has no usable
-// key, naming the remedy. It never reads or prints the key itself.
-func preflightProviderKey(ctx context.Context, keys *providerkeys.Manager, name string) error {
-	var names []string
-	for _, spec := range service.APIProviderSpecs() {
-		names = append(names, spec.Name)
-		if spec.Name != name {
-			continue
-		}
-		if keys == nil {
-			return nil
-		}
-		st := keys.Status(ctx, spec.ProviderID)
-		if st.Usable {
-			return nil
-		}
-		return fmt.Errorf("provider %q has no usable API key (%s): %s\nsave one with: pbpaste | %s provider set-key %s", name, st.Code, st.Guidance, brand.BinaryName, name)
-	}
-	sort.Strings(names)
-	return fmt.Errorf("provider %q is not a native API provider; choose one of: %s", name, strings.Join(names, ", "))
+	return json.NewEncoder(out).Encode(res)
 }
 
 func splitTools(v string) []string {
@@ -220,25 +121,5 @@ func loadSetupDefinition(arg string) ([]byte, []store.DefinitionResource, error)
 		data, err := readAuthoredDefinitionFile(arg)
 		return data, nil, err
 	}
-	catalog, err := agentdefs.Catalog()
-	if err != nil {
-		return nil, nil, err
-	}
-	var ids []string
-	for _, a := range catalog {
-		d, parseErr := agentdef.Parse(a.Data, agentpolicy.Option())
-		if parseErr != nil {
-			continue
-		}
-		ids = append(ids, d.DefinitionID)
-		if d.DefinitionID == arg || d.Name == arg {
-			var resources []store.DefinitionResource
-			for _, r := range a.Resources {
-				resources = append(resources, store.DefinitionResource{URI: r.URI, Content: r.Content})
-			}
-			return a.Data, resources, nil
-		}
-	}
-	sort.Strings(ids)
-	return nil, nil, fmt.Errorf("%q is neither a definition file nor an embedded archetype; archetypes: %s", arg, strings.Join(ids, ", "))
+	return service.ArchetypeDefinition(arg)
 }

@@ -176,6 +176,14 @@ Aider and Junie have no layout. A file that carries the session credential is
 written 0600 whatever the table's default. Skills are planted additively at
 boot; a grant made later needs a fresh boot.
 
+An API-backed session has no boot dir: it is offered its skills as a listing in
+the skills slot and loads a body with `skill_get`. The rule for which skills an
+agent has is the same on both paths, `store.SkillGrantCurrent` — a grant
+approved against the skill's present content hash. A CLI boot plants only those
+skills, `skill_get` refuses any other, and the listing now offers only those,
+so a never-approved or stale grant is neither planted nor listed. Delivery
+differs by design (files up front versus a listing and on-demand load).
+
 ## Subagent runtime
 
 A subagent's runtime follows its parent. A CLI process's calls to Nanite's own

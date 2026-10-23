@@ -101,6 +101,10 @@ func (a *API) handleNativeAuthorityList(w http.ResponseWriter, r *http.Request) 
 		a.nativeAuthorityError(w, err)
 		return
 	}
+	if list, err = pageOf(r, list); err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	out := make([]nativeAuthorityView, 0, len(list))
 	for _, item := range list {
 		tools, terr := writer.ListTools(r.Context(), item.ID)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/apiauth"
@@ -124,7 +125,12 @@ func (a *API) handleNativeAgentList(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusInternalServerError, "listing agents failed")
 		return
 	}
-	a.jsonResp(w, http.StatusOK, list)
+	page, err := pageOf(r, list)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, page)
 }
 
 func (a *API) handleNativeAgentGet(w http.ResponseWriter, r *http.Request) {
@@ -144,4 +150,27 @@ func (a *API) handleNativeAgentGet(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.jsonResp(w, http.StatusOK, v)
 	}
+}
+
+// pageOf applies the optional ?limit=&offset= query to a list before it is
+// rendered. Without limit the list is returned whole, as before.
+func pageOf[T any](r *http.Request, list []T) ([]T, error) {
+	q := r.URL.Query()
+	if q.Get("limit") == "" && q.Get("offset") == "" {
+		return list, nil
+	}
+	limit, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || limit < 1 || limit > 500 {
+		return nil, errors.New("limit must be between 1 and 500")
+	}
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		if offset, err = strconv.Atoi(raw); err != nil || offset < 0 {
+			return nil, errors.New("offset must be a non-negative integer")
+		}
+	}
+	if offset >= len(list) {
+		return list[:0], nil
+	}
+	return list[offset:min(offset+limit, len(list))], nil
 }

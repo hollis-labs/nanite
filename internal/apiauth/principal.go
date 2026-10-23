@@ -47,3 +47,23 @@ func (p Principal) Actor() string {
 	}
 	return string(p.Kind) + ":" + p.CredentialID
 }
+
+type auditKey struct{}
+
+// AuditFunc records one audit row on behalf of the request it came from.
+type AuditFunc func(method, route, outcome string)
+
+// WithAudit attaches the request's audit writer to a context, so a handler
+// that fans out into other routes in-process (the admin MCP endpoint) can
+// record which one it ran; the middleware only sees the outer route.
+func WithAudit(ctx context.Context, f AuditFunc) context.Context {
+	return context.WithValue(ctx, auditKey{}, f)
+}
+
+// AuditFromContext returns the request's audit writer, or a no-op.
+func AuditFromContext(ctx context.Context) AuditFunc {
+	if f, ok := ctx.Value(auditKey{}).(AuditFunc); ok {
+		return f
+	}
+	return func(string, string, string) {}
+}

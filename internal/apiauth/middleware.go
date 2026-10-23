@@ -137,10 +137,13 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 		if need == ScopeAdmin || (need == ScopeMaintain && unsafeMethod(r.Method)) {
 			g.audit(r, p, pattern, "allowed")
 		}
-		ctx, cancel := context.WithCancel(WithPrincipal(r.Context(), p))
+		base := WithAudit(WithPrincipal(r.Context(), p), func(method, route, outcome string) {
+			g.Store.Audit(context.WithoutCancel(r.Context()), p.CredentialID, p.Kind, method, route, outcome, remoteHost(r))
+		})
+		ctx, cancel := context.WithCancel(base)
 		if !expires.IsZero() {
 			cancel()
-			ctx, cancel = context.WithDeadline(WithPrincipal(r.Context(), p), expires)
+			ctx, cancel = context.WithDeadline(base, expires)
 		}
 		unregister := g.reg.add(cancel, p.CredentialID, "ui:"+p.UISessionID)
 		defer func() { unregister(); cancel() }()

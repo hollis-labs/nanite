@@ -118,13 +118,13 @@ Ids must be a single path segment (`.`, `..` and `/` are refused).
 |---|---|
 | `agent_setup`, `agent_list`, `agent_get` | `POST /api/agent-setup`, `GET /api/native-agents[/{id}]` |
 | `host_settings_list`, `host_settings_create`, `host_settings_update` | `/api/agent-host-settings` |
-| `host_settings_retire` | not a route: a disable-only write (`enabled=false`, no model/definition re-validation, retried on a moved revision). Live sessions and grants are untouched; use `session_stop` and `authority_revoke` |
+| `host_settings_retire` | not a route: a disable-only write (`enabled=false`, a required `reason`, no model/definition re-validation, retried on a moved revision). Live sessions and grants are untouched; use `session_stop` and `authority_revoke` |
 | `authority_list`, `authority_get`, `authority_revoke` | `/api/native-authority[/{id}[/revoke]]` |
 | `tool_grant`, `tool_ungrant` | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}` |
 | `session_start`, `session_list`, `session_get`, `session_history`, `session_stop` | `/api/agent/v1/sessions...` |
 | `turn_send`, `turn_get`, `turn_cancel` | `/api/agent/v1/sessions/{id}/turns...` |
 
-`session_list` and `session_history` page with `limit`/`cursor`/`older_cursor`; any
+Every mutating tool writes an auth-audit row naming the tool and its target (`mcp:tool_grant <authority> <tool>`), since the middleware only sees `POST /api/admin/mcp`; `host_settings_retire` also records its reason there. `agent_list`, `host_settings_list` and `authority_list` take `limit` (default 50) and `offset`; `authority_list` needs `host_settings_id`. `session_list` and `session_history` page with `limit`/`cursor`/`older_cursor`; any
 response over 256 KiB is refused rather than cut. The endpoint sits under
 `/api/admin`, so it needs the admin scope: the operator token. Agent credentials are refused, and so is any client credential without
 admin. That credential stays admin for now; narrower credentials come later.

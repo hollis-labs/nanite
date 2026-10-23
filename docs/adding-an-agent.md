@@ -176,8 +176,10 @@ Native `POST /api/agent/v1/sessions` requires `definition_ref` with API spelling
 `id` and `revision`; admission checks the matching pin, the enabled host runtime (`api` or
 `cli`), the authorized model (API) or the CLI provider's launchability, and the
 current host revision. The accepted view stores the typed
-host snapshot. Later host edits affect new views, not previously accepted
-configuration. Unsupported required semantics refuse before session rows.
+host snapshot. A later host edit does not change a previously accepted `api`
+view. A `cli` view records the host revision it was accepted under, and its next
+turn after any host edit fails with `host_revision_changed`; create a new
+session to use the edited host. Unsupported required semantics refuse before session rows.
 
 ## Native and reflex extensions
 

@@ -49,7 +49,9 @@ could accept them.
 | `provider`, `model` | exists | for `api`, a registered API provider and model; for `cli`, the runtime (`claude`, `codex`, `opencode`, `agy`) and the model flag it accepts |
 | `directories` | exists | filesystem the agent may use; the first entry is its work root. Required for `cli`, which refuses a relative entry. Proposed: the same meaning for `api` (see Launch materialization); today an `api` host ignores it |
 | `native_loop`, `recall_limit`, `recall_timeout_ms` | exists | `api` only |
-| `harness_profile`, `protocol`, `transport`, `mcp_servers`, `debug` | exists | `api`/ACP knobs. Today a `cli` host refuses a non-empty `harness_profile`, `native_loop`, `recall_*`, `mcp_servers`, `protocol` or `transport` with cause `cli_host_unsupported_field` |
+| `harness_profile`, `mcp_servers`, `debug` | exists | `harness_profile` is a native-loop knob. Today a `cli` host refuses a non-empty `harness_profile` or `mcp_servers` |
+| `protocol`, `transport` | exists | select an ACP CLI transport. `Validate` rejects them on an `api` host, and a `cli` host refuses them today |
+| (all of the above on a `cli` host) | exists | a non-empty `harness_profile`, `native_loop`, `recall_*`, `mcp_servers`, `protocol` or `transport` is refused with cause `cli_host_unsupported_field` |
 | `mode` | **proposed** | `live` or `pinned` (below). Absent means the default rule |
 | a reference to the agent directory | **proposed** | how a `live` host names the directory it reads. Needs a field or a registration; not chosen here |
 | skill selection hints (trigger phrases, priority) | **proposed** | host-side hints keyed by skill name (see Skills) |
@@ -79,9 +81,11 @@ profile, not of the definition.
 - **Tool authority.** One grant set per host-settings revision, enforced at
   Nanite's tool boundary. A CLI does not widen it: its tools arrive through the
   Nanite MCP server, which asks the same authority.
-- **Host revision pinning.** A session records the host revision it started
-  under; a later turn after the host changed fails rather than silently using
-  the new one.
+- **Host revision pinning.** The intended rule is that a session records the
+  host revision it started under and a later turn after the host changed fails
+  rather than silently using the new one. Today only a defined CLI session
+  checks this (`host_revision_changed`); an `api` session does not, and
+  bringing it to the same rule is part of the work.
 - **Wake and messaging, session events.** The same session record and event
   stream.
 

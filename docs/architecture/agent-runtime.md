@@ -151,6 +151,31 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
 - **Capabilities.** `runtime_kinds` lists `cli` with the providers this host can
   launch.
 
+## Planted files by runtime
+
+A CLI agent's boot dir is planted from the shared harness layout table
+(`adapters/layout/plan`), the table Tether plants from, so one agent produces
+the same files in both products. `TestPlantedFilesMatchTheSharedLayoutTable`
+fails when Nanite stops planting a path the table names, or plants it with a
+different mode; `sharedSkillRoot` reads the skill placement from the same
+table.
+
+| Runtime | Instructions | Kickoff | Native config | MCP | Skills (`<root>/<name>/SKILL.md`) |
+|---|---|---|---|---|---|
+| Claude | `CLAUDE.md` | `boot.md` | `.claude/settings.json` | `.mcp.json` (0600) | `.claude/skills` |
+| Codex | `AGENTS.md` | `boot.md` | `config.toml` (0600, holds `[mcp_servers.*]`) | `.mcp.json` (0600, not read by Codex) | `skills` |
+| OpenCode | `agents/<slug>.md` | `boot.md` | `opencode.json` (0600, holds `mcp`) | `.mcp.json` (0600, not read by OpenCode) | `skills`, and `.opencode/skills` |
+| Antigravity | `AGENTS.md` | `boot.md` | `.agents/plugins/tether/plugin.json` | `.agents/plugins/tether/mcp_config.json` (0600) | `.agents/skills` |
+
+Differences from the table, all deliberate: Nanite also plants `.sandbox/*` and
+`.materialize/manifest.json` in every boot dir; OpenCode skills go to the
+project-local `.opencode/skills` as well, because it is not settled which of the
+two locations `OPENCODE_CONFIG_DIR` reaches; Codex's `auth.json` is a link to
+the host login made at Setup, only when the host is logged in. Gemini, Copilot,
+Aider and Junie have no layout. A file that carries the session credential is
+written 0600 whatever the table's default. Skills are planted additively at
+boot; a grant made later needs a fresh boot.
+
 ## Subagent runtime
 
 A subagent's runtime follows its parent. A CLI process's calls to Nanite's own

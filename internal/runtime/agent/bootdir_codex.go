@@ -132,6 +132,15 @@ func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 		files[relPath] = content
 	}
 
+	// Skills go where the shared layout table puts them for this runtime.
+	skillFiles, err := skillFilesForProvider(context.Background(), "codex", params)
+	if err != nil {
+		return plant.PlantSpec{}, err
+	}
+	for relPath, content := range skillFiles {
+		files[relPath] = content
+	}
+
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {
 		return plant.PlantSpec{}, err

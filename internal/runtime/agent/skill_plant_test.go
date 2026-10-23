@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -162,10 +163,10 @@ func keysOf(m map[string][]byte) []string {
 
 // TestSkillPlantFiles_EmptyInputs confirms the nil-not-error contract.
 func TestSkillPlantFiles_EmptyInputs(t *testing.T) {
-	if got, err := SkillPlantFiles(context.Background(), nil, &fakeSkillVendor{}, claudeSkillDestPrefixes); err != nil || got != nil {
+	if got, err := SkillPlantFiles(context.Background(), nil, &fakeSkillVendor{}, skillDestPrefixesFor("claude")); err != nil || got != nil {
 		t.Errorf("empty skills: got (%v, %v), want (nil, nil)", got, err)
 	}
-	if got, err := SkillPlantFiles(context.Background(), []PlantableSkill{{Slug: "x", ContentHash: skillAddrGood}}, nil, claudeSkillDestPrefixes); err != nil || got != nil {
+	if got, err := SkillPlantFiles(context.Background(), []PlantableSkill{{Slug: "x", ContentHash: skillAddrGood}}, nil, skillDestPrefixesFor("claude")); err != nil || got != nil {
 		t.Errorf("nil vendor: got (%v, %v), want (nil, nil)", got, err)
 	}
 }
@@ -211,8 +212,56 @@ func TestSkillFilesForProvider_Dispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codex: %v", err)
 	}
-	if len(codexFiles) != 0 {
-		t.Errorf("codex: expected no skill files planted (no native skill mechanism), got %v", keysOf(codexFiles))
+	if _, ok := codexFiles["skills/demo/SKILL.md"]; !ok || len(codexFiles) != 1 {
+		t.Errorf("codex: want exactly skills/demo/SKILL.md, got %v", keysOf(codexFiles))
+	}
+
+	agyFiles, err := skillFilesForProvider(context.Background(), "antigravity", params)
+	if err != nil {
+		t.Fatalf("antigravity: %v", err)
+	}
+	if _, ok := agyFiles[".agents/skills/demo/SKILL.md"]; !ok || len(agyFiles) != 1 {
+		t.Errorf("antigravity: want exactly .agents/skills/demo/SKILL.md, got %v", keysOf(agyFiles))
+	}
+
+	// A runtime the shared table has no skill row for plants nothing.
+	if f, err := skillFilesForProvider(context.Background(), "gemini", params); err != nil || len(f) != 0 {
+		t.Errorf("gemini: got (%v, %v), want nothing", keysOf(f), err)
+	}
+}
+
+// The skill roots come from the shared harness layout table, so they cannot
+// drift from where Tether plants them.
+func TestSharedSkillRootsMatchTheLayoutTable(t *testing.T) {
+	for id, want := range map[runtimes.ID]string{
+		runtimes.Claude: ".claude/skills", runtimes.Codex: "skills", runtimes.OpenCode: "skills", runtimes.Antigravity: ".agents/skills",
+	} {
+		if got, ok := sharedSkillRoot(id); !ok || got != want {
+			t.Errorf("sharedSkillRoot(%s) = %q, %v; want %q", id, got, ok, want)
+		}
+	}
+}
+
+// Codex and Antigravity boot dirs carry a granted skill end to end.
+func TestCodexAndAntigravityLayoutsPlantGrantedSkills(t *testing.T) {
+	vendor := &fakeSkillVendor{files: map[string]skillvendor.FileMap{skillAddrGood: {"SKILL.md": []byte("body")}}}
+	sstore := &fakeSkillStore{
+		skills: map[string]*store.Skill{"demo": {Slug: "demo", ContentHash: skillAddrGood}},
+		known:  map[string][]store.AgentKnownSkill{"agent-1": {{AgentID: "agent-1", SkillName: "demo", ApprovedContentHash: skillAddrGood}}},
+	}
+	for provider, rel := range map[string]string{"codex": "skills/demo/SKILL.md", "antigravity": ".agents/skills/demo/SKILL.md"} {
+		boot, err := bootdirLayoutFor(provider).Setup(SetupParams{
+			SessionID: "s-" + provider, AgentProfile: &store.AgentProfile{ID: "agent-1", Name: "A", Slug: "a"},
+			SystemPrompt: "x", Skills: sstore, SkillVendor: vendor,
+		})
+		if err != nil {
+			t.Fatalf("%s Setup: %v", provider, err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(boot) })
+		b, err := os.ReadFile(filepath.Join(boot, rel)) // #nosec G304 -- the test's own planted temp dir
+		if err != nil || string(b) != "body" {
+			t.Errorf("%s: %s = %q, %v", provider, rel, b, err)
+		}
 	}
 }
 
@@ -281,14 +330,14 @@ func TestSkillDestPrefixSafe(t *testing.T) {
 // claude's longer root needs a full "../.." to cancel out entirely,
 // opencode's shorter "skills" root needs only a bare "..".
 func TestClaudeSkillDestPrefixes_AdversarialSlugBlocked(t *testing.T) {
-	if prefixes, ok := claudeSkillDestPrefixes("../.."); ok || prefixes != nil {
-		t.Fatalf("claudeSkillDestPrefixes(\"../..\") = (%v, %v), want (nil, false)", prefixes, ok)
+	if prefixes, ok := skillDestPrefixesFor("claude")("../.."); ok || prefixes != nil {
+		t.Fatalf("skillDestPrefixesFor(claude)(\"../..\") = (%v, %v), want (nil, false)", prefixes, ok)
 	}
 }
 
 func TestOpencodeSkillDestPrefixes_AdversarialSlugBlocked(t *testing.T) {
-	if prefixes, ok := opencodeSkillDestPrefixes(".."); ok || prefixes != nil {
-		t.Fatalf("opencodeSkillDestPrefixes(\"..\") = (%v, %v), want (nil, false)", prefixes, ok)
+	if prefixes, ok := skillDestPrefixesFor("opencode")(".."); ok || prefixes != nil {
+		t.Fatalf("skillDestPrefixesFor(opencode)(\"..\") = (%v, %v), want (nil, false)", prefixes, ok)
 	}
 }
 
@@ -309,13 +358,13 @@ func TestSkillPlantFiles_AdversarialSlugBlocked(t *testing.T) {
 		{
 			name:         "claude: \"../..\" cancels the entire .claude/skills root",
 			slug:         "../..",
-			destPrefixes: claudeSkillDestPrefixes,
+			destPrefixes: skillDestPrefixesFor("claude"),
 			sentinelKey:  "CLAUDE.md", // claudePlantSpec's real system-prompt key
 		},
 		{
 			name:         "opencode: bare \"..\" escapes the shorter skills/ root",
 			slug:         "..",
-			destPrefixes: opencodeSkillDestPrefixes,
+			destPrefixes: skillDestPrefixesFor("opencode"),
 			sentinelKey:  "agents.json", // stand-in for opencodePlantSpec's own real config key
 		},
 	}

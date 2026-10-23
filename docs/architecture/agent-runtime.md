@@ -96,6 +96,42 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
   operator adds an allow-rule (`permissions.allow`) to agy's own
   `~/.gemini/antigravity-cli/settings.json`; Nanite never writes that file, which
   the Antigravity desktop app shares.
+- **Host `mcp_servers` (Claude only).** Names in the host settings' `mcp_servers`
+  are registry servers (`/api/mcp-servers`) planted into the same `.mcp.json`.
+  A CLI calls its servers itself, so Nanite's permission engine never sees the
+  call; the grant is enforced by Claude's own headless gate instead. For each
+  tool the turn's execution capability may use, the launch adds the allow rule
+  `mcp__<server>__<tool>` to the `--allowedTools` flag. The tools come from the
+  same decider as the API runtime (`NativeGrants`): the host's native authority
+  grants, the submitting credential's standing and tools scope, and the turn's
+  narrowing. A launch with no capability gets no tool. A server with no allowed
+  tool is loaded and every call to it is refused. The launch also passes
+  `--setting-sources project,local`, so the operator's own
+  `~/.claude/settings.json` allow rules do not widen the grants; the side
+  effect is that user-scope `env`, `model` and `apiKeyHelper` settings are not
+  read for that launch (not verified against a live Claude here).
+  Limits, stated plainly:
+  - **Yolo mode is refused.** In yolo mode Claude is launched with
+    `--dangerously-skip-permissions`, which removes the gate the allow rules
+    feed. A host with `mcp_servers` fails its boot there rather than run every
+    tool.
+  - **The gate is advisory against a shell-capable agent.** `.mcp.json` is
+    mode 0644 and the server command is an ordinary executable, so an agent
+    with Bash can run the server (or the `tether mcp --token-file` gateway)
+    itself and call tools that were not granted. Nothing in Nanite prevents that.
+  - **Grants are per tool name, not per server.** A granted name is allowed on
+    every listed server that exposes it.
+  - **A revoke takes effect at the next launch.** The rules are argv, fixed
+    for the life of the process.
+  - **Not projected:** a row's `trust_tier` and `env_allowlist` apply to
+    servers Nanite spawns itself and are ignored here; the CLI spawns the
+    server with the row's `env` as written. Those values land in the boot dir,
+    which the agent can read: put credentials in a file the server reads.
+  - Only enabled stdio servers are projected, and none may be named `nanite`.
+  Codex, OpenCode and Antigravity are refused (`cli_host_unsupported_field`)
+  because Nanite has no per-tool gate it can set on them. Admission checks the
+  servers exist; launch re-reads them and the grants, and fails the boot
+  rather than plant a server without its gate.
 - **Antigravity.** The boot dir carries `AGENTS.md`, `boot.md` and a workspace
   plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP server. agy
   has no config-dir variable and shares its global config with the desktop app,
@@ -110,7 +146,7 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
 - **Refusals.** A 422 from session create carries `error.cause`:
   `runtime_unavailable`, `provider_not_launchable`, `read_only_unenforceable`,
   `cli_host_unsupported_field` (`harness_profile`, a non-empty `native_loop`,
-  `recall_*`, `mcp_servers`, a relative directory, or a model the provider's
+  `recall_*`, `mcp_servers` on a provider other than Claude or naming a server that cannot be projected, a relative directory, or a model the provider's
   CLI does not take), `host_directories_missing`.
 - **Capabilities.** `runtime_kinds` lists `cli` with the providers this host can
   launch.

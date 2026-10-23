@@ -40,6 +40,9 @@ import (
 // runner and (eventually) the background dispatcher without re-creating the
 // shared wrapper session registry.
 type AgentDepsConfig struct {
+	// NativeGrants is the native tool-grant decider a CLI host's projected
+	// mcp_servers are gated by; nil grants nothing.
+	NativeGrants    *NativeGrants
 	Store           *store.Store
 	PathGrants      *permission.PathGrants
 	Streams         *StreamManager
@@ -250,6 +253,7 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		// straight by *store.Store elsewhere in this file.
 		Skills:   cfg.Store,
 		ActorURN: durableActorURNResolver(cfg.Store),
+		HostMCP:  storeHostMCP{st: cfg.Store, grants: cfg.NativeGrants},
 	}
 	// cfg.SkillVendor is a *skillvendor.Store — a nil *skillvendor.Store
 	// assigned directly into the SkillVendorReader interface field would

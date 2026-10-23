@@ -9,6 +9,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 const cliEnvSecret = "ghp_notarealtokenbutlongenough" // #nosec G101 -- fake token, not a credential
@@ -70,5 +71,50 @@ func TestMCPImportCLIDropsPlaceholders(t *testing.T) {
 	}
 	if row.Env != `["KEEP=1"]` {
 		t.Fatalf("stored env = %s, want only KEEP=1", row.Env)
+	}
+}
+
+func TestRegisterTetherMessaging(t *testing.T) {
+	ctx := context.Background()
+	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	good := filepath.Join(dir, "a.token")
+	if err = os.WriteFile(good, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loose := filepath.Join(dir, "loose.token")
+	if err = os.WriteFile(loose, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(loose, 0o644); err != nil { // #nosec G302 -- deliberately loose fixture
+		t.Fatal(err)
+	}
+
+	// A group/other-readable token file is refused before anything is stored.
+	if _, err = registerTetherMessaging(ctx, st, loose, nil); err == nil {
+		t.Fatal("loose token file registered")
+	}
+	if row, _ := st.GetMCPServer(ctx, "tether"); row != nil {
+		t.Fatal("a refused registration left a row")
+	}
+
+	prepared := 0
+	res, err := registerTetherMessaging(ctx, st, good, func(*store.MCPServerConfig) { prepared++ })
+	if err != nil || len(res.Created) != 1 || prepared != 1 {
+		t.Fatalf("register: %+v err=%v prepare calls=%d", res, err, prepared)
+	}
+	// Same file again is a no-op; a different file under the same name is refused.
+	if res, err = registerTetherMessaging(ctx, st, good, nil); err != nil || len(res.Skipped) != 1 {
+		t.Fatalf("repeat: %+v %v", res, err)
+	}
+	other := filepath.Join(dir, "b.token")
+	if err = os.WriteFile(other, []byte("y"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registerTetherMessaging(ctx, st, other, nil); err == nil {
+		t.Fatal("second actor's token file accepted")
 	}
 }

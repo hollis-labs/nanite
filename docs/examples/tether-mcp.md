@@ -24,10 +24,14 @@ through an imported Nanite server, because that needs a running daemon.
   bearer token issued for the agent's stable actor. The config stores a path.
   The file must be mode 0600 (registration checks it) and sit outside every
   path a CLI agent can read or write: an agent that can read it holds the
-  credential.
+  credential. A CLI agent with a shell that runs as the same user can read
+  any file that user can, so this cannot be prevented from Nanite: treat the
+  token as exposed to such an agent, and scope it to message.write.
 - **One actor per host, for now.** The `tether` entry is host-wide, so every
   agent listing it launches the gateway with the same token. Registering a
-  second, different token file is refused rather than silently ignored.
+  second gateway is refused where the server is registered (store level), so
+  `nanite mcp import`, the API and the CLI all meet it under any server name.
+  List `tether` only in the host settings of the one actor whose token it holds.
   Per-agent planting (an entry in each agent's own boot dir) is a follow-up.
 - **One address in both directions.** Send tools take `from`. It must be the
   actor URN the Tether bridge delivers to; the planted `tether-identity.md`

@@ -3,7 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -105,8 +109,57 @@ func (s *Store) GetMCPServer(ctx context.Context, name string) (*MCPServerConfig
 	return &cfg, nil
 }
 
+// ErrTetherGatewayConflict reports a second Tether messaging gateway.
+var ErrTetherGatewayConflict = errors.New("a Tether messaging gateway is already registered")
+
+// isTetherGateway reports whether cfg runs `tether ... --token-file <path>`:
+// a Tether gateway that authenticates as one actor.
+func isTetherGateway(cfg *MCPServerConfig) bool {
+	if filepath.Base(cfg.Command) != "tether" {
+		return false
+	}
+	var args []string
+	if json.Unmarshal([]byte(cfg.Args), &args) != nil {
+		return false
+	}
+	for _, a := range args {
+		if a == "--token-file" || strings.HasPrefix(a, "--token-file=") {
+			return true
+		}
+	}
+	return false
+}
+
+// checkSingleTetherGateway holds one Tether actor per host at the point every
+// registration path (CLI import, API, import payload) goes through. The
+// gateway entry is host-wide, so each agent that lists it launches with the
+// same token; a second entry under another name would present a second
+// actor's credential to the same agents while nothing tells them apart. Per-
+// agent planting is what would lift this.
+func (s *Store) checkSingleTetherGateway(ctx context.Context, cfg *MCPServerConfig) error {
+	if !isTetherGateway(cfg) {
+		return nil
+	}
+	rows, err := s.ListMCPServers(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		if rows[i].Name != cfg.Name && isTetherGateway(&rows[i]) {
+			return fmt.Errorf("%w as %q; one Tether actor per host is supported, remove it before registering %q", ErrTetherGatewayConflict, rows[i].Name, cfg.Name)
+		}
+	}
+	return nil
+}
+
 // CreateMCPServer inserts a new MCP server config.
 func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
+	if cfg.Args == "" {
+		cfg.Args = "[]"
+	}
+	if err := s.checkSingleTetherGateway(ctx, cfg); err != nil {
+		return err
+	}
 	if cfg.ID == "" {
 		cfg.ID = uuid.New().String()
 	}
@@ -145,6 +198,9 @@ func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 
 // UpdateMCPServer updates an MCP server config by name.
 func (s *Store) UpdateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
+	if err := s.checkSingleTetherGateway(ctx, cfg); err != nil {
+		return err
+	}
 	if cfg.TrustTier == "" {
 		cfg.TrustTier = TrustTierThirdPartyHTTP
 	}

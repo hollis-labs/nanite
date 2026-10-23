@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 )
 
@@ -162,5 +163,46 @@ func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
 	}
 	if _, ok := cols["env_allowlist"]; !ok {
 		t.Error("env_allowlist column missing after migration 012")
+	}
+}
+
+func tetherGateway(name, tokenFile string) *MCPServerConfig {
+	return &MCPServerConfig{Name: name, TransportType: TransportStdio, Command: "tether", Enabled: true,
+		Args: `["mcp","--no-discover","--token-file","` + tokenFile + `"]`}
+}
+
+// One Tether actor per host is enforced where the row is written, so plain
+// import, the API and the CLI all meet it under any server name.
+func TestMCPServers_OneTetherGatewayPerHost(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.CreateMCPServer(ctx, tetherGateway("tether", "/a")); err != nil {
+		t.Fatal(err)
+	}
+	err := s.CreateMCPServer(ctx, tetherGateway("tether2", "/b"))
+	if !errors.Is(err, ErrTetherGatewayConflict) {
+		t.Fatalf("second gateway under another name: %v", err)
+	}
+	if row, _ := s.GetMCPServer(ctx, "tether2"); row != nil {
+		t.Fatal("refused gateway was stored")
+	}
+	// Another command is unaffected, and so is editing the one gateway.
+	if err := s.CreateMCPServer(ctx, &MCPServerConfig{Name: "files", TransportType: TransportStdio, Command: "npx", Args: `["--token-file","x"]`, Enabled: true}); err != nil {
+		t.Fatalf("non-tether server: %v", err)
+	}
+	if err := s.UpdateMCPServer(ctx, tetherGateway("tether", "/c")); err != nil {
+		t.Fatalf("update of the one gateway: %v", err)
+	}
+	// An existing row cannot be turned into a second gateway either.
+	files := tetherGateway("files", "/d")
+	if err := s.UpdateMCPServer(ctx, files); !errors.Is(err, ErrTetherGatewayConflict) {
+		t.Fatalf("update into a second gateway: %v", err)
+	}
+	// Removing the first frees the slot.
+	if err := s.DeleteMCPServer(ctx, "tether"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMCPServer(ctx, tetherGateway("tether2", "/b")); err != nil {
+		t.Fatalf("after delete: %v", err)
 	}
 }

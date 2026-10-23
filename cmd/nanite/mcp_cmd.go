@@ -73,31 +73,15 @@ func mcpTetherMessaging(args []string) {
 			break
 		}
 	}
-	data, err := mcpconfig.TetherMessagingConfig(args[0])
-	if err == nil {
-		err = mcpconfig.CheckTetherTokenFile(args[0])
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
 	s, err := store.New(context.Background(), dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
 		os.Exit(1)
 	}
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
-	existing, err := s.GetMCPServer(context.Background(), mcpconfig.TetherMessagingServerName)
-	if err == nil {
-		err = mcpconfig.CheckTetherSingleActor(existing, args[0])
-	}
+	result, err := registerTetherMessaging(context.Background(), s, args[0], service.DropRedactedPlaceholders)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	result, err := mcpconfig.Import(context.Background(), s, data, service.DropRedactedPlaceholders)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: import: %v\n", err)
 		os.Exit(1)
 	}
 	for _, name := range result.Created {
@@ -165,4 +149,29 @@ func mcpExport(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Exported %d server(s) to %s\n", len(cfg.MCPServers), outPath)
+}
+
+// registerTetherMessaging checks the token file, refuses a different token
+// file under the existing "tether" name (the store refuses any second gateway
+// under another name) and imports the gateway entry.
+func registerTetherMessaging(ctx context.Context, s *store.Store, tokenFile string, prepare func(*store.MCPServerConfig)) (*mcpconfig.ImportResult, error) {
+	data, err := mcpconfig.TetherMessagingConfig(tokenFile)
+	if err != nil {
+		return nil, err
+	}
+	if err = mcpconfig.CheckTetherTokenFile(tokenFile); err != nil {
+		return nil, err
+	}
+	existing, err := s.GetMCPServer(ctx, mcpconfig.TetherMessagingServerName)
+	if err != nil {
+		return nil, err
+	}
+	if err = mcpconfig.CheckTetherSingleActor(existing, tokenFile); err != nil {
+		return nil, err
+	}
+	result, err := mcpconfig.Import(ctx, s, data, prepare)
+	if err != nil {
+		return nil, fmt.Errorf("import: %w", err)
+	}
+	return result, nil
 }

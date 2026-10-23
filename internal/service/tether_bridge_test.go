@@ -149,3 +149,32 @@ func TestDurableActorURNResolver(t *testing.T) {
 		t.Fatalf("lookup error must yield no address, got %q", got)
 	}
 }
+
+// Dependencies.ActorURN is what puts the bound actor's address in the planted
+// identity file; deleting the wiring in BuildAgentDependencies must fail here.
+func TestBuildAgentDependencies_WiresActorURN(t *testing.T) {
+	ctx := context.Background()
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{Name: "Deps Actor", Slug: "deps-actor", SystemPrompt: "x"}
+	if err := persistTestActor(ctx, st, profile); err != nil {
+		t.Fatal(err)
+	}
+	inst := store.DurableAgentInstance{Name: "i", Slug: "deps-inst", ProfileID: profile.ID, URN: "msg://agent/nanite/agt_deps",
+		Status: store.DurableAgentStatusActive, CurrentSessionID: "sess-deps"}
+	if err := persistTestDurableInstance(ctx, st, &inst); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := BuildAgentDependencies(AgentDepsConfig{Store: st, Streams: NewStreamManager(st), BinaryPath: "/bin/true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Deps.ActorURN == nil {
+		t.Fatal("Dependencies.ActorURN is not wired")
+	}
+	if got := bundle.Deps.ActorURN("sess-deps", profile.ID); got != "msg://agent/nanite/agt_deps" {
+		t.Fatalf("ActorURN = %q", got)
+	}
+	if got := bundle.Deps.ActorURN("other-session", profile.ID); got != "" {
+		t.Fatalf("unbound session got %q", got)
+	}
+}

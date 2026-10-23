@@ -157,3 +157,17 @@ func TestComposeBootdirParams_ResolvesActorURNFromDependencies(t *testing.T) {
 		t.Fatalf("no resolver: ActorURN=%q", p.ActorURN)
 	}
 }
+
+// The observe-mode caveat is planted whichever address the file names: the
+// bound actor's or the profile's own.
+func TestTetherIdentityFile_AlwaysSaysFromIsNotControlled(t *testing.T) {
+	for name, params := range map[string]SetupParams{
+		"bound actor":      {AgentProfile: &store.AgentProfile{ID: "p"}, ActorURN: "msg://agent/nanite/agt_actor", SessionID: "s"},
+		"profile fallback": {AgentProfile: &store.AgentProfile{ID: "p", TetherURN: "msg://agent/agent-mux/agt_p"}, SessionID: "s"},
+	} {
+		got := string(tetherIdentityFile(params))
+		if !strings.Contains(got, "guidance, not a control") || !strings.Contains(got, "only observes") {
+			t.Errorf("%s: no observe-mode caveat:\n%s", name, got)
+		}
+	}
+}

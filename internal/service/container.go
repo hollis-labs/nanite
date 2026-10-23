@@ -1444,7 +1444,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		Sessions:            sessions,
 		CognitiveViews:      cognitiveViews,
 		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
-		AgentSetup:          &AgentSetupService{Store: cfg.Store, Keys: providerKeys},
+		AgentSetup:          &AgentSetupService{Store: cfg.Store, Keys: providerKeys, ConfineDirectories: true},
 		NativeAuthority:     &NativeAuthorityAdmin{Writer: cfg.Store.LocalAuthority()},
 		NativeGrants:        nativeGrants,
 		Agents:              agents,

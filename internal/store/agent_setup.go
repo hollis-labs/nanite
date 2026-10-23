@@ -19,6 +19,19 @@ import (
 // settings that are not the ones this setup would create.
 var ErrAgentSetupConflict = errors.New("host settings with this slug already exist with a different definition, provider, model, runtime or directories")
 
+// ErrAgentSetupRequest marks a setup refused because of what the caller sent
+// (a bad definition, slug, settings or tool list), as opposed to a storage
+// failure. It leaves the underlying message unchanged.
+var ErrAgentSetupRequest = errors.New("invalid agent setup request")
+
+type setupRequestError struct{ err error }
+
+func (e setupRequestError) Error() string        { return e.err.Error() }
+func (e setupRequestError) Unwrap() error        { return e.err }
+func (e setupRequestError) Is(target error) bool { return target == ErrAgentSetupRequest }
+
+func badSetupRequest(err error) error { return setupRequestError{err} }
+
 // AllAvailableTools asks AgentSetup to grant every available known tool.
 const AllAvailableTools = "*"
 
@@ -86,7 +99,7 @@ func (s *Store) ResolveSetupTools(ctx context.Context, requested []string) ([]st
 	for _, name := range requested {
 		if name == AllAvailableTools {
 			if len(all) == 0 {
-				return nil, errors.New("no tools are available yet: start the server once so it records its tool catalog, then run setup again")
+				return nil, badSetupRequest(errors.New("no tools are available yet: start the server once so it records its tool catalog, then run setup again"))
 			}
 			for _, n := range all {
 				if !seen[n] {
@@ -111,7 +124,7 @@ func (s *Store) ResolveSetupTools(ctx context.Context, requested []string) ([]st
 	}
 	if len(missing) > 0 {
 		if len(all) == 0 {
-			return nil, fmt.Errorf("unknown tools %s and no tools are recorded yet: start the server once so it records its tool catalog, then run setup again", strings.Join(missing, ", "))
+			return nil, badSetupRequest(fmt.Errorf("unknown tools %s and no tools are recorded yet: start the server once so it records its tool catalog, then run setup again", strings.Join(missing, ", ")))
 		}
 		return nil, fmt.Errorf("%w: %s; list grantable names with `authority tools`", ErrNativeToolNotGrantable, strings.Join(missing, ", "))
 	}
@@ -129,11 +142,11 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 	}
 	di, err := prepareDefinitionInstall(in.Definition, in.Resources)
 	if err != nil {
-		return res, err
+		return res, badSetupRequest(err)
 	}
 	d, err := agentdef.Parse(in.Definition, agentpolicy.Option())
 	if err != nil {
-		return res, err
+		return res, badSetupRequest(err)
 	}
 	res.DefinitionRef, res.Name = di.pin, d.Name
 	runtime := in.Runtime
@@ -152,11 +165,11 @@ func (s *Store) SetupAgent(ctx context.Context, in AgentSetup) (AgentSetupResult
 		title = slug
 	}
 	if err = ValidateHostSlug(slug); err != nil {
-		return res, err
+		return res, badSetupRequest(err)
 	}
 	want := NativeHostSettings{Version: "1", Runtime: runtime, Provider: in.Provider, Model: in.Model, Directories: in.Directories}
 	if err = want.Validate(); err != nil {
-		return res, err
+		return res, badSetupRequest(err)
 	}
 	tools, err := s.ResolveSetupTools(ctx, in.Tools)
 	if err != nil {

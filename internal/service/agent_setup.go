@@ -34,6 +34,18 @@ type AgentSetupService struct {
 	// WorkspaceRoot holds one private directory per agent when the request names
 	// none. Empty means beside the database.
 	WorkspaceRoot string
+	// ConfineDirectories restricts requested directories to the workspace root.
+	// Set it for remote callers; the local CLI names any directory it likes.
+	ConfineDirectories bool
+}
+
+// DirectoryRoot is where agent workspaces live, and where a confined request
+// may place its directories.
+func (s *AgentSetupService) DirectoryRoot(ctx context.Context) string {
+	if s.WorkspaceRoot != "" {
+		return s.WorkspaceRoot
+	}
+	return filepath.Join(filepath.Dir(s.Store.DBPath(ctx)), "agent-workspaces")
 }
 
 // AgentSetupRequest is one operator request. Exactly one of Definition and
@@ -135,15 +147,17 @@ func (s *AgentSetupService) Setup(ctx context.Context, req AgentSetupRequest, gr
 	if len(dirs) == 0 {
 		// An agent with no directories cannot run, so give each its own
 		// workspace beside the database rather than the server's cwd.
-		root := s.WorkspaceRoot
-		if root == "" {
-			root = filepath.Join(filepath.Dir(s.Store.DBPath(ctx)), "agent-workspaces")
-		}
-		dirs = []string{filepath.Join(root, name)}
+		dirs = []string{filepath.Join(s.DirectoryRoot(ctx), name)}
 	}
-	for _, d := range dirs {
+	for i, d := range dirs {
 		if !filepath.IsAbs(d) {
 			return out, setupInvalid("directory %q must be an absolute path", d)
+		}
+		dirs[i] = filepath.Clean(d)
+		if s.ConfineDirectories {
+			if err = confineDirectory(s.DirectoryRoot(ctx), dirs[i]); err != nil {
+				return out, err
+			}
 		}
 	}
 	if runtime == "cli" {
@@ -155,15 +169,18 @@ func (s *AgentSetupService) Setup(ctx context.Context, req AgentSetupRequest, gr
 	if _, err = s.Store.ResolveSetupTools(ctx, req.Tools); err != nil {
 		return out, err
 	}
-	for _, d := range dirs {
-		if err = os.MkdirAll(d, 0o700); err != nil {
-			return out, fmt.Errorf("create agent directory %s: %w", d, err)
-		}
-	}
 	res, err := s.Store.SetupAgent(ctx, store.AgentSetup{Definition: data, Resources: resources, Slug: req.Slug, Title: req.Title, Directories: dirs,
 		Provider: req.Provider, Model: req.Model, Runtime: runtime, Tools: req.Tools, GrantedBy: grantedBy, Reason: req.Reason})
 	if err != nil {
 		return out, err
+	}
+	// Directories are created only once the rows are committed, so a refused
+	// request leaves nothing behind. If this fails the agent exists without its
+	// directory; running setup again is idempotent and retries it.
+	for _, d := range res.HostSettings.Settings.Directories {
+		if err = os.MkdirAll(d, 0o700); err != nil {
+			return out, fmt.Errorf("create agent directory %s: %w", d, err)
+		}
 	}
 	ref := DefinitionRef{DefinitionID: res.DefinitionRef.ID, Revision: res.DefinitionRef.Revision, SemanticDigest: res.DefinitionRef.Digest}
 	hostRef := HostSettingsRef{ID: res.HostSettings.ID, Revision: res.HostSettings.Revision}
@@ -246,4 +263,43 @@ func (s *AgentSetupService) List(ctx context.Context) ([]store.AgentView, error)
 // Get returns one agent by host-settings id or slug.
 func (s *AgentSetupService) Get(ctx context.Context, idOrSlug string) (store.AgentView, error) {
 	return s.Store.GetAgentView(ctx, idOrSlug)
+}
+
+// confineDirectory refuses a directory outside root, including one that gets
+// out through a symlink in its existing part. dir is already clean and absolute.
+func confineDirectory(root, dir string) error {
+	root = filepath.Clean(root)
+	inside := func(base, p string) bool {
+		rel, err := filepath.Rel(base, p)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	if !inside(root, dir) {
+		return setupInvalid("directory %q must be inside %s", dir, root)
+	}
+	// Resolve the deepest ancestor that exists and check where it really is.
+	existing := dir
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return nil
+		}
+		existing = parent
+	}
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return setupInvalid("directory %q cannot be resolved", dir)
+	}
+	realRoot := root
+	if r, rerr := filepath.EvalSymlinks(root); rerr == nil {
+		realRoot = r
+	} else if !os.IsNotExist(rerr) {
+		return setupInvalid("directory root cannot be resolved")
+	}
+	if inside(root, existing) && !inside(realRoot, resolved) {
+		return setupInvalid("directory %q resolves outside %s", dir, root)
+	}
+	return nil
 }

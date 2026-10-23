@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,7 +37,7 @@ func TestAgentSetupOverHTTPIsAtomicIdempotentAndViewable(t *testing.T) {
 	a, mux := newTestAPI(t)
 	nativeAuthorityHost(t, a) // registers the dev_read tool
 	a.store.DB.ExecContext(t.Context(), `DELETE FROM agent_host_settings`)
-	dir := filepath.Join(t.TempDir(), "work")
+	dir := filepath.Join(a.Services.AgentSetup.DirectoryRoot(t.Context()), "work")
 	body := map[string]any{"artifact": setupFixtureDef, "provider": "claude", "runtime": "cli", "tools": []string{"dev_read"}, "reason": "test", "directories": []string{dir}}
 
 	// Refusals write nothing.
@@ -43,6 +46,8 @@ func TestAgentSetupOverHTTPIsAtomicIdempotentAndViewable(t *testing.T) {
 		"no reason":     func(m map[string]any) { m["reason"] = "" },
 		"unknown tool":  func(m map[string]any) { m["tools"] = []string{"no_such"} },
 		"no tools":      func(m map[string]any) { m["tools"] = []string{} },
+		"dir outside":   func(m map[string]any) { m["directories"] = []string{"/tmp/elsewhere-" + t.Name()} },
+		"dir dotdot":    func(m map[string]any) { m["directories"] = []string{dir + "/../../escape"} },
 		"relative dir":  func(m map[string]any) { m["directories"] = []string{"rel"} },
 		"bad runtime":   func(m map[string]any) { m["runtime"] = "vm" },
 		"both sources":  func(m map[string]any) { m["archetype"] = "x" },
@@ -125,5 +130,93 @@ func TestAgentSetupOverHTTPIsAtomicIdempotentAndViewable(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &view)
 	if len(view.Tools) != 0 {
 		t.Fatalf("tools after ungrant = %v", view.Tools)
+	}
+}
+
+func TestAgentSetupRefusalsCreateNoDirectories(t *testing.T) {
+	a, mux := newTestAPI(t)
+	nativeAuthorityHost(t, a)
+	root := a.Services.AgentSetup.DirectoryRoot(t.Context())
+	good := filepath.Join(root, "first")
+	body := map[string]any{"artifact": setupFixtureDef, "provider": "claude", "runtime": "cli", "tools": []string{"dev_read"}, "reason": "t", "directories": []string{good}}
+	if w := naReq(mux, &operatorPrincipal, "POST", "/api/agent-setup", body); w.Code != http.StatusCreated {
+		t.Fatalf("setup = %d %s", w.Code, w.Body)
+	}
+	// A slug conflict must not leave the new directory behind.
+	other := filepath.Join(root, "second")
+	body["directories"] = []string{other}
+	if w := naReq(mux, &operatorPrincipal, "POST", "/api/agent-setup", body); w.Code != http.StatusConflict {
+		t.Fatalf("conflict = %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatalf("conflicting request created %s (err %v)", other, err)
+	}
+	// A symlink inside the root cannot lead out of it.
+	outside := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	body["slug"], body["directories"] = "linked", []string{filepath.Join(link, "x")}
+	if w := naReq(mux, &operatorPrincipal, "POST", "/api/agent-setup", body); w.Code != http.StatusBadRequest {
+		t.Fatalf("symlink escape = %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "x")); !os.IsNotExist(err) {
+		t.Fatal("directory created through a symlink")
+	}
+}
+
+func TestAgentSetupAllToolsAndOperatorCredentialOverHTTP(t *testing.T) {
+	a, mux := newTestAPI(t)
+	nativeAuthorityHost(t, a)
+	body := map[string]any{"artifact": setupFixtureDef, "provider": "claude", "runtime": "cli", "tools": []string{"*"}, "reason": "all"}
+	w := naReq(mux, &operatorPrincipal, "POST", "/api/agent-setup", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("setup = %d %s", w.Code, w.Body)
+	}
+	var res struct {
+		Tools       []string `json:"tools"`
+		Directories []string `json:"directories"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if !strings.Contains(strings.Join(res.Tools, ","), "dev_read") {
+		t.Fatalf("* did not grant the available tools: %v", res.Tools)
+	}
+	root := a.Services.AgentSetup.DirectoryRoot(t.Context())
+	if len(res.Directories) != 1 || res.Directories[0] != filepath.Join(root, "def-http-setup") {
+		t.Fatalf("default directory = %v, want under %s", res.Directories, root)
+	}
+	if fi, err := os.Stat(res.Directories[0]); err != nil || !fi.IsDir() {
+		t.Fatalf("directory not created after commit: %v", err)
+	}
+}
+
+func TestNativeAgentReadsAnswerHEAD(t *testing.T) {
+	a, mux := newTestAPI(t)
+	nativeAuthorityHost(t, a)
+	for path, want := range map[string]int{"/api/native-agents": 200, "/api/native-agents/native-authority-api": 200, "/api/native-agents/missing": 404} {
+		if w := naReq(mux, &operatorPrincipal, "HEAD", path, nil); w.Code != want {
+			t.Errorf("HEAD %s = %d, want %d", path, w.Code, want)
+		}
+		if w := naReq(mux, &clientPrincipal, "HEAD", path, nil); w.Code != http.StatusForbidden {
+			t.Errorf("HEAD %s as non-admin = %d", path, w.Code)
+		}
+	}
+}
+
+func TestAgentSetupErrorMapsUnknownErrorsTo500WithoutDetail(t *testing.T) {
+	a, _ := newTestAPI(t)
+	for _, err := range []error{
+		errors.New("create agent directory /secret/path: permission denied"),
+		errors.New("sql: database is locked"),
+	} {
+		w := httptest.NewRecorder()
+		a.agentSetupError(w, err)
+		if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "sql") {
+			t.Errorf("%v -> %d %s", err, w.Code, w.Body)
+		}
 	}
 }

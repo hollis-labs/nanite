@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -95,7 +96,7 @@ func (a *API) handleAgentSetup(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) agentSetupError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrAgentSetupInvalid):
+	case errors.Is(err, service.ErrAgentSetupInvalid), errors.Is(err, store.ErrAgentSetupRequest):
 		a.errorResp(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, store.ErrAgentSetupConflict), errors.Is(err, store.ErrDefinitionRevisionConflict), errors.Is(err, store.ErrAgentHostSlugConflict):
 		a.errorResp(w, http.StatusConflict, err.Error())
@@ -104,9 +105,9 @@ func (a *API) agentSetupError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrProfileIngestionRetired):
 		a.errorResp(w, http.StatusForbidden, err.Error())
 	default:
-		// Definition parse and host-settings validation errors are the caller's;
-		// they are the only other errors setup raises before writing.
-		a.errorResp(w, http.StatusBadRequest, err.Error())
+		// Storage and filesystem failures carry paths and SQL; keep them in the log.
+		slog.Error("agent setup failed", "error", err)
+		a.errorResp(w, http.StatusInternalServerError, "agent setup failed")
 	}
 }
 

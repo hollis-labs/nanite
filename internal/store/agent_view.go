@@ -51,7 +51,7 @@ func (s *Store) GetAgentView(ctx context.Context, idOrSlug string) (AgentView, e
 
 func (s *Store) agentViewFor(ctx context.Context, h AgentHostSettings) (AgentView, error) {
 	v := AgentView{HostSettings: h, Tools: []string{}}
-	err := s.DB.QueryRowContext(ctx, `SELECT id FROM native_authorities WHERE host_settings_id=? AND host_settings_revision=? AND enabled=1 AND revoked_at IS NULL`, h.ID, h.Revision).Scan(&v.AuthorityID)
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM native_authorities WHERE host_settings_id=? AND host_settings_revision=? AND enabled=1 AND revoked_at IS NULL ORDER BY id LIMIT 1`, h.ID, h.Revision).Scan(&v.AuthorityID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:

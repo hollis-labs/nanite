@@ -186,3 +186,49 @@ The pieces are independent enough to build in this order:
 
 The endpoint-backed mode and Tether's cutover to the directory are consumers of
 this model and wait for it.
+
+## Definition fields: accept, record or refuse
+
+An agentdef v2 file declares more than a host can run. For each field the
+host does exactly one of three things, and the choice follows one rule:
+
+- **Apply**: the field changes what runs.
+- **Record**: the field is stored, digest-covered and shown to the operator, and
+  changes nothing at run time. Allowed only where ignoring the field cannot
+  weaken a safety or isolation property.
+- **Refuse**: install or launch fails with a stated cause. Used where ignoring
+  the field would silently weaken a guarantee the author asked for, or where the
+  host has no meaning to give it yet.
+
+Installing a definition and running it are separate decisions. Install accepts
+anything that parses, validates and has verifiable pins, because storing an
+artifact claims nothing about running it. Launch is where a field is applied,
+recorded or refused, per runtime.
+
+Requests are not grants. A definition may ask for tools and skills; the
+operator approves, and the agent view shows each request as pending or granted.
+
+| Field | Decision | Notes |
+|---|---|---|
+| `behavior.purpose`, body, `instructions`, `sops`, `completion` | apply | rendered into the instruction content in order |
+| `behavior.hooks` | apply where the runtime has hooks, otherwise refuse | each name resolves in the host's hook registry; an unknown name or a runtime without hooks refuses with the name |
+| `capabilities` | record | advertised services for discovery; no execution effect |
+| `requirements.requires` | apply as a check | an unmet entry refuses and names it |
+| `requirements.uses` | record | an unmet entry is shown, not refused |
+| `requirements.tools` | record as a request | shown as pending until the operator grants; never a grant. A name the host cannot resolve stays pending with that reason |
+| `requirements.skills` | apply | the pinned tree is verified against its digest, requested skills are granted by the operator at setup, and the tree is delivered through the shared planting layer. A runtime with no skill location refuses with a stated cause rather than dropping the skill |
+| `requirements.resources` | apply | pinned files are materialized into the boot root and readable by the agent |
+| `harness_profile.steering` | apply | appended after the instructions, in order, same mechanism |
+| `harness_profile.context.sources` | apply | planted as reference files and listed in the instructions. "Knowledge on boot" means these files plus the host's recall settings, for both runtimes |
+| `harness_profile.context.policy` | record | an opaque pinned document until a policy format exists |
+| `harness_profile.permissions.profile` | apply `default` and `read-only`; refuse the rest | a CLI refuses `read-only` because it cannot enforce it. Another name is added only through a host binding table from profile name to permission mode |
+| `harness_profile.approvals`, `escalation` | refuse | ignoring an approval or escalation policy would silently weaken oversight |
+| `continuity.mode: ephemeral` | apply | |
+| `continuity.mode: durable` | refuse | the error points to durable-agent enrollment, which is separate from a definition |
+| `continuity.memory_policy`, `recovery_strategy` | record on ephemeral, refuse on durable | an ephemeral session has no cross-session memory and recovers from Nanite's own pack |
+| `extensions` (native-policy, reflex-policy) | apply | unchanged. Unknown optional extensions are kept and confer nothing; an unknown mandatory one refuses |
+| `title`, `presentation`, `provenance` | record | |
+
+Tool and skill approval at setup takes the same shape as tool approval: a list
+of names or `*`, with a recorded reason, in one transaction with the rest of
+setup.

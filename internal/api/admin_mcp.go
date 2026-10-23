@@ -3,13 +3,17 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 
+	"github.com/hollis-labs/nanite/internal/apiauth"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -17,10 +21,18 @@ import (
 // sits under /api/admin, so the route rules already require the admin scope.
 const adminMCPPath = "/api/admin/mcp"
 
+// adminMCPMaxResponse caps what one tool call returns. Sessions and history
+// page through limit/cursor; the other lists are small, and an oversize body is
+// refused rather than silently cut.
+const adminMCPMaxResponse = 256 << 10
+
 // adminMCPTool maps one MCP tool onto an existing HTTP route. Tools add no
 // logic of their own: each call is dispatched through the API mux with the
-// caller's credential, so validation, reason-required rules and error codes
-// are exactly the HTTP ones.
+// principal of the request that reached /api/admin/mcp, so the handlers'
+// own validation, reason-required rules and error bodies apply. The inner
+// call does not pass the auth middleware's per-route scope rules or the
+// /api/admin Origin allowlist again; the outer request did, and the endpoint
+// re-checks for an admin principal itself (adminMCPPrincipal).
 type adminMCPTool struct {
 	name, description string
 	method, path      string   // path may hold {param} placeholders filled from arguments
@@ -102,14 +114,17 @@ var adminMCPTools = []adminMCPTool{
 			"work_root": prop("string", "Absolute working directory on the Nanite machine."),
 			"metadata":  map[string]any{"type": "object"},
 		}, required: []string{"definition_ref"}},
-	{name: "session_list", method: "GET", path: "/api/agent/v1/sessions",
-		description: "List agent sessions." + adminCredentialNote},
+	{name: "session_list", method: "GET", path: "/api/agent/v1/sessions", queryParams: []string{"limit", "cursor", "include_archived"},
+		description: "List agent sessions, a page at a time (limit 1-200, default 50); pass next_cursor back as cursor for the next page." + adminCredentialNote,
+		properties: map[string]any{"limit": prop("integer", "Page size, 1-200."), "cursor": prop("string", "next_cursor from the previous page."),
+			"include_archived": prop("string", "\"true\" to include archived sessions.")}},
 	{name: "session_get", method: "GET", path: "/api/agent/v1/sessions/{id}", pathParams: []string{"id"},
 		description: "Show one agent session." + adminCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}},
-	{name: "session_history", method: "GET", path: "/api/agent/v1/sessions/{id}/messages", pathParams: []string{"id"},
-		description: "Read a session's message history." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}},
+	{name: "session_history", method: "GET", path: "/api/agent/v1/sessions/{id}/messages", pathParams: []string{"id"}, queryParams: []string{"limit", "older_cursor"},
+		description: "Read a session's message history, newest page first; pass the returned older cursor back as older_cursor for earlier messages." + adminCredentialNote,
+		properties: map[string]any{"id": prop("string", "Session view id."), "limit": prop("integer", "Page size, 1-200."),
+			"older_cursor": prop("string", "Cursor from the previous page.")}, required: []string{"id"}},
 	{name: "session_stop", method: "POST", path: "/api/agent/v1/sessions/{id}/stop", pathParams: []string{"id"}, body: true,
 		description: "Stop an agent session." + adminCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}},
@@ -127,7 +142,7 @@ var adminMCPTools = []adminMCPTool{
 // adminMCPServer builds the tool set. dispatch runs one request through the
 // API mux; each call carries the caller's request context, so the credential
 // that reached /api/admin/mcp is the one every wrapped route sees.
-func adminMCPServer(dispatch http.Handler, carrier *http.Request) *mcp.Server {
+func adminMCPServer(a *API, dispatch http.Handler, carrier *http.Request) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "nanite-admin", Version: "1"}, nil)
 	for _, t := range adminMCPTools {
 		props := t.properties
@@ -143,11 +158,11 @@ func adminMCPServer(dispatch http.Handler, carrier *http.Request) *mcp.Server {
 				return t.call(ctx, dispatch, carrier, req.Params.Arguments)
 			})
 	}
-	// host_settings_retire reads the current host, then writes it back disabled.
-	srv.AddTool(&mcp.Tool{Name: "host_settings_retire", Description: "Retire an agent by disabling its host settings (enabled=false at the current revision)." + adminCredentialNote,
+	srv.AddTool(&mcp.Tool{Name: "host_settings_retire",
+		Description: "Disable an agent's host settings (enabled=false) so no new session starts from them. This is a disable-only write: it skips the model and definition re-validation that host_settings_update does, so it works even when the model is no longer allowed. It does NOT stop live sessions (use session_stop) or remove tool grants (use authority_revoke or tool_ungrant)." + adminCredentialNote,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"id": prop("string", "Host settings id.")}, "required": []string{"id"}}},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return retireHost(ctx, dispatch, carrier, req.Params.Arguments)
+			return a.retireHost(carrier, req.Params.Arguments)
 		})
 	return srv
 }
@@ -159,76 +174,108 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 			return mcpToolError("arguments must be a JSON object"), nil
 		}
 	}
+	if _, ok := adminMCPPrincipal(carrier); !ok {
+		return mcpToolError("an admin credential is required"), nil
+	}
 	path := t.path
 	for _, p := range t.pathParams {
 		v, _ := args[p].(string)
-		if strings.TrimSpace(v) == "" {
-			return mcpToolError(p + " is required"), nil
+		if !adminMCPSafeID(v) {
+			return mcpToolError(p + " is required and must be a single path segment"), nil
 		}
 		path = strings.ReplaceAll(path, "{"+p+"}", url.PathEscape(v))
 		delete(args, p)
+	}
+	q := url.Values{}
+	for _, name := range t.queryParams {
+		if v, ok := args[name]; ok {
+			q.Set(name, fmt.Sprint(v))
+			delete(args, name)
+		}
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	var body []byte
 	if t.body {
 		body, _ = json.Marshal(args)
 	}
-	status, out := adminDispatch(ctx, h, carrier, t.method, path, body)
+	status, out := adminDispatch(carrier.Context(), h, carrier, t.method, path, body)
 	return mcpToolResult(status, out), nil
 }
 
-func retireHost(ctx context.Context, h http.Handler, carrier *http.Request, raw json.RawMessage) (*mcp.CallToolResult, error) {
+func (a *API) retireHost(carrier *http.Request, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	if _, ok := adminMCPPrincipal(carrier); !ok {
+		return mcpToolError("an admin credential is required"), nil
+	}
 	var args struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(raw, &args); err != nil || strings.TrimSpace(args.ID) == "" {
-		return mcpToolError("id is required"), nil
+	if err := json.Unmarshal(raw, &args); err != nil || !adminMCPSafeID(args.ID) {
+		return mcpToolError("id is required and must be a single path segment"), nil
 	}
-	status, out := adminDispatch(ctx, h, carrier, http.MethodGet, "/api/agent-host-settings", nil)
-	if status >= 400 {
-		return mcpToolResult(status, out), nil
+	if a.Services == nil || a.Services.AgentDefinitions == nil {
+		return mcpToolError("HTTP 503: agent definition host unavailable"), nil
 	}
-	var list []map[string]any
-	if err := json.Unmarshal(out, &list); err != nil {
-		var wrapped struct {
-			Items []map[string]any `json:"items"`
+	ctx := carrier.Context()
+	var host store.AgentHostSettings
+	var err error
+	// The revision can move between the read and the write; read again and retry.
+	for attempt := 0; attempt < 3; attempt++ {
+		host, err = a.Services.AgentDefinitions.DisableHost(ctx, args.ID)
+		if !errors.Is(err, store.ErrAgentHostRevisionConflict) {
+			break
 		}
-		if json.Unmarshal(out, &wrapped) != nil {
-			return mcpToolError("unexpected host settings list shape"), nil
-		}
-		list = wrapped.Items
 	}
-	for _, host := range list {
-		if id, _ := host["id"].(string); id != args.ID {
-			continue
-		}
-		body := map[string]any{"slug": host["slug"], "title": host["title"], "definition_ref": host["definition_ref"], "settings": host["settings"], "enabled": false}
-		if rev, ok := host["revision"].(string); ok {
-			body["revision"] = rev
-		}
-		b, _ := json.Marshal(body)
-		status, out = adminDispatch(ctx, h, carrier, http.MethodPut, "/api/agent-host-settings/"+url.PathEscape(args.ID), b)
-		return mcpToolResult(status, out), nil
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return mcpToolError("HTTP 404: host settings not found"), nil
+	case errors.Is(err, store.ErrAgentHostRevisionConflict):
+		return mcpToolError("HTTP 409: host settings kept changing; retry"), nil
+	case err != nil:
+		return mcpToolError("HTTP 500: retiring host settings failed"), nil
 	}
-	return mcpToolError("host settings not found"), nil
+	out, _ := json.Marshal(host)
+	return mcpToolResult(http.StatusOK, out), nil
 }
 
-func adminDispatch(_ context.Context, h http.Handler, carrier *http.Request, method, path string, body []byte) (int, []byte) {
-	r := httptest.NewRequest(method, path, bytes.NewReader(body)).WithContext(carrier.Context())
-	r.Header = carrier.Header.Clone()
+// adminDispatch runs one inner request. Only what the handlers need is copied
+// from the carrier: no Authorization, Cookie, Accept or MCP session headers.
+func adminDispatch(ctx context.Context, h http.Handler, carrier *http.Request, method, path string, body []byte) (int, []byte) {
+	r := httptest.NewRequest(method, path, bytes.NewReader(body)).WithContext(ctx)
+	r.Host = carrier.Host
 	r.RemoteAddr = carrier.RemoteAddr
 	if body != nil {
 		r.Header.Set("Content-Type", "application/json")
-	} else {
-		r.Header.Del("Content-Type")
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, r)
 	return rec.Code, rec.Body.Bytes()
 }
 
+// adminMCPSafeID accepts one plain path segment. "." and ".." would be cleaned
+// out of the path by the router and answered with a redirect.
+func adminMCPSafeID(v string) bool {
+	return strings.TrimSpace(v) != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\")
+}
+
+// adminMCPPrincipal is the same test the agent-management handlers apply: a
+// non-agent credential with the admin scope.
+func adminMCPPrincipal(r *http.Request) (apiauth.Principal, bool) {
+	p, ok := apiauth.FromContext(r.Context())
+	if !ok || p.Kind == apiauth.KindAgent || !p.Has(apiauth.ScopeAdmin) || strings.TrimSpace(p.CredentialID) == "" {
+		return p, false
+	}
+	return p, true
+}
+
 func mcpToolResult(status int, body []byte) *mcp.CallToolResult {
 	text := strings.TrimSpace(string(body))
-	if status >= 400 {
+	if len(body) > adminMCPMaxResponse {
+		return mcpToolError(fmt.Sprintf("HTTP %d: response is %d bytes, over the %d byte limit; narrow the request (limit, cursor)", status, len(body), adminMCPMaxResponse))
+	}
+	// Anything but 2xx is not a success here, redirects included.
+	if status < 200 || status >= 300 {
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("HTTP %d: %s", status, text)}}}
 	}
 	if text == "" {
@@ -242,10 +289,23 @@ func mcpToolError(msg string) *mcp.CallToolResult {
 }
 
 // registerAdminMCP serves the admin MCP endpoint. Stateless, one server per
-// request: no session state to leak between credentials.
+// request: no session state to leak between credentials. The route is already
+// admin-only in the auth middleware; it checks again here so the tools are
+// never reachable if the route table changes, and each tool call checks once
+// more.
 func (a *API) registerAdminMCP(mux *http.ServeMux) {
 	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		return adminMCPServer(mux, r)
+		return adminMCPServer(a, mux, r)
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	mux.Handle(adminMCPPath, handler)
+	mux.HandleFunc(adminMCPPath, func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := apiauth.FromContext(r.Context()); !ok {
+			a.errorResp(w, http.StatusUnauthorized, "authentication is required")
+			return
+		}
+		if _, ok := adminMCPPrincipal(r); !ok {
+			a.errorResp(w, http.StatusForbidden, "the credential lacks the required scope")
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
 }

@@ -440,6 +440,35 @@ func (s *Store) UpdateAgentHostSettings(ctx context.Context, input AgentHostSett
 	return input, tx.Commit()
 }
 
+// DisableAgentHostSettings sets enabled=0 at a revision compare-and-swap and
+// nothing else: no validation of the stored settings, no change to the pin, the
+// actor binding or any grant. Already-disabled hosts are returned unchanged.
+func (s *Store) DisableAgentHostSettings(ctx context.Context, id, expectedRevision string) (AgentHostSettings, error) {
+	if id == "" || expectedRevision == "" {
+		return AgentHostSettings{}, ErrAgentHostRevisionConflict
+	}
+	cur, err := s.GetAgentHostSettings(ctx, id)
+	if err != nil {
+		return cur, err
+	}
+	if cur.Revision != expectedRevision {
+		return cur, ErrAgentHostRevisionConflict
+	}
+	if !cur.Enabled {
+		return cur, nil
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE agent_host_settings SET enabled=0,revision=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND revision=?`, uuid.NewString(), id, expectedRevision)
+	if err != nil {
+		return cur, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return cur, err
+	} else if n != 1 {
+		return cur, ErrAgentHostRevisionConflict
+	}
+	return s.GetAgentHostSettings(ctx, id)
+}
+
 func (s *Store) DeleteAgentHostSettings(ctx context.Context, id, expectedRevision string) error {
 	if id == "" || expectedRevision == "" {
 		return ErrAgentHostRevisionConflict

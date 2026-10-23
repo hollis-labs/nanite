@@ -46,7 +46,90 @@ func adminMCPCall(t *testing.T, cs *mcp.ClientSession, name string, args map[str
 	return sb.String(), res.IsError
 }
 
-func TestAdminMCPRefusesNonAdmin(t *testing.T) {
+// guardedAdminMCP puts the real auth guard in front of the API mux, as the
+// server does, and returns the base URL plus a bearer secret per credential.
+func guardedAdminMCP(t *testing.T) (url string, secrets map[string]string, a *testAPI) {
+	t.Helper()
+	a, mux := newTestAPI(t)
+	st, err := apiauth.Open(t.Context(), filepath.Join(t.TempDir(), "auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	g := apiauth.NewGuard(st)
+	g.Pattern = func(r *http.Request) string { _, p := mux.Handler(r); return p }
+	srv := httptest.NewServer(g.Middleware(mux))
+	t.Cleanup(srv.Close)
+	secrets = map[string]string{}
+	for name, p := range map[string]apiauth.CreateParams{
+		"operator": {Kind: apiauth.KindOperator, Label: "op", Scopes: apiauth.AllScopes()},
+		"client":   {Kind: apiauth.KindClient, Label: "cl", Scopes: []apiauth.Scope{apiauth.ScopeRead, apiauth.ScopeOperate}},
+		"agent":    {Kind: apiauth.KindAgent, Label: "ag", Scopes: apiauth.AllScopes(), BoundSessionID: "s1"},
+	} {
+		_, secret, err := st.Create(t.Context(), p)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		secrets[name] = secret
+	}
+	return srv.URL, secrets, a
+}
+
+type bearerTransport struct{ secret string }
+
+func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	if b.secret != "" {
+		r.Header.Set("Authorization", "Bearer "+b.secret)
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// Every tool's authorization rests on the outer middleware plus the endpoint's
+// own check; prove the route end to end with real credentials.
+func TestAdminMCPThroughTheAuthGuard(t *testing.T) {
+	url, secrets, _ := guardedAdminMCP(t)
+	post := func(secret string) int {
+		req, _ := http.NewRequest(http.MethodPost, url+adminMCPPath, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := post(""); got != http.StatusUnauthorized {
+		t.Errorf("no credential = %d, want 401", got)
+	}
+	for _, name := range []string{"client", "agent"} {
+		if got := post(secrets[name]); got != http.StatusForbidden {
+			t.Errorf("%s credential = %d, want 403", name, got)
+		}
+	}
+	if got := post(secrets["operator"]); got != http.StatusOK {
+		t.Errorf("operator = %d, want 200", got)
+	}
+
+	// The operator works end to end through the MCP client, tools included.
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil).
+		Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: url + adminMCPPath, HTTPClient: &http.Client{Transport: bearerTransport{secrets["operator"]}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	if text, isErr := adminMCPCall(t, cs, "host_settings_list", nil); isErr {
+		t.Fatalf("host_settings_list as operator: %s", text)
+	}
+}
+
+// Without the middleware in front, the endpoint and each tool still refuse a
+// request that carries no admin principal.
+func TestAdminMCPRefusesNonAdminWithoutTheGuard(t *testing.T) {
 	_, mux := newTestAPI(t)
 	for name, p := range map[string]*apiauth.Principal{"no principal": nil, "agent credential": &agentPrincipal, "client without admin": &clientPrincipal} {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,18 +138,52 @@ func TestAdminMCPRefusesNonAdmin(t *testing.T) {
 			}
 			mux.ServeHTTP(w, r)
 		}))
-		cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil).
-			Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: ts.URL + adminMCPPath}, nil)
-		if err == nil {
-			// The in-process test mux has no auth middleware; the wrapped
-			// routes still refuse, so the tool call must fail.
-			text, isErr := adminMCPCall(t, cs, "agent_list", nil)
-			if !isErr {
-				t.Errorf("%s: agent_list succeeded: %s", name, text)
-			}
-			_ = cs.Close()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+adminMCPPath, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s: status %d, want 401/403", name, resp.StatusCode)
 		}
 		ts.Close()
+	}
+}
+
+// Path-like ids must not reach the router, which would answer a redirect that
+// is neither an error nor a success.
+func TestAdminMCPRejectsUnsafeIDsAndRedirects(t *testing.T) {
+	_, mux := newTestAPI(t)
+	cs := adminMCPSession(t, mux, &adminClientPrincipal)
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"tool_grant", map[string]any{"id": "..", "tool": "dev_read", "reason": "r"}},
+		{"session_stop", map[string]any{"id": "."}},
+		{"agent_get", map[string]any{"id": "a/b"}},
+		{"tool_ungrant", map[string]any{"id": "x", "tool": "../y"}},
+		{"host_settings_retire", map[string]any{"id": ".."}},
+	} {
+		if text, isErr := adminMCPCall(t, cs, c.tool, c.args); !isErr {
+			t.Errorf("%s %v succeeded: %s", c.tool, c.args, text)
+		}
+	}
+	for _, status := range []int{200, 201, 204} {
+		if r := mcpToolResult(status, []byte("{}")); r.IsError {
+			t.Errorf("status %d flagged as error", status)
+		}
+	}
+	for _, status := range []int{301, 307, 400, 404, 500} {
+		if r := mcpToolResult(status, nil); !r.IsError {
+			t.Errorf("status %d not flagged as error", status)
+		}
+	}
+	if r := mcpToolResult(200, make([]byte, adminMCPMaxResponse+1)); !r.IsError {
+		t.Error("oversize response not refused")
 	}
 }
 
@@ -139,6 +256,13 @@ func TestAdminMCPManagesAgentsLikeHTTP(t *testing.T) {
 
 	// Retire disables the host settings.
 	hostID := setupHostID(t, a)
+	// Retiring must not depend on the stored settings still validating.
+	if _, err := a.store.DB.ExecContext(t.Context(), `UPDATE agent_host_settings SET settings_json = json_set(settings_json, '$.model', '') WHERE id = ?`, hostID); err != nil {
+		t.Fatal(err)
+	}
+	if text, isErr := adminMCPCall(t, cs, "host_settings_update", map[string]any{"id": hostID, "slug": "x", "definition_ref": map[string]any{}, "settings": map[string]any{}}); !isErr {
+		t.Fatalf("update with invalid settings succeeded: %s", text)
+	}
 	if text, isErr := adminMCPCall(t, cs, "host_settings_retire", map[string]any{"id": hostID}); isErr {
 		t.Fatalf("retire: %s", text)
 	}

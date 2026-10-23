@@ -104,23 +104,29 @@ The steps below are what `setup` does, for when you need one on its own.
 
 `POST /api/admin/mcp` is a streamable-HTTP MCP endpoint (stateless, JSON
 responses) so Tether's MCP gateway and Tachyon register Nanite as a tool server
-instead of shelling out. Every tool dispatches in-process to the HTTP route
-above with the caller's credential, so validation, reason-required rules and
-status codes are the HTTP ones; an error comes back as an MCP tool error whose
-text starts `HTTP <status>:`.
+instead of shelling out. Each tool calls the HTTP route below in-process with
+the principal of the request that reached the endpoint, so the handlers' own
+validation and reason-required rules apply. An error comes back as an MCP tool
+error whose text starts `HTTP <status>:`; any non-2xx status, redirects
+included, is an error. The inner call does not pass the auth middleware's
+per-route scope rules or the `/api/admin` Origin allowlist a second time (the
+outer request did); the endpoint instead re-checks for a non-agent admin
+principal itself. Today only the operator holds admin, so this changes nothing.
+Ids must be a single path segment (`.`, `..` and `/` are refused).
 
 | Tool | Route |
 |---|---|
 | `agent_setup`, `agent_list`, `agent_get` | `POST /api/agent-setup`, `GET /api/native-agents[/{id}]` |
 | `host_settings_list`, `host_settings_create`, `host_settings_update` | `/api/agent-host-settings` |
-| `host_settings_retire` | read the host, write it back `enabled=false` at its revision |
+| `host_settings_retire` | not a route: a disable-only write (`enabled=false`, no model/definition re-validation, retried on a moved revision). Live sessions and grants are untouched; use `session_stop` and `authority_revoke` |
 | `authority_list`, `authority_get`, `authority_revoke` | `/api/native-authority[/{id}[/revoke]]` |
 | `tool_grant`, `tool_ungrant` | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}` |
 | `session_start`, `session_list`, `session_get`, `session_history`, `session_stop` | `/api/agent/v1/sessions...` |
 | `turn_send`, `turn_get`, `turn_cancel` | `/api/agent/v1/sessions/{id}/turns...` |
 
-The endpoint sits under `/api/admin`, so it needs the admin scope: the operator
-token. Agent credentials are refused, and so is any client credential without
+`session_list` and `session_history` page with `limit`/`cursor`/`older_cursor`; any
+response over 256 KiB is refused rather than cut. The endpoint sits under
+`/api/admin`, so it needs the admin scope: the operator token. Agent credentials are refused, and so is any client credential without
 admin. That credential stays admin for now; narrower credentials come later.
 Directories and `work_root` are absolute paths on the machine Nanite runs on.
 

@@ -30,6 +30,12 @@ const (
 	// an agent_profiles row.
 	UserSentinel = "user"
 
+	// TetherSentinel is the reserved mailbox participant for mail the Tether
+	// bridge delivers (CW-20261022-0002). It is a host-owned label, not an
+	// actor: it holds no capabilities and enrolls nothing. The real Tether
+	// sender is carried in the message metadata, never in this id.
+	TetherSentinel = "tether"
+
 	// agentIDPrefix is the prefix for generated agent IDs.
 	agentIDPrefix = "agt_"
 )

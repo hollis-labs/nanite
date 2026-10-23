@@ -41,7 +41,7 @@ type messagingAgentRegistry struct {
 }
 
 func (registry *messagingAgentRegistry) AgentExists(ctx context.Context, agentID string) (bool, error) {
-	if agentID == a2a.UserSentinel {
+	if agentID == a2a.UserSentinel || agentID == a2a.TetherSentinel {
 		return true, nil
 	}
 	if registry == nil || registry.store == nil {

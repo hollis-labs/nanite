@@ -111,8 +111,8 @@ func (s *AgentConfigService) CreateWithAssignments(ctx context.Context, profile 
 	if err := agent.ValidateSlug(profile.Slug); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
 	}
-	if profile.Slug == a2a.UserSentinel {
-		return nil, svcerr.New(svcerr.CodeInvalid, "slug \"user\" is reserved for messaging", svcerr.WithField("slug"))
+	if profile.Slug == a2a.UserSentinel || profile.Slug == a2a.TetherSentinel {
+		return nil, svcerr.New(svcerr.CodeInvalid, "slug \"user\" and \"tether\" are reserved for messaging", svcerr.WithField("slug"))
 	}
 	if field, err := store.ValidateAgentBehaviorFields(profile); err != nil {
 		return nil, svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField(field))
@@ -359,8 +359,8 @@ func validateEditableAgent(p *store.AgentProfile) error {
 	if err := agent.ValidateSlug(p.Slug); err != nil {
 		return svcerr.Wrap(err, svcerr.CodeInvalid, err.Error(), svcerr.WithField("slug"))
 	}
-	if p.Slug == a2a.UserSentinel {
-		return svcerr.New(svcerr.CodeInvalid, "slug user is reserved for messaging", svcerr.WithField("slug"))
+	if p.Slug == a2a.UserSentinel || p.Slug == a2a.TetherSentinel {
+		return svcerr.New(svcerr.CodeInvalid, "slugs user and tether are reserved for messaging", svcerr.WithField("slug"))
 	}
 	// Empty optional JSON strings retain the legacy default behavior; supplied
 	// non-empty values must have their documented shape, never JSON null.

@@ -130,7 +130,8 @@ func isTetherGateway(cfg *MCPServerConfig) bool {
 	return false
 }
 
-// tetherGatewayFlag is the value of mcp_servers.tether_gateway for cfg. A
+// tetherGatewayFlag is the value of mcp_servers.tether_gateway for cfg: set for
+// an enabled gateway, so a disabled one does not hold the slot. A
 // unique partial index over the flag makes "one Tether actor per host" the
 // database's decision: the gateway entry is host-wide, so each agent that
 // lists it launches with the same token, and a second entry under another name
@@ -139,7 +140,7 @@ func isTetherGateway(cfg *MCPServerConfig) bool {
 // writers on any connection cannot both succeed. Per-agent planting is what
 // would lift this.
 func tetherGatewayFlag(cfg *MCPServerConfig) int {
-	if isTetherGateway(cfg) {
+	if cfg.Enabled && isTetherGateway(cfg) {
 		return 1
 	}
 	return 0

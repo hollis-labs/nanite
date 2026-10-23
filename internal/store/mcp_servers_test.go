@@ -316,3 +316,22 @@ func TestMCPServers_TetherGatewayRuleIsAtomic(t *testing.T) {
 		}
 	})
 }
+
+// A disabled gateway presents no credential, so it does not hold the slot; the
+// rule applies when it is enabled.
+func TestMCPServers_DisabledGatewayDoesNotHoldTheSlot(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	off := tetherGateway("tether-off", "/a")
+	off.Enabled = false
+	if err := s.CreateMCPServer(ctx, off); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMCPServer(ctx, tetherGateway("tether", "/b")); err != nil {
+		t.Fatalf("enabled gateway beside a disabled one: %v", err)
+	}
+	off.Enabled = true
+	if err := s.UpdateMCPServer(ctx, off); !errors.Is(err, ErrTetherGatewayConflict) {
+		t.Fatalf("enabling a second gateway: %v", err)
+	}
+}

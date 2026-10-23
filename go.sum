@@ -59,6 +59,8 @@ github.com/hollis-labs/libs/core/panics v0.1.0 h1:mWJ9yPTRCBsLFprCNGIJrroehfh/g3
 github.com/hollis-labs/libs/core/panics v0.1.0/go.mod h1:KugNEagpx3eqC72FOyQrrTcIzGD+hJb+EXkSV6jP4jU=
 github.com/hollis-labs/libs/core/util v0.5.0 h1:w+8FXHufLWo1Kfc0DaWns99UIzpxit+DY6/zgNbz0zY=
 github.com/hollis-labs/libs/core/util v0.5.0/go.mod h1:CpS3EUj+MHivKVnGWJj8Vtq1+J3TN1uPyPCbLzhQLh0=
+github.com/hollis-labs/libs/core/util v0.6.0 h1:uqVSuuRtKAzwDcMf5ekFlBUO9g6aZzAAp81dRadac4U=
+github.com/hollis-labs/libs/core/util v0.6.0/go.mod h1:CpS3EUj+MHivKVnGWJj8Vtq1+J3TN1uPyPCbLzhQLh0=
 github.com/hollis-labs/libs/harness/core v0.15.0 h1:HHvBWejKchracj+an6vl2PS4Vbl1ssL/nUbLc2G14zQ=
 github.com/hollis-labs/libs/harness/core v0.15.0/go.mod h1:9unAdOAJSvsw5i9rMub7n+kBv+YJbMVzGeTiE8HbgoI=
 github.com/hollis-labs/libs/llm/core v0.2.0 h1:jYjfC4gsLbxsUG5mQ4ougbmUB0b9rQpqb85Vmb4CwQg=
@@ -67,6 +69,8 @@ github.com/hollis-labs/libs/mcp/plugin-mcp v0.4.0 h1:o7MBd8kkpasHajKlfkQnXWEKrvW
 github.com/hollis-labs/libs/mcp/plugin-mcp v0.4.0/go.mod h1:7NTosm6go8xsgYj/VPyKzzPyptskPC7/6tkCv0EWQqI=
 github.com/hollis-labs/libs/mesh/core v0.8.0 h1:XFeak/8MRzBnCw3xj0nj2VBNv6GaUYY/WsP1rKVVsjc=
 github.com/hollis-labs/libs/mesh/core v0.8.0/go.mod h1:K1a1oeFXakkaJDyKogI/I2j+2lpKklTZgdtzSw45Bss=
+github.com/hollis-labs/libs/mesh/core v0.9.1 h1:W1Z7G/OI4Ty9UaLXRQ/TY6Z1aDRtCrUfQs+IW/gShVE=
+github.com/hollis-labs/libs/mesh/core v0.9.1/go.mod h1:4MIXuPovKfdlaHGpI2Va9nINuNKmfsed4XX53UxeoSk=
 github.com/hollis-labs/libs/mesh/eventbus v0.2.0 h1:9mstpH3GWQWRqnNkgzFiNo2e1/sg20enIs/gHePLcRw=
 github.com/hollis-labs/libs/mesh/eventbus v0.2.0/go.mod h1:KKQBH8hpxgkuoMlowUnqn809z3BDMQqkLHteAIcpkZU=
 github.com/hollis-labs/libs/security/policy v0.1.0 h1:XsksYYhpJ315wlr9QmWwxUKRfyDAJSSRiekBh7jpI70=

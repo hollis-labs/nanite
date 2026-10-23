@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	messaging "github.com/hollis-labs/libs/mesh/core/messaging"
 	mailbox "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
+	tether "github.com/hollis-labs/libs/mesh/core/tetherclient"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -188,5 +191,15 @@ func TestTetherBridgeClientOptionsTokenFile(t *testing.T) {
 	}
 	if got := tetherBridgeClientOptions("/run/nanite/bridge.token"); len(got) != 1 {
 		t.Fatalf("token file should add one option, got %d", len(got))
+	}
+}
+
+func TestTetherBridgeClientAcceptsServiceTokenFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bridge.token")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 456)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tether.New("http://127.0.0.1:1", tetherBridgeClientOptions(path)...); err != nil {
+		t.Fatalf("a service-token-length file must be accepted: %v", err)
 	}
 }

@@ -604,7 +604,7 @@ func TestScratchpadClear_RemovesKey(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
 	_ = ls.scratchpadWrite("k", "v")
 	bytesBefore := ls.scratchpadBytes
-	cleared := ls.scratchpadClear("k")
+	cleared, _ := ls.scratchpadClear("k")
 	if !cleared {
 		t.Fatal("expected cleared=true")
 	}
@@ -619,7 +619,7 @@ func TestScratchpadClear_RemovesKey(t *testing.T) {
 
 func TestScratchpadClear_MissingKeyReturnsFalse(t *testing.T) {
 	ls := newLoopState(chat.AgentConstraints{}, nil, false)
-	if ls.scratchpadClear("nope") {
+	if cleared, _ := ls.scratchpadClear("nope"); cleared {
 		t.Fatal("expected cleared=false for missing key")
 	}
 	if ls.scratchpadBytes != 0 {

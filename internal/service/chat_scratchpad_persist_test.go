@@ -17,8 +17,8 @@ func TestScratchpadSurvivesATurnWithAWorkspace(t *testing.T) {
 	if err := first.scratchpadWrite("note", "keep"); err != nil {
 		t.Fatal(err)
 	}
-	if !first.scratchpadClear("note") {
-		t.Fatal("clear reported the key missing")
+	if cleared, err := first.scratchpadClear("note"); !cleared || err != nil {
+		t.Fatalf("clear = %v, %v; want true, nil", cleared, err)
 	}
 
 	second := newTestLoopState()
@@ -88,5 +88,41 @@ func TestScratchpadWriteRefusedWhenItCannotBeSaved(t *testing.T) {
 	}
 	if got, _ := ls.scratchpadRead(""); len(got) != 1 {
 		t.Fatalf("unsaved write left in the buffer: %v", got)
+	}
+}
+
+func TestScratchpadClearRefusedWhenItCannotBeSaved(t *testing.T) {
+	state := t.TempDir()
+	ls := newTestLoopState()
+	ls.attachScratchpadFile(state)
+	if err := ls.scratchpadWrite("keep", "saved"); err != nil {
+		t.Fatal(err)
+	}
+	bytesBefore := ls.scratchpadBytes
+	aside := state + ".aside"
+	if err := os.Rename(state, aside); err != nil {
+		t.Fatal(err)
+	}
+	if cleared, err := ls.scratchpadClear("keep"); cleared || err == nil {
+		t.Fatalf("clear = %v, %v; want false and an error", cleared, err)
+	}
+	out, isErr := callScratchpadClear(map[string]any{"key": "keep"}, ls)
+	if !isErr {
+		t.Fatalf("clear tool reported success: %s", out)
+	}
+	if got, _ := ls.scratchpadRead("keep"); got["keep"] != "saved" || ls.scratchpadBytes != bytesBefore {
+		t.Fatalf("failed clear not rolled back: %v, %d bytes (was %d)", got, ls.scratchpadBytes, bytesBefore)
+	}
+	if err := os.Rename(aside, state); err != nil {
+		t.Fatal(err)
+	}
+	fresh := newTestLoopState()
+	fresh.attachScratchpadFile(state)
+	if got, _ := fresh.scratchpadRead("keep"); got["keep"] != "saved" {
+		t.Fatalf("next turn restored %v, want the value the failed clear kept", got)
+	}
+	// A missing key is not an error, with or without a workspace.
+	if cleared, err := ls.scratchpadClear("nope"); cleared || err != nil {
+		t.Fatalf("missing key: %v, %v", cleared, err)
 	}
 }

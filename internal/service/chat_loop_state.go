@@ -688,12 +688,15 @@ func (ls *loopState) scratchpadRead(key string) (map[string]any, bool) {
 	return result, true
 }
 
-// scratchpadClear deletes a key. Returns true if the key existed.
-func (ls *loopState) scratchpadClear(key string) bool {
+// scratchpadClear deletes a key. Returns true if the key existed. As with a
+// write, a deletion that cannot be saved to the session workspace is undone and
+// returned as an error, so the next turn cannot restore a value reported gone.
+func (ls *loopState) scratchpadClear(key string) (bool, error) {
 	v, ok := ls.scratchpad[key]
 	if !ok {
-		return false
+		return false, nil
 	}
+	prevBytes := ls.scratchpadBytes
 	// Marshal cannot fail here: scratchpadWrite already validated serializability
 	// before storing. If it somehow does (direct map write bypassing scratchpadWrite),
 	// we clamp to zero rather than leak bytes.
@@ -707,9 +710,11 @@ func (ls *loopState) scratchpadClear(key string) bool {
 	}
 	delete(ls.scratchpad, key)
 	if err := ls.persistScratchpad(); err != nil {
-		slog.Warn("scratchpad: clear not saved to the session workspace", "err", err)
+		ls.scratchpad[key] = v
+		ls.scratchpadBytes = prevBytes
+		return false, fmt.Errorf("scratchpad could not be saved to the session workspace: %w", err)
 	}
-	return true
+	return true, nil
 }
 
 // continueWith logs a continuation site and optionally captures a snapshot.

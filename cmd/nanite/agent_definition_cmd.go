@@ -42,11 +42,14 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 		defer closeStoreBestEffort(context.Background(), st)
 		return runAgentLoad(context.Background(), st, args[1:], out)
 	}
+	if args[0] == "run" {
+		return runAgentRun(context.Background(), args[1:], out)
+	}
 	if args[0] == "list" || args[0] == "stop" {
 		return runAgentSessionCommand(args, out)
 	}
 	if args[0] != "validate" && args[0] != "install" {
-		return fmt.Errorf("unknown agent command %q: use author, validate, install, setup, load, list or stop (old profile sync/import is retired); run `nanite agent help`", args[0])
+		return fmt.Errorf("unknown agent command %q: use author, validate, install, setup, load, run, list or stop (old profile sync/import is retired); run `nanite agent help`", args[0])
 	}
 	fs := flag.NewFlagSet("agent "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)

@@ -175,6 +175,10 @@ type agentCreateSessionRequest struct {
 	DefinitionRef service.DefinitionRef `json:"definition_ref"`
 	ProjectID     string                `json:"project_id,omitempty"`
 	Title         string                `json:"title,omitempty"`
+	// HostSettings and WorkRoot start a defined CLI agent: the host row to run
+	// under and the directory it works in.
+	HostSettings *service.HostSettingsRef `json:"host_settings,omitempty"`
+	WorkRoot     string                   `json:"work_root,omitempty"`
 }
 
 type agentSessionResponse struct {

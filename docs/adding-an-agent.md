@@ -299,3 +299,22 @@ revision and the body to start a session against the new row.
   than the native runtime can launch is refused, as in `agent setup`.
 - The load writes the database directly, like `setup`; a running server uses the
   new row for its next session without a restart. HTTP reload is not built.
+
+### Running it from the project
+
+```sh
+cd ~/dev/my-project
+nanite agent run                    # load ./.nanite (or ./agent.md), start, attach
+nanite agent run -p "fix the build" # one prompt, print the reply, exit
+echo "summarize" | nanite agent run -p -
+nanite agent run --session <id>     # resume (no reload)
+```
+
+`run` does an `agent load` first (same flags: `--force`, `--grant-same-as`,
+`--reason`), then starts a session on the loaded revision and host row. For a
+`runtime: cli` agent the current directory is the work root and must sit inside
+`directories` in `host.yaml`; an API agent gets none. Edit the directory and run
+again to pick the change up; the server is not restarted and running sessions
+keep their revision. A fresh revision has no tool grants, so `run` prints the
+`agent load --grant-same-as` command to give it the previous row's tools.
+Starts the server if it is not running, unless `--no-autostart`.

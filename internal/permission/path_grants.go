@@ -77,6 +77,16 @@ type PathGrants struct {
 	// Mutex-guarded together with grants + lineage because the natural
 	// lifetime boundary is identical — spawn registers, defer clears.
 	derivedRules map[string]*permissionlib.RuleSet
+	// roots[sessionID] is the work root a host registered for the session
+	// (RegisterRoots). BestSessionDir returns it ahead of any mention grant,
+	// so a tool's default working directory is the host's, not whatever path
+	// the last message mentioned. Guarded by mu.
+	roots map[string]string
+	// protected[sessionID] is the set of canonical directories the dev tools
+	// refuse for the session however a grant reaches them, and shellRefusal
+	// the reason dev_bash is withheld (RegisterProtected). Guarded by mu.
+	protected    map[string][]string
+	shellRefusal map[string]string
 	// mention bounds which free-text mentions may become grants
 	// (CW-20261001-0232). Nil applies only the built-in sensitive-path
 	// denylist. Guarded by mu.
@@ -89,7 +99,112 @@ func NewPathGrants() *PathGrants {
 		grants:       make(map[string]map[string]struct{}),
 		lineage:      make(map[string]string),
 		derivedRules: make(map[string]*permissionlib.RuleSet),
+		roots:        make(map[string]string),
+		protected:    make(map[string][]string),
+		shellRefusal: make(map[string]string),
 	}
+}
+
+// RegisterProtected records the directories the dev tools must refuse for
+// sessionID even when a granted root contains them (a host directory that is
+// an ancestor of the control plane), and, when shellRefusal is not empty, why
+// dev_bash is not offered: a command cannot be path-filtered, so a session
+// whose grants reach a protected directory gets no shell. Re-registering
+// replaces both.
+func (g *PathGrants) RegisterProtected(sessionID string, dirs []string, shellRefusal string) {
+	if g == nil || sessionID == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.protected[sessionID] = append([]string(nil), dirs...)
+	if shellRefusal == "" {
+		delete(g.shellRefusal, sessionID)
+		return
+	}
+	g.shellRefusal[sessionID] = shellRefusal
+}
+
+// lineageChain returns sessionID followed by its ancestors (RegisterLineage),
+// at most lineageMaxHops deep and cycle-safe. The caller holds g.mu.
+func (g *PathGrants) lineageChain(sessionID string) []string {
+	chain := []string{sessionID}
+	seen := map[string]struct{}{sessionID: {}}
+	for cursor := sessionID; len(chain) <= lineageMaxHops; {
+		parent := g.lineage[cursor]
+		if _, dup := seen[parent]; parent == "" || dup {
+			break
+		}
+		seen[parent] = struct{}{}
+		chain = append(chain, parent)
+		cursor = parent
+	}
+	return chain
+}
+
+// Protected returns the directories RegisterProtected recorded for sessionID
+// and for every session it descends from: a child uses its parent's grants
+// (LookupPath), so it inherits the parent's protection too, fail-closed.
+func (g *PathGrants) Protected(sessionID string) []string {
+	if g == nil || sessionID == "" {
+		return nil
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	var out []string
+	for _, id := range g.lineageChain(sessionID) {
+		out = append(out, g.protected[id]...)
+	}
+	return out
+}
+
+// ShellRefusal returns why dev_bash is withheld from sessionID or any session
+// it descends from, or "".
+func (g *PathGrants) ShellRefusal(sessionID string) string {
+	if g == nil || sessionID == "" {
+		return ""
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, id := range g.lineageChain(sessionID) {
+		if r := g.shellRefusal[id]; r != "" {
+			return r
+		}
+	}
+	return ""
+}
+
+// RegisterRoots grants sessionID the given host-chosen directories and makes
+// the first the session's work root. Unlike a mention it is not user text, so
+// the mention policy does not apply; the caller owns the choice (host
+// directories, the session workspace) and must already have removed anything
+// protected. Relative and empty paths are skipped. Re-registering is
+// idempotent, and the work root is replaced.
+func (g *PathGrants) RegisterRoots(sessionID string, roots ...string) {
+	if g == nil || sessionID == "" {
+		return
+	}
+	var clean []string
+	for _, r := range roots {
+		if r == "" || !filepath.IsAbs(r) {
+			continue
+		}
+		clean = append(clean, filepath.Clean(r))
+	}
+	if len(clean) == 0 {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	bucket := g.grants[sessionID]
+	if bucket == nil {
+		bucket = make(map[string]struct{}, len(clean))
+		g.grants[sessionID] = bucket
+	}
+	for _, p := range clean {
+		bucket[p] = struct{}{}
+	}
+	g.roots[sessionID] = clean[0]
 }
 
 // RegisterFromUserMessage scans message for whitespace-delimited tokens
@@ -416,6 +531,12 @@ func (g *PathGrants) BestSessionDir(sessionID string) string {
 	}
 
 	g.mu.RLock()
+	if root := g.roots[sessionID]; root != "" {
+		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			g.mu.RUnlock()
+			return root
+		}
+	}
 	candidates := make([]string, 0)
 	for p := range g.grants[sessionID] {
 		candidates = append(candidates, p)
@@ -474,6 +595,9 @@ func (g *PathGrants) Clear(sessionID string) {
 	}
 	g.mu.Lock()
 	delete(g.grants, sessionID)
+	delete(g.roots, sessionID)
+	delete(g.protected, sessionID)
+	delete(g.shellRefusal, sessionID)
 	delete(g.derivedRules, sessionID)
 	g.mu.Unlock()
 }

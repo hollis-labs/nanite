@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/chat"
+	"github.com/hollis-labs/nanite/internal/permission"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // definedAPIView stores an API-backed defined view for the fixture's session.
-func definedAPIView(t *testing.T, f *characterizationFixture) {
+func definedAPIView(t *testing.T, f *characterizationFixture, dirs ...string) {
 	t.Helper()
 	ctx := t.Context()
 	if err := installEmbeddedChatDefinition(ctx, f.st); err != nil {
@@ -26,7 +27,7 @@ func definedAPIView(t *testing.T, f *characterizationFixture) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := store.NativeHostSettings{Version: "1", Runtime: "api", Provider: "characterization", Model: "characterization-model"}
+	settings := store.NativeHostSettings{Version: "1", Runtime: "api", Provider: "characterization", Model: "characterization-model", Directories: dirs}
 	host, err := f.st.CreateAgentHostSettings(ctx, store.AgentHostSettings{Slug: "api-ws", Title: "api-ws", Source: "test", DefinitionRef: verified.Ref.MeshRef(), Enabled: true, Settings: settings})
 	if err != nil {
 		t.Fatal(err)
@@ -94,5 +95,49 @@ func TestPrepareTurn_NoWorkspaceWithoutARootOrForCLI(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, cli.session)); !os.IsNotExist(err) {
 		t.Fatalf("prepareTurn created a CLI session's workspace: %v", err)
+	}
+}
+
+// The session's tools are bounded by the host's directories and the
+// workspace, and the first directory is the default working directory.
+func TestPrepareTurn_APISessionToolRoots(t *testing.T) {
+	root := canonicalTempDir(t)
+	hostA, hostB := canonicalTempDir(t), canonicalTempDir(t)
+	f := newHandleMessageFixture(t, nil)
+	f.svc.agentDeps = &runtimeagent.Dependencies{WorkspacesRoot: root}
+	f.svc.pathGrants = permission.NewPathGrants()
+	definedAPIView(t, f, hostA, hostB)
+
+	prepared := f.svc.prepareTurn(cognitiveCtx(), f.session, "hi", make(chan chat.StreamEvent, 16))
+	if prepared.setup == nil {
+		t.Fatal("prepareTurn refused an API view with host directories")
+	}
+	if got := f.svc.pathGrants.BestSessionDir(f.session); got != hostA {
+		t.Fatalf("work root = %q, want the first host directory %q", got, hostA)
+	}
+	for _, dir := range []string{hostA, hostB, prepared.setup.workspace.Root} {
+		if !f.svc.pathGrants.IsPathAllowed(f.session, filepath.Join(dir, "f")) {
+			t.Errorf("%s not granted to the session", dir)
+		}
+	}
+	if f.svc.pathGrants.IsPathAllowed(f.session, filepath.Join(canonicalTempDir(t), "f")) {
+		t.Error("a directory the host never listed was granted")
+	}
+}
+
+// With no host directories the workspace is the work root, as for a CLI
+// session.
+func TestPrepareTurn_APISessionWithoutDirectoriesWorksInItsWorkspace(t *testing.T) {
+	root := canonicalTempDir(t)
+	f := newHandleMessageFixture(t, nil)
+	f.svc.agentDeps = &runtimeagent.Dependencies{WorkspacesRoot: root}
+	f.svc.pathGrants = permission.NewPathGrants()
+	definedAPIView(t, f)
+	prepared := f.svc.prepareTurn(cognitiveCtx(), f.session, "hi", make(chan chat.StreamEvent, 16))
+	if prepared.setup == nil {
+		t.Fatal("prepareTurn refused")
+	}
+	if got := f.svc.pathGrants.BestSessionDir(f.session); got != prepared.setup.workspace.Root {
+		t.Fatalf("work root = %q, want the workspace %q", got, prepared.setup.workspace.Root)
 	}
 }

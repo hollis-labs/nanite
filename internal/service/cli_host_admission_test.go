@@ -175,3 +175,32 @@ func TestCreateRefusesACLIHostWhoseMCPServerCannotBeProjected(t *testing.T) {
 		t.Fatalf("registered server: %v", err)
 	}
 }
+
+// An api host's directories bound its tools, so a relative one is refused at
+// session creation with its own cause; an absolute one is accepted.
+func TestCreateRefusesARelativeAPIHostDirectory(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	pin, err := st.InstallAgentDefinition(ctx, []byte("---\nschema_version: \"2\"\ndefinition_id: def:api-dirs\nrevision: \"1\"\nname: api-dirs\ndescription: API dirs.\nbehavior:\n  purpose: Answer.\nrequirements: {}\nharness_profile:\n  context: {}\n  permissions:\n    profile: default\ncontinuity:\n  mode: ephemeral\n---\nBody.\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := &CognitiveViews{Store: st, Resolver: &StoredDefinitionResolver{Store: st}, Models: ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
+		return ModelSelection{"mock-provider", "mock-model"}, nil
+	})}
+	create := func(slug, dir string) error {
+		host, hostErr := st.CreateAgentHostSettings(ctx, store.AgentHostSettings{Slug: slug, Title: slug, Source: "test", DefinitionRef: pin, Enabled: true,
+			Settings: store.NativeHostSettings{Version: "1", Runtime: "api", Provider: "mock-provider", Model: "mock-model", Directories: []string{dir}}})
+		if hostErr != nil {
+			t.Fatal(hostErr)
+		}
+		_, createErr := views.Create(ctx, CreateDefinedView{DefinitionRef: DefinitionRefFromMesh(pin), HostSettings: &HostSettingsRef{ID: host.ID, Revision: host.Revision}})
+		return createErr
+	}
+	if err = create("rel", "work"); !errors.Is(err, ErrUnsupportedDefinition) || CauseCode(err) != CauseHostDirectoryInvalid {
+		t.Fatalf("relative directory: %v", err)
+	}
+	if err = create("abs", t.TempDir()); err != nil {
+		t.Fatalf("absolute directory: %v", err)
+	}
+}

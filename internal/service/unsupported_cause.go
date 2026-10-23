@@ -36,6 +36,7 @@ const (
 	CauseHostRevisionChanged     = "host_revision_changed"
 	CauseWorkRootUnsupported     = "work_root_unsupported"
 	CauseWorkRootInvalid         = "work_root_invalid"
+	CauseHostDirectoryInvalid    = "host_directory_invalid"
 )
 
 type UnsupportedCause struct {

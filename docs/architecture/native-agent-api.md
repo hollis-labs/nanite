@@ -79,6 +79,14 @@ The response allocates `session_view_id`, `turn_id`, `run_id`,
 events and cancellation. The local run/output/turn identifiers share one opaque
 identifier. They make no fabric URN claim.
 
+An `api` session has the same durable session workspace a CLI session has:
+`<WorkspacesRoot>/<session_view_id>/{prompts,state,logs}`, created on the first
+turn (idempotent) and kept after the session ends. A turn does not run if it
+cannot be created. Today the directory is created and carried on the turn;
+tools are not yet rooted in it, scratch state is not yet written to `state/`,
+and `directories` is still ignored for `api` hosts (CW-20261022-0007 is
+delivering these in steps).
+
 ### Embedded view observations
 
 An optional `client_context` on this turn request carries an untrusted view

@@ -62,3 +62,11 @@ func workspaceCreate(root, sessionID string, opts Options) (*Workspace, error) {
 		LogPath:    filepath.Join(logs, "session.log"),
 	}, nil
 }
+
+// EnsureSessionWorkspace creates (or finds) the durable session workspace
+// <root>/<sessionID>/{prompts,state,logs} for a session that is not booted
+// through Boot, so a native-loop (API) session has the same workspace a CLI
+// session gets. Idempotent.
+func EnsureSessionWorkspace(root, sessionID string) (*Workspace, error) {
+	return workspaceCreate(root, sessionID, Options{})
+}

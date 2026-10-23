@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/hollis-labs/nanite/internal/loop"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
@@ -16,6 +17,9 @@ import (
 // API holds dependencies for HTTP handlers.
 type API struct {
 	Services *service.Container
+	// stopLocks serializes agent session stops per session id.
+	stopMu    sync.Mutex
+	stopLocks map[string]*stopLock
 	// agentCursorKey signs process-local pagination tokens for the single operator.
 	agentCursorKey []byte
 	// embedderSelectDeps is injected for embedding_status computation. Defaults
@@ -327,6 +331,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent/v1/capabilities", a.agentV1Handler(a.handleAgentV1Capabilities))
 	mux.HandleFunc("POST /api/agent/v1/sessions", a.agentV1Handler(a.handleAgentV1CreateSession))
 	mux.HandleFunc("GET /api/agent/v1/sessions", a.agentV1Handler(a.handleAgentV1ListSessions))
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/stop", a.agentV1Handler(a.handleAgentV1StopSession))
 	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/messages", a.agentV1Handler(a.handleAgentV1History))
 	mux.HandleFunc("GET /api/agent/v1/sessions/{id}", a.agentV1Handler(a.handleAgentV1GetSession))
 	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/turns/{turnId}", a.agentV1Handler(a.handleAgentV1GetTurn))

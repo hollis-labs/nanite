@@ -220,3 +220,10 @@ Between-turn artifact refresh remains typed unavailable for active bindings.
 Nanite retains the old binding and bytes; it does not directly overwrite active
 boot artifacts or claim an inactive root based on timing. CLI/provider or fabric
 adoption is not implied by installing a definition or saving host settings.
+
+## Session lifecycle
+
+`POST /api/agent/v1/sessions` accepts `work_root` for CLI hosts (absolute, inside
+a host directory). `POST /api/agent/v1/sessions/{id}/stop` ends a session and its
+runtime and is idempotent; `nanite agent list` and `nanite agent stop <session>`
+call the same routes. See `docs/getting-running.md`.

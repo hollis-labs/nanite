@@ -34,8 +34,11 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 	if args[0] == "setup" {
 		return runAgentSetupCommand(args[1:], out)
 	}
+	if args[0] == "list" || args[0] == "stop" {
+		return runAgentSessionCommand(args, out)
+	}
 	if args[0] != "validate" && args[0] != "install" {
-		return fmt.Errorf("unknown agent command %q: use author, validate, install or setup (old profile sync/import is retired); run `nanite agent help`", args[0])
+		return fmt.Errorf("unknown agent command %q: use author, validate, install, setup, list or stop (old profile sync/import is retired); run `nanite agent help`", args[0])
 	}
 	fs := flag.NewFlagSet("agent "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)

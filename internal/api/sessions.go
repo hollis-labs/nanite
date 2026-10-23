@@ -200,25 +200,11 @@ func (a *API) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Archive closes the session's live agent runtime (the onArchive hook)
-	// and emits session-end to activity and plugins.
-	if err := a.Services.Sessions.Archive(r.Context(), id); err != nil {
+	// and emits session-end to activity and plugins; endSession also kills
+	// orphaned CLI processes and broadcasts the archive to the UI.
+	if err := a.endSession(r, id); err != nil {
 		a.errorResp(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	// Kill any orphaned CLI processes for this session.
-	if a.Services.ProcessTracker != nil {
-		a.Services.ProcessTracker.KillSession(id)
-	}
-
-	// Broadcast session archived presence so UI updates immediately.
-	a.Services.Streams.BroadcastSessionArchived(id)
-
-	// Emit plugin event: session archived.
-	if a.Services.Plugins != nil {
-		safego.Go(r.Context(), "api.sessions.emit.session-archived-delete", func() {
-			a.Services.Plugins.EmitSessionArchived(id)
-		})
 	}
 
 	a.jsonResp(w, http.StatusOK, map[string]string{"archived": id})
@@ -241,12 +227,17 @@ func (a *API) handleRebootSessionAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	ctx := r.Context()
 
-	if _, err := a.Services.Sessions.Get(ctx, sessionID); err != nil {
+	sess, err := a.Services.Sessions.Get(ctx, sessionID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.errorResp(w, http.StatusNotFound, "session not found")
 		} else {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 		}
+		return
+	}
+	if sess.Status == "archived" {
+		a.errorResp(w, http.StatusConflict, "session has ended")
 		return
 	}
 
@@ -276,12 +267,17 @@ func (a *API) handleRecoverSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	ctx := r.Context()
 
-	if _, err := a.Services.Sessions.Get(ctx, sessionID); err != nil {
+	sess, err := a.Services.Sessions.Get(ctx, sessionID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.errorResp(w, http.StatusNotFound, "session not found")
 		} else {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 		}
+		return
+	}
+	if sess.Status == "archived" {
+		a.errorResp(w, http.StatusConflict, "session has ended")
 		return
 	}
 

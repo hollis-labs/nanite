@@ -57,6 +57,11 @@ func (s *chatServiceImpl) submitCognitiveTurn(ctx context.Context, viewID, conte
 	if err != nil {
 		return "", err
 	}
+	// Stop holds this conversation gate while it archives and cancels, so a turn
+	// is either registered before the cancel or sees the session ended here.
+	if session.Status == "archived" {
+		return "", ErrSessionEnded
+	}
 	providerID, model := session.Provider, session.Model
 	defined := false
 	cliView := false

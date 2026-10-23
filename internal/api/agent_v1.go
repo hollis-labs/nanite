@@ -110,6 +110,9 @@ type agentV1CreateSessionRequest struct {
 	ProjectID      string                   `json:"project_id,omitempty"`
 	Title          string                   `json:"title,omitempty"`
 	Metadata       map[string]any           `json:"metadata,omitempty"`
+	// WorkRoot is the directory a CLI agent works in: an existing directory
+	// inside one of the host settings' directories.
+	WorkRoot string `json:"work_root,omitempty"`
 }
 
 type agentV1SessionResponse struct {
@@ -128,6 +131,7 @@ type agentV1SessionRoutes struct {
 	History   string `json:"history"`
 	Turns     string `json:"turns"`
 	Approvals string `json:"approvals"`
+	Stop      string `json:"stop"`
 }
 
 type agentV1InputPart struct {
@@ -190,7 +194,7 @@ func (a *API) handleAgentV1Capabilities(w http.ResponseWriter, r *http.Request) 
 		RuntimeKinds:        agentV1RuntimeKinds(),
 		TurnStates:          agentV1SessionActivityOptions(),
 		SupportedEventTypes: agentV1EventTypes(),
-		SessionCreateFields: agentV1FieldSupport{Supported: []string{"definition_ref", "host_settings", "model_selection", "project_id", "title", "metadata"}, Unsupported: []string{"agent_id", "provider", "model", "runtime_kind", "work_root", "durable_agent_id", "boot_profile_id", "subagent_runtime"}},
+		SessionCreateFields: agentV1FieldSupport{Supported: []string{"definition_ref", "host_settings", "model_selection", "project_id", "title", "metadata", "work_root"}, Unsupported: []string{"agent_id", "provider", "model", "runtime_kind", "durable_agent_id", "boot_profile_id", "subagent_runtime"}},
 		TurnSendFields: agentV1FieldSupport{
 			Supported:   []string{"content", "delivery", "effort", "delta_mode", "client_context"},
 			Unsupported: []string{},
@@ -229,7 +233,7 @@ func (a *API) handleAgentV1CreateSession(w http.ResponseWriter, r *http.Request)
 	if req.Metadata == nil {
 		blob = []byte("{}")
 	}
-	sess, err := a.Services.CognitiveViews.Create(r.Context(), service.CreateDefinedView{DefinitionRef: req.DefinitionRef, HostSettings: req.HostSettings, ModelSelection: req.ModelSelection, ProjectID: req.ProjectID, Title: req.Title, Metadata: string(blob)})
+	sess, err := a.Services.CognitiveViews.Create(r.Context(), service.CreateDefinedView{DefinitionRef: req.DefinitionRef, HostSettings: req.HostSettings, ModelSelection: req.ModelSelection, ProjectID: req.ProjectID, Title: req.Title, Metadata: string(blob), WorkRoot: req.WorkRoot})
 	if err != nil {
 		status := 500
 		switch {
@@ -277,8 +281,13 @@ func (a *API) handleAgentV1GetSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleAgentV1SendTurn(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	if _, err := a.Services.Sessions.Get(r.Context(), sessionID); err != nil {
+	existing, err := a.Services.Sessions.Get(r.Context(), sessionID)
+	if err != nil {
 		a.agentV1LookupError(w, err)
+		return
+	}
+	if existing.Status == "archived" {
+		a.agentV1ErrorCause(w, http.StatusConflict, "the session has ended; create a new session", "session_ended")
 		return
 	}
 
@@ -346,6 +355,9 @@ func (a *API) handleAgentV1SendTurn(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, service.ErrCognitiveAdmissionClosed) {
 			status = http.StatusServiceUnavailable
 		}
+		if errors.Is(err, service.ErrSessionEnded) {
+			status = http.StatusConflict
+		}
 		a.agentV1ErrorCause(w, status, err.Error(), service.CauseCode(err))
 		return
 	}
@@ -375,6 +387,7 @@ func agentV1Operations() []string {
 		"sessions.create",
 		"sessions.get",
 		"sessions.list",
+		"sessions.stop",
 		"history.read",
 		"sessions.turns.create",
 		"sessions.turns.cancel",
@@ -410,7 +423,7 @@ func agentV1EventTypeValues() []string {
 }
 func agentV1SessionRoutesForSession(id string) agentV1SessionRoutes {
 	base := agentV1RoutePrefix + "/sessions/" + url.PathEscape(id)
-	return agentV1SessionRoutes{Self: base, History: base + "/messages", Turns: base + "/turns", Approvals: base + "/approvals/{requestId}/responses"}
+	return agentV1SessionRoutes{Self: base, History: base + "/messages", Turns: base + "/turns", Approvals: base + "/approvals/{requestId}/responses", Stop: base + "/stop"}
 }
 
 // decodeAgentV1 rejects removed fields and trailing values rather than

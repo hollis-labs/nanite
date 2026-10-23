@@ -101,7 +101,7 @@ func main() {
 		cliDB, args = extractDBFlag(args)
 	}
 	switch os.Args[1] {
-	case "auth", "authority":
+	case "auth", "authority", "agent":
 		// -db finds the credentials; --url picks the server they are sent to.
 		if u, rest := extractURLFlag(args); u != "" {
 			_ = os.Setenv(brand.Env("API_URL"), u)

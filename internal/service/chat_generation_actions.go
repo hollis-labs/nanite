@@ -397,6 +397,9 @@ func (s *chatServiceImpl) initializeRun(
 }
 
 type turnSetup struct {
+	// workspace is the durable session workspace of an API-backed defined
+	// session; nil for every other turn.
+	workspace          *runtimeagent.Workspace
 	session            *store.Session
 	agent              *store.AgentProfile
 	agentID            string
@@ -1992,6 +1995,19 @@ func (s *chatServiceImpl) prepareTurn(
 	}
 	agentID := agent.ID
 
+	// An API-backed defined session has the same durable workspace a CLI
+	// session gets (CW-20261022-0007); the turn does not run without it.
+	var sessionWorkspace *runtimeagent.Workspace
+	if isCognitiveTurn(ctx) && agent.RuntimeKind == "api" && s.agentDeps != nil && s.agentDeps.WorkspacesRoot != "" {
+		ws, wsErr := runtimeagent.EnsureSessionWorkspace(s.agentDeps.WorkspacesRoot, sessionID)
+		if wsErr != nil {
+			slog.Error("prepareTurn: session workspace", "session_id", sessionID, "err", wsErr)
+			ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "The session workspace could not be created", nil)
+			return prepareTurnResult{directive: runloop.Terminate}
+		}
+		sessionWorkspace = ws
+	}
+
 	// Block disabled agents.
 	if agent.Status == "disabled" {
 		ch <- chat.ErrorEvent(chat.ErrorCodeInternal, fmt.Sprintf("Agent %q is disabled", agent.Name), nil)
@@ -2360,6 +2376,7 @@ func (s *chatServiceImpl) prepareTurn(
 	return prepareTurnResult{
 		directive: runloop.Proceed,
 		setup: &turnSetup{
+			workspace:          sessionWorkspace,
 			session:            session,
 			agent:              agent,
 			agentID:            agentID,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/contextwindow"
+	"github.com/hollis-labs/libs/agent/core/runloop"
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -140,5 +143,129 @@ func TestResolveWorkRootRejectsSwappedSymlink(t *testing.T) {
 	}
 	if again, err := resolveWorkRoot(root, []string{host}); err == nil && again == got {
 		t.Fatalf("swapped symlink still resolved to the recorded root %q", again)
+	}
+}
+
+// definedCLIView binds a CLI defined view with a create-time work_root to the
+// characterization fixture's session and returns the work root and host.
+func definedCLIView(t *testing.T, f *characterizationFixture, hostDir, workRoot string) {
+	t.Helper()
+	ctx := t.Context()
+	if err := installEmbeddedChatDefinition(ctx, f.st); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := EmbeddedDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := MapChatDefinition(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := store.NativeHostSettings{Version: "1", Runtime: "cli", Provider: "codex", Directories: []string{hostDir}}
+	host, err := f.st.CreateAgentHostSettings(ctx, store.AgentHostSettings{Slug: "prep", Title: "prep", Source: "test", DefinitionRef: verified.Ref.MeshRef(), Enabled: true, Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Model = ModelSelection{"codex", "codex-model"}
+	cfg.HostSettings = &settings
+	cfg.HostSettingsRef = &HostSettingsRef{ID: host.ID, Revision: host.Revision}
+	cfg.WorkRoot = workRoot
+	pinJSON, _ := json.Marshal(verified.Ref)
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.st.DB.ExecContext(ctx, `INSERT INTO cognitive_views(session_view_id,definition_ref_json,chat_config_json) VALUES(?,?,?)`, f.session, string(pinJSON), string(cfgJSON)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func cognitiveCtx() context.Context {
+	return context.WithValue(context.Background(), cognitiveTurnContextKey{}, true)
+}
+
+// Through prepareTurn: the create-time work root leads the host directories and
+// becomes the runtime's working directory.
+func TestPrepareTurn_WorkRootBecomesTheRuntimeWorkdir(t *testing.T) {
+	host := canonicalTempDir(t)
+	root := filepath.Join(host, "work")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	f := newHandleMessageFixture(t, nil)
+	f.svc.agentDeps = bootRealDeps(t)
+	definedCLIView(t, f, host, root)
+
+	ch := make(chan chat.StreamEvent, 16)
+	prepared := f.svc.prepareTurn(cognitiveCtx(), f.session, "hi", ch)
+	if prepared.setup == nil {
+		t.Fatalf("prepareTurn refused a valid work root: %v", drainEvents(ch))
+	}
+	agent := prepared.setup.agent
+	if len(agent.NativeHost.Directories) != 2 || agent.NativeHost.Directories[0] != root || agent.NativeHost.Directories[1] != host {
+		t.Fatalf("directories = %v, want [work root, host dir]", agent.NativeHost.Directories)
+	}
+
+	// Hand the prepared agent to the real boot path and read the workdir it used.
+	f.svc.agentEventBridge = &agentEventBridge{streams: NewStreamManager()}
+	bootProfile := *agent
+	bootProfile.DefaultProvider = "codex"
+	f.svc.agentDeps.Agents = &fakeAgentProfilesResolver{profile: &bootProfile}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, _ = f.svc.driveBootSession(ctx, f.session, prepared.setup.session, agent, prepared.setup.slotResult, "hi", 0, "codex")
+	if got, _ := f.svc.activeSessionWorkRoots.Load(f.session); got != root {
+		t.Fatalf("runtime workdir = %v, want %q", got, root)
+	}
+	f.svc.CloseAgentSession(context.Background(), f.session)
+}
+
+// A work root swapped for a symlink out of the host directories after create
+// fails the next turn and stops it before any runtime starts.
+func TestPrepareTurn_SwappedWorkRootFailsTheTurn(t *testing.T) {
+	host := canonicalTempDir(t)
+	root := filepath.Join(host, "work")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	f := newHandleMessageFixture(t, nil)
+	f.svc.agentDeps = bootRealDeps(t)
+	definedCLIView(t, f, host, root)
+
+	outside := canonicalTempDir(t)
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, root); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan chat.StreamEvent, 16)
+	prepared := f.svc.prepareTurn(cognitiveCtx(), f.session, "hi", ch)
+	if prepared.setup != nil || prepared.directive != runloop.Terminate {
+		t.Fatalf("a swapped work root was accepted: %+v", prepared)
+	}
+	events := drainEvents(ch)
+	if len(events) != 1 || !strings.Contains(events[0].Error, "work root") {
+		t.Fatalf("events = %+v, want one error naming the work root", events)
+	}
+	if _, ok := f.svc.runtimeSessions().Load(f.session); ok {
+		t.Fatal("a runtime started for a turn that was refused")
+	}
+}
+
+// A native turn submitted after the session ended is refused at admission,
+// under the conversation gate a stop holds while it archives and cancels.
+func TestSubmitCognitiveTurn_RefusesEndedSession(t *testing.T) {
+	f := newHandleMessageFixture(t, nil)
+	bindTestDefinedConfiguration(t, f)
+	if err := f.st.ArchiveSession(t.Context(), f.session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.SubmitCognitiveTurn(t.Context(), f.session, "hi"); !errors.Is(err, ErrSessionEnded) {
+		t.Fatalf("err = %v, want ErrSessionEnded", err)
+	}
+	if f.provider.callCount() != 0 {
+		t.Fatal("the provider was called for an ended session")
 	}
 }

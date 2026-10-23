@@ -355,6 +355,9 @@ func (a *API) handleAgentV1SendTurn(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, service.ErrCognitiveAdmissionClosed) {
 			status = http.StatusServiceUnavailable
 		}
+		if errors.Is(err, service.ErrSessionEnded) {
+			status = http.StatusConflict
+		}
 		a.agentV1ErrorCause(w, status, err.Error(), service.CauseCode(err))
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/hollis-labs/nanite/internal/safego"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 type agentV1StopResponse struct {
@@ -35,10 +36,17 @@ func (a *API) handleAgentV1StopSession(w http.ResponseWriter, r *http.Request) {
 	}
 	// One stop at a time per session, so exactly one caller reports
 	// stopped=true however many race.
-	lock, _ := a.stopLocks.LoadOrStore(id, &sync.Mutex{})
-	mu := lock.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
+	defer a.lockStop(id)()
+	// Hold the conversation gate too: turn admission takes it, so a turn is
+	// either registered before the cancel below or sees the session ended.
+	if locker, ok := a.Services.Chat.(service.ConversationLocker); ok {
+		release, err := locker.LockConversation(r.Context(), id)
+		if err != nil {
+			a.agentV1Error(w, http.StatusServiceUnavailable, "session is busy; retry the stop")
+			return
+		}
+		defer release()
+	}
 	sess, err := a.Services.Sessions.Get(r.Context(), id)
 	if err != nil {
 		a.agentV1LookupError(w, err)
@@ -60,6 +68,36 @@ func (a *API) handleAgentV1StopSession(w http.ResponseWriter, r *http.Request) {
 		out.TurnCanceled = a.Services.Chat.CancelActiveGeneration(id)
 	}
 	a.jsonResp(w, http.StatusOK, out)
+}
+
+// lockStop serializes stops per session and frees the entry when the last
+// holder leaves, so the table does not grow with every stopped session.
+func (a *API) lockStop(id string) (unlock func()) {
+	a.stopMu.Lock()
+	if a.stopLocks == nil {
+		a.stopLocks = map[string]*stopLock{}
+	}
+	l := a.stopLocks[id]
+	if l == nil {
+		l = &stopLock{}
+		a.stopLocks[id] = l
+	}
+	l.refs++
+	a.stopMu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		a.stopMu.Lock()
+		if l.refs--; l.refs == 0 {
+			delete(a.stopLocks, id)
+		}
+		a.stopMu.Unlock()
+	}
+}
+
+type stopLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // endSession archives a session and tears down everything attached to it. It

@@ -18,7 +18,8 @@ import (
 type API struct {
 	Services *service.Container
 	// stopLocks serializes agent session stops per session id.
-	stopLocks sync.Map
+	stopMu    sync.Mutex
+	stopLocks map[string]*stopLock
 	// agentCursorKey signs process-local pagination tokens for the single operator.
 	agentCursorKey []byte
 	// embedderSelectDeps is injected for embedding_status computation. Defaults

@@ -212,6 +212,12 @@ func TestAgentV1ConcurrentStopsReportOneStop(t *testing.T) {
 	if stopped.Load() != 1 {
 		t.Fatalf("%d stops reported stopped=true, want 1", stopped.Load())
 	}
+	a.stopMu.Lock()
+	left := len(a.stopLocks)
+	a.stopMu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d stop locks left after every stop finished", left)
+	}
 }
 
 // An ended session cannot be reached again through the retained reboot/recover routes.

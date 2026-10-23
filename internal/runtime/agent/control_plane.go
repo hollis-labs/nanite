@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -213,6 +214,11 @@ func realDir(path string, keepMissing bool) string {
 }
 
 func pathWithin(path, dir string) bool {
+	// macOS volumes are case-insensitive by default: a differently cased
+	// spelling of a protected directory is the same directory.
+	if runtime.GOOS == "darwin" {
+		path, dir = strings.ToLower(path), strings.ToLower(dir)
+	}
 	rel, err := filepath.Rel(dir, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

@@ -198,3 +198,42 @@ func TestAgentLoadDistinctDefinitionIDsSharingASlug(t *testing.T) {
 		t.Fatalf("first=%+v second=%+v", first, second)
 	}
 }
+
+// A stored row edited after loading is not the authored state: reload refuses
+// instead of handing out the mutated row, and leaves the row alone.
+func TestAgentLoadRefusesAMutatedOrDisabledRow(t *testing.T) {
+	ctx := context.Background()
+	svc, root := loadFixture(t, "Body.", "")
+	first, err := loadDir(t, svc, root, AgentLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := svc.Store.GetAgentHostSettings(ctx, first.HostSettingsID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := row
+	mutated.Settings.Model = "different-model"
+	if _, err = svc.Store.UpdateAgentHostSettings(ctx, mutated, row.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loadDir(t, svc, root, AgentLoadOptions{}); err == nil || !strings.Contains(err.Error(), "edited after") {
+		t.Fatalf("err = %v", err)
+	}
+	got, err := svc.Store.GetAgentHostSettings(ctx, first.HostSettingsID)
+	if err != nil || got.Settings.Model != "different-model" {
+		t.Fatalf("row was altered by the refused load: %+v, %v", got, err)
+	}
+
+	svc2, root2 := loadFixture(t, "Body.", "")
+	f2, err := loadDir(t, svc2, root2, AgentLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc2.Store.DisableAgentHostSettings(ctx, f2.HostSettingsID, f2.HostSettings.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loadDir(t, svc2, root2, AgentLoadOptions{}); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("err = %v", err)
+	}
+}

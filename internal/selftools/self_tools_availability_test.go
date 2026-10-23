@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/libs/agent/core/subagent"
-	"github.com/hollis-labs/nanite/internal/store"
 )
 
 func listedNames(t *testing.T, st *SelfToolsTransport) []string {
@@ -152,7 +151,7 @@ func TestBareStoreTools_MatchesBareTransport(t *testing.T) {
 }
 
 func TestServiceErrorToolDispatchLogsContext(t *testing.T) {
-	for _, tool := range []string{"todo_update", "agent_update"} {
+	for _, tool := range []string{"todo_update"} {
 		t.Run(tool, func(t *testing.T) {
 			transport := newSelfTools(t)
 			transport.WorkTrackingTools.Updater = nil
@@ -165,9 +164,6 @@ func TestServiceErrorToolDispatchLogsContext(t *testing.T) {
 				t.Fatalf("failure = %+v %v", result, err)
 			}
 			level, code, message := "ERROR", "unavailable", "todo service not available"
-			if tool == "agent_update" {
-				level, code, message = "ERROR", "unavailable", store.ErrImmutableAgentProfile.Error()
-			}
 			for _, want := range []string{"level=" + level, "code=" + code, `message="` + message + `"`, "tool=" + tool, "id=missing-resource"} {
 				if !strings.Contains(logs.String(), want) {
 					t.Fatalf("missing %q: %s", want, logs.String())

@@ -143,7 +143,12 @@ func (a *API) handleHostSettingsList(w http.ResponseWriter, r *http.Request) {
 		a.definitionError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, list)
+	page, err := pageOf(r, list)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, page)
 }
 
 type hostSettingsInput struct {

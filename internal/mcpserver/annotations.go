@@ -60,10 +60,7 @@ var toolAnnotations = map[string]gmcpserver.ToolAnnotations{
 	"skill_get": {OpenWorldHint: true},
 
 	// --- agent profiles ---
-	"agent_create": {},
-	"agent_list":   {ReadOnlyHint: true, IdempotentHint: true},
-	// Partial field update; same args repeated yield the same end state.
-	"agent_update": {IdempotentHint: true},
+	"agent_list": {ReadOnlyHint: true, IdempotentHint: true},
 	// Pure read: resolves and composes, never writes.
 	"agent_source_resolve": {ReadOnlyHint: true, IdempotentHint: true},
 

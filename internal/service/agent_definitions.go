@@ -44,6 +44,18 @@ func (s *AgentDefinitions) UpdateHost(ctx context.Context, h store.AgentHostSett
 	}
 	return s.Store.UpdateAgentHostSettings(ctx, h, expected)
 }
+
+// DisableHost turns a host off without re-validating its model or definition,
+// which may have gone stale; disabling must always be possible. It reads the
+// current revision and swaps on it, so a concurrent edit surfaces as a
+// revision conflict for the caller to retry.
+func (s *AgentDefinitions) DisableHost(ctx context.Context, id string) (store.AgentHostSettings, error) {
+	h, err := s.Store.GetAgentHostSettings(ctx, id)
+	if err != nil {
+		return h, err
+	}
+	return s.Store.DisableAgentHostSettings(ctx, h.ID, h.Revision)
+}
 func (s *AgentDefinitions) validateHostModel(ctx context.Context, h store.AgentHostSettings) error {
 	if err := h.Settings.Validate(); err != nil {
 		return err

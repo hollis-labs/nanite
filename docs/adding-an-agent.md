@@ -100,6 +100,40 @@ done here; until then treat the operator token as the key to granting tools.
 
 The steps below are what `setup` does, for when you need one on its own.
 
+## The same setup over MCP
+
+`POST /api/admin/mcp` is a streamable-HTTP MCP endpoint (stateless, JSON
+responses) so Tether's MCP gateway and Tachyon register Nanite as a tool server
+instead of shelling out. Each tool calls the HTTP route below in-process with
+the principal of the request that reached the endpoint, so the handlers' own
+validation and reason-required rules apply. An error comes back as an MCP tool
+error whose text starts `HTTP <status>:`; any non-2xx status, redirects
+included, is an error. The inner call does not pass the auth middleware's
+per-route scope rules or the `/api/admin` Origin allowlist a second time (the
+outer request did); the endpoint instead re-checks for a non-agent admin
+principal itself. Today only the operator holds admin, so this changes nothing.
+Ids must be a single path segment (`.`, `..` and `/` are refused).
+
+| Tool | Route |
+|---|---|
+| `agent_setup`, `agent_list`, `agent_get` | `POST /api/agent-setup`, `GET /api/native-agents[/{id}]` |
+| `host_settings_list`, `host_settings_create`, `host_settings_update` | `/api/agent-host-settings` |
+| `host_settings_retire` | not a route: a disable-only write (`enabled=false`, a required `reason`, no model/definition re-validation, retried on a moved revision). Live sessions and grants are untouched; use `session_stop` and `authority_revoke` |
+| `authority_list`, `authority_get`, `authority_revoke` | `/api/native-authority[/{id}[/revoke]]` |
+| `tool_grant`, `tool_ungrant` | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}` |
+| `session_start`, `session_list`, `session_get`, `session_history`, `session_stop` | `/api/agent/v1/sessions...` |
+| `turn_send`, `turn_get`, `turn_cancel` | `/api/agent/v1/sessions/{id}/turns...` |
+
+Every mutating tool writes an auth-audit row naming the tool and its target (`mcp:tool_grant <authority> <tool>`), since the middleware only sees `POST /api/admin/mcp`; `host_settings_retire` also records its reason there. `agent_list`, `host_settings_list` and `authority_list` take `limit` (default 50) and `offset`; `authority_list` needs `host_settings_id`. `session_list` and `session_history` page with `limit`/`cursor`/`older_cursor`; any
+response over 256 KiB is refused rather than cut. The endpoint sits under
+`/api/admin`, so it needs the admin scope: the operator token. Agent credentials are refused, and so is any client credential without
+admin. That credential stays admin for now; narrower credentials come later.
+Directories and `work_root` are absolute paths on the machine Nanite runs on.
+
+The `agent_create` and `agent_update` self-tools are gone: they only ever
+returned the immutable-profile error. `agent_list` among the per-session self
+tools still lists legacy profiles, read-only.
+
 ## Author and install intrinsic content
 
 Definitions use agentdef v2 frontmatter, a stable definition ID, an authored

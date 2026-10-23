@@ -46,19 +46,25 @@ func retainedSelfToolProfile(t *testing.T, db *store.Store, slug, source string)
 	return profile
 }
 
+// assertRetiredSelfTool proves a removed tool is no longer dispatchable and
+// leaks nothing: it is neither advertised nor handled.
 func assertRetiredSelfTool(t *testing.T, st *SelfToolsTransport, tool string, args map[string]any) {
 	t.Helper()
-	result, err := st.CallTool(t.Context(), tool, args)
-	if err != nil || result == nil || !result.IsError || len(result.Content) != 1 {
-		t.Fatalf("retired %s result=%+v err=%v", tool, result, err)
-	}
-	var wire map[string]any
-	if err := json.Unmarshal([]byte(result.Content[0].Text), &wire); err != nil {
+	listed, err := st.ListTools(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
-	message, ok := wire["message"].(string)
-	if wire["code"] != "unavailable" || !ok || message != store.ErrImmutableAgentProfile.Error() || len(wire) != 2 || strings.Contains(result.Content[0].Text, "PRIVATE HISTORICAL") {
-		t.Fatalf("retired %s missing typed safe guidance: %s", tool, result.Content[0].Text)
+	for _, d := range listed {
+		if d.Name == tool {
+			t.Fatalf("retired tool %s is still advertised", tool)
+		}
+	}
+	result, err := st.CallTool(t.Context(), tool, args)
+	if err == nil && (result == nil || !result.IsError) {
+		t.Fatalf("retired %s dispatched: %+v", tool, result)
+	}
+	if result != nil && len(result.Content) > 0 && strings.Contains(result.Content[0].Text, "PRIVATE HISTORICAL") {
+		t.Fatalf("retired %s leaked history: %s", tool, result.Content[0].Text)
 	}
 }
 

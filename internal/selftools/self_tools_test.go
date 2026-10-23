@@ -41,9 +41,7 @@ func TestSelfToolsTransport_ListTools(t *testing.T) {
 	expected := map[string]bool{
 		"skill_list":      false,
 		"skill_delete":    false,
-		"agent_create":    false,
 		"agent_list":      false,
-		"agent_update":    false,
 		"builder_start":   false,
 		"builder_step":    false,
 		"install_home":    false,
@@ -108,7 +106,8 @@ func TestSelfToolsTransport_ListSkills(t *testing.T) {
 	}
 }
 
-// TestSelfToolsTransport_CreateAgent verifies typed retirement before input or store effects.
+// TestSelfToolsTransport_CreateAgent verifies the removed agent_create/agent_update
+// tools are neither advertised nor dispatched, and touch no store state.
 func TestSelfToolsTransport_CreateAgent(t *testing.T) {
 	st := newSelfTools(t)
 	db := fixtureStore(st)

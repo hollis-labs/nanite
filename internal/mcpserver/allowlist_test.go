@@ -85,7 +85,7 @@ func TestToolAllowlist_DiscoveryIsRestricted(t *testing.T) {
 	// Spot-check a couple of tools that exist on the unrestricted catalog
 	// (see TestToolAllowlist_Unrestricted_SeesFullCatalog) but must be
 	// absent here.
-	for _, name := range []string{"todo_create", "dev_read", "agent_create"} {
+	for _, name := range []string{"todo_create", "dev_read", "agent_list"} {
 		if got[name] {
 			t.Errorf("out-of-scope tool %q leaked into the restricted discovery list", name)
 		}
@@ -176,7 +176,7 @@ func TestToolAllowlist_Unrestricted_SeesFullCatalog(t *testing.T) {
 	// WorkflowExecutor wired, so CW-20261001-0017 leaves them out of an
 	// unrestricted bare listing. The dispatch check below still proves no
 	// allowlist gated them.
-	for _, name := range []string{"dev_read", "agent_create", "skill_list"} {
+	for _, name := range []string{"dev_read", "agent_list", "skill_list"} {
 		if !got[name] {
 			t.Errorf("expected unrestricted server to list %q, it did not; got %v", name, toolNames(res.Tools))
 		}

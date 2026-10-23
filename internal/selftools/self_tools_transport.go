@@ -296,12 +296,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callDeleteSkill(args)
 	case "skill_get":
 		return st.callSkillGet(ctx, args)
-	case "agent_create":
-		return st.AgentProfileTools.callCreateAgent(args)
 	case "agent_list":
 		return st.AgentProfileTools.callListAgents(args)
-	case "agent_update":
-		return st.AgentProfileTools.callUpdateAgent(args)
 	case agentSourceResolveToolName:
 		return st.AgentProfileTools.callAgentSourceResolve(args)
 	case "workflow_execute_llm_step":
@@ -547,10 +543,6 @@ func (st *SelfToolsTransport) callDeleteSkill(args map[string]any) (*mcp.ToolRes
 
 // --- agent handlers ---
 
-func (at *AgentProfileTools) callCreateAgent(args map[string]any) (*mcp.ToolResult, error) {
-	return mcp.ServiceErrorResult(svcerr.Wrap(store.ErrImmutableAgentProfile, svcerr.CodeUnavailable, store.ErrImmutableAgentProfile.Error()), "tool", "agent_create"), nil
-}
-
 func (at *AgentProfileTools) callListAgents(args map[string]any) (*mcp.ToolResult, error) {
 	agents, err := at.Store.ListAgents(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */)
 	if err != nil {
@@ -572,10 +564,6 @@ func (at *AgentProfileTools) callListAgents(args map[string]any) (*mcp.ToolResul
 			a.Name, a.ID, a.Slug, model, a.Description)
 	}
 	return mcp.TextResult(sb.String()), nil
-}
-
-func (at *AgentProfileTools) callUpdateAgent(args map[string]any) (*mcp.ToolResult, error) {
-	return mcp.ServiceErrorResult(svcerr.Wrap(store.ErrImmutableAgentProfile, svcerr.CodeUnavailable, store.ErrImmutableAgentProfile.Error()), "tool", "agent_update", "id", strArg(args, "id", "")), nil
 }
 
 func (st *SelfToolsTransport) callStartBuilder(args map[string]any) (*mcp.ToolResult, error) {

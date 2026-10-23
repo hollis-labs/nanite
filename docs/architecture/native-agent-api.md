@@ -37,13 +37,11 @@ mapping checks the returned identity and supported semantics without a second
 fabric verifier. A semantic digest mismatch returns typed 409 before creating a
 view. An unknown revision returns 404.
 
-The standalone resolver reads regular `.md` files, at most 1 MiB each, directly
-from the host-selected `NANITE_AGENTDEF_DIR`. It calls the released mesh agentdef
-v2 parser, validator and semantic digester. Request IDs never become paths.
-Duplicate `(definition_id, revision)` entries, including attempts to overwrite
-the embedded default, are refused. Files are reread on create. Existing views
-keep their verified launch content/pin; edits do not silently repin them.
+Definitions are the installed, immutable artifacts in the database; a view keeps
+its verified launch content and pin, and an edit never silently repins it.
 Discovery supplies the embedded default pin for clients that need a default.
+Nothing reads definitions from a directory yet. A proposal for doing so is in
+`agent-alignment.md`; treat it as a design, not as behavior.
 
 The chat mapping applies Markdown body, purpose/completion instructions and
 permission posture. `default` binds to the native default gate; `read-only`

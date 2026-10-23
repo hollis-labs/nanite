@@ -137,3 +137,23 @@ func TestTetherIdentityFile_BoundActorWithoutProfileURN(t *testing.T) {
 		t.Fatalf("a bound actor with no profile URN got %q", got)
 	}
 }
+
+func TestComposeBootdirParams_ResolvesActorURNFromDependencies(t *testing.T) {
+	var gotSession, gotProfile string
+	deps := &Dependencies{ActorURN: func(sessionID, profileID string) string {
+		gotSession, gotProfile = sessionID, profileID
+		return "msg://agent/nanite/agt_actor"
+	}}
+	profile := &store.AgentProfile{ID: "prof-1"}
+	_, params := composeBootdirParams(deps, Options{Provider: "claude", Workdir: t.TempDir(), SessionID: "sess-9"}, profile, "sess-9")
+	if params.ActorURN != "msg://agent/nanite/agt_actor" || gotSession != "sess-9" || gotProfile != "prof-1" {
+		t.Fatalf("ActorURN=%q looked up (%q,%q)", params.ActorURN, gotSession, gotProfile)
+	}
+	// No profile, no resolver: nothing is looked up or planted.
+	if _, p := composeBootdirParams(deps, Options{Provider: "claude", Workdir: t.TempDir()}, nil, "s"); p.ActorURN != "" {
+		t.Fatalf("no profile: ActorURN=%q", p.ActorURN)
+	}
+	if _, p := composeBootdirParams(&Dependencies{}, Options{Provider: "claude", Workdir: t.TempDir()}, profile, "s"); p.ActorURN != "" {
+		t.Fatalf("no resolver: ActorURN=%q", p.ActorURN)
+	}
+}

@@ -22,18 +22,31 @@ through an imported Nanite server, because that needs a running daemon.
   is reachable through this server. Add them later as a separate entry.
 - **A token file, never a token.** `--token-file` points at a file holding the
   bearer token issued for the agent's stable actor. The config stores a path.
-  Use one token and file per bound actor.
+  The file must be mode 0600 (registration checks it) and sit outside every
+  path a CLI agent can read or write: an agent that can read it holds the
+  credential.
+- **One actor per host, for now.** The `tether` entry is host-wide, so every
+  agent listing it launches the gateway with the same token. Registering a
+  second, different token file is refused rather than silently ignored.
+  Per-agent planting (an entry in each agent's own boot dir) is a follow-up.
 - **One address in both directions.** Send tools take `from`. It must be the
   actor URN the Tether bridge delivers to; the planted `tether-identity.md`
   names it. A token issued for that actor makes Tether attribute the send to the
-  same address mail comes back to.
+  same address mail comes back to. **That attribution holds only when Tether
+  enforces sender identity.** The send tools take `from` from the caller, and
+  the daemon refuses a mismatched `from` only in enforce mode. In observe mode,
+  which is how Tether runs today, an agent granted `tether_message_send` can
+  send as any URN, including another agent's. Until Tether enforces it
+  (tracked on the Tether side, CW-20261020-0047), the planted
+  `tether-identity.md` is advice, not a control.
 - **Short of hardened.** The token is a long-lived file credential under the
   relaxed posture. Rotation and device-bound credentials are follow-up work.
 
 ## Attaching it
 
-1. Register: `nanite mcp tether-messaging /abs/path/tether-actor.token`. An
-   existing server named `tether` is skipped, not replaced.
+1. Register: `nanite mcp tether-messaging /abs/path/tether-actor.token`. The
+   file must exist with mode 0600. Re-running with the same file is a no-op; a
+   different file is refused (see one actor per host).
 2. API agents: list `tether` in the host settings `mcp_servers`. CLI agents get
    the same entry once host `mcp_servers` is projected for CLI runtimes
    (CW-20261023-0023); until then a CLI agent cannot use it.

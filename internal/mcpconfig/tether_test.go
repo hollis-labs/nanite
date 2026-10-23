@@ -1,6 +1,8 @@
 package mcpconfig
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,5 +52,48 @@ func TestTetherMessagingTools_AreTheMessagingSet(t *testing.T) {
 	want := []string{"tether_message_send", "tether_message_reply", "tether_message_inbox", "tether_message_list", "tether_message_get", "tether_message_mark_read"}
 	if !reflect.DeepEqual(TetherMessagingTools, want) {
 		t.Fatalf("tools = %v", TetherMessagingTools)
+	}
+}
+
+func TestCheckTetherTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.token")
+	if err := os.WriteFile(good, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckTetherTokenFile(good); err != nil {
+		t.Fatalf("0600 file refused: %v", err)
+	}
+	loose := filepath.Join(dir, "loose.token")
+	if err := os.WriteFile(loose, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(loose, 0o644); err != nil { // #nosec G302 -- deliberately loose fixture
+		t.Fatal(err)
+	}
+	if err := CheckTetherTokenFile(loose); err == nil || !strings.Contains(err.Error(), "0600") {
+		t.Fatalf("0644 file: %v", err)
+	}
+	if err := CheckTetherTokenFile(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("missing file accepted")
+	}
+	if err := CheckTetherTokenFile(dir); err == nil {
+		t.Fatal("directory accepted")
+	}
+}
+
+func TestCheckTetherSingleActor(t *testing.T) {
+	existing := &store.MCPServerConfig{Name: TetherMessagingServerName, Args: `["mcp","--no-discover","--token-file","/a/tok"]`}
+	if err := CheckTetherSingleActor(nil, "/a/tok"); err != nil {
+		t.Fatalf("no entry: %v", err)
+	}
+	if err := CheckTetherSingleActor(existing, "/a/tok"); err != nil {
+		t.Fatalf("same file refused: %v", err)
+	}
+	if err := CheckTetherSingleActor(existing, "/b/tok"); err == nil || !strings.Contains(err.Error(), "one Tether actor per host") {
+		t.Fatalf("second actor: %v", err)
+	}
+	if err := CheckTetherSingleActor(&store.MCPServerConfig{Args: `not json`}, "/a/tok"); err == nil {
+		t.Fatal("unreadable existing args must refuse, not pass")
 	}
 }

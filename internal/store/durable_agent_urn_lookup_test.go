@@ -142,3 +142,26 @@ func TestDurableActorURNForSession(t *testing.T) {
 		}
 	}
 }
+
+// Two live instances bound to one session and profile make the slot
+// ambiguous: no address is guessed, the same refusal the bridge makes.
+func TestDurableActorURNForSession_AmbiguousSlotReturnsEmpty(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	agent := makeTestAgent(t, s, "actor-urn-ambiguous")
+	first := makeTestActorInstance(t, s, agent.ID, "ambiguous-a")
+	if _, err := s.SetDurableAgentInstanceLaunchState(ctx, first.ID, DurableAgentStatusActive, "sess-amb", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.DurableActorURNForSession(ctx, "sess-amb", agent.ID); err != nil || got != first.URN {
+		t.Fatalf("one instance: %q, %v, want %q", got, err, first.URN)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO actor_instances(id,name,slug,profile_id,provider,model,urn,status,current_session_id) VALUES(?,?,?,?,?,?,?,?,?)`,
+		"inst-amb-b", "B", "ambiguous-b", agent.ID, "fixture-provider", "fixture-model", "msg://agent/nanite/other", DurableAgentStatusActive, "sess-amb"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.DurableActorURNForSession(ctx, "sess-amb", agent.ID); err != nil || got != "" {
+		t.Fatalf("ambiguous slot = %q, %v; want empty and no error", got, err)
+	}
+}

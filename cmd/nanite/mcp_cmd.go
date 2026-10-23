@@ -74,6 +74,9 @@ func mcpTetherMessaging(args []string) {
 		}
 	}
 	data, err := mcpconfig.TetherMessagingConfig(args[0])
+	if err == nil {
+		err = mcpconfig.CheckTetherTokenFile(args[0])
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -84,7 +87,15 @@ func mcpTetherMessaging(args []string) {
 		os.Exit(1)
 	}
 	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
-	result, err := mcpconfig.Import(context.Background(), s, data, nil)
+	existing, err := s.GetMCPServer(context.Background(), mcpconfig.TetherMessagingServerName)
+	if err == nil {
+		err = mcpconfig.CheckTetherSingleActor(existing, args[0])
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	result, err := mcpconfig.Import(context.Background(), s, data, service.DropRedactedPlaceholders)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: import: %v\n", err)
 		os.Exit(1)

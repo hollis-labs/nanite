@@ -50,7 +50,9 @@ func tetherIdentityFile(params SetupParams) []byte {
 	fmt.Fprintf(&b, "- Agent URN: `%s`\n- Session URN: `%s`\n", agentURN, sessionURN)
 	if params.ActorURN != "" {
 		fmt.Fprintf(&b, "\nThe Agent URN is this session's stable actor: Tether mail addressed to it is delivered "+
-			"into this session, so use it as `from` when you send or reply (`in_reply_to` the message you answer).\n")
+			"into this session, so use it as `from` when you send or reply (`in_reply_to` the message you answer). "+
+			"This is guidance, not a control: Tether attributes a send to the token holder only when it enforces sender identity; "+
+			"while it only observes, `from` is whatever the caller passes.\n")
 		if p := params.AgentProfile; p != nil && p.TetherURN != "" && p.TetherURN != params.ActorURN {
 			fmt.Fprintf(&b, "\nThe profile's registered address `%s` is not this actor's delivery address; do not send from it.\n", p.TetherURN)
 		}

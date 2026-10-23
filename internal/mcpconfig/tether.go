@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // TetherMessagingServerName is the registry name of the Tether messaging
@@ -55,4 +58,46 @@ func TetherMessagingConfig(tokenFile string) ([]byte, error) {
 		},
 	}}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// CheckTetherTokenFile fails early, at registration, when the token file
+// cannot be the credential `tether mcp` will read: missing, not a regular
+// file, or readable by group or others. Without it the same mistakes surface
+// only when a launched agent's gateway starts.
+func CheckTetherTokenFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("tether messaging config: token file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("tether messaging config: token file %q is not a regular file", path)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("tether messaging config: token file %q has mode %04o; it holds a credential, chmod 0600", path, info.Mode().Perm())
+	}
+	return nil
+}
+
+// CheckTetherSingleActor refuses a second actor's token on a host that already
+// has the "tether" entry. The entry is host-wide: every agent listing it
+// launches the gateway with this one credential, and the Import skips an
+// existing name, so a second token would be silently ignored while its agent
+// sent under the first actor's identity. Per-agent planting is the follow-up
+// that lifts this; until then one actor per host is explicit. existing is the
+// stored row, or nil.
+func CheckTetherSingleActor(existing *store.MCPServerConfig, tokenFile string) error {
+	if existing == nil {
+		return nil
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(existing.Args), &args); err == nil {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "--token-file" && args[i+1] == tokenFile {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("tether messaging config: server %q is already registered with a different token file; "+
+		"the entry is host-wide, so one Tether actor per host is supported (a second actor would send under the first's token). "+
+		"Remove the existing entry to replace it", TetherMessagingServerName)
 }

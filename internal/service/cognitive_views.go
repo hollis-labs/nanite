@@ -176,6 +176,9 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 			if cliErr != nil {
 				return nil, cliErr
 			}
+			if cliErr = v.checkHostMCPServers(ctx, h.Settings.MCPServers); cliErr != nil {
+				return nil, cliErr
+			}
 			req.ModelSelection = &selected
 		default:
 			return nil, unsupportedCause(CauseRuntimeUnsupported, "host settings %q use runtime %q, which native sessions do not run; use \"api\" or \"cli\"", h.ID, h.Settings.Runtime)
@@ -247,7 +250,8 @@ func (v *CognitiveViews) LatestTurn(ctx context.Context, viewID string) (string,
 // and returns the provider/model it runs on. It refuses, with a stated cause,
 // anything a CLI process cannot honor: a read-only definition (the CLI has no
 // enforced read-only posture), native-loop knobs (the CLI owns its loop), host
-// MCP servers (planting them is not implemented), a model on a runtime whose
+// MCP servers on a runtime whose tool grants Nanite cannot enforce (only Claude
+// carries them), a model on a runtime whose
 // model flag is unverified, and a host that grants no directory.
 func admitCLIHost(h store.NativeHostSettings, permissionProfile string, requested *ModelSelection) (ModelSelection, error) {
 	if h.Provider == "" {
@@ -261,6 +265,9 @@ func admitCLIHost(h store.NativeHostSettings, permissionProfile string, requeste
 	}
 	if field := cliUnsupportedField(h); field != "" {
 		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field %q does not apply to a CLI agent; remove it", field)
+	}
+	if len(h.MCPServers) > 0 && !runtimeagent.HostMCPSupported(h.Provider) {
+		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field \"mcp_servers\" is not supported for provider %q: Nanite cannot gate a tool call that runtime makes itself, so it will not plant the servers; use provider \"claude\" or runtime \"api\"", h.Provider)
 	}
 	if len(h.Directories) == 0 {
 		return ModelSelection{}, unsupportedCause(CauseHostDirectoriesMissing, "a CLI agent needs at least one directory in host settings; the first is its work root")
@@ -300,8 +307,6 @@ func cliUnsupportedField(h store.NativeHostSettings) string {
 		return "recall_limit"
 	case h.RecallTimeoutMS != nil:
 		return "recall_timeout_ms"
-	case len(h.MCPServers) > 0:
-		return "mcp_servers"
 	case h.Protocol != "":
 		return "protocol"
 	case h.Transport != "":
@@ -339,4 +344,20 @@ func resolveWorkRoot(requested string, allowed []string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("work_root %q is outside the directories granted by the host settings", requested)
+}
+
+// checkHostMCPServers refuses, at admission, a CLI host whose mcp_servers name
+// a server that launch could not project, so the cause surfaces at session
+// creation and not as a failed boot.
+func (v *CognitiveViews) checkHostMCPServers(ctx context.Context, names []string) error {
+	for _, name := range names {
+		row, err := v.Store.GetMCPServer(ctx, name)
+		if err != nil {
+			return err
+		}
+		if err := runtimeagent.ValidateHostMCPServer(name, row, "nanite"); err != nil {
+			return unsupportedCause(CauseCLIHostUnsupportedField, "host settings mcp_servers: %v", err)
+		}
+	}
+	return nil
 }

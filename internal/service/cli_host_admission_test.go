@@ -44,7 +44,11 @@ func TestAdmitCLIHostRefusalsCarryACause(t *testing.T) {
 		{"read-only definition", cliHost(nil), "read-only", nil, CauseReadOnlyUnenforceable},
 		{"harness profile", cliHost(func(h *store.NativeHostSettings) { h.HarnessProfile = "strict" }), "default", nil, CauseCLIHostUnsupportedField},
 		{"recall limit", cliHost(func(h *store.NativeHostSettings) { h.RecallLimit = &limit }), "default", nil, CauseCLIHostUnsupportedField},
-		{"mcp servers", cliHost(func(h *store.NativeHostSettings) { h.MCPServers = []string{"files"} }), "default", nil, CauseCLIHostUnsupportedField},
+		{"mcp servers on a runtime whose grants cannot be enforced", cliHost(func(h *store.NativeHostSettings) {
+			h.Provider = "copilot"
+			h.Model = ""
+			h.MCPServers = []string{"files"}
+		}), "default", nil, CauseCLIHostUnsupportedField},
 		{"acp protocol", cliHost(func(h *store.NativeHostSettings) { h.Protocol = "acp" }), "default", nil, CauseCLIHostUnsupportedField},
 		{"no directories", cliHost(func(h *store.NativeHostSettings) { h.Directories = nil }), "default", nil, CauseHostDirectoriesMissing},
 		{"relative directory", cliHost(func(h *store.NativeHostSettings) { h.Directories = []string{"work"} }), "default", nil, CauseCLIHostUnsupportedField},
@@ -108,5 +112,66 @@ func TestHostWorkRootIsTheFirstHostDirectory(t *testing.T) {
 	}
 	if _, err := hostWorkRoot(&store.AgentProfile{HostSettingsID: "h", NativeHost: &store.NativeHostSettings{Directories: []string{"rel"}}}); err == nil {
 		t.Error("relative host directory accepted")
+	}
+}
+
+func TestAdmitCLIHostAcceptsMCPServersOnClaude(t *testing.T) {
+	if _, err := admitCLIHost(cliHost(func(h *store.NativeHostSettings) { h.MCPServers = []string{"tether"} }), "default", nil); err != nil {
+		t.Fatalf("claude with mcp_servers: %v", err)
+	}
+}
+
+func TestCheckHostMCPServersRefusesWhatLaunchCannotProject(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	v := &CognitiveViews{Store: st}
+	add := func(cfg store.MCPServerConfig) {
+		t.Helper()
+		if err := st.CreateMCPServer(ctx, &cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(store.MCPServerConfig{Name: "tether", TransportType: store.TransportStdio, Command: "tether", Args: `["mcp"]`, Enabled: true})
+	add(store.MCPServerConfig{Name: "off", TransportType: store.TransportStdio, Command: "x", Enabled: false})
+	add(store.MCPServerConfig{Name: "remote", TransportType: store.TransportSSE, URL: "http://x", Enabled: true})
+	if err := v.checkHostMCPServers(ctx, []string{"tether"}); err != nil {
+		t.Fatalf("stdio server: %v", err)
+	}
+	for _, name := range []string{"missing", "off", "remote", "nanite"} {
+		err := v.checkHostMCPServers(ctx, []string{name})
+		if !errors.Is(err, ErrUnsupportedDefinition) || CauseCode(err) != CauseCLIHostUnsupportedField {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+// Session creation, not only launch, refuses a host whose mcp_servers cannot
+// be projected: the cause surfaces as a 422, not as a failed boot.
+func TestCreateRefusesACLIHostWhoseMCPServerCannotBeProjected(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	pin, err := st.InstallAgentDefinition(ctx, []byte("---\nschema_version: \"2\"\ndefinition_id: def:host-mcp\nrevision: \"1\"\nname: host-mcp\ndescription: Host MCP.\nbehavior:\n  purpose: Answer.\nrequirements: {}\nharness_profile:\n  context: {}\n  permissions:\n    profile: default\ncontinuity:\n  mode: ephemeral\n---\nBody.\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := &CognitiveViews{Store: st, Resolver: &StoredDefinitionResolver{Store: st}}
+	create := func(slug string, servers ...string) error {
+		host, hostErr := st.CreateAgentHostSettings(ctx, store.AgentHostSettings{Slug: slug, Title: slug, Source: "test", DefinitionRef: pin, Enabled: true,
+			Settings: cliHost(func(h *store.NativeHostSettings) { h.Model = ""; h.MCPServers = servers })})
+		if hostErr != nil {
+			t.Fatal(hostErr)
+		}
+		_, createErr := views.Create(ctx, CreateDefinedView{DefinitionRef: DefinitionRefFromMesh(pin), HostSettings: &HostSettingsRef{ID: host.ID, Revision: host.Revision}})
+		return createErr
+	}
+	err = create("missing-server", "no-such-server")
+	if !errors.Is(err, ErrUnsupportedDefinition) || CauseCode(err) != CauseCLIHostUnsupportedField {
+		t.Fatalf("missing server: %v", err)
+	}
+	if err = st.CreateMCPServer(ctx, &store.MCPServerConfig{Name: "tether", TransportType: store.TransportStdio, Command: "tether", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err = create("with-server", "tether"); err != nil {
+		t.Fatalf("registered server: %v", err)
 	}
 }

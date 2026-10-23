@@ -34,6 +34,13 @@ const AuthTokenEnv = "NANITE_AUTH_TOKEN" // #nosec G101 -- an environment variab
 // Returns an error when cfg is internally inconsistent (BinaryPath is
 // required once DBPath is set).
 func renderMCPJSON(cfg MCPConfig, sessionID string, storeScope bool) (string, error) {
+	return renderMCPJSONWith(cfg, sessionID, storeScope, nil)
+}
+
+// renderMCPJSONWith is renderMCPJSON plus the registry servers a CLI host
+// projects (host_mcp.go). Planting is still gated on the Nanite entry: with
+// MCP planting disabled nothing is rendered.
+func renderMCPJSONWith(cfg MCPConfig, sessionID string, storeScope bool, host []HostMCPServer) (string, error) {
 	id, command, args, env, err := naniteMCPEntry(cfg, sessionID, storeScope)
 	if err != nil || id == "" {
 		return "", err
@@ -42,15 +49,25 @@ func renderMCPJSON(cfg MCPConfig, sessionID string, storeScope bool) (string, er
 	for k, v := range env {
 		envAny[k] = v
 	}
-	mcpConfig := map[string]any{
-		"mcpServers": map[string]any{
-			id: map[string]any{
-				"command": command,
-				"args":    args,
-				"env":     envAny,
-			},
+	servers := map[string]any{
+		id: map[string]any{
+			"command": command,
+			"args":    args,
+			"env":     envAny,
 		},
 	}
+	for _, h := range host {
+		hostArgs := h.Args
+		if hostArgs == nil {
+			hostArgs = []string{}
+		}
+		entry := map[string]any{"command": h.Command, "args": hostArgs}
+		if len(h.Env) > 0 {
+			entry["env"] = h.Env
+		}
+		servers[h.Name] = entry
+	}
+	mcpConfig := map[string]any{"mcpServers": servers}
 	data, err := json.MarshalIndent(mcpConfig, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("agent: marshal .mcp.json: %w", err)

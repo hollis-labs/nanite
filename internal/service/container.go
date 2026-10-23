@@ -1077,7 +1077,13 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 			_ = runtimeFeed.Close(ctx)
 		}
 	}()
+	// Native-view tool authority. The credential-standing reader is installed
+	// once the credential store exists (SetCallers); until then native turns
+	// are tool-free. Built ahead of the agent dependencies because a CLI host's
+	// projected mcp_servers are gated by it too.
+	nativeGrants := NewNativeGrants(cfg.Store.LocalAuthority(), nil)
 	agentDepsBundle, agentDepsErr := BuildAgentDependencies(AgentDepsConfig{
+		NativeGrants:     nativeGrants,
 		Store:            cfg.Store,
 		PathGrants:       pathGrants,
 		Streams:          streams,
@@ -1111,10 +1117,6 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 
 	cognitiveApprovals := approval.New(permissions)
 	resultCache := buildResultCache(cfg.Store)
-	// Native-view tool authority. The credential-standing reader is installed
-	// once the credential store exists (SetCallers); until then native turns
-	// are tool-free.
-	nativeGrants := NewNativeGrants(cfg.Store.LocalAuthority(), nil)
 	chatSvc := NewChatService(ChatServiceConfig{
 		HarnessProfiles:    cfg.HarnessProfiles,
 		Sessions:           sessions,

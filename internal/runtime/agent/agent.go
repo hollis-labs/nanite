@@ -438,6 +438,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	var bootParams SetupParams
 	if !isACP {
 		layout, params := composeBootdirParams(deps, opts, profile, sessID)
+		applyHostMCP(ctx, deps, opts, profile, &params)
 		bootParams = params
 		bootDir, err = layout.Setup(params)
 		if err != nil {
@@ -460,11 +461,7 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		return nil, failure
 	}
 
-	var launchX launchExtra
-	if !isACP {
-		launchX.Model = profile.DefaultModel
-		launchX.AddDirs = bootParams.CLIWritableRoots
-	}
+	launchX := cliLaunchExtra(profile, bootParams, isACP)
 	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir, launchX)
 	if err != nil {
 		return cleanup(fmt.Errorf("agent.Boot: select wrapper adapter: %w", err))
@@ -773,4 +770,21 @@ func checkExpectedHostRevision(opts Options, profile *store.AgentProfile) error 
 		return nil
 	}
 	return fmt.Errorf("%w: host settings %s is at revision %s, the session was admitted at %s", ErrHostRevisionChanged, profile.HostSettingsID, profile.Revision, opts.ExpectedHostRevision)
+}
+
+// cliLaunchExtra is the per-launch argv input a CLI boot takes from the
+// profile and the resolved boot params: the model, the directories and, for a
+// host that projects mcp_servers, the grant-derived allow rules.
+func cliLaunchExtra(profile *store.AgentProfile, bootParams SetupParams, isACP bool) launchExtra {
+	var x launchExtra
+	if isACP {
+		return x
+	}
+	x.Model = profile.DefaultModel
+	x.AddDirs = bootParams.CLIWritableRoots
+	if bootParams.HostMCP != nil {
+		x.HostMCPGated = true
+		x.HostMCPAllow = bootParams.HostMCP.AllowRules
+	}
+	return x
 }

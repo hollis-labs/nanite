@@ -290,6 +290,13 @@ type SetupParams struct {
 	// MCPConfig disables MCP planting.
 	MCPConfig MCPConfig
 
+	// HostMCP is the CLI host's mcp_servers projection and the allow rules its
+	// tool grants produce (host_mcp.go); nil when the host lists none.
+	// HostMCPErr is why it could not be resolved: the boot fails with it
+	// rather than planting the servers without their gate.
+	HostMCP    *HostMCPLaunch
+	HostMCPErr error
+
 	// CLIWritableRoots is the allow-list of directories a CLI-launch
 	// agent (codex / claude) may write to beyond its throwaway boot dir.
 	// It threads into the planted provider config: codex's

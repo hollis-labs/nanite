@@ -101,6 +101,10 @@ type Dependencies struct {
 	// resolved binary path and the active store DB path.
 	MCPConfig MCPConfig
 
+	// HostMCP resolves a CLI host's mcp_servers and the tool grants that gate
+	// them (host_mcp.go). Nil refuses any CLI host that lists mcp_servers.
+	HostMCP HostMCPSource
+
 	// WorkspacesRoot is the persistent workspace base dir
 	// (default ~/.nanite/workspaces).
 	WorkspacesRoot string

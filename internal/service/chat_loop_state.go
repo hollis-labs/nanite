@@ -293,10 +293,13 @@ type loopState struct {
 	// chat_rate_budget_pause.go for the event semantics.
 	rateBudgetPauseAttempts int
 
-	// P4 Scratchpad — per-turn writable key/value buffer (CW-20260419-0025).
-	// Evicted automatically: loopState is created fresh per generateResponse call.
+	// P4 Scratchpad — writable key/value buffer (CW-20260419-0025). loopState
+	// is created fresh per generateResponse call, so without scratchpadPath
+	// the buffer ends with the turn. A session with a durable workspace sets
+	// scratchpadPath (attachScratchpadFile) and the buffer survives turns.
 	scratchpad      map[string]any
 	scratchpadBytes int
+	scratchpadPath  string
 
 	// I1 (CW-20260426-0004): inspector turn ID for the aggregator.
 	// Set by generateResponse after slot assembly; propagated into
@@ -650,8 +653,20 @@ func (ls *loopState) scratchpadWrite(key string, value any) error {
 		return fmt.Errorf("scratchpad total size exceeded: write would reach %d bytes (limit %d bytes)", newTotal, scratchpadMaxTotalBytes)
 	}
 
+	prev, had := ls.scratchpad[key]
+	prevBytes := ls.scratchpadBytes
 	ls.scratchpad[key] = value
 	ls.scratchpadBytes = newTotal
+	if err := ls.persistScratchpad(); err != nil {
+		// Not stored means not stored: put the buffer back so the model is told.
+		if had {
+			ls.scratchpad[key] = prev
+		} else {
+			delete(ls.scratchpad, key)
+		}
+		ls.scratchpadBytes = prevBytes
+		return fmt.Errorf("scratchpad could not be saved to the session workspace: %w", err)
+	}
 	return nil
 }
 
@@ -673,12 +688,15 @@ func (ls *loopState) scratchpadRead(key string) (map[string]any, bool) {
 	return result, true
 }
 
-// scratchpadClear deletes a key. Returns true if the key existed.
-func (ls *loopState) scratchpadClear(key string) bool {
+// scratchpadClear deletes a key. Returns true if the key existed. As with a
+// write, a deletion that cannot be saved to the session workspace is undone and
+// returned as an error, so the next turn cannot restore a value reported gone.
+func (ls *loopState) scratchpadClear(key string) (bool, error) {
 	v, ok := ls.scratchpad[key]
 	if !ok {
-		return false
+		return false, nil
 	}
+	prevBytes := ls.scratchpadBytes
 	// Marshal cannot fail here: scratchpadWrite already validated serializability
 	// before storing. If it somehow does (direct map write bypassing scratchpadWrite),
 	// we clamp to zero rather than leak bytes.
@@ -691,7 +709,12 @@ func (ls *loopState) scratchpadClear(key string) bool {
 		ls.scratchpadBytes = 0
 	}
 	delete(ls.scratchpad, key)
-	return true
+	if err := ls.persistScratchpad(); err != nil {
+		ls.scratchpad[key] = v
+		ls.scratchpadBytes = prevBytes
+		return false, fmt.Errorf("scratchpad could not be saved to the session workspace: %w", err)
+	}
+	return true, nil
 }
 
 // continueWith logs a continuation site and optionally captures a snapshot.

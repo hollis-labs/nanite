@@ -101,7 +101,10 @@ func callScratchpadClear(input map[string]any, ls *loopState) (string, bool) {
 	if key == "" {
 		return "key is required", true
 	}
-	cleared := ls.scratchpadClear(key)
+	cleared, err := ls.scratchpadClear(key)
+	if err != nil {
+		return err.Error(), true
+	}
 	out, _ := json.Marshal(map[string]any{"cleared": cleared})
 	return string(out), false
 }

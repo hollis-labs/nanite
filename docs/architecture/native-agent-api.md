@@ -40,8 +40,8 @@ view. An unknown revision returns 404.
 Definitions are the installed, immutable artifacts in the database; a view keeps
 its verified launch content and pin, and an edit never silently repins it.
 Discovery supplies the embedded default pin for clients that need a default.
-Reading definitions from an agent directory is described in
-`agent-alignment.md`.
+Nothing reads definitions from a directory yet. A proposal for doing so is in
+`agent-alignment.md`; treat it as a design, not as behavior.
 
 The chat mapping applies Markdown body, purpose/completion instructions and
 permission posture. `default` binds to the native default gate; `read-only`

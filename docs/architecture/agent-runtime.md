@@ -182,3 +182,18 @@ live with the v0.9.1 wrapper API):
 | OpenCode | One shell shape executed internally without asking; this is not exhaustive. |
 | Pi | No request was observed; `pi-acp` documents local filesystem and terminal execution. |
 | Copilot | Copilot CLI 1.0.12 asked before one non-mutating `pwd`/`execute` shape; other shapes are unmeasured. |
+
+## Trying a real CLI turn
+
+`internal/service/cli_runtime_spike_test.go` boots one real Claude CLI turn from a
+pinned definition and `runtime=cli` host settings on a scratch database. It is
+opt-in because it starts the real binary and spends a turn:
+
+```sh
+NANITE_SPIKE_CLAUDE=1 go test ./internal/service -run TestSpikeCLIRuntimeClaudeTurn -v -count=1
+```
+
+The test's isolated `HOME` makes Claude report `Not logged in`; the spike passes
+the real `HOME` through the boot options, as the server inherits it.
+`scripts/smoke-agents.sh` covers the same ground end to end through the HTTP API
+(`SMOKE_CLI=1`).

@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "tether-mux": {
+    "tether": {
       "command": "tether",
-      "args": ["mcp", "--proxy", "--no-discover", "--servers", "torque"],
+      "args": ["mcp", "--no-discover", "--token-file", "/home/agent/.nanite/tether-actor.token"],
       "env": {
-        "TETHER_MCP_TOOLS": "[\"torque_task_get\",\"torque_task_list\"]"
+        "TETHER_MCP_SCOPES": "message.write"
       }
     }
   }

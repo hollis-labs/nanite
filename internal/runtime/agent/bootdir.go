@@ -125,6 +125,9 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		Hooks: DefaultBootDirHooks,
 	}
 	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir, profileDirectories(profile)...)
+	if deps != nil && deps.ActorURN != nil && profile != nil {
+		params.ActorURN = deps.ActorURN(sessID, profile.ID)
+	}
 	if deps != nil {
 		// No root offered to an agent (the work root, dev_tools_allowed_paths,
 		// path grants) may be, or sit inside, a control-plane directory
@@ -272,6 +275,10 @@ type SetupParams struct {
 	SessionID    string
 	RunID        string
 	AgentProfile *store.AgentProfile
+	// ActorURN is the stable actor address of the durable instance bound to
+	// this session, when there is one (Dependencies.ActorURN). Empty means
+	// the session is not a bound durable actor.
+	ActorURN     string
 	Mode         Mode
 	SystemPrompt string
 	BootContent  string

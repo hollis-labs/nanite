@@ -117,3 +117,28 @@ func TestCountInstancesSharingMailboxSlot(t *testing.T) {
 		t.Errorf("empty session: n=%d err=%v, want 0", n, err)
 	}
 }
+
+func TestDurableActorURNForSession(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	agent := makeTestAgent(t, s, "actor-urn-session")
+	inst := makeTestActorInstance(t, s, agent.ID, "actor-urn-session")
+	if _, err := s.SetDurableAgentInstanceLaunchState(ctx, inst.ID, DurableAgentStatusActive, "sess-1", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.DurableActorURNForSession(ctx, "sess-1", agent.ID)
+	if err != nil || got != inst.URN {
+		t.Fatalf("urn = %q err=%v, want %q", got, err, inst.URN)
+	}
+	// The same lookup the bridge's route resolution makes, so both directions
+	// use one address.
+	if via, err := s.GetDurableAgentInstanceByURN(ctx, got); err != nil || via.CurrentSessionID != "sess-1" {
+		t.Fatalf("bridge side disagrees: %+v %v", via, err)
+	}
+	for _, c := range [][2]string{{"", agent.ID}, {"sess-1", ""}, {"other-session", agent.ID}, {"sess-1", "other-profile"}} {
+		if u, err := s.DurableActorURNForSession(ctx, c[0], c[1]); err != nil || u != "" {
+			t.Fatalf("lookup %v = %q,%v, want empty", c, u, err)
+		}
+	}
+}

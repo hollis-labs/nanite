@@ -249,6 +249,13 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		// needed, same as several other Dependencies fields backed
 		// straight by *store.Store elsewhere in this file.
 		Skills: cfg.Store,
+		ActorURN: func(sessionID, profileID string) string {
+			urn, err := cfg.Store.DurableActorURNForSession(context.Background(), sessionID, profileID)
+			if err != nil {
+				slog.Warn("boot: resolve durable actor urn", "session_id", sessionID, "err", err)
+			}
+			return urn
+		},
 	}
 	// cfg.SkillVendor is a *skillvendor.Store — a nil *skillvendor.Store
 	// assigned directly into the SkillVendorReader interface field would

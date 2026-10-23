@@ -112,3 +112,28 @@ func TestClaudeLayout_Setup_OmitsTetherIdentity_WhenNotRegistered(t *testing.T) 
 		t.Errorf("expected no identity file for an unregistered profile, stat err = %v", err)
 	}
 }
+
+// The bridge delivers to the durable actor's address, so the identity file
+// must name that one and not the profile's separately registered address.
+func TestTetherIdentityFile_PrefersTheBoundActorURN(t *testing.T) {
+	profile := &store.AgentProfile{ID: "p", TetherURN: "msg://agent/agent-mux/agt_profile"}
+	got := string(tetherIdentityFile(SetupParams{
+		AgentProfile: profile, SessionID: "s", ActorURN: "msg://agent/nanite/agt_actor",
+	}))
+	if !strings.Contains(got, "Agent URN: `msg://agent/nanite/agt_actor`") {
+		t.Fatalf("actor URN not planted as the Agent URN:\n%s", got)
+	}
+	if strings.Contains(got, "Agent URN: `msg://agent/agent-mux/agt_profile`") {
+		t.Fatalf("profile URN planted as the Agent URN:\n%s", got)
+	}
+	if !strings.Contains(got, "as `from`") || !strings.Contains(got, "in_reply_to") {
+		t.Fatalf("missing send guidance:\n%s", got)
+	}
+}
+
+func TestTetherIdentityFile_BoundActorWithoutProfileURN(t *testing.T) {
+	got := tetherIdentityFile(SetupParams{AgentProfile: &store.AgentProfile{ID: "p"}, ActorURN: "msg://agent/nanite/agt_actor"})
+	if got == nil || !strings.Contains(string(got), "msg://agent/nanite/agt_actor") {
+		t.Fatalf("a bound actor with no profile URN got %q", got)
+	}
+}

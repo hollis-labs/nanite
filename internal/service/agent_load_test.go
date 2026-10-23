@@ -183,11 +183,11 @@ func TestAgentLoadDistinctDefinitionIDsSharingASlug(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "agent.md")
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // test fixture path
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(path, []byte(strings.Replace(string(b), "def:load-agent", "def:other-agent", 1)), 0o600); err != nil {
+	if err = os.WriteFile(path, []byte(strings.Replace(string(b), "def:load-agent", "def:other-agent", 1)), 0o600); err != nil { //nolint:gosec // test fixture path
 		t.Fatal(err)
 	}
 	second, err := loadDir(t, svc, root, AgentLoadOptions{})

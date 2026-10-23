@@ -361,6 +361,9 @@ type Container struct {
 	// and nil-checked by the launch API before any run is created.
 	TeamRouting *TeamRoutingService
 
+	// stopTetherBridge stops the Tether delivery loop; nil when it is off.
+	stopTetherBridge func()
+
 	// stopModelCatalog cancels the model catalog background refresher.
 	stopModelCatalog context.CancelFunc
 	// modelCatalogDone closes once the refresher goroutine has returned.
@@ -1232,6 +1235,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// exists by this point (built above for the ChatRunner wiring) — same
 	// ordering SetCompletionReactor relies on just above.
 	messagingSvc.SetWakeReactor(&messagingWakeReactor{chat: chatSvcImpl})
+	// CW-20261022-0002: Tether mail for bound durable actors lands in the
+	// same mailbox the reactor above serves. Off unless NANITE_TETHER_ADDR.
+	stopTetherBridge := startTetherBridge(cfg.Store, messagingSvc, chatSvcImpl)
+	defer func() {
+		if !containerCommitted && stopTetherBridge != nil {
+			stopTetherBridge()
+		}
+	}()
 	// Copilot PR #258 review: wire the wake-reactor goroutine spawn onto
 	// a tracked *lifecycle.Manager instead of the untracked safego.Go
 	// default, so a burst of messages can't leave unbounded goroutines
@@ -1536,6 +1547,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentImportSeeder:   SeedImportedAgentChildren(cfg.Store),
 		CompactionEvents:    NewCompactionEventWriter(cfg.Store),
 		CompactionHandoffs:  cfg.Store,
+		stopTetherBridge:    stopTetherBridge,
 		stopModelCatalog:    stopCatalog,
 		modelCatalogDone:    catalogDone,
 		subagentReaper:      subagentReaper,
@@ -1625,6 +1637,9 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 		}()
 	}
 
+	if c.stopTetherBridge != nil {
+		c.stopTetherBridge()
+	}
 	if c.stopModelCatalog != nil {
 		c.stopModelCatalog()
 	}

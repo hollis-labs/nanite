@@ -1,0 +1,574 @@
+package tetherbridge
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	messaging "github.com/hollis-labs/libs/mesh/core/messaging"
+	"github.com/hollis-labs/libs/mesh/core/messaging/delivery"
+
+	"github.com/hollis-labs/nanite/internal/store"
+)
+
+type fakeClaimer struct {
+	mu       sync.Mutex
+	stages   []delivery.ReceiptStage
+	nacks    []NackOptions
+	claims   int
+	claimErr error
+}
+
+func (f *fakeClaimer) ClaimMessage(_ context.Context, id string, _ messaging.Address, _ ClaimOptions) (messaging.Envelope, delivery.LeaseRef, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.claims++
+	if f.claimErr != nil {
+		return messaging.Envelope{}, delivery.LeaseRef{}, 0, f.claimErr
+	}
+	return messaging.Envelope{ID: id}, delivery.LeaseRef{DeliveryID: "d", LeaseToken: "t"}, 120, nil
+}
+
+func (f *fakeClaimer) AckMessage(_ context.Context, _ string, _ messaging.Address, _ delivery.LeaseRef, st delivery.ReceiptStage) (delivery.RecipientDelivery, delivery.Attempt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stages = append(f.stages, st)
+	return delivery.RecipientDelivery{}, delivery.Attempt{}, nil
+}
+
+func (f *fakeClaimer) NackMessage(_ context.Context, _ string, _ messaging.Address, _ delivery.LeaseRef, o NackOptions) (delivery.RecipientDelivery, delivery.Attempt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nacks = append(f.nacks, o)
+	rd := delivery.RecipientDelivery{}
+	if !o.Retryable {
+		rd.Status = delivery.DeliveryDeadLettered
+	}
+	return rd, delivery.Attempt{}, nil
+}
+
+// memLedger mirrors the store's semantics: forward-only, terminal rows frozen,
+// deferred rows hidden from the open list until due. failAdvance makes the
+// next N Advance calls to a state fail, to model a ledger write that dies after
+// the mailbox write.
+type memLedger struct {
+	mu          sync.Mutex
+	now         func() time.Time
+	rows        map[string]*store.TetherDelivery
+	failAdvance map[string]int
+	failRecord  int
+}
+
+func newMemLedger(now func() time.Time) *memLedger {
+	return &memLedger{now: now, rows: map[string]*store.TetherDelivery{}, failAdvance: map[string]int{}}
+}
+
+func (m *memLedger) RecordTetherDelivery(_ context.Context, d store.TetherDelivery) (*store.TetherDelivery, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failRecord > 0 {
+		m.failRecord--
+		return nil, false, errors.New("db busy")
+	}
+	if r, ok := m.rows[d.MessageID]; ok {
+		c := *r
+		return &c, false, nil
+	}
+	d.State = store.TetherDeliveryReceived
+	m.rows[d.MessageID] = &d
+	c := d
+	return &c, true, nil
+}
+
+var stateRank = map[string]int{store.TetherDeliveryReceived: 0, store.TetherDeliveryAccepted: 1, store.TetherDeliverySubmitted: 2}
+
+func (m *memLedger) AdvanceTetherDelivery(_ context.Context, id, state, local, lastErr string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failAdvance[state] > 0 {
+		m.failAdvance[state]--
+		return false, errors.New("ledger write failed")
+	}
+	r := m.rows[id]
+	if r == nil || r.Terminal() {
+		return false, nil
+	}
+	if want, ok := stateRank[state]; ok && stateRank[r.State] > want {
+		return false, nil
+	}
+	r.State, r.LastError, r.NextAttemptAt = state, lastErr, time.Time{}
+	if local != "" {
+		r.LocalMessageID = local
+	}
+	if r.Terminal() {
+		r.EnvelopeJSON = ""
+	}
+	return true, nil
+}
+
+func (m *memLedger) DeferTetherDelivery(_ context.Context, id string, at time.Time, why string, bump bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.rows[id]
+	if r == nil || r.Terminal() {
+		return 0, nil
+	}
+	r.NextAttemptAt, r.LastError = at, why
+	if bump {
+		r.Attempts++
+	}
+	return r.Attempts, nil
+}
+
+func (m *memLedger) ListOpenTetherDeliveries(context.Context, int) ([]store.TetherDelivery, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.TetherDelivery
+	for _, r := range m.rows {
+		if !r.Terminal() && !r.NextAttemptAt.After(m.now()) {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
+// fakeInjector is idempotent on the envelope id, as the Injector contract
+// requires, and counts how many distinct mailbox rows it has written.
+type fakeInjector struct {
+	mu    sync.Mutex
+	busy  bool
+	err   error
+	rows  map[string]string
+	calls int
+}
+
+func (f *fakeInjector) Busy(string) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.busy }
+func (f *fakeInjector) Inject(_ context.Context, _ ActorRoute, env messaging.Envelope) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.rows == nil {
+		f.rows = map[string]string{}
+	}
+	if id, ok := f.rows[env.ID]; ok {
+		return id, nil
+	}
+	id := "local-" + env.ID
+	f.rows[env.ID] = id
+	return id, nil
+}
+func (f *fakeInjector) written() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.rows) }
+
+const testActor = "msg://agent/nanite/agt_testactor"
+
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *clock) Advance(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
+
+func newTestLoop(bound bool) (*Loop, *fakeClaimer, *memLedger, *fakeInjector, *clock) {
+	sess := ""
+	if bound {
+		sess = "sess-1"
+	}
+	clk := &clock{t: time.Now()}
+	c, led, inj := &fakeClaimer{}, newMemLedger(clk.Now), &fakeInjector{}
+	return &Loop{
+		Claimer: c, Ledger: led, Injector: inj, now: clk.Now,
+		Store: &fakeStore{inst: &store.DurableAgentInstance{ID: "i", ProfileID: "p", CurrentSessionID: sess}, slotCount: 1},
+	}, c, led, inj, clk
+}
+
+func testEnv(id string) messaging.Envelope {
+	return messaging.Envelope{ID: id, To: testRecipient, Kind: messaging.MsgKindRequest}
+}
+
+func TestHandle_DeliversOnceWithAllReceipts(t *testing.T) {
+	l, c, led, inj, _ := newTestLoop(true)
+	ctx := context.Background()
+	if err := l.Handle(ctx, testActor, testEnv("m1")); err != nil {
+		t.Fatal(err)
+	}
+	want := []delivery.ReceiptStage{delivery.StageHostAccepted, delivery.StageTurnSubmitted, delivery.StageConsumed}
+	if len(c.stages) != 3 || c.stages[0] != want[0] || c.stages[1] != want[1] || c.stages[2] != want[2] {
+		t.Fatalf("stages = %v, want %v", c.stages, want)
+	}
+	if inj.written() != 1 || led.rows["m1"].State != store.TetherDeliveryConsumed {
+		t.Fatalf("written=%d state=%s", inj.written(), led.rows["m1"].State)
+	}
+	if led.rows["m1"].EnvelopeJSON != "" {
+		t.Fatal("a finished delivery should not keep the message body")
+	}
+	if err := l.Handle(ctx, testActor, testEnv("m1")); err != nil {
+		t.Fatal(err)
+	}
+	if inj.calls != 1 || c.claims != 1 {
+		t.Fatalf("duplicate re-delivered: inject calls=%d claims=%d", inj.calls, c.claims)
+	}
+}
+
+// The ledger write after a successful mailbox write fails once. The next
+// attempt must not produce a second mailbox row.
+func TestHandle_LedgerFailureAfterInjectDoesNotDoubleDeliver(t *testing.T) {
+	l, c, led, inj, clk := newTestLoop(true)
+	led.failAdvance[store.TetherDeliverySubmitted] = 1
+	ctx := context.Background()
+	if err := l.Handle(ctx, testActor, testEnv("m")); err == nil {
+		t.Fatal("expected the ledger failure to surface")
+	}
+	if inj.written() != 1 {
+		t.Fatalf("written=%d after first attempt", inj.written())
+	}
+	clk.Advance(time.Hour)
+	if err := l.Handle(ctx, testActor, testEnv("m")); err != nil {
+		t.Fatal(err)
+	}
+	if inj.written() != 1 {
+		t.Fatalf("double delivery: %d mailbox rows", inj.written())
+	}
+	if led.rows["m"].State != store.TetherDeliveryConsumed || c.stages[len(c.stages)-1] != delivery.StageConsumed {
+		t.Fatalf("row=%+v stages=%v", led.rows["m"], c.stages)
+	}
+}
+
+func TestHandle_ResumeAfterCrashDoesNotReinject(t *testing.T) {
+	l, c, led, inj, _ := newTestLoop(true)
+	led.rows["m2"] = &store.TetherDelivery{MessageID: "m2", ActorURN: testActor, State: store.TetherDeliverySubmitted, LocalMessageID: "local-0"}
+	if err := l.Handle(context.Background(), testActor, testEnv("m2")); err != nil {
+		t.Fatal(err)
+	}
+	if inj.calls != 0 {
+		t.Fatalf("re-injected after crash: %d", inj.calls)
+	}
+	if got := c.stages[len(c.stages)-1]; got != delivery.StageConsumed {
+		t.Fatalf("last stage = %s", got)
+	}
+	for _, st := range c.stages {
+		if st == delivery.StageTurnSubmitted && led.rows["m2"].State != store.TetherDeliveryConsumed {
+			t.Fatal("state regressed")
+		}
+	}
+}
+
+func TestHandle_BusyDefersAndNeverDeadLetters(t *testing.T) {
+	l, c, led, inj, clk := newTestLoop(true)
+	l.Config.MaxAttempts = 2
+	inj.busy = true
+	ctx := context.Background()
+	for i := 0; i < 30; i++ { // far past any failure budget
+		if err := l.Handle(ctx, testActor, testEnv("m3")); err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(l.Config.RetryDelay + time.Second)
+	}
+	row := led.rows["m3"]
+	if row.State == store.TetherDeliveryFailed || row.Attempts != 0 {
+		t.Fatalf("busy must not consume attempts or dead-letter: %+v", row)
+	}
+	for _, n := range c.nacks {
+		if !n.Retryable || n.NextAttemptSeconds < int(l.Config.RetryDelay/time.Second) {
+			t.Fatalf("busy nack = %+v", n)
+		}
+	}
+	if inj.written() != 0 {
+		t.Fatal("injected into a busy session")
+	}
+	inj.busy = false
+	if err := l.Handle(ctx, testActor, testEnv("m3")); err != nil {
+		t.Fatal(err)
+	}
+	if inj.written() != 1 || led.rows["m3"].State != store.TetherDeliveryConsumed {
+		t.Fatalf("after idle: written=%d state=%s", inj.written(), led.rows["m3"].State)
+	}
+}
+
+func TestHandle_DeferredRowIsNotRetriedEarly(t *testing.T) {
+	l, c, _, inj, clk := newTestLoop(true)
+	inj.busy = true
+	ctx := context.Background()
+	_ = l.Handle(ctx, testActor, testEnv("m"))
+	claims := c.claims
+	_ = l.Handle(ctx, testActor, testEnv("m")) // Tether redelivers immediately
+	if c.claims != claims {
+		t.Fatal("a deferred row was claimed before it was due")
+	}
+	clk.Advance(time.Minute)
+	inj.busy = false
+	_ = l.Handle(ctx, testActor, testEnv("m"))
+	if inj.written() != 1 {
+		t.Fatal("not delivered once due")
+	}
+}
+
+func TestHandle_UnclaimableRowsAgeOut(t *testing.T) {
+	l, c, led, _, clk := newTestLoop(true)
+	l.Config.MaxAttempts = 2 // closes after 8 counted failures
+	c.claimErr = errors.New("lease held elsewhere")
+	ctx := context.Background()
+	for i := 0; i < 10; i++ {
+		_ = l.Handle(ctx, testActor, testEnv("stuck"))
+		clk.Advance(time.Hour)
+	}
+	row := led.rows["stuck"]
+	if row.State != store.TetherDeliveryFailed || row.Attempts == 0 {
+		t.Fatalf("stuck row not closed: %+v", row)
+	}
+	open, _ := led.ListOpenTetherDeliveries(ctx, 10)
+	if len(open) != 0 {
+		t.Fatalf("closed row still open: %d", len(open))
+	}
+}
+
+// The inbox read has already marked the message delivered in Tether. If the
+// route cannot be resolved the message must stay in the ledger.
+func TestHandle_RouteErrorKeepsMessageInLedger(t *testing.T) {
+	l, c, led, inj, clk := newTestLoop(true)
+	l.Store = &fakeStore{instErr: errors.New("db down")}
+	ctx := context.Background()
+	if err := l.Handle(ctx, testActor, testEnv("m")); err == nil {
+		t.Fatal("expected the resolve error")
+	}
+	if row := led.rows["m"]; row == nil || row.Terminal() || row.EnvelopeJSON == "" {
+		t.Fatalf("message lost on a resolve error: %+v", row)
+	}
+	l.Store = &fakeStore{inst: &store.DurableAgentInstance{ID: "i", ProfileID: "p", CurrentSessionID: "sess-1"}, slotCount: 1}
+	clk.Advance(time.Hour)
+	l.Config.defaults()
+	l.Mail = &fakeMail{inbox: map[string][]messaging.Envelope{}, stream: make(chan messaging.Envelope)}
+	l.Actors = &fakeActors{}
+	l.Sweep(ctx) // no live actors: only the ledger resume path runs
+	if inj.written() != 1 || c.stages[len(c.stages)-1] != delivery.StageConsumed {
+		t.Fatalf("resume from ledger failed: written=%d", inj.written())
+	}
+}
+
+func TestHandle_RecordFailureIsRetriedThenSurfaced(t *testing.T) {
+	l, _, led, inj, _ := newTestLoop(true)
+	led.failRecord = 2
+	if err := l.Handle(context.Background(), testActor, testEnv("m")); err != nil {
+		t.Fatalf("transient ledger error should be retried: %v", err)
+	}
+	if inj.written() != 1 {
+		t.Fatal("not delivered after retry")
+	}
+	led.failRecord = 100
+	if err := l.Handle(context.Background(), testActor, testEnv("n")); err == nil {
+		t.Fatal("persistent ledger failure must surface")
+	}
+}
+
+func TestHandle_UnboundActorStaysOpenAndUntouched(t *testing.T) {
+	l, c, led, inj, _ := newTestLoop(false)
+	if err := l.Handle(context.Background(), testActor, testEnv("m4")); err != nil {
+		t.Fatal(err)
+	}
+	if c.claims != 0 || inj.calls != 0 {
+		t.Fatalf("unbound touched things: claims=%d injects=%d", c.claims, inj.calls)
+	}
+	if row := led.rows["m4"]; row == nil || row.Terminal() {
+		t.Fatalf("unbound delivery must stay open, not be dropped: %+v", row)
+	}
+}
+
+func TestHandle_PersistentInjectFailureDeadLetters(t *testing.T) {
+	l, c, led, inj, clk := newTestLoop(true)
+	l.Config.MaxAttempts = 2
+	inj.err = errors.New("boom")
+	for i := 0; i < 2; i++ {
+		if err := l.Handle(context.Background(), testActor, testEnv("m5")); err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(time.Hour)
+	}
+	if led.rows["m5"].State != store.TetherDeliveryFailed {
+		t.Fatalf("state = %s", led.rows["m5"].State)
+	}
+	if last := c.nacks[len(c.nacks)-1]; last.Retryable {
+		t.Fatal("final nack should dead-letter")
+	}
+}
+
+func TestHandle_RejectedSenderIsDeadLetteredNotInjected(t *testing.T) {
+	l, c, led, inj, _ := newTestLoop(true)
+	l.AllowSender = func(messaging.Envelope) error { return ErrSenderRejected }
+	if err := l.Handle(context.Background(), testActor, testEnv("m6")); err != nil {
+		t.Fatal(err)
+	}
+	if inj.calls != 0 || led.rows["m6"].State != store.TetherDeliveryFailed {
+		t.Fatalf("rejected sender woke the actor: calls=%d state=%s", inj.calls, led.rows["m6"].State)
+	}
+	if len(c.nacks) != 1 || c.nacks[0].Retryable {
+		t.Fatalf("nacks = %+v", c.nacks)
+	}
+}
+
+// --- Sweep, subscribe, Run and shutdown ---
+
+type fakeActors struct{ insts []store.DurableAgentInstance }
+
+func (f *fakeActors) ListDurableAgentInstances(context.Context, bool) ([]store.DurableAgentInstance, error) {
+	return f.insts, nil
+}
+
+// fakeMail implements only the two messaging.Store methods the loop uses.
+type fakeMail struct {
+	messaging.Store
+	mu       sync.Mutex
+	inbox    map[string][]messaging.Envelope
+	stream   chan messaging.Envelope
+	subs     int
+	inboxErr error
+}
+
+func (f *fakeMail) Inbox(_ context.Context, to messaging.Address, _ messaging.Filter) ([]messaging.Envelope, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.inboxErr != nil {
+		return nil, f.inboxErr
+	}
+	out := f.inbox[to.URN()]
+	delete(f.inbox, to.URN()) // like Tether: a read marks delivered
+	return out, nil
+}
+
+func (f *fakeMail) Subscribe(ctx context.Context, _ messaging.Address, _ messaging.Filter) (<-chan messaging.Envelope, error) {
+	f.mu.Lock()
+	f.subs++
+	f.mu.Unlock()
+	out := make(chan messaging.Envelope)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case env := <-f.stream:
+				select {
+				case out <- env:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out, nil
+}
+
+func newSweepLoop(t *testing.T) (*Loop, *fakeMail, *memLedger, *fakeInjector) {
+	t.Helper()
+	l, _, led, inj, _ := newTestLoop(true)
+	mail := &fakeMail{inbox: map[string][]messaging.Envelope{}, stream: make(chan messaging.Envelope, 4)}
+	l.Mail = mail
+	l.Actors = &fakeActors{insts: []store.DurableAgentInstance{
+		{ID: "i", URN: testActor, ProfileID: "p", CurrentSessionID: "sess-1"},
+		{ID: "u", URN: "msg://agent/nanite/agt_unbound", ProfileID: "p2"},
+	}}
+	l.Config.ResubscribeWait = time.Millisecond
+	return l, mail, led, inj
+}
+
+func TestSweep_DrainsInboxOncePerMessageAndSkipsUnbound(t *testing.T) {
+	l, mail, led, inj := newSweepLoop(t)
+	mail.inbox[testActor] = []messaging.Envelope{testEnv("a"), testEnv("b")}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	l.Sweep(ctx)
+	l.Sweep(ctx)
+	for i := 0; i < 400; i++ { // let the subscription goroutine connect
+		mail.mu.Lock()
+		n := mail.subs
+		mail.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	l.Close()
+	if inj.written() != 2 || led.rows["a"].State != store.TetherDeliveryConsumed {
+		t.Fatalf("written=%d", inj.written())
+	}
+	if mail.subs != 1 {
+		t.Fatalf("subscriptions = %d, want 1 (bound actor only, once)", mail.subs)
+	}
+}
+
+// Inbox marks delivered; a failure after that read must not lose the message.
+func TestSweep_InboxReadFollowedByFailureIsRecoveredFromLedger(t *testing.T) {
+	l, mail, led, inj := newSweepLoop(t)
+	mail.inbox[testActor] = []messaging.Envelope{testEnv("a")}
+	inj.err = errors.New("mailbox down")
+	ctx := context.Background()
+	l.Sweep(ctx)
+	if len(mail.inbox[testActor]) != 0 {
+		t.Fatal("test setup: inbox should be drained")
+	}
+	if row := led.rows["a"]; row == nil || row.Terminal() {
+		t.Fatalf("message lost: %+v", row)
+	}
+	inj.err = nil
+	led.mu.Lock()
+	led.rows["a"].NextAttemptAt = time.Time{}
+	led.mu.Unlock()
+	l.Sweep(ctx)
+	l.Close()
+	if inj.written() != 1 {
+		t.Fatalf("recovered written=%d", inj.written())
+	}
+}
+
+func TestSubscribe_StreamDeliveryAndDuplicateWithSweep(t *testing.T) {
+	l, mail, led, inj := newSweepLoop(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	l.Sweep(ctx) // starts the subscription
+	mail.stream <- testEnv("s1")
+	mail.stream <- testEnv("s1") // the same message arriving twice
+	deadline := time.After(2 * time.Second)
+	for {
+		led.mu.Lock()
+		r := led.rows["s1"]
+		done := r != nil && r.State == store.TetherDeliveryConsumed
+		led.mu.Unlock()
+		if done {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("stream delivery never completed")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	l.Close()
+	if inj.written() != 1 || inj.calls != 1 {
+		t.Fatalf("written=%d calls=%d", inj.written(), inj.calls)
+	}
+}
+
+func TestRun_StopsAndWaitsForSubscriptions(t *testing.T) {
+	l, _, _, _ := newSweepLoop(t)
+	l.Config.SweepEvery = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { l.Run(ctx); close(done) }()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	l.mu.Lock()
+	n := len(l.subs)
+	l.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("subscriptions left after shutdown: %d", n)
+	}
+}

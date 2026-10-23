@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -97,6 +98,11 @@ func bootDirArtifactTree(spec plant.PlantSpec, cfg plantConfig) (artifact.Tree, 
 		}
 		if mode == 0 {
 			mode = plantedFileMode
+		}
+		// A file that carries the session credential is owner-only, as the
+		// Codex config.toml and the Antigravity MCP file are.
+		if mode&0o077 != 0 && bytes.Contains(content, []byte(AuthTokenEnv)) {
+			mode = 0o600
 		}
 		// make+copy, NOT append([]byte(nil), content...): appending zero
 		// elements to a nil slice yields nil, and artifact.Entry.Validate

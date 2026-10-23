@@ -130,36 +130,34 @@ func isTetherGateway(cfg *MCPServerConfig) bool {
 	return false
 }
 
-// checkSingleTetherGateway holds one Tether actor per host at the point every
-// registration path (CLI import, API, import payload) goes through. The
-// gateway entry is host-wide, so each agent that lists it launches with the
-// same token; a second entry under another name would present a second
-// actor's credential to the same agents while nothing tells them apart. Per-
-// agent planting is what would lift this.
-func (s *Store) checkSingleTetherGateway(ctx context.Context, cfg *MCPServerConfig) error {
-	if !isTetherGateway(cfg) {
-		return nil
+// tetherGatewayFlag is the value of mcp_servers.tether_gateway for cfg. A
+// unique partial index over the flag makes "one Tether actor per host" the
+// database's decision: the gateway entry is host-wide, so each agent that
+// lists it launches with the same token, and a second entry under another name
+// would present a second actor's credential to the same agents. Create and
+// update both write the flag in the same statement as the row, so concurrent
+// writers on any connection cannot both succeed. Per-agent planting is what
+// would lift this.
+func tetherGatewayFlag(cfg *MCPServerConfig) int {
+	if isTetherGateway(cfg) {
+		return 1
 	}
-	rows, err := s.ListMCPServers(ctx)
-	if err != nil {
+	return 0
+}
+
+// tetherGatewayConflict maps the index's violation to the typed error and
+// names the gateway already registered, best effort.
+func (s *Store) tetherGatewayConflict(ctx context.Context, err error, cfg *MCPServerConfig) error {
+	if err == nil || !strings.Contains(err.Error(), "mcp_servers.tether_gateway") {
 		return err
 	}
-	for i := range rows {
-		if rows[i].Name != cfg.Name && isTetherGateway(&rows[i]) {
-			return fmt.Errorf("%w as %q; one Tether actor per host is supported, remove it before registering %q", ErrTetherGatewayConflict, rows[i].Name, cfg.Name)
-		}
-	}
-	return nil
+	var other string
+	_ = s.DB.QueryRowContext(ctx, `SELECT name FROM mcp_servers WHERE tether_gateway = 1 AND name != ? LIMIT 1`, cfg.Name).Scan(&other)
+	return fmt.Errorf("%w as %q; one Tether actor per host is supported, remove it before registering %q", ErrTetherGatewayConflict, other, cfg.Name)
 }
 
 // CreateMCPServer inserts a new MCP server config.
 func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
-	if cfg.Args == "" {
-		cfg.Args = "[]"
-	}
-	if err := s.checkSingleTetherGateway(ctx, cfg); err != nil {
-		return err
-	}
 	if cfg.ID == "" {
 		cfg.ID = uuid.New().String()
 	}
@@ -181,14 +179,14 @@ func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 	}
 
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO mcp_servers (`+mcpServerColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO mcp_servers (`+mcpServerColumns+`, tether_gateway)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.ID, cfg.Name, cfg.TransportType, cfg.Command, cfg.URL,
 		cfg.Args, cfg.Env, cfg.Enabled,
 		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers,
-		now, now,
+		now, now, tetherGatewayFlag(cfg),
 	)
-	if err != nil {
+	if err = s.tetherGatewayConflict(ctx, err, cfg); err != nil {
 		return fmt.Errorf("create mcp server: %w", err)
 	}
 	cfg.CreatedAt = now
@@ -198,9 +196,6 @@ func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 
 // UpdateMCPServer updates an MCP server config by name.
 func (s *Store) UpdateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
-	if err := s.checkSingleTetherGateway(ctx, cfg); err != nil {
-		return err
-	}
 	if cfg.TrustTier == "" {
 		cfg.TrustTier = TrustTierThirdPartyHTTP
 	}
@@ -213,12 +208,13 @@ func (s *Store) UpdateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE mcp_servers SET transport_type = ?, command = ?, url = ?, args = ?, env = ?,
-			enabled = ?, trust_tier = ?, env_allowlist = ?, headers = ?, updated_at = ?
+			enabled = ?, trust_tier = ?, env_allowlist = ?, headers = ?, updated_at = ?,
+			tether_gateway = ?
 		 WHERE name = ?`,
 		cfg.TransportType, cfg.Command, cfg.URL, cfg.Args, cfg.Env, cfg.Enabled,
-		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers, now, cfg.Name,
+		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers, now, tetherGatewayFlag(cfg), cfg.Name,
 	)
-	if err != nil {
+	if err = s.tetherGatewayConflict(ctx, err, cfg); err != nil {
 		return fmt.Errorf("update mcp server: %w", err)
 	}
 	n, _ := res.RowsAffected()

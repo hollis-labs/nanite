@@ -34,6 +34,8 @@ const (
 	CauseCLIHostUnsupportedField = "cli_host_unsupported_field"
 	CauseHostDirectoriesMissing  = "host_directories_missing"
 	CauseHostRevisionChanged     = "host_revision_changed"
+	CauseWorkRootUnsupported     = "work_root_unsupported"
+	CauseWorkRootInvalid         = "work_root_invalid"
 )
 
 type UnsupportedCause struct {

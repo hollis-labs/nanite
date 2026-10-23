@@ -167,6 +167,8 @@ type ChatDefinitionConfig struct {
 	// HostSettingsRef records which host settings revision the view was admitted
 	// under; native tool authority is looked up against it.
 	HostSettingsRef *HostSettingsRef `json:"host_settings_ref,omitempty"`
+	// WorkRoot is the validated work root chosen at create time (CLI hosts).
+	WorkRoot string `json:"work_root,omitempty"`
 }
 
 func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error) {

@@ -123,6 +123,26 @@ restarts, send another turn to the same `session_view_id`. A CLI session resumes
 from the provider's session, or from Nanite's recovery pack when the provider
 cannot resume. The smoke script exercises restart recovery and cancellation for both runtimes.
 
+## Work root, listing and stopping
+
+A CLI session runs in the first host directory unless the create request names
+`"work_root": "/abs/path"`. The path must be absolute, exist, and sit inside one
+of the host's `directories`; otherwise create answers `422` with
+`error.cause` `work_root_invalid` (or `work_root_unsupported` when the host is
+not a CLI host). The work root is also the first directory the process is
+given.
+
+```sh
+nanite agent list [--all]        # sessions on the running server (--all includes ended)
+nanite agent stop <session>      # same as POST /api/agent/v1/sessions/{id}/stop
+```
+
+Stop cancels a running or queued turn, closes the agent process and marks the
+session ended. The response says `stopped` (false on a repeat call, which
+changes nothing) and `turn_canceled`. An ended session refuses new turns with
+`409 invalid_state`. Both commands call the running server, so point them at it
+with `NANITE_API_URL` or `NANITE_PORT`.
+
 ## Known refusals
 
 | Step | Symptom | Cause |
@@ -131,6 +151,8 @@ cannot resume. The smoke script exercises restart recovery and cancellation for 
 | session create, `runtime=cli` | `422`, `error.cause` `cli_host_unsupported_field` | the host sets `mcp_servers`, `harness_profile`, a non-empty `native_loop`, `recall_*`, `protocol` or `transport`, or a relative directory |
 | session create, `runtime=cli` | `422`, `error.cause` `read_only_unenforceable` | the definition asks for a read-only permission profile, which a CLI process cannot enforce |
 | session create, `runtime=cli` | `422`, `error.cause` `provider_not_launchable` | no provider, or one Nanite cannot launch |
+| session create | `422`, `error.cause` `work_root_invalid` / `work_root_unsupported` | `work_root` is relative, missing, not a directory, outside the host directories, or the host is not a CLI host |
+| turn | `409 invalid_state` | the session was stopped; create a new session |
 | turn, `runtime=cli` | `host_revision_changed` | the host settings were edited after the session was created; create a new session |
 | host settings create | `400 invalid host settings request` | the body has an unknown field (e.g. `source`); the server assigns it |
 | session create | `404 sql: no rows` | stale `host_settings.revision`; use the revision returned by create |

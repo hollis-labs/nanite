@@ -1,0 +1,67 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/hollis-labs/nanite/internal/safego"
+)
+
+type agentV1StopResponse struct {
+	SessionViewID string `json:"session_view_id"`
+	// State is always "ended" on success.
+	State string `json:"state"`
+	// Stopped is false when the session had already ended (a repeat call).
+	Stopped bool `json:"stopped"`
+	// TurnCanceled reports that a running or queued turn was canceled by this
+	// call. A turn that had already finished is left as it ended.
+	TurnCanceled bool `json:"turn_canceled"`
+}
+
+// handleAgentV1StopSession ends a session: it cancels any running or queued
+// turn, closes the live agent runtime (the archive hook, which stops the CLI
+// process), and marks the session ended. It is idempotent: a second call
+// reports stopped=false and changes nothing. An ended session refuses new
+// turns with 409 invalid_state.
+func (a *API) handleAgentV1StopSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess, err := a.Services.Sessions.Get(r.Context(), id)
+	if err != nil {
+		a.agentV1LookupError(w, err)
+		return
+	}
+	if _, _, err = a.Services.CognitiveViews.Get(r.Context(), id); err != nil {
+		a.agentV1LookupError(w, err)
+		return
+	}
+	if sess.Status == "archived" {
+		a.jsonResp(w, http.StatusOK, agentV1StopResponse{SessionViewID: id, State: "ended"})
+		return
+	}
+	out := agentV1StopResponse{SessionViewID: id, State: "ended", Stopped: true}
+	if a.Services.Chat != nil {
+		out.TurnCanceled = a.Services.Chat.CancelActiveGeneration(id)
+	}
+	if err = a.endSession(r, id); err != nil {
+		a.agentV1Error(w, http.StatusInternalServerError, "failed to end session")
+		return
+	}
+	a.jsonResp(w, http.StatusOK, out)
+}
+
+// endSession archives a session and tears down everything attached to it. It
+// is the shared body of DELETE /api/sessions/{id} and the v1 stop route.
+func (a *API) endSession(r *http.Request, id string) error {
+	if err := a.Services.Sessions.Archive(r.Context(), id); err != nil {
+		return err
+	}
+	if a.Services.ProcessTracker != nil {
+		a.Services.ProcessTracker.KillSession(id)
+	}
+	a.Services.Streams.BroadcastSessionArchived(id)
+	if a.Services.Plugins != nil {
+		safego.Go(r.Context(), "api.sessions.emit.session-archived-stop", func() {
+			a.Services.Plugins.EmitSessionArchived(id)
+		})
+	}
+	return nil
+}

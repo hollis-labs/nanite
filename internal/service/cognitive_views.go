@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -121,6 +122,10 @@ type CreateDefinedView struct {
 	HostSettings               *HostSettingsRef
 	ModelSelection             *ModelSelection
 	ProjectID, Title, Metadata string
+	// WorkRoot is where a CLI agent works, chosen at create time. It must be an
+	// existing directory inside one of the host settings' directories; the host
+	// document, not the request, owns filesystem authority.
+	WorkRoot string
 }
 
 // HostSettingsRef selects an already validated host document at one revision.
@@ -177,6 +182,16 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		}
 		cfg.HostSettings = &h.Settings
 		cfg.HostSettingsRef = &HostSettingsRef{ID: h.ID, Revision: h.Revision}
+	}
+	if req.WorkRoot != "" {
+		if cfg.HostSettings == nil || cfg.HostSettings.Runtime != "cli" {
+			return nil, unsupportedCause(CauseWorkRootUnsupported, "work_root applies to CLI agents; this session has no CLI host settings")
+		}
+		root, rootErr := resolveWorkRoot(req.WorkRoot, cfg.HostSettings.Directories)
+		if rootErr != nil {
+			return nil, unsupportedCause(CauseWorkRootInvalid, "%v", rootErr)
+		}
+		cfg.WorkRoot = root
 	}
 	if cfg.HostSettings != nil && cfg.HostSettings.Runtime == "cli" {
 		// A CLI agent's model is the CLI's own; there is no native provider
@@ -293,4 +308,35 @@ func cliUnsupportedField(h store.NativeHostSettings) string {
 		return "transport"
 	}
 	return ""
+}
+
+// resolveWorkRoot validates a requested work root against the host's allowed
+// directories: absolute, an existing directory, and inside one of them after
+// symlinks are resolved. It returns the resolved path.
+func resolveWorkRoot(requested string, allowed []string) (string, error) {
+	expanded, err := runtimeagent.ExpandUserHome(strings.TrimSpace(requested))
+	if err != nil || !filepath.IsAbs(expanded) {
+		return "", fmt.Errorf("work_root %q must be an absolute path", requested)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(expanded))
+	if err != nil {
+		return "", fmt.Errorf("work_root %q must be an existing directory", requested)
+	}
+	if fi, statErr := os.Stat(resolved); statErr != nil || !fi.IsDir() {
+		return "", fmt.Errorf("work_root %q must be an existing directory", requested)
+	}
+	for _, dir := range allowed {
+		base, baseErr := runtimeagent.ExpandUserHome(strings.TrimSpace(dir))
+		if baseErr != nil {
+			continue
+		}
+		base = filepath.Clean(base)
+		if resolvedBase, evalErr := filepath.EvalSymlinks(base); evalErr == nil {
+			base = resolvedBase
+		}
+		if rel, relErr := filepath.Rel(base, resolved); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("work_root %q is outside the directories granted by the host settings", requested)
 }

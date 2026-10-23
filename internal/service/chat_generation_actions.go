@@ -1949,6 +1949,17 @@ func (s *chatServiceImpl) prepareTurn(
 			agent.RuntimeKind = "cli"
 			agent.HostSettingsID = cfg.HostSettingsRef.ID
 			agent.Revision = cfg.HostSettingsRef.Revision
+			if cfg.WorkRoot != "" {
+				// The create-time work root leads; every host directory stays granted.
+				host := *cfg.HostSettings
+				host.Directories = []string{cfg.WorkRoot}
+				for _, dir := range cfg.HostSettings.Directories {
+					if dir != cfg.WorkRoot {
+						host.Directories = append(host.Directories, dir)
+					}
+				}
+				agent.NativeHost = &host
+			}
 		}
 		if cfg.HostSettings != nil {
 			if validationErr := cfg.HostSettings.Validate(); validationErr != nil {

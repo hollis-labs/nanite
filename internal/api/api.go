@@ -327,6 +327,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agent/v1/capabilities", a.agentV1Handler(a.handleAgentV1Capabilities))
 	mux.HandleFunc("POST /api/agent/v1/sessions", a.agentV1Handler(a.handleAgentV1CreateSession))
 	mux.HandleFunc("GET /api/agent/v1/sessions", a.agentV1Handler(a.handleAgentV1ListSessions))
+	mux.HandleFunc("POST /api/agent/v1/sessions/{id}/stop", a.agentV1Handler(a.handleAgentV1StopSession))
 	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/messages", a.agentV1Handler(a.handleAgentV1History))
 	mux.HandleFunc("GET /api/agent/v1/sessions/{id}", a.agentV1Handler(a.handleAgentV1GetSession))
 	mux.HandleFunc("GET /api/agent/v1/sessions/{id}/turns/{turnId}", a.agentV1Handler(a.handleAgentV1GetTurn))

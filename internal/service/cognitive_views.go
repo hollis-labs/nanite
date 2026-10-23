@@ -166,6 +166,14 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		}
 		switch h.Settings.Runtime {
 		case "api":
+			// An api host's directories bound its file and shell tools, as a
+			// CLI host's do, so a relative one is refused here and not
+			// silently dropped when the session runs.
+			for _, dir := range h.Settings.Directories {
+				if expanded, dirErr := runtimeagent.ExpandUserHome(strings.TrimSpace(dir)); dirErr != nil || !filepath.IsAbs(expanded) {
+					return nil, unsupportedCause(CauseHostDirectoryInvalid, "host settings directory %q must be an absolute path", dir)
+				}
+			}
 			selected := ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model}
 			if req.ModelSelection != nil && *req.ModelSelection != selected {
 				return nil, unsupportedModelCause(CauseModelSelectionMismatch, "the requested provider/model (%s/%s) differs from the host settings (%s/%s); omit the request selection or change the host settings", req.ModelSelection.Provider, req.ModelSelection.Model, selected.Provider, selected.Model)

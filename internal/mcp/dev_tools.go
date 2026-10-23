@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -219,8 +220,66 @@ func canonicalPath(p string) (string, error) {
 	return pathsafe.ResolveUnder(fsRoot, rel)
 }
 
-// resolveConfined is resolveAllowed's implementation; see its comment.
+// sessionProtection is what a host registered with PathGrants.RegisterProtected.
+type sessionProtection interface {
+	Protected(sessionID string) []string
+	ShellRefusal(sessionID string) string
+}
+
+// protectedDirs returns the directories the session's host withholds from the
+// dev tools, and why dev_bash is withheld.
+func protectedDirs(ctx context.Context) (dirs []string, shellRefusal string) {
+	sessionID, checker := permission.PathGrantsFromContext(ctx)
+	if sp, ok := checker.(sessionProtection); ok && sessionID != "" {
+		return sp.Protected(sessionID), sp.ShellRefusal(sessionID)
+	}
+	return nil, ""
+}
+
+// underProtected reports the protected directory that path, by its real
+// location, is equal to or inside. A grant of an ancestor does not lift it.
+func underProtected(ctx context.Context, path string) (string, bool) {
+	dirs, _ := protectedDirs(ctx)
+	if len(dirs) == 0 {
+		return "", false
+	}
+	resolved, err := canonicalPath(path)
+	if err != nil {
+		resolved = path
+	}
+	for _, p := range dirs {
+		// macOS volumes are case-insensitive by default, so a differently
+		// cased spelling reaches the same directory.
+		if runtime.GOOS == "darwin" {
+			resolved, p = strings.ToLower(resolved), strings.ToLower(p)
+		}
+		if resolved == p || strings.HasPrefix(resolved, p+string(filepath.Separator)) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// resolveConfined is resolveAllowed's implementation; see its comment. It
+// refuses a path that really lies in a directory the session's host protects,
+// whichever root or grant admitted it.
 func (d *DevToolsTransport) resolveConfined(ctx context.Context, userPath string) (confinedPath, error) {
+	p, err := d.resolveAdmitted(ctx, userPath)
+	if err != nil {
+		return confinedPath{}, err
+	}
+	if dir, bad := underProtected(ctx, p.path); bad {
+		return confinedPath{}, &pathsafe.EscapeError{
+			Root:     p.root,
+			Attempt:  userPath,
+			Resolved: p.path,
+			Cause:    fmt.Errorf("inside the protected directory %s", dir),
+		}
+	}
+	return p, nil
+}
+
+func (d *DevToolsTransport) resolveAdmitted(ctx context.Context, userPath string) (confinedPath, error) {
 	if userPath == "" {
 		return confinedPath{}, fmt.Errorf("path is required")
 	}
@@ -907,6 +966,12 @@ func (d *DevToolsTransport) callGrep(ctx context.Context, args map[string]any) (
 		if walkErr != nil {
 			return nil // skip unreadable entries
 		}
+		if _, bad := underProtected(ctx, path); bad {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if info.IsDir() {
 			base := filepath.Base(path)
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == "dist" {
@@ -1202,6 +1267,12 @@ func (d *DevToolsTransport) callGlob(ctx context.Context, args map[string]any) (
 		if walkErr != nil {
 			return nil //nolint:nilerr // Glob is best-effort; unreadable descendants are omitted from matches.
 		}
+		if _, bad := underProtected(ctx, path); bad {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() {
 			base := filepath.Base(path)
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == "dist" {
@@ -1355,6 +1426,9 @@ func (d *DevToolsTransport) callBash(ctx context.Context, args map[string]any) (
 	command, _ := args["command"].(string)
 	if command == "" {
 		return ErrorResult("command is required"), nil
+	}
+	if _, refusal := protectedDirs(ctx); refusal != "" {
+		return ErrorResult("dev_bash: " + refusal), nil
 	}
 
 	// CW-fix-dev-glob-grant Stage B: unify the dev_* permission gate.

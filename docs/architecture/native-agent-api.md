@@ -85,9 +85,23 @@ turn (idempotent) and kept after the session ends. A turn does not run if it
 cannot be created. The scratchpad tools persist to `state/scratchpad.json`
 (owner-only, replaced atomically on every change), so what an agent stores in
 one turn is there in the next; a write that cannot be saved is refused rather
-than reported stored, and an unreadable or over-cap file is ignored. Tools are
-not yet rooted in the directory and `directories` is still ignored for `api`
-hosts (CW-20261022-0007 is delivering these in steps).
+than reported stored, and an unreadable or over-cap file is ignored.
+
+Its file and shell tools are bounded the way a CLI's writable roots are: the
+host settings' `directories` (absolute, `~` expanded; a relative one is refused
+at session create with cause `host_directory_invalid`) and the workspace are
+granted to the session, the first directory is the tools' default working
+directory (the workspace when the host lists none), and anything inside the
+control plane is dropped by the same filter a CLI launch uses. A directory that
+*contains* the control plane is kept, but the dev tools refuse any path whose
+real location (symlinks followed) is in the control plane, `dev_grep` and
+`dev_glob` skip it, and `dev_bash`, which cannot be path-filtered, is withheld
+from that session with a refusal naming the protected directory. These grants are
+added to, not instead of, `dev_tools_allowed_paths` and path mentions. They
+live in memory for the process and are rebuilt on each turn. Not yet done:
+planted context and skills still differ from a CLI session (CW-20261022-0007
+step 4). `work_root` is
+still refused for `api` hosts.
 
 ### Embedded view observations
 

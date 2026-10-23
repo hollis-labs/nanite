@@ -2010,6 +2010,17 @@ func (s *chatServiceImpl) prepareTurn(
 			return prepareTurnResult{directive: runloop.Terminate}
 		}
 		sessionWorkspace = ws
+		// The session's file and shell tools work inside the host's directories
+		// and the workspace, as a CLI session does; nothing wider is implied.
+		if s.pathGrants != nil {
+			var dirs []string
+			if agent.NativeHost != nil {
+				dirs = agent.NativeHost.Directories
+			}
+			s.pathGrants.RegisterRoots(sessionID, runtimeagent.SessionToolRoots(s.agentDeps, ws, dirs)...)
+			protected, shellRefusal := runtimeagent.SessionToolProtection(s.agentDeps, ws, dirs)
+			s.pathGrants.RegisterProtected(sessionID, protected, shellRefusal)
+		}
 	}
 
 	// Block disabled agents.

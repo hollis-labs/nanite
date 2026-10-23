@@ -342,3 +342,45 @@ func equalStringSlices(a, b []string) bool {
 // noopDevNullCleaner is a sanity check that this file doesn't depend on
 // stray helpers.
 var _ = strings.TrimSpace
+
+func TestPathGrants_RegisterRoots(t *testing.T) {
+	work, other := t.TempDir(), t.TempDir()
+	g := NewPathGrants()
+
+	g.RegisterRoots("s", "relative/dir", "", work, other)
+	if got := g.BestSessionDir("s"); got != work {
+		t.Fatalf("BestSessionDir = %q, want the first root %q", got, work)
+	}
+	for _, p := range []string{work, other} {
+		if !g.IsPathAllowed("s", filepath.Join(p, "f")) {
+			t.Errorf("%s not granted", p)
+		}
+	}
+	if g.IsPathAllowed("s", "relative/dir/f") {
+		t.Error("a relative root was registered")
+	}
+
+	// A mention naming a longer path must not displace the work root.
+	deep := filepath.Join(other, "deeper", "still")
+	if err := os.MkdirAll(deep, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	g.RegisterFromUserMessage("s", "look at "+deep)
+	if got := g.BestSessionDir("s"); got != work {
+		t.Fatalf("after a mention BestSessionDir = %q, want %q", got, work)
+	}
+
+	// Re-registering is idempotent and replaces the work root.
+	g.RegisterRoots("s", other, work)
+	if got := g.BestSessionDir("s"); got != other {
+		t.Fatalf("re-registered work root = %q, want %q", got, other)
+	}
+
+	g.Clear("s")
+	if g.BestSessionDir("s") != "" || g.IsPathAllowed("s", filepath.Join(work, "f")) {
+		t.Fatal("Clear left the roots behind")
+	}
+	g.RegisterRoots("", work) // no session: no-op, no panic
+	var nilGrants *PathGrants
+	nilGrants.RegisterRoots("s", work)
+}

@@ -178,3 +178,15 @@ func TestBuildAgentDependencies_WiresActorURN(t *testing.T) {
 		t.Fatalf("unbound session got %q", got)
 	}
 }
+
+func TestTetherBridgeClientOptionsTokenFile(t *testing.T) {
+	if got := tetherBridgeClientOptions(""); len(got) != 0 {
+		t.Fatalf("no token file should add no options, got %d", len(got))
+	}
+	if got := tetherBridgeClientOptions("  "); len(got) != 0 {
+		t.Fatalf("blank token file should add no options, got %d", len(got))
+	}
+	if got := tetherBridgeClientOptions("/run/nanite/bridge.token"); len(got) != 1 {
+		t.Fatalf("token file should add one option, got %d", len(got))
+	}
+}

@@ -2,8 +2,8 @@
 
 Mail addressed through Tether to a durable Nanite actor reaches the actor's
 session as one turn. The bridge is off unless `NANITE_TETHER_ADDR` names a
-Tether daemon (credentials come from the Tether client: `TETHER_TOKEN` or its
-token file). Run it with its own Tether service identity and a scoped token,
+Tether daemon (credentials come from the Tether client: `NANITE_TETHER_TOKEN_FILE`, a 0600
+file holding the bridge's service token, else `TETHER_TOKEN`). Run it with its own Tether service identity and a scoped token,
 not an operator credential.
 
 ## Flow

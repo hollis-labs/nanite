@@ -263,3 +263,39 @@ adoption is not implied by installing a definition or saving host settings.
 a host directory). `POST /api/agent/v1/sessions/{id}/stop` ends a session and its
 runtime and is idempotent; `nanite agent list` and `nanite agent stop <session>`
 call the same routes. See `docs/getting-running.md`.
+
+## Loading an agent from a directory
+
+An agent can be authored as a directory and published with `nanite agent load`:
+
+```
+my-agent/
+  agent.md      agentdef v2 (behavior, requirements, harness policy, continuity)
+  host.yaml     runtime, provider, model, directories (absolute; the first is the work root)
+  context/...   files that agent.md pins as resources (relative paths, or file:<path>)
+```
+
+```sh
+nanite agent load my-agent             # or run it from the directory; ./.nanite is also searched
+nanite agent load --dry-run            # show the diff, write nothing
+nanite agent load --grant-same-as <previous-slug> --reason "same tools"
+```
+
+`host.yaml` accepts `version`, `runtime`, `provider`, `model`, `directories`, plus
+`slug`, `title` and `mode` (`live` or `pinned`); unknown keys are refused. A load installs the definition and records a **new**
+host-settings row named from the agent and a hash of the definition and host
+settings, so loading the same state twice changes nothing, and an edit never
+touches the row an older session was admitted under (see
+`architecture/agent-alignment.md`). The output is the diff from the previous
+revision and the body to start a session against the new row.
+
+- The new row has **no tool authority**. Grant tools as usual, or pass
+  `--grant-same-as` to re-grant exactly the tools of an earlier row; nothing else
+  carries forward.
+- Editing `agent.md` needs a new `revision:` label (a revision names one set of
+  bytes); the error says so.
+- `mode: pinned` refuses a second revision unless `--force`.
+- `skills/` is listed but not installed yet, and a definition that declares more
+  than the native runtime can launch is refused, as in `agent setup`.
+- The load writes the database directly, like `setup`; a running server uses the
+  new row for its next session without a restart. HTTP reload is not built.

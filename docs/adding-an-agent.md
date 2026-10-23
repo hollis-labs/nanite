@@ -173,8 +173,9 @@ refuse before effects. Retired IDs/slugs cannot be recreated through host setup.
 
 Native `POST /api/agent/v1/sessions` requires `definition_ref` with API spellings
 `definition_id`, `revision`, `semantic_digest`. Optional `host_settings` contains
-`id` and `revision`; admission checks the matching pin, enabled API runtime,
-authorized model and current host revision. The accepted view stores the typed
+`id` and `revision`; admission checks the matching pin, the enabled host runtime (`api` or
+`cli`), the authorized model (API) or the CLI provider's launchability, and the
+current host revision. The accepted view stores the typed
 host snapshot. Later host edits affect new views, not previously accepted
 configuration. Unsupported required semantics refuse before session rows.
 

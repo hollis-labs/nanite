@@ -66,7 +66,7 @@ func LayoutFor(provider string) Layout {
 
 // HasBootdirLayout reports whether provider (after CLI-alias
 // normalization) has a real, implemented bootdir Layout — claude, codex,
-// and opencode, the headless CLI runtimes agent.Boot can actually
+// opencode and antigravity, the headless CLI runtimes agent.Boot can actually
 // materialize a boot dir for. Everything else, including every plain HTTP
 // API provider (anthropic, openai, gemini-api, openrouter, ...) and every
 // CLI tool without a Layout yet (gemini, copilot, aider, junie), resolves
@@ -83,7 +83,7 @@ func LayoutFor(provider string) Layout {
 // never actually assessable — there was nothing to retry).
 func HasBootdirLayout(provider string) bool {
 	switch normalizeProviderName(provider) {
-	case "claude", "claude-code", "claudecode", "codex", "opencode":
+	case "claude", "claude-code", "claudecode", "codex", "opencode", "antigravity":
 		return true
 	default:
 		return false

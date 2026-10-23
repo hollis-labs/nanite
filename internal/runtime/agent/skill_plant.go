@@ -13,6 +13,10 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strings"
+
+	"github.com/hollis-labs/libs/harness/core/adapters/layout/plan"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -183,33 +187,65 @@ func skillDestPrefixSafe(root, slug string) (dest string, ok bool) {
 	return dest, true
 }
 
-// claudeSkillDestPrefixes is claude's native skill-delivery convention —
-// see this file's package doc. Returns (nil, false) when slug would
-// escape ".claude/skills/"'s own per-skill subtree.
-func claudeSkillDestPrefixes(slug string) ([]string, bool) {
-	dest, ok := skillDestPrefixSafe(".claude/skills", slug)
-	if !ok {
-		return nil, false
+// sharedSkillRoot is the directory, relative to the boot dir, under which the
+// shared harness layout table (adapters/layout/plan) places a runtime's skill
+// packages as <root>/<name>/SKILL.md. It is the same row Tether plants from, so
+// a skill lands in the same place in both products. ok is false when the table
+// has no supported boot-layer skill placement for the runtime, or its modes
+// disagree.
+func sharedSkillRoot(id runtimes.ID) (root string, ok bool) {
+	const suffix = "/{name}/SKILL.md"
+	for _, row := range plan.Table() {
+		if row.Provider != id || row.Layer != plan.Boot || row.Field != plan.Skills ||
+			row.Capability != plan.Supported || row.Root != plan.RootBoot || !strings.HasSuffix(row.Path, suffix) {
+			continue
+		}
+		r := strings.TrimSuffix(row.Path, suffix)
+		if root != "" && root != r {
+			return "", false
+		}
+		root = r
 	}
-	return []string{dest}, true
+	return root, root != ""
 }
 
-// opencodeSkillDestPrefixes is opencode's native skill-delivery
-// convention. Plants to BOTH candidate destinations given real,
-// unresolved doc ambiguity about which one Nanite's own
-// OPENCODE_CONFIG_DIR env amendment reaches — see this file's package doc
-// for the full investigation. Returns (nil, false) — no partial plant to
-// only the destination(s) that happen to check out — when EITHER
-// candidate destination would escape its own per-skill subtree (the
-// shorter "skills/" root is exactly the case ESCALATIONS.md's 2026-08-22
-// finding calls out: a bare ".." slug alone is enough to escape it).
-func opencodeSkillDestPrefixes(slug string) ([]string, bool) {
-	configRelative, okA := skillDestPrefixSafe("skills", slug)         // OPENCODE_CONFIG_DIR-relative convention
-	projectLocal, okB := skillDestPrefixSafe(".opencode/skills", slug) // project-local convention (== cwd == bootDir today)
-	if !okA || !okB {
-		return nil, false
+// skillDestPrefixesFor returns providerName's per-slug destination function, or
+// nil when the runtime has no skill placement. The root comes from the shared
+// layout table; opencode additionally gets the project-local copy
+// ".opencode/skills", a Nanite overlay kept because it is not settled which of
+// the two OPENCODE_CONFIG_DIR reaches (see this file's package doc).
+func skillDestPrefixesFor(providerName string) func(slug string) ([]string, bool) {
+	var id runtimes.ID
+	var extra []string
+	switch normalizeProviderName(providerName) {
+	case "claude", "claude-code", "claudecode":
+		id = runtimes.Claude
+	case "codex":
+		id = runtimes.Codex
+	case "opencode":
+		id, extra = runtimes.OpenCode, []string{".opencode/skills"}
+	case "antigravity":
+		id = runtimes.Antigravity
+	default:
+		return nil
 	}
-	return []string{configRelative, projectLocal}, true
+	root, ok := sharedSkillRoot(id)
+	if !ok {
+		return nil
+	}
+	roots := append([]string{root}, extra...)
+	return func(slug string) ([]string, bool) {
+		out := make([]string, 0, len(roots))
+		for _, r := range roots {
+			dest, ok := skillDestPrefixSafe(r, slug)
+			if !ok {
+				// No partial plant to only the destination(s) that check out.
+				return nil, false
+			}
+			out = append(out, dest)
+		}
+		return out, true
+	}
 }
 
 // skillFilesForProvider returns providerName's plant.PlantSpec-ready
@@ -224,15 +260,11 @@ func skillFilesForProvider(ctx context.Context, providerName string, params Setu
 		return nil, nil
 	}
 
-	var rawDestPrefixes func(slug string) ([]string, bool)
-	switch normalizeProviderName(providerName) {
-	case "claude", "claude-code", "claudecode":
-		rawDestPrefixes = claudeSkillDestPrefixes
-	case "opencode":
-		rawDestPrefixes = opencodeSkillDestPrefixes
-	default:
-		// codex (no native skill mechanism) and anything unrecognized: no
-		// skill planting. Not an error — a legitimate terminal outcome.
+	rawDestPrefixes := skillDestPrefixesFor(providerName)
+	if rawDestPrefixes == nil {
+		// A provider with no skill placement in the shared layout table (or
+		// anything unrecognized): no skill planting. Not an error — a
+		// legitimate terminal outcome.
 		return nil, nil
 	}
 

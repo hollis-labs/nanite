@@ -71,6 +71,15 @@ func agyPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	for relPath, content := range sandboxFiles(params) {
 		files[relPath] = content
 	}
+	// Skills go where the shared layout table puts them for this runtime.
+	skillFiles, err := skillFilesForProvider(context.Background(), "antigravity", params)
+	if err != nil {
+		return plant.PlantSpec{}, err
+	}
+	for relPath, content := range skillFiles {
+		files[relPath] = content
+	}
+
 	// agy's mcp_config.json has the shape of .mcp.json for a stdio server
 	// ({"mcpServers": {name: {command, args, env}}}).
 	mcp, err := mcpConfigBytes(params)

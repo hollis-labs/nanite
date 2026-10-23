@@ -26,6 +26,11 @@ import (
 // resolution. Unset means the bridge is off and Nanite behaves as before.
 const tetherBridgeAddrEnv = "NANITE_TETHER_ADDR"
 
+// tetherBridgeTokenFileEnv names a 0600 file holding the bridge's own Tether
+// service token. Tether service tokens are longer than the client accepts in
+// TETHER_TOKEN, so a file is the way to give the bridge its scoped identity.
+const tetherBridgeTokenFileEnv = "NANITE_TETHER_TOKEN_FILE"
+
 // tetherBridgeAllowEnv optionally restricts which Tether senders may wake an
 // actor: a comma-separated list of URNs or prefixes ending in "*". Whatever it
 // says, a sender must be verified by Tether.
@@ -180,7 +185,7 @@ func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatService
 	if addr == "" {
 		return nil
 	}
-	client, err := tether.New(addr)
+	client, err := tether.New(addr, tetherBridgeClientOptions(os.Getenv(tetherBridgeTokenFileEnv))...)
 	if err != nil {
 		slog.Error("tether bridge: client", "addr", redactAddr(addr), "err", strings.ReplaceAll(err.Error(), addr, redactAddr(addr)))
 		return nil
@@ -205,6 +210,15 @@ func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatService
 		cancel()
 		<-done
 	}
+}
+
+// tetherBridgeClientOptions adds the token file when one is configured; with
+// none, the client resolves credentials as before.
+func tetherBridgeClientOptions(tokenFile string) []tether.Option {
+	if tokenFile = strings.TrimSpace(tokenFile); tokenFile == "" {
+		return nil
+	}
+	return []tether.Option{tether.WithTokenFile(tokenFile)}
 }
 
 func splitList(s string) []string {

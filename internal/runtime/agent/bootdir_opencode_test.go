@@ -2,14 +2,18 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -169,6 +173,21 @@ func TestOpencodeLayout_RealOpencodeDropsUserLevelMCP(t *testing.T) {
 	if err != nil {
 		t.Skip("opencode is not installed")
 	}
+	// opencode 2.x moved `debug config` onto a background service and lists
+	// configuration sources instead of resolved JSON, so this check cannot run
+	// there. Skip on that version alone; an unreadable version is a failure.
+	versionOut, vErr := exec.Command(bin, "--version").Output() // #nosec G204 -- opencode found on PATH, fixed arguments
+	if vErr != nil {
+		t.Fatalf("opencode --version: %v", vErr)
+	}
+	version := strings.TrimSpace(string(versionOut))
+	fields := strings.Fields(version) // "opencode v2.0.22" or "1.18.33"
+	major, _, _ := strings.Cut(strings.TrimPrefix(fields[len(fields)-1], "v"), ".")
+	if n, convErr := strconv.Atoi(major); convErr != nil {
+		t.Fatalf("cannot read an opencode major version from %q", version)
+	} else if n >= 2 {
+		t.Skipf("opencode %s: `debug config` does not return resolved config JSON; this check needs opencode 1.x", version)
+	}
 	home := t.TempDir()
 	userCfg := filepath.Join(home, ".config", "opencode")
 	if mkErr := os.MkdirAll(userCfg, 0o750); mkErr != nil {
@@ -185,6 +204,7 @@ func TestOpencodeLayout_RealOpencodeDropsUserLevelMCP(t *testing.T) {
 		Mode:         ModeOneShot,
 		BootContent:  "# Boot\n",
 		ProjectDir:   t.TempDir(),
+		MCPConfig:    MCPConfig{BinaryPath: "/bin/true", DBPath: filepath.Join(t.TempDir(), "n.db"), ServerID: "nanite"},
 	})
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
@@ -192,7 +212,9 @@ func TestOpencodeLayout_RealOpencodeDropsUserLevelMCP(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
 
 	resolved := func(env map[string]string) (mcp []string, hasAgent bool) {
-		cmd := exec.Command(bin, "debug", "config") // #nosec G204 -- opencode found on PATH, fixed arguments
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, "debug", "config") // #nosec G204 -- opencode found on PATH, fixed arguments
 		cmd.Dir = t.TempDir()
 		cmd.Stdin = nil
 		cmd.Env = []string{
@@ -205,15 +227,18 @@ func TestOpencodeLayout_RealOpencodeDropsUserLevelMCP(t *testing.T) {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("opencode debug config: %v", err)
-		}
 		var cfg struct {
 			MCP   map[string]json.RawMessage `json:"mcp"`
 			Agent map[string]json.RawMessage `json:"agent"`
 		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Skipf("opencode %s: `debug config` timed out", version)
+		}
+		if err != nil {
+			t.Fatalf("opencode debug config: %v", err)
+		}
 		if err := json.Unmarshal(out, &cfg); err != nil {
-			t.Fatalf("opencode debug config is not JSON: %v\n%s", err, out)
+			t.Fatalf("opencode debug config printed something other than config JSON (%v):\n%s", err, out)
 		}
 		for name := range cfg.MCP {
 			mcp = append(mcp, name)
@@ -224,14 +249,15 @@ func TestOpencodeLayout_RealOpencodeDropsUserLevelMCP(t *testing.T) {
 
 	// Before: OPENCODE_CONFIG_DIR alone, the user's config home untouched.
 	before, hasAgent := resolved(map[string]string{"OPENCODE_CONFIG_DIR": bootDir})
-	if !slices.Equal(before, []string{"user-level-leak"}) || !hasAgent {
-		t.Fatalf("control: with OPENCODE_CONFIG_DIR alone mcp = %v, planted agent = %v; want the user-level server and the agent", before, hasAgent)
+	slices.Sort(before)
+	if !slices.Equal(before, []string{"nanite", "user-level-leak"}) || !hasAgent {
+		t.Fatalf("control: with OPENCODE_CONFIG_DIR alone mcp = %v, planted agent = %v; want the planted nanite server, the user-level server and the agent", before, hasAgent)
 	}
 
 	t.Setenv(OpenCodeIsolateEnv, "")
 	after, hasAgent := resolved(opencodeLayout{}.AmendEnv(map[string]string{}, bootDir))
-	if len(after) != 0 {
-		t.Errorf("with the layout's env mcp servers = %v, want none", after)
+	if !slices.Equal(after, []string{"nanite"}) {
+		t.Errorf("with the layout's env mcp servers = %v, want only the planted nanite server", after)
 	}
 	if !hasAgent {
 		t.Error("the planted agent is gone with the layout's env")
@@ -276,5 +302,116 @@ func TestAgentSlug_Fallback(t *testing.T) {
 		if got != c.want {
 			t.Errorf("agentSlug(%+v) = %q, want %q", c.profile, got, c.want)
 		}
+	}
+}
+
+// OpenCode reads MCP servers from the `mcp` key of its config, not from the
+// .mcp.json Claude uses, so the Nanite server must be in opencode.json.
+func TestOpencodeLayout_PlantsNaniteMCPServerUnderTheMcpKey(t *testing.T) {
+	bootDir, err := opencodeLayout{}.Setup(SetupParams{
+		SessionID:    "sess-mcp",
+		RunID:        "r1",
+		AgentProfile: &store.AgentProfile{ID: "oc-1", Name: "Mcp", Slug: "mcp-agent", Description: "d"},
+		Mode:         ModeLongLived,
+		BootContent:  "# Boot\n",
+		ProjectDir:   t.TempDir(),
+		MCPConfig:    MCPConfig{BinaryPath: "/usr/local/bin/nanite", DBPath: "/data/nanite.db", ServerID: "nanite", APIBaseURL: "http://127.0.0.1:8090"},
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(bootDir) })
+
+	body, err := os.ReadFile(filepath.Join(bootDir, "opencode.json")) // #nosec G304 -- path beneath the boot dir this test created
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Agent map[string]json.RawMessage `json:"agent"`
+		MCP   map[string]struct {
+			Type        string            `json:"type"`
+			Command     []string          `json:"command"`
+			Environment map[string]string `json:"environment"`
+			Enabled     bool              `json:"enabled"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		t.Fatalf("opencode.json: %v\n%s", err, body)
+	}
+	if _, ok := cfg.Agent["mcp-agent"]; !ok {
+		t.Errorf("the planted agent is missing: %s", body)
+	}
+	srv, ok := cfg.MCP["nanite"]
+	if !ok || len(cfg.MCP) != 1 {
+		t.Fatalf("mcp = %+v, want exactly the nanite server\n%s", cfg.MCP, body)
+	}
+	wantCmd := []string{"/usr/local/bin/nanite", "mcp", "--db", "/data/nanite.db", "--session", "sess-mcp"}
+	if srv.Type != "local" || !srv.Enabled || !slices.Equal(srv.Command, wantCmd) {
+		t.Errorf("server = %+v, want local/enabled/%v", srv, wantCmd)
+	}
+	if srv.Environment["NANITE_API_URL"] != "http://127.0.0.1:8090" {
+		t.Errorf("environment = %v, want NANITE_API_URL", srv.Environment)
+	}
+	// The full self-tool surface is a chat-agent affordance: ModeLongLived keeps
+	// it, so the bare-store scope variable must be absent.
+	if _, scoped := srv.Environment[SelfToolsScopeEnv]; scoped {
+		t.Errorf("chat agent was given the bare-store scope: %v", srv.Environment)
+	}
+}
+
+func TestOpencodeLayout_NoMCPConfigPlantsNoMcpKey(t *testing.T) {
+	body, err := opencodeJSON(SetupParams{SessionID: "s"}, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, `"mcp"`) {
+		t.Errorf("an unconfigured launch planted an mcp key: %s", body)
+	}
+}
+
+func TestOpencodeLayout_OneShotGetsTheBareStoreScope(t *testing.T) {
+	body, err := opencodeJSON(SetupParams{
+		SessionID: "s", Mode: ModeOneShot,
+		MCPConfig: MCPConfig{BinaryPath: "/b", DBPath: "/d", ServerID: "nanite", APIBaseURL: "http://x"},
+	}, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, SelfToolsScopeEnv) {
+		t.Errorf("a one-shot launch lost the bare-store scope: %s", body)
+	}
+}
+
+// The session credential reaches opencode.json (and .mcp.json) through the
+// MCP server's environment, so both are owner-only like Codex's config.toml.
+func TestOpencodeLayout_CredentialBearingFilesAreOwnerOnly(t *testing.T) {
+	boot, err := opencodeLayout{}.Setup(SetupParams{
+		SessionID:    "oc-cred",
+		AgentProfile: &store.AgentProfile{ID: "oc-2", Name: "Cred", Slug: "cred-agent", Description: "d"},
+		BootContent:  "# Boot\n",
+		ProjectDir:   t.TempDir(),
+		MCPConfig: MCPConfig{BinaryPath: "/bin/nanite", DBPath: "/tmp/x.db", ServerID: "nanite", APIBaseURL: "http://127.0.0.1:1",
+			AgentCredential: func(string) (string, error) { return "cred-for-test", nil }},
+	})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(boot) })
+	for _, name := range []string{"opencode.json", ".mcp.json"} {
+		path := filepath.Join(boot, name)
+		b, err := os.ReadFile(path) // #nosec G304 -- the test's own planted temp dir
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "cred-for-test") {
+			t.Errorf("%s does not carry the session credential:\n%s", name, b)
+		}
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode = %v, %v; it carries a credential and must be 0600", name, info.Mode().Perm(), err)
+		}
+	}
+	// Files without the credential keep the default mode.
+	if info, err := os.Stat(filepath.Join(boot, "boot.md")); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("boot.md mode = %v, %v; want 0644", info.Mode().Perm(), err)
 	}
 }

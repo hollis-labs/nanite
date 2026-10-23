@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -97,6 +98,11 @@ func bootDirArtifactTree(spec plant.PlantSpec, cfg plantConfig) (artifact.Tree, 
 		}
 		if mode == 0 {
 			mode = plantedFileMode
+		}
+		// A file that carries the session credential is owner-only, as the
+		// Codex config.toml and the Antigravity MCP file are.
+		if mode&0o077 != 0 && bytes.Contains(content, []byte(AuthTokenEnv)) {
+			mode = 0o600
 		}
 		// make+copy, NOT append([]byte(nil), content...): appending zero
 		// elements to a nil slice yields nil, and artifact.Entry.Validate
@@ -377,7 +383,7 @@ func mcpOverlay(params SetupParams) (map[string]string, error) {
 	// they had when they dispatched locally, named by SelfToolsScopeEnv.
 	// ModeResume re-boots a crash-recovered chat agent, so it keeps the
 	// full surface.
-	storeScope := params.Mode != ModeLongLived && params.Mode != ModeResume
+	storeScope := mcpStoreScope(params)
 	body, err := renderMCPJSON(params.MCPConfig, params.SessionID, storeScope)
 	if err != nil {
 		return nil, err
@@ -388,12 +394,20 @@ func mcpOverlay(params SetupParams) (map[string]string, error) {
 	return map[string]string{".mcp.json": body}, nil
 }
 
+// mcpStoreScope reports whether a launch gets the bare-store self-tool set. The
+// full self-tool surface is a chat-agent affordance only: ModeLongLived and
+// ModeResume (a crash-recovered chat agent) keep it, everything else is scoped.
+// Every provider's planted MCP entry reads it here so none can drift.
+func mcpStoreScope(params SetupParams) bool {
+	return params.Mode != ModeLongLived && params.Mode != ModeResume
+}
+
 // naniteMCPServerSpec is the Nanite MCP server as a go-providers MCPServerSpec,
 // for the providers whose MCP servers are rendered by the library into the
 // provider's own config (Codex's config.toml, OpenCode's opencode.json). The
 // bool is false when MCP planting is disabled.
 func naniteMCPServerSpec(params SetupParams) (provider.MCPServerSpec, bool, error) {
-	storeScope := params.Mode != ModeLongLived && params.Mode != ModeResume
+	storeScope := mcpStoreScope(params)
 	id, command, args, env, err := naniteMCPEntry(params.MCPConfig, params.SessionID, storeScope)
 	if err != nil || id == "" {
 		return provider.MCPServerSpec{}, false, err

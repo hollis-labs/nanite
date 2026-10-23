@@ -39,6 +39,8 @@ func (a *API) handleAgentV1StopSession(w http.ResponseWriter, r *http.Request) {
 	defer a.lockStop(id)()
 	// Hold the conversation gate too: turn admission takes it, so a turn is
 	// either registered before the cancel below or sees the session ended.
+	// A long operation that holds the gate (a compaction) makes the stop wait
+	// until it finishes or the request is canceled.
 	if locker, ok := a.Services.Chat.(service.ConversationLocker); ok {
 		release, err := locker.LockConversation(r.Context(), id)
 		if err != nil {

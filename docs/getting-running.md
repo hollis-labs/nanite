@@ -128,7 +128,7 @@ cannot resume. The smoke script exercises restart recovery and cancellation for 
 | Step | Symptom | Cause |
 |---|---|---|
 | session create, `runtime=cli` | `422`, `error.cause` `host_directories_missing` | the CLI host settings have no `directories` |
-| session create, `runtime=cli` | `422`, `error.cause` `cli_host_unsupported_field` | the host sets `mcp_servers`, `harness_profile`, a non-empty `native_loop`, `recall_*`, `protocol` or `transport`, or a relative directory |
+| session create, `runtime=cli` | `422`, `error.cause` `cli_host_unsupported_field` | the host sets `mcp_servers` on a provider other than `claude` (or names a server that is missing, disabled, non-stdio or called `nanite`), `harness_profile`, a non-empty `native_loop`, `recall_*`, `protocol` or `transport`, or a relative directory |
 | session create, `runtime=cli` | `422`, `error.cause` `read_only_unenforceable` | the definition asks for a read-only permission profile, which a CLI process cannot enforce |
 | session create, `runtime=cli` | `422`, `error.cause` `provider_not_launchable` | no provider, or one Nanite cannot launch |
 | turn, `runtime=cli` | `host_revision_changed` | the host settings were edited after the session was created; create a new session |

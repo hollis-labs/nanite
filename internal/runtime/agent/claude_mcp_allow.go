@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"strings"
+
 	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 )
 
@@ -74,9 +76,15 @@ func claudeMCPAllowRule(cfg MCPConfig) string {
 // tools, or nil when the launch plants no server: another runtime, an ACP
 // launch with no boot dir, or a composition root with no database path, which
 // disables MCP planting.
-func claudeMCPAllowArgs(runtime runtimes.ID, bootDir string, cfg MCPConfig) []string {
+//
+// hostRules are the per-tool rules a CLI host's granted tools add for its
+// projected mcp_servers (host_mcp.go). They join the same flag, comma
+// separated: the `=` form carries one value, and a second flag is not known to
+// accumulate.
+func claudeMCPAllowArgs(runtime runtimes.ID, bootDir string, cfg MCPConfig, hostRules ...string) []string {
 	if runtime != runtimes.Claude || bootDir == "" || cfg.DBPath == "" {
 		return nil
 	}
-	return []string{claudeAllowedToolsFlag + "=" + claudeMCPAllowRule(cfg)}
+	rules := append([]string{claudeMCPAllowRule(cfg)}, hostRules...)
+	return []string{claudeAllowedToolsFlag + "=" + strings.Join(rules, ",")}
 }

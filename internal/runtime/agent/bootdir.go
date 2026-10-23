@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/registry"
 	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
@@ -95,6 +97,9 @@ func HasBootdirLayout(provider string) bool {
 // (recovery.BootDirOps via ResolveBootdirParams) can rebuild the same
 // params from a persisted runtime row without duplicating the
 // system-prompt / boot-content / MCP-config plumbing.
+// hostMCPResolveTimeout bounds the registry and grant reads of a launch.
+const hostMCPResolveTimeout = 5 * time.Second
+
 func composeBootdirParams(deps *Dependencies, opts Options, profile *store.AgentProfile, sessID string) (Layout, SetupParams) {
 	mcp := MCPConfig{}
 	if deps != nil {
@@ -125,6 +130,15 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		Hooks: DefaultBootDirHooks,
 	}
 	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir, profileDirectories(profile)...)
+	if profile != nil && profile.NativeHost != nil && len(profile.NativeHost.MCPServers) > 0 {
+		var src HostMCPSource
+		if deps != nil {
+			src = deps.HostMCP
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), hostMCPResolveTimeout)
+		params.HostMCP, params.HostMCPErr = resolveHostMCP(ctx, src, profile, effectiveProvider(opts, profile), mcpServerID(mcp))
+		cancel()
+	}
 	if deps != nil {
 		// No root offered to an agent (the work root, dev_tools_allowed_paths,
 		// path grants) may be, or sit inside, a control-plane directory
@@ -282,6 +296,13 @@ type SetupParams struct {
 	// per-session args ("mcp --db <db> --session <sessID>"). Zero-value
 	// MCPConfig disables MCP planting.
 	MCPConfig MCPConfig
+
+	// HostMCP is the CLI host's mcp_servers projection and the allow rules its
+	// tool grants produce (host_mcp.go); nil when the host lists none.
+	// HostMCPErr is why it could not be resolved: the boot fails with it
+	// rather than planting the servers without their gate.
+	HostMCP    *HostMCPLaunch
+	HostMCPErr error
 
 	// CLIWritableRoots is the allow-list of directories a CLI-launch
 	// agent (codex / claude) may write to beyond its throwaway boot dir.

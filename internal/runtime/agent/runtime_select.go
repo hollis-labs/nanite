@@ -153,6 +153,9 @@ type launchExtra struct {
 	// until its workspace is trusted, and the ephemeral boot dir never is, so
 	// the command line is the grant that holds.
 	AddDirs []string
+	// HostMCPAllow are the Claude allow rules the host's tool grants produce
+	// for its projected mcp_servers (host_mcp.go).
+	HostMCPAllow []string
 }
 
 // selectAdapter builds the wrapper adapter for sel through launch.Select.
@@ -188,7 +191,7 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 		Mode:    sel.Mode,
 		ExtraArgs: slices.Concat(
 			strictMCPArgs(sel.Runtime, bootDir),
-			claudeMCPAllowArgs(sel.Runtime, bootDir, deps.MCPConfig),
+			claudeMCPAllowArgs(sel.Runtime, bootDir, deps.MCPConfig, x.HostMCPAllow...),
 			modelArgs(string(sel.Runtime), x.Model),
 			agyPermissionArgs(deps, sel.Runtime),
 			addDirArgs(string(sel.Runtime), workRoot, x.AddDirs),

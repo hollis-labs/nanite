@@ -464,6 +464,9 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	if !isACP {
 		launchX.Model = profile.DefaultModel
 		launchX.AddDirs = bootParams.CLIWritableRoots
+		if bootParams.HostMCP != nil {
+			launchX.HostMCPAllow = bootParams.HostMCP.AllowRules
+		}
 	}
 	selectedAdapter, err := selectAdapter(deps, selection, opts.Workdir, bootDir, launchX)
 	if err != nil {

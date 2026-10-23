@@ -384,7 +384,14 @@ func mcpOverlay(params SetupParams) (map[string]string, error) {
 	// ModeResume re-boots a crash-recovered chat agent, so it keeps the
 	// full surface.
 	storeScope := mcpStoreScope(params)
-	body, err := renderMCPJSON(params.MCPConfig, params.SessionID, storeScope)
+	if params.HostMCPErr != nil {
+		return nil, fmt.Errorf("agent: host mcp_servers: %w", params.HostMCPErr)
+	}
+	var host []HostMCPServer
+	if params.HostMCP != nil {
+		host = params.HostMCP.Servers
+	}
+	body, err := renderMCPJSONWith(params.MCPConfig, params.SessionID, storeScope, host)
 	if err != nil {
 		return nil, err
 	}

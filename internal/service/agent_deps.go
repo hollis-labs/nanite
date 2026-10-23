@@ -248,7 +248,8 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		// (GetSkillBySlug + ListAgentKnownSkills) directly — no adapter
 		// needed, same as several other Dependencies fields backed
 		// straight by *store.Store elsewhere in this file.
-		Skills: cfg.Store,
+		Skills:  cfg.Store,
+		HostMCP: storeHostMCP{st: cfg.Store},
 	}
 	// cfg.SkillVendor is a *skillvendor.Store — a nil *skillvendor.Store
 	// assigned directly into the SkillVendorReader interface field would

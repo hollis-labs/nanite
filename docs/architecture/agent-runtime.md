@@ -96,6 +96,21 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
   operator adds an allow-rule (`permissions.allow`) to agy's own
   `~/.gemini/antigravity-cli/settings.json`; Nanite never writes that file, which
   the Antigravity desktop app shares.
+- **Host `mcp_servers` (Claude only).** Names in the host settings' `mcp_servers`
+  are registry servers (`/api/mcp-servers`) planted into the same `.mcp.json`.
+  A CLI calls its servers itself, so Nanite's permission engine never sees the
+  call; the grant is enforced by Claude's own headless gate instead. For each
+  tool the host's native authority grants (`nanite authority grant`), the launch
+  adds the allow rule `mcp__<server>__<tool>` to the `--allowedTools` flag. A
+  server with no granted tool is loaded and every call to it is refused. Grants
+  are per tool name, so a granted name is allowed on every listed server that
+  exposes it. Only enabled stdio servers are projected, and none may be named
+  `nanite`. Env values from the registry row are written to the boot dir, which
+  the agent can read: put credentials in a file the server reads, not in `env`.
+  Codex, OpenCode and Antigravity are refused (`cli_host_unsupported_field`)
+  because Nanite has no per-tool gate it can set on them. Admission checks the
+  servers exist; launch re-reads them and the grants, and fails the boot
+  rather than plant a server without its gate.
 - **Antigravity.** The boot dir carries `AGENTS.md`, `boot.md` and a workspace
   plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP server. agy
   has no config-dir variable and shares its global config with the desktop app,
@@ -110,7 +125,7 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
 - **Refusals.** A 422 from session create carries `error.cause`:
   `runtime_unavailable`, `provider_not_launchable`, `read_only_unenforceable`,
   `cli_host_unsupported_field` (`harness_profile`, a non-empty `native_loop`,
-  `recall_*`, `mcp_servers`, a relative directory, or a model the provider's
+  `recall_*`, `mcp_servers` on a provider other than Claude or naming a server that cannot be projected, a relative directory, or a model the provider's
   CLI does not take), `host_directories_missing`.
 - **Capabilities.** `runtime_kinds` lists `cli` with the providers this host can
   launch.

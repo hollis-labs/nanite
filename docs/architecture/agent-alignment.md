@@ -49,7 +49,7 @@ could accept them.
 | `provider`, `model` | exists | for `api`, a registered API provider and model; for `cli`, the runtime (`claude`, `codex`, `opencode`, `agy`) and the model flag it accepts |
 | `directories` | exists | filesystem the agent may use; the first entry is its work root. Required for `cli`, which refuses a relative entry. Proposed: the same meaning for `api` (see Launch materialization); today an `api` host ignores it |
 | `native_loop`, `recall_limit`, `recall_timeout_ms` | exists | `api` only |
-| `harness_profile`, `protocol`, `transport`, `mcp_servers`, `debug` | exists | `api`/ACP knobs. Today a `cli` host refuses a non-empty `harness_profile`, `native_loop`, `recall_*`, `mcp_servers`, `protocol` or `transport` with cause `cli_host_unsupported_field` |
+| `harness_profile`, `protocol`, `transport`, `mcp_servers`, `debug` | exists | `api`/ACP knobs. Today a `cli` host refuses a non-empty `harness_profile`, `native_loop`, `recall_*`, `protocol` or `transport`, and `mcp_servers` unless the provider is `claude`, with cause `cli_host_unsupported_field` |
 | `mode` | **proposed** | `live` or `pinned` (below). Absent means the default rule |
 | a reference to the agent directory | **proposed** | how a `live` host names the directory it reads. Needs a field or a registration; not chosen here |
 | skill selection hints (trigger phrases, priority) | **proposed** | host-side hints keyed by skill name (see Skills) |

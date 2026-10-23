@@ -54,6 +54,50 @@ definition revision, provider, model or runtime) is refused; pass `--slug`.
 The semantic digest ignores identity, so definitions are told apart by id and
 revision, and `agent validate` also prints `identity_digest`.
 
+## The same setup over HTTP
+
+A remote caller (a Tether agent, Tachyon) makes the same single transaction with
+one request instead of driving the pieces in sequence:
+
+```sh
+curl -X POST $NANITE/api/agent-setup -H "Authorization: Bearer $TOKEN" -d '{
+  "archetype": "def:nanite/chat",          // or "artifact": "<authored definition text>"
+  "provider": "claude", "runtime": "cli",  // api needs "model" and a usable provider key
+  "tools": ["*"],                          // or ["dev_read", ...]; "*" grants every available tool
+  "reason": "why these tools",             // required, at most 500 characters
+  "slug": "...", "title": "...",           // optional
+  "directories": ["/abs/path"],            // optional, absolute; default agent-workspaces/<slug>
+  "resources": [{"uri": "...", "content": "..."}]   // optional, for artifact
+}'
+```
+
+The body fields and the response are those of `nanite agent setup`: `201` with
+`"created": true` the first time, `200` and `"created": false` on an identical
+re-run, `409` when the slug is taken by different settings, `400` for a request
+that cannot work (refused before anything is written), `422` for a tool that
+cannot be granted. The response carries `session_request`, the body for
+`POST /api/agent/v1/sessions`.
+
+Read agents back with `GET /api/native-agents` and `GET /api/native-agents/{slug-or-id}`:
+host settings (definition pin and digest, runtime, provider, model,
+directories, `enabled`), the active `authority_id`, the granted `tools`, and a
+`state` of `ready`, `no_authority` (host settings changed since the last
+review, so nothing is granted for the new revision) or `disabled`.
+
+Changing an agent uses the existing routes: grant or withdraw a tool with
+`PUT`/`DELETE /api/native-authority/{authority_id}/tools/{tool}`, withdraw all
+authority with `POST /api/native-authority/{authority_id}/revoke`, retire by
+`PUT /api/agent-host-settings/{id}` with `"enabled": false`, change host
+settings the same way (send the current `revision`).
+
+Credential: the setup and view routes are admin-class and refuse agent
+credentials. Client credentials cannot hold `admin` (`nanite auth create`
+refuses it), so today the caller must present the operator credential
+(`nanite auth token-path`). The accountable actor recorded on the authority is
+that credential's id, not anything in the body. Giving Tether and Tachyon their
+own narrower credential for these routes would need a scope decision and is not
+done here; until then treat the operator token as the key to granting tools.
+
 The steps below are what `setup` does, for when you need one on its own.
 
 ## Author and install intrinsic content

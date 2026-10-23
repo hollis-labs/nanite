@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -247,5 +248,50 @@ func TestEndedSessionRefusesRebootAndRecover(t *testing.T) {
 		if rec.Code == http.StatusOK || rec.Code == http.StatusAccepted {
 			t.Fatalf("POST %s revived an ended session: %d %s", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// lockingChatStub records when stop holds the conversation gate relative to
+// the cancel and the archive.
+type lockingChatStub struct {
+	agentChatStub
+	events []string
+}
+
+func (s *lockingChatStub) LockConversation(_ context.Context, id string) (func(), error) {
+	s.events = append(s.events, "lock")
+	return func() { s.events = append(s.events, "unlock") }, nil
+}
+
+// Stop takes the per-conversation gate before it archives and cancels, and
+// releases it after: that ordering is what stops a racing turn from
+// registering after the cancel.
+func TestAgentV1StopHoldsTheConversationGateAroundArchiveAndCancel(t *testing.T) {
+	a, mux := newTestAPI(t)
+	allowTestNativeModel(a)
+	body, _ := json.Marshal(agentV1CreateSessionRequest{DefinitionRef: a.Services.CognitiveViews.DefaultDefinitionRef})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", agentV1RoutePrefix+"/sessions", bytes.NewReader(body)))
+	var created agentV1SessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || w.Code != http.StatusCreated {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	stub := &lockingChatStub{}
+	stub.cancelActiveGenerationFn = func(id string) bool {
+		sess, err := a.Services.Sessions.Get(t.Context(), id)
+		if err != nil || sess.Status != "archived" {
+			t.Errorf("cancel ran before the session was archived: %+v %v", sess, err)
+		}
+		stub.events = append(stub.events, "cancel")
+		return false
+	}
+	a.Services.Chat = stub
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", agentV1RoutePrefix+"/sessions/"+created.Session.ID+"/stop", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if got := strings.Join(stub.events, ","); got != "lock,cancel,unlock" {
+		t.Fatalf("events = %s, want lock,cancel,unlock", got)
 	}
 }

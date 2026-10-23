@@ -82,10 +82,12 @@ identifier. They make no fabric URN claim.
 An `api` session has the same durable session workspace a CLI session has:
 `<WorkspacesRoot>/<session_view_id>/{prompts,state,logs}`, created on the first
 turn (idempotent) and kept after the session ends. A turn does not run if it
-cannot be created. Today the directory is created and carried on the turn;
-tools are not yet rooted in it, scratch state is not yet written to `state/`,
-and `directories` is still ignored for `api` hosts (CW-20261022-0007 is
-delivering these in steps).
+cannot be created. The scratchpad tools persist to `state/scratchpad.json`
+(owner-only, replaced atomically on every change), so what an agent stores in
+one turn is there in the next; a write that cannot be saved is refused rather
+than reported stored, and an unreadable or over-cap file is ignored. Tools are
+not yet rooted in the directory and `directories` is still ignored for `api`
+hosts (CW-20261022-0007 is delivering these in steps).
 
 ### Embedded view observations
 

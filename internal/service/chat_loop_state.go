@@ -293,10 +293,13 @@ type loopState struct {
 	// chat_rate_budget_pause.go for the event semantics.
 	rateBudgetPauseAttempts int
 
-	// P4 Scratchpad — per-turn writable key/value buffer (CW-20260419-0025).
-	// Evicted automatically: loopState is created fresh per generateResponse call.
+	// P4 Scratchpad — writable key/value buffer (CW-20260419-0025). loopState
+	// is created fresh per generateResponse call, so without scratchpadPath
+	// the buffer ends with the turn. A session with a durable workspace sets
+	// scratchpadPath (attachScratchpadFile) and the buffer survives turns.
 	scratchpad      map[string]any
 	scratchpadBytes int
+	scratchpadPath  string
 
 	// I1 (CW-20260426-0004): inspector turn ID for the aggregator.
 	// Set by generateResponse after slot assembly; propagated into
@@ -650,8 +653,20 @@ func (ls *loopState) scratchpadWrite(key string, value any) error {
 		return fmt.Errorf("scratchpad total size exceeded: write would reach %d bytes (limit %d bytes)", newTotal, scratchpadMaxTotalBytes)
 	}
 
+	prev, had := ls.scratchpad[key]
+	prevBytes := ls.scratchpadBytes
 	ls.scratchpad[key] = value
 	ls.scratchpadBytes = newTotal
+	if err := ls.persistScratchpad(); err != nil {
+		// Not stored means not stored: put the buffer back so the model is told.
+		if had {
+			ls.scratchpad[key] = prev
+		} else {
+			delete(ls.scratchpad, key)
+		}
+		ls.scratchpadBytes = prevBytes
+		return fmt.Errorf("scratchpad could not be saved to the session workspace: %w", err)
+	}
 	return nil
 }
 
@@ -691,6 +706,9 @@ func (ls *loopState) scratchpadClear(key string) bool {
 		ls.scratchpadBytes = 0
 	}
 	delete(ls.scratchpad, key)
+	if err := ls.persistScratchpad(); err != nil {
+		slog.Warn("scratchpad: clear not saved to the session workspace", "err", err)
+	}
 	return true
 }
 

@@ -276,6 +276,10 @@ func (s *chatServiceImpl) initializeRun(
 	// fixed 300s wall-clock deadline that used to bound subagent runs
 	callerType := dispatcher.CallerTypeFromContext(ctx)
 	ls := newLoopState(constraints, toolNames, debugMode, callerType)
+	if setup.workspace != nil {
+		// CW-20261022-0007: the scratchpad lives in the session workspace.
+		ls.attachScratchpadFile(setup.workspace.StateDir)
+	}
 	// D-33: the resolved harness profile owns the loop limits from here. The
 	// per-agent constraints and the per-tool-cap user setting were folded into
 	// the resolution as layers in prepareTurn.

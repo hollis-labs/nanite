@@ -226,12 +226,28 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 	}
 	status, out := adminDispatch(ctx, h, carrier, t.method, path, body)
 	if t.method != http.MethodGet {
-		if t.name == "agent_setup" && target == "" {
-			var res struct {
-				Slug string `json:"slug"`
+		switch t.name {
+		case "agent_setup":
+			if target == "" {
+				var res struct {
+					Slug string `json:"slug"`
+				}
+				_ = json.Unmarshal(out, &res)
+				target = res.Slug
 			}
+		case "session_start":
+			// Name the definition asked for and the session it produced.
+			var req struct {
+				Ref struct {
+					ID string `json:"id"`
+				} `json:"definition_ref"`
+			}
+			var res struct {
+				View string `json:"session_view_id"`
+			}
+			_ = json.Unmarshal(body, &req)
 			_ = json.Unmarshal(out, &res)
-			target = res.Slug
+			target = strings.TrimSpace(req.Ref.ID + " " + res.View)
 		}
 		adminMCPAudit(ctx, "mcp:"+t.name+" "+target, status)
 	}
@@ -303,8 +319,6 @@ func adminDispatch(ctx context.Context, h http.Handler, carrier *http.Request, m
 	return rec.Code, rec.Body.Bytes()
 }
 
-// adminMCPSafeID accepts one plain path segment. "." and ".." would be cleaned
-// out of the path by the router and answered with a redirect.
 // adminMCPAudit records which tool ran and on what. The auth middleware only
 // sees POST /api/admin/mcp, not the route a tool called.
 func adminMCPAudit(ctx context.Context, route string, status int) {
@@ -315,6 +329,8 @@ func adminMCPAudit(ctx context.Context, route string, status int) {
 	apiauth.AuditFromContext(ctx)(http.MethodPost, route, outcome)
 }
 
+// adminMCPSafeID accepts one plain path segment. "." and ".." would be cleaned
+// out of the path by the router and answered with a redirect.
 func adminMCPSafeID(v string) bool {
 	return strings.TrimSpace(v) != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\")
 }

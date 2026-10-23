@@ -356,6 +356,9 @@ func TestAdminMCPManagesAgentsLikeHTTP(t *testing.T) {
 	}
 
 	// Sessions.
+	if text, isErr := adminMCPCall(t, cs, "session_start", map[string]any{"definition_ref": map[string]any{"id": "def:no-such", "revision": "1", "digest": "x"}}); !isErr {
+		t.Fatalf("session_start on an unknown definition succeeded: %s", text)
+	}
 	if text, isErr := adminMCPCall(t, cs, "session_list", nil); isErr {
 		t.Fatalf("session_list: %s", text)
 	}
@@ -371,6 +374,7 @@ func TestAdminMCPManagesAgentsLikeHTTP(t *testing.T) {
 		"mcp:tool_grant " + authID + " dev_read failed:400",
 		"mcp:tool_ungrant " + authID + " dev_read ok",
 		"mcp:authority_revoke " + authID + " ok",
+		"mcp:session_start def:no-such failed:",
 		"mcp:host_settings_retire " + hostID + " reason=retired by test ok",
 	} {
 		if !strings.Contains(audit, want) {
@@ -389,4 +393,89 @@ func setupHostID(t *testing.T, a *testAPI) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// The list tools send a limit even when the caller gives none, and pass an
+// explicit limit/offset through untouched.
+func TestAdminMCPListToolsPageByDefault(t *testing.T) {
+	a, _ := newTestAPI(t)
+	var seen []string
+	spy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path+"?"+r.URL.RawQuery)
+		_, _ = w.Write([]byte("[]"))
+	})
+	carrier := httptest.NewRequest(http.MethodPost, adminMCPPath, nil)
+	ctx := apiauth.WithPrincipal(t.Context(), adminClientPrincipal)
+	ct, st := mcp.NewInMemoryTransports()
+	ss, err := adminMCPServer(a.API, spy, carrier).Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ss.Close() }()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	adminMCPCall(t, cs, "agent_list", nil)
+	adminMCPCall(t, cs, "host_settings_list", nil)
+	adminMCPCall(t, cs, "authority_list", map[string]any{"host_settings_id": "h1"})
+	adminMCPCall(t, cs, "agent_list", map[string]any{"limit": 7, "offset": 3})
+	want := []string{
+		"/api/native-agents?limit=50",
+		"/api/agent-host-settings?limit=50",
+		"/api/native-authority?host_settings_id=h1&limit=50",
+		"/api/native-agents?limit=7&offset=3",
+	}
+	if strings.Join(seen, "|") != strings.Join(want, "|") {
+		t.Errorf("inner requests = %v, want %v", seen, want)
+	}
+}
+
+// The list routes honour limit and offset before rendering.
+func TestListRoutesPage(t *testing.T) {
+	a, mux := newTestAPI(t)
+	host := nativeAuthorityHost(t, a)
+	second := host
+	second.ID, second.Revision, second.Slug, second.Title = "", "", "native-authority-api-2", "Second"
+	if _, err := a.store.CreateAgentHostSettings(t.Context(), second); err != nil {
+		t.Fatal(err)
+	}
+	if w := naReq(mux, &adminClientPrincipal, "POST", "/api/native-authority", map[string]any{"host_settings_id": host.ID, "reason": "paging test"}); w.Code != http.StatusCreated && w.Code != http.StatusOK {
+		t.Fatalf("create authority = %d %s", w.Code, w.Body)
+	}
+	dir := filepath.Join(a.Services.AgentSetup.DirectoryRoot(t.Context()), "work")
+	if w := naReq(mux, &adminClientPrincipal, "POST", "/api/agent-setup", map[string]any{"artifact": setupFixtureDef, "provider": "claude", "model": "sonnet", "runtime": "cli", "tools": []string{"dev_read"}, "reason": "paging test", "directories": []string{dir}}); w.Code != http.StatusCreated {
+		t.Fatalf("setup = %d %s", w.Code, w.Body)
+	}
+	count := func(path string) int {
+		w := naReq(mux, &adminClientPrincipal, "GET", path, nil)
+		var items []json.RawMessage
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &items) != nil {
+			t.Fatalf("GET %s = %d %s", path, w.Code, w.Body)
+		}
+		return len(items)
+	}
+	auth := "/api/native-authority?host_settings_id=" + host.ID
+	for path, want := range map[string]int{
+		auth:                                        1,
+		auth + "&limit=1":                           1,
+		auth + "&limit=5&offset=1":                  0,
+		"/api/agent-host-settings":                  3,
+		"/api/agent-host-settings?limit=1":          1,
+		"/api/agent-host-settings?limit=2&offset=2": 1,
+		"/api/native-agents":                        3,
+		"/api/native-agents?limit=1":                1,
+		"/api/native-agents?limit=5&offset=1":       2,
+		"/api/native-agents?limit=5&offset=3":       0,
+	} {
+		if got := count(path); got != want {
+			t.Errorf("GET %s returned %d items, want %d", path, got, want)
+		}
+	}
+	for _, path := range []string{auth + "&limit=0", "/api/native-agents?limit=0", "/api/agent-host-settings?limit=501", "/api/native-agents?limit=1&offset=-1"} {
+		if w := naReq(mux, &adminClientPrincipal, "GET", path, nil); w.Code != http.StatusBadRequest {
+			t.Errorf("GET %s = %d, want 400", path, w.Code)
+		}
+	}
 }

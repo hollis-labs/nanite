@@ -248,7 +248,8 @@ func BuildAgentDependencies(cfg AgentDepsConfig) (AgentDepsBundle, error) {
 		// (GetSkillBySlug + ListAgentKnownSkills) directly — no adapter
 		// needed, same as several other Dependencies fields backed
 		// straight by *store.Store elsewhere in this file.
-		Skills: cfg.Store,
+		Skills:   cfg.Store,
+		ActorURN: durableActorURNResolver(cfg.Store),
 	}
 	// cfg.SkillVendor is a *skillvendor.Store — a nil *skillvendor.Store
 	// assigned directly into the SkillVendorReader interface field would
@@ -1438,4 +1439,29 @@ func keysOrNil(m *providerkeys.Manager) providerKeyResolver {
 		return nil
 	}
 	return m
+}
+
+// actorURNLookupTimeout bounds the boot-time durable actor lookup: one indexed
+// read, so a stuck database must not hold up a launch.
+const actorURNLookupTimeout = 5 * time.Second
+
+// durableActorURNLookup is the slice of the store the resolver needs.
+type durableActorURNLookup interface {
+	DurableActorURNForSession(ctx context.Context, sessionID, profileID string) (string, error)
+}
+
+// durableActorURNResolver builds Dependencies.ActorURN: the bound durable
+// actor's address for a session, empty when none, ambiguous or the lookup
+// fails (logged, never fatal to a launch).
+func durableActorURNResolver(st durableActorURNLookup) func(sessionID, profileID string) string {
+	return func(sessionID, profileID string) string {
+		ctx, cancel := context.WithTimeout(context.Background(), actorURNLookupTimeout)
+		defer cancel()
+		urn, err := st.DurableActorURNForSession(ctx, sessionID, profileID)
+		if err != nil {
+			slog.Warn("boot: resolve durable actor urn", "session_id", sessionID, "err", err)
+			return ""
+		}
+		return urn
+	}
 }

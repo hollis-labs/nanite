@@ -1612,6 +1612,9 @@ func cmdMCP(args []string) {
 		case "import":
 			mcpImport(args[1:])
 			return
+		case "tether-messaging":
+			mcpTetherMessaging(args[1:])
+			return
 		case "export":
 			mcpExport(args[1:])
 			return

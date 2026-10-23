@@ -3,7 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -105,6 +109,54 @@ func (s *Store) GetMCPServer(ctx context.Context, name string) (*MCPServerConfig
 	return &cfg, nil
 }
 
+// ErrTetherGatewayConflict reports a second Tether messaging gateway.
+var ErrTetherGatewayConflict = errors.New("a Tether messaging gateway is already registered")
+
+// isTetherGateway reports whether cfg runs `tether ... --token-file <path>`:
+// a Tether gateway that authenticates as one actor.
+func isTetherGateway(cfg *MCPServerConfig) bool {
+	if filepath.Base(cfg.Command) != "tether" {
+		return false
+	}
+	var args []string
+	if json.Unmarshal([]byte(cfg.Args), &args) != nil {
+		return false
+	}
+	for _, a := range args {
+		if a == "--token-file" || strings.HasPrefix(a, "--token-file=") {
+			return true
+		}
+	}
+	return false
+}
+
+// tetherGatewayFlag is the value of mcp_servers.tether_gateway for cfg: set for
+// an enabled gateway, so a disabled one does not hold the slot. A
+// unique partial index over the flag makes "one Tether actor per host" the
+// database's decision: the gateway entry is host-wide, so each agent that
+// lists it launches with the same token, and a second entry under another name
+// would present a second actor's credential to the same agents. Create and
+// update both write the flag in the same statement as the row, so concurrent
+// writers on any connection cannot both succeed. Per-agent planting is what
+// would lift this.
+func tetherGatewayFlag(cfg *MCPServerConfig) int {
+	if cfg.Enabled && isTetherGateway(cfg) {
+		return 1
+	}
+	return 0
+}
+
+// tetherGatewayConflict maps the index's violation to the typed error and
+// names the gateway already registered, best effort.
+func (s *Store) tetherGatewayConflict(ctx context.Context, err error, cfg *MCPServerConfig) error {
+	if err == nil || !strings.Contains(err.Error(), "mcp_servers.tether_gateway") {
+		return err
+	}
+	var other string
+	_ = s.DB.QueryRowContext(ctx, `SELECT name FROM mcp_servers WHERE tether_gateway = 1 AND name != ? LIMIT 1`, cfg.Name).Scan(&other)
+	return fmt.Errorf("%w as %q; one Tether actor per host is supported, remove it before registering %q", ErrTetherGatewayConflict, other, cfg.Name)
+}
+
 // CreateMCPServer inserts a new MCP server config.
 func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error {
 	if cfg.ID == "" {
@@ -128,14 +180,14 @@ func (s *Store) CreateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 	}
 
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO mcp_servers (`+mcpServerColumns+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO mcp_servers (`+mcpServerColumns+`, tether_gateway)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cfg.ID, cfg.Name, cfg.TransportType, cfg.Command, cfg.URL,
 		cfg.Args, cfg.Env, cfg.Enabled,
 		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers,
-		now, now,
+		now, now, tetherGatewayFlag(cfg),
 	)
-	if err != nil {
+	if err = s.tetherGatewayConflict(ctx, err, cfg); err != nil {
 		return fmt.Errorf("create mcp server: %w", err)
 	}
 	cfg.CreatedAt = now
@@ -157,12 +209,13 @@ func (s *Store) UpdateMCPServer(ctx context.Context, cfg *MCPServerConfig) error
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE mcp_servers SET transport_type = ?, command = ?, url = ?, args = ?, env = ?,
-			enabled = ?, trust_tier = ?, env_allowlist = ?, headers = ?, updated_at = ?
+			enabled = ?, trust_tier = ?, env_allowlist = ?, headers = ?, updated_at = ?,
+			tether_gateway = ?
 		 WHERE name = ?`,
 		cfg.TransportType, cfg.Command, cfg.URL, cfg.Args, cfg.Env, cfg.Enabled,
-		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers, now, cfg.Name,
+		cfg.TrustTier, cfg.EnvAllowlist, cfg.Headers, now, tetherGatewayFlag(cfg), cfg.Name,
 	)
-	if err != nil {
+	if err = s.tetherGatewayConflict(ctx, err, cfg); err != nil {
 		return fmt.Errorf("update mcp server: %w", err)
 	}
 	n, _ := res.RowsAffected()

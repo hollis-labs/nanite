@@ -150,6 +150,13 @@ type Dependencies struct {
 	// SetupParams.Skills' doc comment.
 	Skills SkillStore
 
+	// ActorURN resolves the stable Tether/messaging actor URN of the durable
+	// instance bound to (sessionID, profileID), or "" when there is none. It
+	// is how the planted identity file names the same address the inbound
+	// Tether bridge delivers to. nil disables the lookup; the identity file
+	// then falls back to the profile's own TetherURN.
+	ActorURN func(sessionID, profileID string) string
+
 	// SkillVendor reads a plantable skill's vendored file tree for
 	// skill_plant.go. nil disables skill planting, same as a nil Skills.
 	SkillVendor SkillVendorReader

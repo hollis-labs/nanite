@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -162,5 +165,173 @@ func TestMCPServerTrust_MigrationIdempotent(t *testing.T) {
 	}
 	if _, ok := cols["env_allowlist"]; !ok {
 		t.Error("env_allowlist column missing after migration 012")
+	}
+}
+
+func tetherGateway(name, tokenFile string) *MCPServerConfig {
+	return &MCPServerConfig{Name: name, TransportType: TransportStdio, Command: "tether", Enabled: true,
+		Args: `["mcp","--no-discover","--token-file","` + tokenFile + `"]`}
+}
+
+// One Tether actor per host is enforced where the row is written, so plain
+// import, the API and the CLI all meet it under any server name.
+func TestMCPServers_OneTetherGatewayPerHost(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.CreateMCPServer(ctx, tetherGateway("tether", "/a")); err != nil {
+		t.Fatal(err)
+	}
+	err := s.CreateMCPServer(ctx, tetherGateway("tether2", "/b"))
+	if !errors.Is(err, ErrTetherGatewayConflict) {
+		t.Fatalf("second gateway under another name: %v", err)
+	}
+	if row, _ := s.GetMCPServer(ctx, "tether2"); row != nil {
+		t.Fatal("refused gateway was stored")
+	}
+	// Another command is unaffected, and so is editing the one gateway.
+	if err := s.CreateMCPServer(ctx, &MCPServerConfig{Name: "files", TransportType: TransportStdio, Command: "npx", Args: `["--token-file","x"]`, Enabled: true}); err != nil {
+		t.Fatalf("non-tether server: %v", err)
+	}
+	if err := s.UpdateMCPServer(ctx, tetherGateway("tether", "/c")); err != nil {
+		t.Fatalf("update of the one gateway: %v", err)
+	}
+	// An existing row cannot be turned into a second gateway either.
+	files := tetherGateway("files", "/d")
+	if err := s.UpdateMCPServer(ctx, files); !errors.Is(err, ErrTetherGatewayConflict) {
+		t.Fatalf("update into a second gateway: %v", err)
+	}
+	// Removing the first frees the slot.
+	if err := s.DeleteMCPServer(ctx, "tether"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMCPServer(ctx, tetherGateway("tether2", "/b")); err != nil {
+		t.Fatalf("after delete: %v", err)
+	}
+}
+
+// The rule is the database's, so concurrent writers cannot both win: a
+// read-then-write check let 7 of 20 through.
+func TestMCPServers_TetherGatewayRuleIsAtomic(t *testing.T) {
+	ctx := context.Background()
+
+	race := func(t *testing.T, n int, op func(i int) error) (ok, conflict int) {
+		t.Helper()
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		start := make(chan struct{})
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				err := op(i)
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case err == nil:
+					ok++
+				case errors.Is(err, ErrTetherGatewayConflict):
+					conflict++
+				default:
+					t.Errorf("writer %d: unexpected error: %v", i, err)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		return ok, conflict
+	}
+	gateways := func(t *testing.T, s *Store) int {
+		t.Helper()
+		var n int
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM mcp_servers WHERE tether_gateway = 1`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	t.Run("create/create", func(t *testing.T) {
+		s := newTestStore(t)
+		ok, conflict := race(t, 20, func(i int) error {
+			return s.CreateMCPServer(ctx, tetherGateway(fmt.Sprintf("tether-%d", i), fmt.Sprintf("/tok/%d", i)))
+		})
+		if ok != 1 || conflict != 19 || gateways(t, s) != 1 {
+			t.Fatalf("ok=%d conflict=%d stored=%d, want exactly one", ok, conflict, gateways(t, s))
+		}
+	})
+
+	t.Run("update/update", func(t *testing.T) {
+		s := newTestStore(t)
+		for i := 0; i < 20; i++ {
+			if err := s.CreateMCPServer(ctx, &MCPServerConfig{Name: fmt.Sprintf("plain-%d", i), TransportType: TransportStdio, Command: "npx", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ok, conflict := race(t, 20, func(i int) error {
+			return s.UpdateMCPServer(ctx, tetherGateway(fmt.Sprintf("plain-%d", i), fmt.Sprintf("/tok/%d", i)))
+		})
+		if ok != 1 || conflict != 19 || gateways(t, s) != 1 {
+			t.Fatalf("ok=%d conflict=%d stored=%d, want exactly one", ok, conflict, gateways(t, s))
+		}
+	})
+
+	t.Run("create/update", func(t *testing.T) {
+		s := newTestStore(t)
+		for i := 0; i < 10; i++ {
+			if err := s.CreateMCPServer(ctx, &MCPServerConfig{Name: fmt.Sprintf("plain-%d", i), TransportType: TransportStdio, Command: "npx", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ok, conflict := race(t, 20, func(i int) error {
+			if i%2 == 0 {
+				return s.CreateMCPServer(ctx, tetherGateway(fmt.Sprintf("new-%d", i), fmt.Sprintf("/tok/c%d", i)))
+			}
+			return s.UpdateMCPServer(ctx, tetherGateway(fmt.Sprintf("plain-%d", i/2), fmt.Sprintf("/tok/u%d", i)))
+		})
+		if ok != 1 || conflict != 19 || gateways(t, s) != 1 {
+			t.Fatalf("ok=%d conflict=%d stored=%d, want exactly one", ok, conflict, gateways(t, s))
+		}
+	})
+
+	t.Run("unrelated servers are unaffected", func(t *testing.T) {
+		s := newTestStore(t)
+		ok, conflict := race(t, 20, func(i int) error {
+			return s.CreateMCPServer(ctx, &MCPServerConfig{Name: fmt.Sprintf("srv-%d", i), TransportType: TransportStdio, Command: "npx", Args: `["--token-file","x"]`, Enabled: true})
+		})
+		if ok != 20 || conflict != 0 {
+			t.Fatalf("ok=%d conflict=%d", ok, conflict)
+		}
+	})
+
+	t.Run("a gateway turned into a plain server frees the slot", func(t *testing.T) {
+		s := newTestStore(t)
+		if err := s.CreateMCPServer(ctx, tetherGateway("tether", "/a")); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpdateMCPServer(ctx, &MCPServerConfig{Name: "tether", TransportType: TransportStdio, Command: "npx", Args: "[]", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateMCPServer(ctx, tetherGateway("tether2", "/b")); err != nil {
+			t.Fatalf("slot not freed: %v", err)
+		}
+	})
+}
+
+// A disabled gateway presents no credential, so it does not hold the slot; the
+// rule applies when it is enabled.
+func TestMCPServers_DisabledGatewayDoesNotHoldTheSlot(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	off := tetherGateway("tether-off", "/a")
+	off.Enabled = false
+	if err := s.CreateMCPServer(ctx, off); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMCPServer(ctx, tetherGateway("tether", "/b")); err != nil {
+		t.Fatalf("enabled gateway beside a disabled one: %v", err)
+	}
+	off.Enabled = true
+	if err := s.UpdateMCPServer(ctx, off); !errors.Is(err, ErrTetherGatewayConflict) {
+		t.Fatalf("enabling a second gateway: %v", err)
 	}
 }

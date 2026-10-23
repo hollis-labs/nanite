@@ -112,3 +112,62 @@ func TestClaudeLayout_Setup_OmitsTetherIdentity_WhenNotRegistered(t *testing.T) 
 		t.Errorf("expected no identity file for an unregistered profile, stat err = %v", err)
 	}
 }
+
+// The bridge delivers to the durable actor's address, so the identity file
+// must name that one and not the profile's separately registered address.
+func TestTetherIdentityFile_PrefersTheBoundActorURN(t *testing.T) {
+	profile := &store.AgentProfile{ID: "p", TetherURN: "msg://agent/agent-mux/agt_profile"}
+	got := string(tetherIdentityFile(SetupParams{
+		AgentProfile: profile, SessionID: "s", ActorURN: "msg://agent/nanite/agt_actor",
+	}))
+	if !strings.Contains(got, "Agent URN: `msg://agent/nanite/agt_actor`") {
+		t.Fatalf("actor URN not planted as the Agent URN:\n%s", got)
+	}
+	if strings.Contains(got, "Agent URN: `msg://agent/agent-mux/agt_profile`") {
+		t.Fatalf("profile URN planted as the Agent URN:\n%s", got)
+	}
+	if !strings.Contains(got, "as `from`") || !strings.Contains(got, "in_reply_to") {
+		t.Fatalf("missing send guidance:\n%s", got)
+	}
+}
+
+func TestTetherIdentityFile_BoundActorWithoutProfileURN(t *testing.T) {
+	got := tetherIdentityFile(SetupParams{AgentProfile: &store.AgentProfile{ID: "p"}, ActorURN: "msg://agent/nanite/agt_actor"})
+	if got == nil || !strings.Contains(string(got), "msg://agent/nanite/agt_actor") {
+		t.Fatalf("a bound actor with no profile URN got %q", got)
+	}
+}
+
+func TestComposeBootdirParams_ResolvesActorURNFromDependencies(t *testing.T) {
+	var gotSession, gotProfile string
+	deps := &Dependencies{ActorURN: func(sessionID, profileID string) string {
+		gotSession, gotProfile = sessionID, profileID
+		return "msg://agent/nanite/agt_actor"
+	}}
+	profile := &store.AgentProfile{ID: "prof-1"}
+	_, params := composeBootdirParams(deps, Options{Provider: "claude", Workdir: t.TempDir(), SessionID: "sess-9"}, profile, "sess-9")
+	if params.ActorURN != "msg://agent/nanite/agt_actor" || gotSession != "sess-9" || gotProfile != "prof-1" {
+		t.Fatalf("ActorURN=%q looked up (%q,%q)", params.ActorURN, gotSession, gotProfile)
+	}
+	// No profile, no resolver: nothing is looked up or planted.
+	if _, p := composeBootdirParams(deps, Options{Provider: "claude", Workdir: t.TempDir()}, nil, "s"); p.ActorURN != "" {
+		t.Fatalf("no profile: ActorURN=%q", p.ActorURN)
+	}
+	if _, p := composeBootdirParams(&Dependencies{}, Options{Provider: "claude", Workdir: t.TempDir()}, profile, "s"); p.ActorURN != "" {
+		t.Fatalf("no resolver: ActorURN=%q", p.ActorURN)
+	}
+}
+
+// The observe-mode caveat is planted whichever address the file names: the
+// bound actor's or the profile's own.
+func TestTetherIdentityFile_AlwaysSaysFromIsNotControlled(t *testing.T) {
+	for name, params := range map[string]SetupParams{
+		"bound actor":      {AgentProfile: &store.AgentProfile{ID: "p"}, ActorURN: "msg://agent/nanite/agt_actor", SessionID: "s"},
+		"profile fallback": {AgentProfile: &store.AgentProfile{ID: "p", TetherURN: "msg://agent/agent-mux/agt_p"}, SessionID: "s"},
+	} {
+		got := string(tetherIdentityFile(params))
+		if !strings.Contains(got, "guidance, not a control") || !strings.Contains(got, "only observes") {
+			t.Errorf("%s: no observe-mode caveat:\n%s", name, got)
+		}
+	}
+}

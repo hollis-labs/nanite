@@ -250,6 +250,37 @@ func (s *Store) CountInstancesSharingMailboxSlot(ctx context.Context, profileID,
 	return n, nil
 }
 
+// DurableActorURNForSession returns the stable actor URN of the one non-archived
+// instance of profileID bound to sessionID, or "" when there is none or the
+// slot is ambiguous. It is the outbound twin of the tetherbridge lookup: the
+// address an agent sends from must be the address the bridge delivers to, and
+// an ambiguous slot is refused there too, so no address is guessed here.
+func (s *Store) DurableActorURNForSession(ctx context.Context, sessionID, profileID string) (string, error) {
+	if sessionID == "" || profileID == "" {
+		return "", nil
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT urn FROM actor_instances
+		  WHERE profile_id = ? AND current_session_id = ? AND status != ? AND urn != '' LIMIT 2`,
+		profileID, sessionID, DurableAgentStatusArchived)
+	if err != nil {
+		return "", fmt.Errorf("durable actor urn for session %s: %w", sessionID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var urns []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return "", err
+		}
+		urns = append(urns, u)
+	}
+	if err := rows.Err(); err != nil || len(urns) != 1 {
+		return "", err
+	}
+	return urns[0], nil
+}
+
 func (s *Store) GetDurableAgentInstanceByProfileID(ctx context.Context, profileID string) (*DurableAgentInstance, error) {
 	var inst DurableAgentInstance
 	err := scanDurableAgentInstance(s.DB.QueryRowContext(ctx,

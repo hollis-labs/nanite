@@ -58,6 +58,41 @@ func mcpImport(args []string) {
 	fmt.Printf("\n%d created, %d skipped\n", len(result.Created), len(result.Skipped))
 }
 
+// mcpTetherMessaging registers the Tether messaging gateway from a token file,
+// without hand-writing a .mcp.json. It only registers the server; tool grants
+// stay an operator act (nanite authority grant).
+func mcpTetherMessaging(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "usage: %s mcp tether-messaging <absolute-token-file> [--db <path>]\n", brand.BinaryName)
+		os.Exit(1)
+	}
+	dbPath := resolveDBPath()
+	for i := 1; i < len(args)-1; i++ {
+		if args[i] == "--db" {
+			dbPath = args[i+1]
+			break
+		}
+	}
+	s, err := store.New(context.Background(), dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: open db: %v\n", err)
+		os.Exit(1)
+	}
+	defer closeStoreBestEffort(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s)
+	result, err := registerTetherMessaging(context.Background(), s, args[0], service.DropRedactedPlaceholders)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	for _, name := range result.Created {
+		fmt.Printf("  created: %s\n", name)
+	}
+	for _, name := range result.Skipped {
+		fmt.Printf("  skipped (exists): %s\n", name)
+	}
+	fmt.Printf("Tools to grant explicitly: %v\n", mcpconfig.TetherMessagingTools)
+}
+
 // mcpExport writes all DB MCP server configs as a .mcp.json file.
 func mcpExport(args []string) {
 	dbPath := resolveDBPath()
@@ -114,4 +149,29 @@ func mcpExport(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Exported %d server(s) to %s\n", len(cfg.MCPServers), outPath)
+}
+
+// registerTetherMessaging checks the token file, refuses a different token
+// file under the existing "tether" name (the store refuses any second gateway
+// under another name) and imports the gateway entry.
+func registerTetherMessaging(ctx context.Context, s *store.Store, tokenFile string, prepare func(*store.MCPServerConfig)) (*mcpconfig.ImportResult, error) {
+	data, err := mcpconfig.TetherMessagingConfig(tokenFile)
+	if err != nil {
+		return nil, err
+	}
+	if err = mcpconfig.CheckTetherTokenFile(tokenFile); err != nil {
+		return nil, err
+	}
+	existing, err := s.GetMCPServer(ctx, mcpconfig.TetherMessagingServerName)
+	if err != nil {
+		return nil, err
+	}
+	if err = mcpconfig.CheckTetherSingleActor(existing, tokenFile); err != nil {
+		return nil, err
+	}
+	result, err := mcpconfig.Import(ctx, s, data, prepare)
+	if err != nil {
+		return nil, fmt.Errorf("import: %w", err)
+	}
+	return result, nil
 }

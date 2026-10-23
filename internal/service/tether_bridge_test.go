@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -124,5 +125,56 @@ func TestRedactAddr(t *testing.T) {
 	}
 	if got := redactAddr("/run/user/1/tether.sock"); got != "/run/user/1/tether.sock" {
 		t.Fatalf("socket path changed: %s", got)
+	}
+}
+
+type fakeActorURNLookup struct {
+	urn      string
+	err      error
+	deadline bool
+}
+
+func (f *fakeActorURNLookup) DurableActorURNForSession(ctx context.Context, _, _ string) (string, error) {
+	_, f.deadline = ctx.Deadline()
+	return f.urn, f.err
+}
+
+func TestDurableActorURNResolver(t *testing.T) {
+	ok := &fakeActorURNLookup{urn: "msg://agent/nanite/agt_x"}
+	if got := durableActorURNResolver(ok)("s", "p"); got != "msg://agent/nanite/agt_x" || !ok.deadline {
+		t.Fatalf("got %q, deadline set=%v", got, ok.deadline)
+	}
+	bad := &fakeActorURNLookup{urn: "msg://agent/nanite/leaked", err: errors.New("db down")}
+	if got := durableActorURNResolver(bad)("s", "p"); got != "" {
+		t.Fatalf("lookup error must yield no address, got %q", got)
+	}
+}
+
+// Dependencies.ActorURN is what puts the bound actor's address in the planted
+// identity file; deleting the wiring in BuildAgentDependencies must fail here.
+func TestBuildAgentDependencies_WiresActorURN(t *testing.T) {
+	ctx := context.Background()
+	st := newDurableAgentServiceTestStore(t)
+	profile := &store.AgentProfile{Name: "Deps Actor", Slug: "deps-actor", SystemPrompt: "x"}
+	if err := persistTestActor(ctx, st, profile); err != nil {
+		t.Fatal(err)
+	}
+	inst := store.DurableAgentInstance{Name: "i", Slug: "deps-inst", ProfileID: profile.ID, URN: "msg://agent/nanite/agt_deps",
+		Status: store.DurableAgentStatusActive, CurrentSessionID: "sess-deps"}
+	if err := persistTestDurableInstance(ctx, st, &inst); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := BuildAgentDependencies(AgentDepsConfig{Store: st, Streams: NewStreamManager(st), BinaryPath: "/bin/true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Deps.ActorURN == nil {
+		t.Fatal("Dependencies.ActorURN is not wired")
+	}
+	if got := bundle.Deps.ActorURN("sess-deps", profile.ID); got != "msg://agent/nanite/agt_deps" {
+		t.Fatalf("ActorURN = %q", got)
+	}
+	if got := bundle.Deps.ActorURN("other-session", profile.ID); got != "" {
+		t.Fatalf("unbound session got %q", got)
 	}
 }

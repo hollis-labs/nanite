@@ -65,7 +65,9 @@ func agentUsage(w io.Writer) {
 	fmt.Fprintln(w, "  stop <session>                               stop a session's runtime and end it; stopping twice is a no-op")
 	fmt.Fprintln(w, "the digest covers behavior, not identity: use identity_digest to tell definitions apart")
 	fmt.Fprintln(w, "flags:")
-	fmt.Fprintln(w, "  -db <path>            database to write (else NANITE_DB_PATH / NANITE_WORKSPACE)")
+	fmt.Fprintln(w, "  -db <path>            database to write (author, validate, install and setup only)")
+	fmt.Fprintln(w, "  --url <url>           server for list and stop (else NANITE_API_URL, else NANITE_PORT). -db does not choose the server;")
+	fmt.Fprintln(w, "                        list prints the server it asked, and stop prints it on stderr")
 }
 
 // openAgentImporter opens the shared DB and returns a fresh Importer plus the

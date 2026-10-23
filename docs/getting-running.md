@@ -140,8 +140,11 @@ nanite agent stop <session>      # same as POST /api/agent/v1/sessions/{id}/stop
 Stop cancels a running or queued turn, closes the agent process and marks the
 session ended. The response says `stopped` (false on a repeat call, which
 changes nothing) and `turn_canceled`. An ended session refuses new turns with
-`409 invalid_state`. Both commands call the running server, so point them at it
-with `NANITE_API_URL` or `NANITE_PORT`.
+`409 invalid_state`. Both commands call the running server, not a database: `-db` does not choose
+the server. Point them at it with `--url`, `NANITE_API_URL` or `NANITE_PORT`;
+`list` prints the server it asked and `stop` prints it on stderr. `list` follows
+every page. Stop and `work_root` need the operate scope, the same as sending a
+turn or `DELETE /api/sessions/{id}`; an agent credential cannot reach them.
 
 ## Known refusals
 

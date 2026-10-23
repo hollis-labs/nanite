@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/hollis-labs/nanite/internal/safego"
 )
@@ -24,12 +25,22 @@ type agentV1StopResponse struct {
 // turns with 409 invalid_state.
 func (a *API) handleAgentV1StopSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sess, err := a.Services.Sessions.Get(r.Context(), id)
-	if err != nil {
+	if _, err := a.Services.Sessions.Get(r.Context(), id); err != nil {
 		a.agentV1LookupError(w, err)
 		return
 	}
-	if _, _, err = a.Services.CognitiveViews.Get(r.Context(), id); err != nil {
+	if _, _, err := a.Services.CognitiveViews.Get(r.Context(), id); err != nil {
+		a.agentV1LookupError(w, err)
+		return
+	}
+	// One stop at a time per session, so exactly one caller reports
+	// stopped=true however many race.
+	lock, _ := a.stopLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	sess, err := a.Services.Sessions.Get(r.Context(), id)
+	if err != nil {
 		a.agentV1LookupError(w, err)
 		return
 	}
@@ -37,13 +48,16 @@ func (a *API) handleAgentV1StopSession(w http.ResponseWriter, r *http.Request) {
 		a.jsonResp(w, http.StatusOK, agentV1StopResponse{SessionViewID: id, State: "ended"})
 		return
 	}
-	out := agentV1StopResponse{SessionViewID: id, State: "ended", Stopped: true}
-	if a.Services.Chat != nil {
-		out.TurnCanceled = a.Services.Chat.CancelActiveGeneration(id)
-	}
+	// Archive first: from here a new turn is refused and no runtime can start
+	// (the service checks the row where it starts one). Then cancel whatever was
+	// already running.
 	if err = a.endSession(r, id); err != nil {
 		a.agentV1Error(w, http.StatusInternalServerError, "failed to end session")
 		return
+	}
+	out := agentV1StopResponse{SessionViewID: id, State: "ended", Stopped: true}
+	if a.Services.Chat != nil {
+		out.TurnCanceled = a.Services.Chat.CancelActiveGeneration(id)
 	}
 	a.jsonResp(w, http.StatusOK, out)
 }

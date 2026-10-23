@@ -227,12 +227,17 @@ func (a *API) handleRebootSessionAgent(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	ctx := r.Context()
 
-	if _, err := a.Services.Sessions.Get(ctx, sessionID); err != nil {
+	sess, err := a.Services.Sessions.Get(ctx, sessionID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.errorResp(w, http.StatusNotFound, "session not found")
 		} else {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 		}
+		return
+	}
+	if sess.Status == "archived" {
+		a.errorResp(w, http.StatusConflict, "session has ended")
 		return
 	}
 
@@ -262,12 +267,17 @@ func (a *API) handleRecoverSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	ctx := r.Context()
 
-	if _, err := a.Services.Sessions.Get(ctx, sessionID); err != nil {
+	sess, err := a.Services.Sessions.Get(ctx, sessionID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.errorResp(w, http.StatusNotFound, "session not found")
 		} else {
 			a.errorResp(w, http.StatusInternalServerError, err.Error())
 		}
+		return
+	}
+	if sess.Status == "archived" {
+		a.errorResp(w, http.StatusConflict, "session has ended")
 		return
 	}
 

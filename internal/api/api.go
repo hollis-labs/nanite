@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/hollis-labs/nanite/internal/loop"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
@@ -16,6 +17,8 @@ import (
 // API holds dependencies for HTTP handlers.
 type API struct {
 	Services *service.Container
+	// stopLocks serializes agent session stops per session id.
+	stopLocks sync.Map
 	// agentCursorKey signs process-local pagination tokens for the single operator.
 	agentCursorKey []byte
 	// embedderSelectDeps is injected for embedding_status computation. Defaults

@@ -1950,6 +1950,12 @@ func (s *chatServiceImpl) prepareTurn(
 			agent.HostSettingsID = cfg.HostSettingsRef.ID
 			agent.Revision = cfg.HostSettingsRef.Revision
 			if cfg.WorkRoot != "" {
+				// Re-resolve at boot: the path was validated at create, and a
+				// directory swapped for a symlink since then must not be followed.
+				if again, rootErr := resolveWorkRoot(cfg.WorkRoot, cfg.HostSettings.Directories); rootErr != nil || again != cfg.WorkRoot {
+					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "The session work root changed or left the host's directories; create a new session", nil)
+					return prepareTurnResult{directive: runloop.Terminate}
+				}
 				// The create-time work root leads; every host directory stays granted.
 				host := *cfg.HostSettings
 				host.Directories = []string{cfg.WorkRoot}

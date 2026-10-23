@@ -136,3 +136,22 @@ func TestNativeAuthorityRoutesAreAdminOnly(t *testing.T) {
 		}
 	}
 }
+
+// Stopping a session and creating one with a work_root are operate-scope by
+// decision (see the comment above the /api/agent/v1 rule); this pins it so a
+// change to the route table is a visible choice.
+func TestAgentSessionLifecycleRoutesRequireOperate(t *testing.T) {
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/agent/v1/sessions/{id}/stop"},
+		{http.MethodHead, "/api/agent/v1/sessions/{id}/stop"},
+		{http.MethodPost, "/api/agent/v1/sessions"},
+	} {
+		got, known := ScopeFor(tc.method, tc.path)
+		if !known || got != ScopeOperate {
+			t.Fatalf("%s %s = %v (known=%v), want operate", tc.method, tc.path, got, known)
+		}
+	}
+	if got, _ := ScopeFor(http.MethodDelete, "/api/sessions/{id}"); got != ScopeOperate {
+		t.Fatalf("DELETE session = %v, want operate (stop must not be stricter than the route it shares a body with, nor looser)", got)
+	}
+}

@@ -81,7 +81,12 @@ var routeRules = []routeRule{
 	rule("POST", `^/api/tools/call$`, ScopeTools),
 	rule("!GET", `^/api/tools(/.*)?$`, ScopeMaintain),
 
-	// Conversation and work: operate.
+	// Conversation and work: operate. This includes stopping a session and
+	// choosing a work_root on create. Both are deliberate: operate already
+	// sends turns to, and DELETEs, any session (DELETE /api/sessions/{id} ends
+	// a session by the same path), and work_root can only narrow into
+	// directories the host settings already allow. Agent credentials hold only
+	// the tools scope and cannot reach these routes.
 	rule("", `^/api/agent/v1(/.*)?$`, ScopeOperate),
 	rule("!GET", `^/api/(sessions|a2a|echo|workers|work|workflows|stream|messaging|teams|plans|todos|tasks|memories|projects|loops|goals|handoffs|pending|documents|artifacts|items|envelopes|drawer-cards|reflexes|durable-agent-wake|approvals|metrics|envelope)(/.*)?$`, ScopeOperate),
 

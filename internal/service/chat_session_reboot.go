@@ -26,6 +26,10 @@ const stopRebootGrace = 15 * time.Second
 //     deliver whatever it was reacting to once a turn does run.
 var ErrSessionBusy = errors.New("session has an in-flight turn")
 
+// ErrSessionEnded is returned when a runtime would start for a session that
+// has been stopped or archived.
+var ErrSessionEnded = errors.New("session has ended")
+
 // RebootResult reports the outcome of a RebootSessionAgent call.
 type RebootResult struct {
 	// Rebooted is true when a live runtime agent was found and stopped.

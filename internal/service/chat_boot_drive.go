@@ -132,6 +132,12 @@ func (s *chatServiceImpl) driveBootSession(
 
 	// 2. Boot when absent.
 	if sess == nil {
+		// An ended session never starts a process. Stop archives first and then
+		// closes the runtime, so this check and the one after Boot together
+		// leave no interleaving that starts a process nobody closes.
+		if s.sessionEnded(ctx, sessionID) {
+			return nil, ErrSessionEnded
+		}
 		profileSlug := ""
 		if agent != nil {
 			profileSlug = agent.Slug
@@ -191,6 +197,12 @@ func (s *chatServiceImpl) driveBootSession(
 		}
 		if err != nil {
 			return nil, fmt.Errorf("driveBootSession: boot: %w", err)
+		}
+		// A stop that archived the session after the check above has already
+		// run its close hook, which could not see this process. Close it here.
+		if s.sessionEnded(ctx, sessionID) {
+			s.CloseAgentSession(context.WithoutCancel(ctx), sessionID)
+			return nil, ErrSessionEnded
 		}
 		// Boot registered the handle atomically at wrapper readiness. Repeating
 		// Store here would reopen a recovery/shutdown admission race.
@@ -920,4 +932,14 @@ func hostWorkRoot(agent *store.AgentProfile) (string, error) {
 		return "", fmt.Errorf("resolve work root: host directory %q is not an absolute path", agent.NativeHost.Directories[0])
 	}
 	return filepath.Clean(root), nil
+}
+
+// sessionEnded reports whether the session row is archived. A lookup failure
+// reads as not ended: the turn proceeds as it did before the guard.
+func (s *chatServiceImpl) sessionEnded(ctx context.Context, sessionID string) bool {
+	if s.sessions == nil {
+		return false
+	}
+	sess, err := s.sessions.Get(ctx, sessionID)
+	return err == nil && sess != nil && sess.Status == "archived"
 }

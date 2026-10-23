@@ -1,14 +1,11 @@
 package mcpserver
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 
 	svcerr "github.com/hollis-labs/libs/core/util/svcerr"
@@ -40,7 +37,7 @@ func parityDoors(t *testing.T) (*store.Store, http.Handler, *sdk.ClientSession) 
 	}
 	mux := http.NewServeMux()
 	api.New(services).RegisterRoutes(mux)
-	server := New(st, "parity-session", nil, "", []string{"todo_update", "agent_update", "agent_create"})
+	server := New(st, "parity-session", nil, "", []string{"todo_update"})
 	return st, mux, connectClient(t, server)
 }
 
@@ -202,34 +199,6 @@ func TestTransportParityTodoUpdateFields(t *testing.T) {
 	t.Fatal("todo_update absent from real MCP discovery")
 }
 
-func TestTransportParityAgentUpdateRefusal(t *testing.T) {
-	st, h, cs := parityDoors(t)
-	for _, source := range []string{"internal", "plugin", "external"} {
-		t.Run(source, func(t *testing.T) {
-			row := &store.AgentProfile{Name: "Protected", Slug: "protected-" + source, SystemPrompt: "keep prompt", Source: source}
-			if err := storetest.HistoricalProfile(context.Background(), st, row); err != nil {
-				t.Fatal(err)
-			}
-			a := httpOutcome(t, h, http.MethodPut, "/api/agents/"+row.ID, map[string]any{"name": "must not write"})
-			b := mcpOutcome(t, cs, "agent_update", map[string]any{"id": row.ID, "name": "must not write"})
-			if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
-				t.Fatalf("want immutable unavailable: %s / %s", a, b)
-			}
-			tp.AssertSameOutcome(t, "noneditable agent", a, b)
-			after, err := st.GetHistoricalAgentProfile(context.Background(), row.ID)
-			if err != nil || after.Name != row.Name {
-				t.Fatalf("protected agent changed: %v / %+v", err, after)
-			}
-		})
-	}
-	a := httpOutcome(t, h, http.MethodPut, "/api/agents/missing", map[string]any{"name": "x"})
-	b := mcpOutcome(t, cs, "agent_update", map[string]any{"id": "missing", "name": "x"})
-	if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
-		t.Fatalf("want immutable unavailable: %s / %s", a, b)
-	}
-	tp.AssertSameOutcome(t, "missing agent", a, b)
-}
-
 func TestTransportParityInfrastructureFailure(t *testing.T) {
 	st, h, cs := parityDoors(t)
 	// A closed database is an infrastructure failure, even for an absent id.
@@ -241,83 +210,6 @@ func TestTransportParityInfrastructureFailure(t *testing.T) {
 		t.Fatalf("want internal failure: %s / %s", a, b)
 	}
 	tp.AssertSameOutcome(t, "closed database", a, b)
-	a = httpOutcome(t, h, http.MethodPut, "/api/agents/missing", map[string]any{"name": "x"})
-	b = mcpOutcome(t, cs, "agent_update", map[string]any{"id": "missing", "name": "x"})
-	if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable || a.Status != http.StatusGone {
-		t.Fatalf("want immutable unavailable: %s / %s", a, b)
-	}
-	tp.AssertSameOutcome(t, "closed database agent", a, b)
-}
-
-func TestRetiredAgentWriteDoesNotReachFailingStore(t *testing.T) {
-	for _, op := range []string{"create", "update"} {
-		t.Run(op, func(t *testing.T) {
-			st, h, cs := parityDoors(t)
-			if err := storetest.HistoricalProfile(context.Background(), st, &store.AgentProfile{ID: "write-target", Name: "Target", Slug: "write-target", SystemPrompt: "fixture", Source: "user"}); err != nil {
-				t.Fatal(err)
-			}
-			statement := "INSERT"
-			if op == "update" {
-				statement = "UPDATE"
-			}
-			if _, err := st.DB.Exec(`CREATE TRIGGER fail_agent_write BEFORE ` + statement + ` ON agent_profiles BEGIN SELECT RAISE(ABORT, 'write_secret SQLITE_BUSY private query'); END`); err != nil {
-				t.Fatal(err)
-			}
-			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
-			method, path, tool := http.MethodPost, "/api/agents", "agent_create"
-			args := map[string]any{"name": "Fresh", "slug": "fresh", "system_prompt": "fixture"}
-			if op == "update" {
-				method, path, tool = http.MethodPut, "/api/agents/write-target", "agent_update"
-				args = map[string]any{"id": "write-target", "name": "Changed"}
-			}
-			restArgs := map[string]any{}
-			for key, value := range args {
-				if key != "id" {
-					restArgs[key] = value
-				}
-			}
-			a := httpOutcome(t, h, method, path, restArgs)
-			b := mcpOutcome(t, cs, tool, args)
-			if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
-				t.Fatalf("want immutable unavailable: %s / %s", a, b)
-			}
-			tp.AssertSameOutcome(t, "retired writer refusal", a, b)
-			kept, lookupErr := st.GetHistoricalAgentProfile(t.Context(), "write-target")
-			if lookupErr != nil || kept.Name != "Target" || kept.SystemPrompt != "fixture" {
-				t.Fatalf("history changed: %+v %v", kept, lookupErr)
-			}
-			if _, lookupErr = st.GetAgentBySlug(t.Context(), "fresh"); lookupErr == nil {
-				t.Fatal("retired create admitted fresh host")
-			}
-
-			if strings.Contains(a.Detail, "write_secret") || strings.Contains(b.Detail, "write_secret") {
-				t.Fatalf("leaked write cause: %s / %s", a, b)
-			}
-			if strings.Contains(logs.String(), "write_secret") {
-				t.Fatalf("retired operation reached a forbidden writer: %s", logs.String())
-			}
-		})
-	}
-}
-
-func TestAgentCreateClosedDBParity(t *testing.T) {
-	st, h, cs := parityDoors(t)
-	if err := st.DB.Close(); err != nil {
-		t.Fatal(err)
-	}
-	args := map[string]any{"name": "Fresh", "slug": "fresh", "system_prompt": "fixture"}
-	a := httpOutcome(t, h, http.MethodPost, "/api/agents", args)
-	b := mcpOutcome(t, cs, "agent_create", args)
-	if a.Category != svcerr.CodeUnavailable || b.Category != svcerr.CodeUnavailable {
-		t.Fatalf("want immutable unavailable: %s / %s", a, b)
-	}
-	tp.AssertSameOutcome(t, "closed DB create", a, b)
-	if strings.Contains(a.Detail, "database is closed") || strings.Contains(b.Detail, "database is closed") {
-		t.Fatal("closed DB cause leaked")
-	}
 }
 
 func TestTransportTodoUpdateFailureField(t *testing.T) {

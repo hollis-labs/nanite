@@ -100,6 +100,34 @@ done here; until then treat the operator token as the key to granting tools.
 
 The steps below are what `setup` does, for when you need one on its own.
 
+## The same setup over MCP
+
+`POST /api/admin/mcp` is a streamable-HTTP MCP endpoint (stateless, JSON
+responses) so Tether's MCP gateway and Tachyon register Nanite as a tool server
+instead of shelling out. Every tool dispatches in-process to the HTTP route
+above with the caller's credential, so validation, reason-required rules and
+status codes are the HTTP ones; an error comes back as an MCP tool error whose
+text starts `HTTP <status>:`.
+
+| Tool | Route |
+|---|---|
+| `agent_setup`, `agent_list`, `agent_get` | `POST /api/agent-setup`, `GET /api/native-agents[/{id}]` |
+| `host_settings_list`, `host_settings_create`, `host_settings_update` | `/api/agent-host-settings` |
+| `host_settings_retire` | read the host, write it back `enabled=false` at its revision |
+| `authority_list`, `authority_get`, `authority_revoke` | `/api/native-authority[/{id}[/revoke]]` |
+| `tool_grant`, `tool_ungrant` | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}` |
+| `session_start`, `session_list`, `session_get`, `session_history`, `session_stop` | `/api/agent/v1/sessions...` |
+| `turn_send`, `turn_get`, `turn_cancel` | `/api/agent/v1/sessions/{id}/turns...` |
+
+The endpoint sits under `/api/admin`, so it needs the admin scope: the operator
+token. Agent credentials are refused, and so is any client credential without
+admin. That credential stays admin for now; narrower credentials come later.
+Directories and `work_root` are absolute paths on the machine Nanite runs on.
+
+The `agent_create` and `agent_update` self-tools are gone: they only ever
+returned the immutable-profile error. `agent_list` among the per-session self
+tools still lists legacy profiles, read-only.
+
 ## Author and install intrinsic content
 
 Definitions use agentdef v2 frontmatter, a stable definition ID, an authored

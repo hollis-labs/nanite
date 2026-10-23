@@ -39,8 +39,6 @@ var BuiltinCategories = map[string]string{
 	"engine_refresh":   categoryContext,
 
 	// Agent management + plans + todos.
-	"agent_create":    categoryAgent,
-	"agent_update":    categoryAgent,
 	"agent_list":      categoryAgent,
 	"skill_create":    categoryAgent,
 	"skill_update":    categoryAgent,

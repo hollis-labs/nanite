@@ -11,7 +11,7 @@ func TestBuiltinCategorizer(t *testing.T) {
 	}{
 		{name: "dev_read", want: categoryCoreIO},
 		{name: "dev_grep", want: categorySearch},
-		{name: "agent_create", want: categoryAgent},
+		{name: "agent_list", want: categoryAgent},
 		{name: "tesseract_recall", want: categoryContext},
 		{name: "mcp_github_search", want: categoryMCP},
 		{name: "nanite_find_record", want: categorySearch},

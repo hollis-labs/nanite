@@ -138,50 +138,13 @@ func selfToolDefinitions() []mcp.Tool {
 			},
 		},
 		{
-			Name: "agent_create",
-			Description: "Create a new agent profile with a name, slug, system prompt, and optional default model.\n\n" +
-				"**When to use:** When the user asks to define a new agent persona or role.\n\n" +
-				"**When NOT to use:** Do not create duplicate slugs — use agent_update to modify an existing profile.\n\n" +
-				"**Output shape:** \"Created agent <name> (<id>)\" on success. Use agent_list to verify.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":          map[string]any{"type": "string", "description": "Agent display name"},
-					"slug":          map[string]any{"type": "string", "description": "URL-safe slug (unique)"},
-					"system_prompt": map[string]any{"type": "string", "description": "System prompt for the agent"},
-					"description":   map[string]any{"type": "string", "description": "Short description (optional)"},
-					"default_model": map[string]any{"type": "string", "description": "Default LLM model (optional)"},
-				},
-				"required": []string{"name", "slug", "system_prompt"},
-			},
-		},
-		{
 			Name: "agent_list",
-			Description: "List all agent profiles.\n\n" +
+			Description: "List legacy agent profiles (read-only history). Native agents are managed over the Nanite admin MCP endpoint (/api/admin/mcp: agent_setup, agent_list, agent_get) or POST /api/agent-setup with an admin credential.\n\n" +
 				"**When to use:** When the user asks what agents are configured, or before creating one to check for name/slug conflicts.\n\n" +
 				"**Output shape:** Text list of agents with name, slug, description, and default model. Returns all agents — no filter parameters.",
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
-			},
-		},
-		{
-			Name: "agent_update",
-			Description: "Update an existing agent profile by ID. Only the fields you provide are changed (partial update).\n\n" +
-				"**When to use:** When the user asks to change an agent's system prompt, name, slug, or default model.\n\n" +
-				"**Required context:** You need the agent ID — get it from agent_list first if you only have the slug.\n\n" +
-				"**Output shape:** \"Updated agent <id>\" on success.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id":            map[string]any{"type": "string", "description": "Agent ID to update"},
-					"name":          map[string]any{"type": "string", "description": "New name (optional)"},
-					"slug":          map[string]any{"type": "string", "description": "New slug (optional)"},
-					"system_prompt": map[string]any{"type": "string", "description": "New system prompt (optional)"},
-					"description":   map[string]any{"type": "string", "description": "New description (optional)"},
-					"default_model": map[string]any{"type": "string", "description": "New default model (optional)"},
-				},
-				"required": []string{"id"},
 			},
 		},
 		// C1 (S5 platform-reshape) — agent-source resolver endpoint.
@@ -290,7 +253,7 @@ func selfToolDefinitions() []mcp.Tool {
 			Name: "builder_start",
 			Description: "Start a step-by-step creation wizard for a new agent or skill.\n\n" +
 				"**When to use:** When the user wants to interactively create a new agent or skill and you want to gather the required fields one step at a time.\n\n" +
-				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. If you already have all required fields for an agent, use agent_create directly.\n\n" +
+				"**When NOT to use:** NOT for asking arbitrary questions — this builder only drives entity creation (agent / skill). Do not call this for read or update operations. Native agents are created through the Nanite admin MCP agent_setup tool, not here.\n\n" +
 				"**Required context:** You MUST supply builder_name. Omit it only to list available builder types.\n\n" +
 				"**Output shape:** Returns the first step prompt. Pass the response to builder_step to advance through subsequent steps.\n\n" +
 				"**Chaining:** Always follow with builder_step for each subsequent step until the builder signals completion.",

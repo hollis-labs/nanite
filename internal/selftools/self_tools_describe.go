@@ -126,9 +126,7 @@ var describeRelations = map[string]struct {
 	// tools that no longer exist.
 	"skill_list":    {relatedTools: []string{"skill_delete"}},
 	"skill_delete":  {relatedTools: []string{"skill_list"}},
-	"agent_create":  {relatedTools: []string{"agent_list", "agent_update"}},
-	"agent_list":    {relatedTools: []string{"agent_create", "agent_update"}},
-	"agent_update":  {relatedTools: []string{"agent_list"}},
+	"agent_list":    {relatedTools: []string{"agent_source_resolve"}},
 	"message_send":  {relatedTools: []string{"message_inbox", "message_thread", "message_ack"}},
 	"message_inbox": {relatedTools: []string{"message_ack", "message_resolve", "message_thread"}},
 	"subagent_spawn": {

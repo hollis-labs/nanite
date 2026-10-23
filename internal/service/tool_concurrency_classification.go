@@ -71,9 +71,7 @@ var declaredToolConcurrencySafety = map[string]bool{
 	"skill_delete": false,
 	"skill_list":   true,
 
-	"agent_create": false,
-	"agent_update": false,
-	"agent_list":   true,
+	"agent_list": true,
 
 	"engine_navigate": false, // UI navigation signal — order-sensitive
 	"engine_refresh":  false, // UI refresh signal — order-sensitive

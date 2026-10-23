@@ -86,7 +86,8 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
   `--add-dir`; Codex gets them as `writable_roots` in its planted `config.toml`.
 - **Nanite MCP server.** Claude reads it from the planted `.mcp.json` (with the
   strict-MCP flags and an allow rule); Codex reads it from `[mcp_servers.*]` in
-  the planted `config.toml`. agy discovers the plugin's `mcp_config.json`, but
+  the planted `config.toml`; OpenCode reads it from the `mcp` key of the planted
+  `opencode.json` (`type: local`, argv `command`, `environment`). agy discovers the plugin's `mcp_config.json`, but
   its headless mode auto-denies a tool call that needs the `mcp` permission.
   Nanite launches agy with `--dangerously-skip-permissions` only when the
   permission engine's mode is yolo (the counterpart of Claude's developer

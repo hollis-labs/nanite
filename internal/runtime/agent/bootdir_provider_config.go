@@ -98,13 +98,11 @@ import (
 // that scopes the in-process dev_* tools — see resolveDevToolsAllowedPaths.
 // Empty → no table is emitted and the config.toml is unchanged.
 //
-// PlantContext.MCPLoopbackURL is left empty deliberately. Nanite's MCP
-// transport is subprocess-spawn-based — the planted .mcp.json names the
-// nanite binary as a stdio child; there is no HTTP loopback URL to emit
-// into an [mcp_servers.loopback] block. Wiring codex's MCP discovery
-// (codex reads MCP servers from config.toml, NOT from the Nanite
-// .mcp.json sidecar) is a separate, out-of-scope follow-up — see the
-// report.
+// Codex reads MCP servers from config.toml, not from the Nanite .mcp.json
+// sidecar, so codexPlantSpec passes the Nanite server (a stdio child, from
+// naniteMCPServerSpec) in as an mcpServers entry and it lands as
+// [mcp_servers.<id>]. PlantContext.MCPLoopbackURL stays empty: Nanite's MCP
+// transport is subprocess-spawn-based, so there is no HTTP loopback URL.
 func codexConfigTOMLContent(writableRoots []string, mcpServers ...provider.MCPServerSpec) (string, error) {
 	adapter := provider.NewCodexAdapter()
 	adapter.SandboxMode = codexSandboxMode

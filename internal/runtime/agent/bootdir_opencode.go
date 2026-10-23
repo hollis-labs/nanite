@@ -78,13 +78,34 @@ func opencodeAgentsJSON(params SetupParams, slug string) (string, error) {
 }
 
 // opencodeJSON renders the opencode.json descriptor body.
-func opencodeJSON(slug string) (string, error) {
+//
+// OpenCode reads MCP servers from the top-level `mcp` key of its config
+// (type "local" with an argv-style command and an `environment` map), not from
+// the .mcp.json Claude uses; the Nanite server is written there from the same
+// naniteMCPEntry description every provider's file is rendered from. A zero
+// MCPConfig (no DBPath) plants no server.
+func opencodeJSON(params SetupParams, slug string) (string, error) {
 	opencodeJSON := map[string]any{
 		"agent": map[string]any{
 			slug: map[string]any{
 				"prompt": fmt.Sprintf("{file:./agents/%s.md}", slug),
 			},
 		},
+	}
+	storeScope := mcpStoreScope(params)
+	id, command, args, env, err := naniteMCPEntry(params.MCPConfig, params.SessionID, storeScope)
+	if err != nil {
+		return "", err
+	}
+	if id != "" {
+		opencodeJSON["mcp"] = map[string]any{
+			id: map[string]any{
+				"type":        "local",
+				"command":     append([]string{command}, args...),
+				"environment": env,
+				"enabled":     true,
+			},
+		}
 	}
 	b, err := json.MarshalIndent(opencodeJSON, "", "  ")
 	if err != nil {
@@ -110,7 +131,7 @@ func opencodePlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	if err != nil {
 		return plant.PlantSpec{}, err
 	}
-	opencodeJSONBody, err := opencodeJSON(slug)
+	opencodeJSONBody, err := opencodeJSON(params, slug)
 	if err != nil {
 		return plant.PlantSpec{}, err
 	}

@@ -55,12 +55,13 @@ func cmdAgent(args []string) {
 }
 
 func agentUsage(w io.Writer) {
-	fmt.Fprintf(w, "usage: %s agent <author|validate|install|setup|list|stop> ...\n", brand.BinaryName)
+	fmt.Fprintf(w, "usage: %s agent <author|validate|install|setup|load|list|stop> ...\n", brand.BinaryName)
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  author [--role <role.md>] <definition.md>    flatten a role into an authored definition")
 	fmt.Fprintln(w, "  validate <definition.md>                     check schema and print id, revision, digest")
 	fmt.Fprintln(w, "  install [--resources <manifest.json>] <definition.md>   store a definition and print its pin")
 	fmt.Fprintln(w, "  setup <definition.md> --provider P --model M --tools all|a,b   install, configure, review and grant in one step")
+	fmt.Fprintln(w, "  load [<dir>] [--dry-run] [--force] [--grant-same-as H]   publish an agent directory (agent.md + host.yaml) as a new revision")
 	fmt.Fprintln(w, "  list [--all]                                 list agent sessions on the running server (--all includes ended)")
 	fmt.Fprintln(w, "  stop <session>                               stop a session's runtime and end it; stopping twice is a no-op")
 	fmt.Fprintln(w, "the digest covers behavior, not identity: use identity_digest to tell definitions apart")

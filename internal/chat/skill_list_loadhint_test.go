@@ -266,7 +266,38 @@ func persistPriorChatRosterSkill(t *testing.T, st *store.Store, actorID, skillID
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name) VALUES(?,?)`, actorID, skill.Slug); err != nil {
+	// An approved grant, as a CLI boot would plant it: the listing offers only
+	// skills the agent can load (CW-20261022-0007).
+	if _, err := st.DB.ExecContext(t.Context(), `UPDATE skills SET content_hash=? WHERE id=?`, "hash-"+skill.Slug, skill.ID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name,approved_content_hash) VALUES(?,?,?)`, actorID, skill.Slug, "hash-"+skill.Slug); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildSkillListForSession_OffersOnlyApprovedCurrentGrants(t *testing.T) {
+	s := newTestStoreForChat(t)
+	agent := priorChatRosterActor(t, s, "agent-approvals")
+	ok := mustCreateSkill(t, s, &store.Skill{Name: "Ok", Slug: "sk-ok", Description: "approved"})
+	bare := mustCreateSkill(t, s, &store.Skill{Name: "Bare", Slug: "sk-bare", Description: "never approved"})
+	stale := mustCreateSkill(t, s, &store.Skill{Name: "Stale", Slug: "sk-stale", Description: "changed since approval"})
+	persistPriorChatRosterSkill(t, s, agent.ID, ok.ID)
+	persistPriorChatRosterSkill(t, s, agent.ID, stale.ID)
+	if _, err := s.DB.ExecContext(t.Context(), `UPDATE actor_known_skills SET approved_content_hash='old' WHERE agent_id=? AND skill_name=?`, agent.ID, stale.Slug); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name) VALUES(?,?)`, agent.ID, bare.Slug); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buildSkillListForSession(context.Background(), s, agent.ID, "")
+	if !strings.Contains(got, "sk-ok:") {
+		t.Errorf("approved skill missing from %q", got)
+	}
+	for _, slug := range []string{"sk-bare", "sk-stale"} {
+		if strings.Contains(got, slug+":") {
+			t.Errorf("%s offered although skill_get would refuse it: %q", slug, got)
+		}
 	}
 }

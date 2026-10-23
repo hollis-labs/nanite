@@ -48,6 +48,17 @@ type AgentKnownSkill struct {
 	CapabilitiesGranted string `json:"capabilities_granted"`
 }
 
+// SkillGrantCurrent reports whether grant is an approval of sk as it stands
+// now: approved at all, and against sk's present content hash. It is the one
+// rule for "this agent may be given this skill" — CLI boot planting
+// (runtime/agent.ResolvePlantableSkills), the API chat skill listing and
+// skill_get's gate (internal/skill) all mean it, so a skill an agent cannot
+// load is neither planted nor offered (CW-20261022-0007). A nil sk (a grant
+// whose catalog row is gone) is never current.
+func SkillGrantCurrent(grant AgentKnownSkill, sk *Skill) bool {
+	return sk != nil && grant.ApprovedContentHash != "" && grant.ApprovedContentHash == sk.ContentHash
+}
+
 // IsBareAssignment reports whether this row carries no known-skill-specific
 // data beyond bare (agent_id, skill_name) existence — i.e. it was created
 // only by skills.go's AssignSkillToAgent (the "Assigned Skills" step

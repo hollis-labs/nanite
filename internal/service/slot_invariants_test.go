@@ -103,12 +103,14 @@ func newInvariantsFixture(t *testing.T) *invariantsFixture {
 	}
 
 	// One granted skill so INV7 has a listing to check.
-	sk := &store.Skill{Name: "Invariant Skill", Slug: "inv-skill", Description: invSkillDescription}
+	sk := &store.Skill{Name: "Invariant Skill", Slug: "inv-skill", Description: invSkillDescription, ContentHash: "inv-skill-hash"}
 	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if err := s.InsertAgentKnownSkill(context.Background(), store.AgentKnownSkill{AgentID: agent.ID, SkillName: sk.Slug}); err != nil {
-		t.Fatalf("AssignSkillToAgent: %v", err)
+	// Approved against the current hash, as the listing requires; the store's
+	// grant API refuses without a verified actor binding, so seed the row.
+	if _, err := s.DB.ExecContext(context.Background(), `INSERT INTO actor_known_skills(agent_id,skill_name,approved_content_hash) VALUES(?,?,?)`, agent.ID, sk.Slug, sk.ContentHash); err != nil {
+		t.Fatalf("seed skill grant: %v", err)
 	}
 
 	sess := &store.Session{

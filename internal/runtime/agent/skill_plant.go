@@ -88,21 +88,13 @@ func ResolvePlantableSkills(ctx context.Context, grants SkillGrantStore, catalog
 
 	out := make([]PlantableSkill, 0, len(known))
 	for _, k := range known {
-		if k.ApprovedContentHash == "" {
-			// Ungranted / never-approved bare assignment — never plantable.
-			continue
-		}
 		sk, err := catalog.GetSkillBySlug(ctx, k.SkillName)
 		if err != nil {
 			return nil, fmt.Errorf("agent: resolve plantable skills: look up skill %q: %w", k.SkillName, err)
 		}
-		if sk == nil {
-			// Dangling grant against a since-deleted catalog row.
-			continue
-		}
-		if k.ApprovedContentHash != sk.ContentHash {
-			// Stale approval — a re-install/re-sync happened since this
-			// grant was approved. Never plantable until re-approved.
+		// Never plantable: never approved, a since-deleted catalog row, or a
+		// stale approval (a re-install/re-sync happened since it was granted).
+		if !store.SkillGrantCurrent(k, sk) {
 			continue
 		}
 		out = append(out, PlantableSkill{Slug: sk.Slug, ContentHash: sk.ContentHash})

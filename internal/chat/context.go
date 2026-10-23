@@ -265,6 +265,15 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 
 	warnDanglingSkillGrants(s, agentID)
 
+	// Offer only what the agent can load and a CLI boot would plant: a granted
+	// skill whose approval is missing or stale is refused by skill_get, so
+	// listing it sends the agent after a skill it cannot have (CW-20261022-0007).
+	skills, err = approvedSkillsOnly(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, s, agentID, skills)
+	if err != nil {
+		slog.Warn("chat: failed to check skill approvals", "err", err)
+		return ""
+	}
+
 	// Phase 0 item 21 ("Cut Modes, in full") deleted the E2 mode filter
 	// (filterAgentSkillsByMode) that used to run here — it resolved
 	// s.GetSessionMode(sessionID), which no longer exists. There is no
@@ -294,6 +303,26 @@ func buildSkillListForSession(_ context.Context, s *store.Store, agentID, _ stri
 	}
 
 	return sb.String()
+}
+
+// approvedSkillsOnly keeps the skills whose grant for agentID is currently
+// approved (store.SkillGrantCurrent), preserving order.
+func approvedSkillsOnly(ctx context.Context, s *store.Store, agentID string, skills []store.Skill) ([]store.Skill, error) {
+	grants, err := s.ListAgentKnownSkills(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]store.AgentKnownSkill, len(grants))
+	for _, g := range grants {
+		byName[g.SkillName] = g
+	}
+	out := make([]store.Skill, 0, len(skills))
+	for _, sk := range skills {
+		if g, ok := byName[sk.Slug]; ok && store.SkillGrantCurrent(g, &sk) {
+			out = append(out, sk)
+		}
+	}
+	return out, nil
 }
 
 // warnedSkillGrants remembers the (agent, slug) pairs already reported, so a

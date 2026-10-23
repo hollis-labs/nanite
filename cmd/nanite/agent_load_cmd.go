@@ -50,20 +50,27 @@ func runAgentLoad(ctx context.Context, st *store.Store, args []string, out io.Wr
 	if len(positional) == 1 {
 		arg = positional[0]
 	}
-	path, err := agentdir.Discover(arg)
-	if err != nil {
-		return err
-	}
-	dir, err := agentdir.Load(path)
-	if err != nil {
-		return err
-	}
-	svc := &service.AgentLoadService{Store: st}
-	res, err := svc.Load(ctx, dir, service.AgentLoadOptions{Force: *force, DryRun: *dryRun, GrantFrom: *grantSame, Reason: *reason}, loadCLIActor)
+	_, res, err := loadAgentDirectory(ctx, st, arg, service.AgentLoadOptions{Force: *force, DryRun: *dryRun, GrantFrom: *grantSame, Reason: *reason})
 	if err != nil {
 		return err
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(res)
+}
+
+// loadAgentDirectory discovers, reads and publishes the agent directory named
+// by arg (empty means the current directory), shared by load and run.
+func loadAgentDirectory(ctx context.Context, st *store.Store, arg string, opts service.AgentLoadOptions) (*agentdir.Directory, service.AgentLoadResponse, error) {
+	path, err := agentdir.Discover(arg)
+	if err != nil {
+		return nil, service.AgentLoadResponse{}, err
+	}
+	dir, err := agentdir.Load(path)
+	if err != nil {
+		return nil, service.AgentLoadResponse{}, err
+	}
+	svc := &service.AgentLoadService{Store: st}
+	res, err := svc.Load(ctx, dir, opts, loadCLIActor)
+	return dir, res, err
 }

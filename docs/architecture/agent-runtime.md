@@ -184,6 +184,41 @@ skills, `skill_get` refuses any other, and the listing now offers only those,
 so a never-approved or stale grant is neither planted nor listed. Delivery
 differs by design (files up front versus a listing and on-demand load).
 
+## API-backed and CLI-backed sessions: where they differ
+
+CW-20261022-0007 made an API-backed (native loop) session run like a CLI one
+wherever the difference was an accident. What remains is listed here, each as
+intentional or as an open gap. Update the list when one changes.
+
+Intentional:
+
+- **Boot material.** A CLI session is booted from a boot dir (system prompt
+  file, `boot.md`, provider config, planted skills) in `$TMPDIR`, removed when
+  the session ends. An API session has no boot dir; its context is assembled
+  each turn in slots. Both have the durable session workspace
+  `<WorkspacesRoot>/<session>/{prompts,state,logs}`.
+- **Skill delivery.** CLI: files planted at boot, so a grant made later needs a
+  fresh boot. API: a listing in the skills slot, rebuilt each turn, and bodies
+  through `skill_get`. The rule for which skills qualify is shared
+  (`store.SkillGrantCurrent`; see above).
+- **Chat-harness services.** The result cache, truncation and per-turn
+  ceilings apply to an API session's tool calls and not to a CLI process's
+  calls to Nanite's tools (see "Subagent runtime").
+- **Scratchpad.** It is a tool of the chat harness, kept in
+  `state/scratchpad.json` for an API session so it survives turns. A CLI
+  process keeps its own working files in its directories.
+
+Open:
+
+- **Disabled skills.** A CLI boot plants a granted, approved skill even when
+  the catalog row is disabled, while `skill_get` refuses a disabled skill and
+  the API listing still offers it. The shared rule does not check `Enabled`;
+  adding it changes `Gate.Authorize`'s contract and many test fixtures, so it
+  is left for its own change.
+- **Tool roots and `directories`.** Rooting API tools in the host's
+  directories and workspace is step 2 of the same task (PR #546) and is not
+  described here until it lands.
+
 ## Subagent runtime
 
 A subagent's runtime follows its parent. A CLI process's calls to Nanite's own

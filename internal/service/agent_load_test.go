@@ -174,3 +174,27 @@ func TestAgentLoadRevisionOnlyChangeGetsItsOwnHost(t *testing.T) {
 		t.Fatalf("old row = %+v, %v", old, err)
 	}
 }
+
+// Two definitions that share an explicit agent slug stay separate rows.
+func TestAgentLoadDistinctDefinitionIDsSharingASlug(t *testing.T) {
+	svc, root := loadFixture(t, "Same body.", "slug: shared\n")
+	first, err := loadDir(t, svc, root, AgentLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "agent.md")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, []byte(strings.Replace(string(b), "def:load-agent", "def:other-agent", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadDir(t, svc, root, AgentLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.HostSettingsID == first.HostSettingsID || second.DefinitionRef.DefinitionID == first.DefinitionRef.DefinitionID {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+}

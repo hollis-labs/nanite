@@ -144,3 +144,33 @@ func TestAgentLoadEditWithoutBumpingRevisionSaysHow(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A revision label is part of the state: a revision-only change yields a new
+// host row pinned to the new revision, and the old row keeps its pin.
+func TestAgentLoadRevisionOnlyChangeGetsItsOwnHost(t *testing.T) {
+	svc, root := loadFixture(t, "Same body.", "")
+	first, err := loadDir(t, svc, root, AgentLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := agentdir.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := d.Host.Directories[0]
+	writeLoadDirRev(t, root, work, "2", "Same body.", "")
+	second, err := loadDir(t, svc, root, AgentLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Changed || second.HostSettingsID == first.HostSettingsID || second.Slug == first.Slug {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+	if second.DefinitionRef.Revision != "2" || second.HostSettings.Revision == "" || first.DefinitionRef.Revision != "1" {
+		t.Fatalf("pins: first=%+v second=%+v", first.DefinitionRef, second.DefinitionRef)
+	}
+	old, err := svc.Store.GetAgentHostSettings(context.Background(), first.HostSettingsID)
+	if err != nil || old.DefinitionRef.Revision != "1" {
+		t.Fatalf("old row = %+v, %v", old, err)
+	}
+}

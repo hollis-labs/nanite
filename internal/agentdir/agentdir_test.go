@@ -46,6 +46,8 @@ func TestLoadRefusals(t *testing.T) {
 		"bad mode":           {"runtime: api\nmode: sometimes\n", "mode"},
 		"relative directory": {"runtime: api\ndirectories: [rel]\n", "absolute"},
 		"cli without dirs":   {"runtime: cli\nprovider: claude\n", "directories"},
+		"second document":    {"runtime: api\n---\nruntime: cli\nprovider: claude\n", "more than one"},
+		"malformed trailing": {"runtime: api\n---\n: : [\n", "host.yaml"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

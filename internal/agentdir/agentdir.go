@@ -113,6 +113,14 @@ func Load(path string) (*Directory, error) {
 	if err = dec.Decode(&d.Host); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s: %w", HostFile, err)
 	}
+	// host.yaml is one document: anything after it would be silently ignored.
+	var extra yaml.Node
+	if err = dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("more than one YAML document")
+		}
+		return nil, fmt.Errorf("%s: %w", HostFile, err)
+	}
 	if err = d.Host.check(); err != nil {
 		return nil, fmt.Errorf("%s: %w", HostFile, err)
 	}

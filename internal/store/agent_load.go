@@ -87,7 +87,7 @@ func (s *Store) LoadAgent(ctx context.Context, in AgentLoad) (AgentLoadResult, e
 	if err != nil {
 		return res, err
 	}
-	sum := sha256.Sum256([]byte(di.pin.Digest + "\n" + string(settingsJSON)))
+	sum := sha256.Sum256([]byte(di.pin.ID + "\n" + di.pin.Revision + "\n" + di.pin.Digest + "\n" + string(settingsJSON)))
 	slug := agent + "-" + hex.EncodeToString(sum[:])[:8]
 	if err = ValidateHostSlug(slug); err != nil {
 		return res, badSetupRequest(err)
@@ -137,6 +137,12 @@ func (s *Store) LoadAgent(ctx context.Context, in AgentLoad) (AgentLoadResult, e
 		res.Created, res.HostCreated = true, true
 	case err != nil:
 		return res, err
+	default:
+		// The slug is a hash, but an existing row is reused only when it is
+		// exactly this state.
+		if host.DefinitionRef != di.pin || host.Source != source {
+			return res, fmt.Errorf("host settings %s exist for a different definition pin or source; refusing to reuse them", slug)
+		}
 	}
 	res.HostSettings = host
 

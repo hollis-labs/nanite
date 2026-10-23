@@ -143,21 +143,14 @@ func (s *Store) LoadAgent(ctx context.Context, in AgentLoad) (AgentLoadResult, e
 		if host.DefinitionRef != di.pin || host.Source != source {
 			return res, fmt.Errorf("host settings %s exist for a different definition pin or source; refusing to reuse them", slug)
 		}
-		// Settings are part of the identity. A row edited since it was loaded
-		// is not the authored state, and rewriting it could change what older
-		// sessions run under, so refuse and let the operator decide.
-		stored, mErr := json.Marshal(host.Settings)
-		if mErr != nil {
-			return res, mErr
-		}
-		if string(stored) != string(settingsJSON) {
-			return res, fmt.Errorf("host settings %s were edited after they were loaded and no longer match host.yaml; change host.yaml (a new state loads as a new row) or restore the row", slug)
-		}
-		// A disabled row is the operator's decision to stop using this state;
-		// loading does not quietly turn it back on. Title is a label, not
-		// identity, and is left as the operator set it.
-		if !host.Enabled {
-			return res, fmt.Errorf("host settings %s are disabled; enable them or change the agent directory", slug)
+		// The authored state is the definition pin and the host settings
+		// (runtime, provider, model, directories, ...). Title and enabled are
+		// operator-owned and not compared: a retitled or disabled row is still
+		// this state, and a load neither renames nor re-enables it. A settings
+		// mismatch is refused, never rewritten, because older sessions may be
+		// running under the row.
+		if diff := differingSettings(host.Settings, in.Settings); len(diff) > 0 {
+			return res, fmt.Errorf("host settings %s (%s) were edited after they were loaded and differ from host.yaml in: %s; change host.yaml (a new state loads as a new row) or restore the row", host.Slug, host.ID, strings.Join(diff, ", "))
 		}
 	}
 	res.HostSettings = host
@@ -238,4 +231,28 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// differingSettings names the top-level settings fields whose canonical JSON differs.
+func differingSettings(stored, authored NativeHostSettings) []string {
+	toMap := func(v NativeHostSettings) map[string]json.RawMessage {
+		raw, _ := json.Marshal(v)
+		m := map[string]json.RawMessage{}
+		_ = json.Unmarshal(raw, &m)
+		return m
+	}
+	a, b := toMap(stored), toMap(authored)
+	var out []string
+	for k, v := range a {
+		if string(v) != string(b[k]) {
+			out = append(out, k)
+		}
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

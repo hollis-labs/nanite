@@ -201,7 +201,7 @@ func TestAgentLoadDistinctDefinitionIDsSharingASlug(t *testing.T) {
 
 // A stored row edited after loading is not the authored state: reload refuses
 // instead of handing out the mutated row, and leaves the row alone.
-func TestAgentLoadRefusesAMutatedOrDisabledRow(t *testing.T) {
+func TestAgentLoadRefusesAMutatedRowButIgnoresEnabledAndTitle(t *testing.T) {
 	ctx := context.Background()
 	svc, root := loadFixture(t, "Body.", "")
 	first, err := loadDir(t, svc, root, AgentLoadOptions{})
@@ -217,7 +217,7 @@ func TestAgentLoadRefusesAMutatedOrDisabledRow(t *testing.T) {
 	if _, err = svc.Store.UpdateAgentHostSettings(ctx, mutated, row.Revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = loadDir(t, svc, root, AgentLoadOptions{}); err == nil || !strings.Contains(err.Error(), "edited after") {
+	if _, err = loadDir(t, svc, root, AgentLoadOptions{}); err == nil || !strings.Contains(err.Error(), "model") {
 		t.Fatalf("err = %v", err)
 	}
 	got, err := svc.Store.GetAgentHostSettings(ctx, first.HostSettingsID)
@@ -225,6 +225,8 @@ func TestAgentLoadRefusesAMutatedOrDisabledRow(t *testing.T) {
 		t.Fatalf("row was altered by the refused load: %+v, %v", got, err)
 	}
 
+	// Title and enabled are operator-owned, not authored state: a retitled,
+	// disabled row is still the loaded state and is reused untouched.
 	svc2, root2 := loadFixture(t, "Body.", "")
 	f2, err := loadDir(t, svc2, root2, AgentLoadOptions{})
 	if err != nil {
@@ -233,7 +235,8 @@ func TestAgentLoadRefusesAMutatedOrDisabledRow(t *testing.T) {
 	if _, err = svc2.Store.DisableAgentHostSettings(ctx, f2.HostSettingsID, f2.HostSettings.Revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = loadDir(t, svc2, root2, AgentLoadOptions{}); err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("err = %v", err)
+	again, err := loadDir(t, svc2, root2, AgentLoadOptions{})
+	if err != nil || again.Changed || again.HostSettingsID != f2.HostSettingsID {
+		t.Fatalf("again = %+v, %v", again, err)
 	}
 }

@@ -1,0 +1,85 @@
+name: Build binaries
+
+# CW-20261024-0120: binaries are built once in CI and installed from GitHub; nothing is built on a
+# target machine. Per commit: nanite_<version>_<os>_<arch>.tar.gz (linux/amd64, darwin/arm64) +
+# SHA256SUMS + build-info.json in one workflow artifact named nanite-<sha12>. NO tags, releases or
+# prereleases are created (those stay the owner's). Contract: Cerberus' ci-build-deploy-workflow-v1;
+# this inlines the steps of the reusable hollis-labs/tools go-app-build.yml until that merges.
+# Design: docs/architecture/ci-binaries-0120.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-binaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The same full suite as go-test.yml; gates the build on main (the duplicate run is accepted for now).
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install sandbox prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --ro-bind / / true
+      - name: Run the full test suite
+        run: go test -count=1 -timeout=20m ./...
+
+  build:
+    needs: test
+    # Fork PRs never run on the self-hosted runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, build-1]
+    timeout-minutes: 30
+    env:
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Toolchain
+        run: |
+          go version
+          node --version
+      - name: Install UI dependencies
+        run: cd ui && npm ci
+      - name: Build tarballs, checksums and build-info.json
+        run: scripts/ci/build-binaries.sh linux/amd64 darwin/arm64
+      - name: Smoke-test the linux binary
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          tar -xzf dist/nanite_*_linux_amd64.tar.gz -C "$tmp"
+          bin=$(ls "$tmp"/nanite_*_linux_amd64/nanite)
+          "$bin" version
+          want=$(sed -n 's/.*"sha12":"\([0-9a-f]*\)".*/\1/p' dist/build-info.json)
+          "$bin" version | grep -q "$want"
+      - name: Verify checksums
+        run: cd dist && sha256sum -c SHA256SUMS
+      - name: Artifact name
+        id: name
+        run: echo "sha12=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nanite-${{ steps.name.outputs.sha12 }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}

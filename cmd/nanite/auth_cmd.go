@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,10 +23,14 @@ Credentials for the Nanite HTTP API (CW-20261011-0036).
 
   whoami                          show the credential this CLI presents
   list [--all]                    list credentials (never secrets)
-  create --kind client --label L --scope read,operate [--ttl-days N]
-                                  create a client credential; the secret is shown ONCE
+  create --kind client --label L --scope read,operate [--ttl-days N] [--output FILE [--force]]
+                                  create a client credential; the secret is shown ONCE.
+                                  With --output the secret goes only to FILE (mode 0600,
+                                  refused if it exists unless --force) and is never printed
   revoke <id>                     revoke a credential (open streams close)
-  rotate <id>                     replace a credential; the new secret is shown ONCE
+  rotate <id> [--output FILE [--force]]
+                                  replace a credential; the new secret is shown ONCE (or
+                                  written only to FILE with --output)
   login-link                      print a one-time (60 s) browser login URL (on the server's
                                   NANITE_PUBLIC_URL, else this shell's, else the API base URL)
   token-path                      print the operator token file path
@@ -64,8 +69,14 @@ func cmdAuth(args []string) {
 		label := fs.String("label", "", "what this credential is for (required)")
 		scopes := fs.String("scope", "", "comma-separated scopes (required)")
 		ttl := fs.Int("ttl-days", 0, "lifetime in days (default 30)")
+		output := fs.String("output", "", "write the secret to this file (mode 0600) instead of printing it")
+		force := fs.Bool("force", false, "with --output, replace an existing file")
 		_ = fs.Parse(args[1:])
 		body := map[string]any{"kind": *kind, "label": *label, "scopes": splitList(*scopes), "ttl_days": *ttl}
+		if *output != "" {
+			err = authIssue(os.Stdout, http.MethodPost, "/api/auth/credentials", body, *output, *force)
+			break
+		}
 		err = authCall(http.MethodPost, "/api/auth/credentials", body)
 		if err == nil {
 			fmt.Fprintln(os.Stderr, "\nStore the secret now: it is not shown again and cannot be recovered.")
@@ -77,11 +88,29 @@ func cmdAuth(args []string) {
 		}
 		err = authCall(http.MethodDelete, "/api/auth/credentials/"+args[1], nil)
 	case "rotate":
-		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: nanite auth rotate <id>")
+		fs := flag.NewFlagSet("auth rotate", flag.ExitOnError)
+		output := fs.String("output", "", "write the new secret to this file (mode 0600) instead of printing it")
+		force := fs.Bool("force", false, "with --output, replace an existing file")
+		rest := args[1:]
+		var id string
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+			id, rest = rest[0], rest[1:]
+		}
+		_ = fs.Parse(rest)
+		if id == "" && fs.NArg() == 1 {
+			id = fs.Arg(0)
+		} else if fs.NArg() != 0 {
+			id = ""
+		}
+		if id == "" {
+			fmt.Fprintln(os.Stderr, "usage: nanite auth rotate <id> [--output FILE [--force]]")
 			os.Exit(2)
 		}
-		err = authCall(http.MethodPost, "/api/auth/credentials/"+args[1]+"/rotate", map[string]any{})
+		if *output != "" {
+			err = authIssue(os.Stdout, http.MethodPost, "/api/auth/credentials/"+id+"/rotate", map[string]any{}, *output, *force)
+			break
+		}
+		err = authCall(http.MethodPost, "/api/auth/credentials/"+id+"/rotate", map[string]any{})
 		if err == nil {
 			fmt.Fprintln(os.Stderr, "\nStore the new secret now: it is not shown again. The old secret no longer works.")
 		}
@@ -165,6 +194,61 @@ func authCall(method, path string, body any) error {
 	}
 	return nil
 }
+
+// authIssue mints (or rotates) a credential and writes its secret only to the
+// 0600 file at output. The secret is never printed, logged or placed in an
+// error: out gets the credential's metadata with the secret removed. The
+// output path is checked before the server is asked to mint, and if the file
+// cannot be written after minting the new credential is revoked, so no
+// credential exists whose secret nobody holds.
+func authIssue(out io.Writer, method, path string, body any, output string, force bool) error {
+	if !force {
+		if _, err := os.Lstat(output); err == nil {
+			return fmt.Errorf("%s already exists; nothing was issued (use --force to replace it)", output)
+		}
+	}
+	data, status, err := authDo(method, path, body)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("%s %s: HTTP %d: %s", method, path, status, redactSecrets(strings.TrimSpace(string(data))))
+	}
+	var view map[string]any
+	if err := json.Unmarshal(data, &view); err != nil {
+		return fmt.Errorf("%s %s: unreadable response; the credential may have been issued, check `%s auth list`", method, path, brand.BinaryName)
+	}
+	secret, _ := view["secret"].(string)
+	id, _ := view["id"].(string)
+	if secret == "" {
+		return fmt.Errorf("%s %s: the response carried no secret", method, path)
+	}
+	delete(view, "secret")
+	if err := apiauth.WriteSecretFile(output, secret, force); err != nil {
+		// The secret was never stored; do not leave a credential nobody holds.
+		if id != "" && method == http.MethodPost && strings.HasSuffix(path, "/api/auth/credentials") {
+			_, _, _ = authDo(http.MethodDelete, "/api/auth/credentials/"+id, nil)
+			return fmt.Errorf("could not write %s (%v); the new credential %s was revoked", output, err, id)
+		}
+		return fmt.Errorf("could not write %s (%v); the credential %s was issued but its secret was not saved: rotate it again", output, err, id)
+	}
+	view["written_to"] = output
+	pretty, err := json.MarshalIndent(view, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(out, string(pretty))
+	fmt.Fprintf(os.Stderr, "\nThe secret was written to %s (mode 0600) and is not shown again.\n", output)
+	return nil
+}
+
+// redactSecrets removes anything shaped like a Nanite credential from text
+// about to be shown.
+func redactSecrets(s string) string {
+	return secretShape.ReplaceAllString(s, "[redacted]")
+}
+
+var secretShape = regexp.MustCompile(`nan_(operator|client|agent)_[A-Za-z0-9_-]{20,}`)
 
 func authLoginLink() error {
 	data, status, err := authDo(http.MethodPost, "/api/auth/login-links", map[string]any{})

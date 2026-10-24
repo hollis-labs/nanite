@@ -140,7 +140,7 @@ func plantAgyHome(bootDir string, params SetupParams) error {
 			return fmt.Errorf("agent: agy home: link %s: %w", rel, err)
 		}
 	}
-	return writeAgySettings(gem, agyMCPAllowRules(params))
+	return writeAgySettings(gem, agyAllowRules(params))
 }
 
 // writeAgySettings merges rules into <gem>/antigravity-cli/settings.json: every

@@ -10,15 +10,22 @@
 # that package on its own trunk, while go.mod's pinned agentkit v0.6.1
 # (the real, published dependency) has it fine.
 build: generate-envelopes build-ui
-	GOWORK=off go build -o nanite ./cmd/nanite
+	GOWORK=off go build -ldflags "$(VERSION_LDFLAGS)" -o nanite ./cmd/nanite
 
 # Developer build enables development-only agent profiles. Never publish it.
 build-dev: generate-envelopes build-ui
-	GOWORK=off go build -tags devmode -o nanite ./cmd/nanite
+	GOWORK=off go build -tags devmode -ldflags "$(VERSION_LDFLAGS)" -o nanite ./cmd/nanite
 
 # Install to ~/go/bin/ (used by MCP and Cerberus)
 install: generate-envelopes build-ui
-	GOWORK=off go install ./cmd/nanite
+	GOWORK=off go install -ldflags "$(VERSION_LDFLAGS)" ./cmd/nanite
+
+# Product version comes from the nearest repo-level v* tag (pkg/pluginapi/* tags
+# are the plugin API module's own versions and are excluded by --match). Untagged
+# commits read like 0.3.0-beta.1-12-gabc123456789; no tags at all reads "dev".
+GIT_VERSION := $(shell git describe --tags --match 'v*' --dirty 2>/dev/null | sed 's/^v//')
+VERSION_PKG := github.com/hollis-labs/nanite/internal/version
+VERSION_LDFLAGS := -X $(VERSION_PKG).GitSHA=$(shell git rev-parse --short=12 HEAD 2>/dev/null || echo dev)$(if $(GIT_VERSION), -X $(VERSION_PKG).Version=$(GIT_VERSION))
 
 # Generate TypeScript types from the released go-envelopes module selected by
 # go.mod. The module-owned exporter resolves embedded schemas and metadata.
@@ -96,12 +103,11 @@ run: build
 # Build distributable macOS release archives + checksums, for the
 # hollis-labs/homebrew-tap Formula/nanite.rb. VERSION is the git tag the
 # release workflow is packaging (e.g. v0.4.0) — passed in, never guessed here.
-# Only injects GitSHA via ldflags, matching the mechanism documented in
-# internal/version/version.go; internal/version.Version stays a hand-bumped
-# literal per the release skill's own checklist.
+# The binary's Version is injected from VERSION (the tag, leading v stripped)
+# along with GitSHA; see internal/version/version.go.
 VERSION ?= dev
 RELEASE_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-RELEASE_LDFLAGS := -s -w -X github.com/hollis-labs/nanite/internal/version.GitSHA=$(RELEASE_COMMIT)
+RELEASE_LDFLAGS := -s -w -X $(VERSION_PKG).GitSHA=$(RELEASE_COMMIT) -X $(VERSION_PKG).Version=$(patsubst v%,%,$(VERSION))
 
 package-release: generate-envelopes build-ui
 	mkdir -p dist

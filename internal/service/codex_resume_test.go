@@ -31,9 +31,10 @@ import (
 // scratch dir.
 const fakeCodexResumeScript = `#!/bin/sh
 dir="%[1]s"
-# Real codex keeps a thread's rollout under $CODEX_HOME, and Nanite points that
-# at the per-boot dir, so a thread does not outlive its boot.
-tdir="${CODEX_HOME:-$dir}/threads"
+# Real codex keeps a thread's rollout at $CODEX_HOME/sessions/.../rollout-<ts>-<id>.jsonl.
+# Nanite points CODEX_HOME at the per-boot dir and links its sessions/ to a
+# per-session persistent dir, so a thread outlives its boot (CW-20261024-0034).
+tdir="${CODEX_HOME:-$dir}/sessions/2026/10/24"
 printf '%%s ' "$@" | tr '\n' ' ' >> "$dir/argv.log"
 echo >> "$dir/argv.log"
 state=pre
@@ -50,19 +51,19 @@ done
 prompt="$a"
 mkdir -p "$tdir"
 if [ -n "$id" ]; then
-  if [ ! -f "$tdir/$id" ]; then echo "no rollout found for thread id $id" >&2; exit 1; fi
+  if [ ! -f "$tdir/rollout-t-$id.jsonl" ]; then echo "no rollout found for thread id $id" >&2; exit 1; fi
   thread="$id"
 else
   n=$(cat "$dir/threads.count" 2>/dev/null || echo 0)
   n=$((n+1))
   echo "$n" > "$dir/threads.count"
   thread="thr-0113-$n"
-  : > "$tdir/$thread"
+  : > "$tdir/rollout-t-$thread.jsonl"
 fi
-printf '%%s\n' "$prompt" >> "$tdir/$thread"
+printf '%%s\n' "$prompt" >> "$tdir/rollout-t-$thread.jsonl"
 case "$prompt" in
   *"what is the code word"*)
-    word=$(sed -n 's/.*the code word is \([a-z]*\).*/\1/p' "$tdir/$thread" | head -1)
+    word=$(sed -n 's/.*the code word is \([a-z]*\).*/\1/p' "$tdir/rollout-t-$thread.jsonl" | head -1)
     reply="${word:-I do not know}" ;;
   *) reply="noted" ;;
 esac
@@ -75,6 +76,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":
 // A two-turn Codex session keeps its context: turn 1 states a fact, turn 2
 // asks for it back and gets it, because turn 2 resumed turn 1's thread.
 func TestCodexExecSecondTurnResumesTheThreadAndKeepsContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	tc := codexSubprocessCase
 	tc.script = fmt.Sprintf(fakeCodexResumeScript, dir)
@@ -144,14 +146,14 @@ func readFileString(t *testing.T, path string) string {
 	return string(data)
 }
 
-// A Codex thread does not outlive its boot: real codex keeps a thread's
-// rollout under $CODEX_HOME, which Nanite points at the per-boot dir. So a
-// cold boot (host restart, an evicted or killed session) must start a fresh
-// thread, not `exec resume <old id>`, which codex refuses with "no rollout
-// found for thread id" and the turn would fail. Before go-providers v0.41.0
-// Codex reported no thread id, so this always worked; with it, Nanite has to
-// keep the id from reaching a later boot (providerSessionSurvivesBoot).
-func TestCodexColdBootStartsAFreshThreadInsteadOfResumingOne(t *testing.T) {
+// A Codex thread outlives its boot (CW-20261024-0034): a cold boot (host
+// restart, an evicted or killed session) resumes the same thread with
+// `exec resume <id>`, because the boot dir's sessions/ is linked to a
+// per-session persistent dir that holds the rollout. The fake refuses a
+// resume without a rollout, as real codex does, so a regression to a per-boot
+// sessions dir fails the turn.
+func TestCodexColdBootResumesTheSameThread(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	tc := codexSubprocessCase
 	tc.script = fmt.Sprintf(fakeCodexResumeScript, dir)
@@ -192,7 +194,7 @@ func TestCodexColdBootStartsAFreshThreadInsteadOfResumingOne(t *testing.T) {
 
 	events := ask("Now, what is the code word?")
 	if e := findEvent(events, "error"); e != nil {
-		t.Fatalf("the first turn after a cold boot failed: %+v (a stored codex thread id was resumed in a boot that does not have the thread)", e)
+		t.Fatalf("the first turn after a cold boot failed: %+v", e)
 	}
 	if findEvent(events, "stream_end") == nil {
 		t.Fatalf("turn 2 did not end: %v", eventTypes(events))
@@ -202,19 +204,31 @@ func TestCodexColdBootStartsAFreshThreadInsteadOfResumingOne(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("codex ran %d times, want one process per turn: %q", len(calls), calls)
 	}
-	if strings.Contains(calls[1], " resume ") {
-		t.Fatalf("turn 2 resumed a thread across a boot: %q", calls[1])
+	if !strings.Contains(calls[1], " resume thr-0113-1 -- ") {
+		t.Fatalf("turn 2 did not resume turn 1's thread across the boot: %q", calls[1])
 	}
-	if got := strings.TrimSpace(readFileString(t, filepath.Join(dir, "threads.count"))); got != "2" {
-		t.Fatalf("codex started %s threads, want 2: one per boot", got)
+	if got := strings.TrimSpace(readFileString(t, filepath.Join(dir, "threads.count"))); got != "1" {
+		t.Fatalf("codex started %s threads, want 1: the cold boot must resume, not start a new thread", got)
 	}
-	// Nothing was persisted for a later boot to resume.
+	msgs, err := f.st.ListMessages(ctx, f.session, 100)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	var last string
+	for _, m := range msgs {
+		if text, ok := structuredmessage.UnwrapText(m.Content); ok && text == "plum" {
+			last = text
+		}
+	}
+	if last != "plum" {
+		t.Fatalf("turn 2 did not answer from turn 1's context after the restart; messages %d", len(msgs))
+	}
 	var stored string
 	if err := f.st.DB.QueryRowContext(ctx, `SELECT COALESCE(provider_session_id, '') FROM agent_runtime WHERE id = ?`, f.session).Scan(&stored); err != nil {
 		t.Fatalf("read agent_runtime row: %v", err)
 	}
-	if stored != "" {
-		t.Fatalf("agent_runtime.provider_session_id = %q, want none for a codex thread no later boot can resume", stored)
+	if stored != "thr-0113-1" {
+		t.Fatalf("agent_runtime.provider_session_id = %q, want the resumed thread thr-0113-1", stored)
 	}
 }
 

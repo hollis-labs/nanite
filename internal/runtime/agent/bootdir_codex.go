@@ -192,6 +192,9 @@ func (codexLayout) populateInactive(bootDir string, params SetupParams, authoriz
 	if err := linkCodexHostAuth(bootDir); err != nil {
 		return result, err
 	}
+	if err := linkCodexSessions(bootDir, params); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 

@@ -1,6 +1,6 @@
 # Tether address and durable actor for native agents
 
-Decision record. Nanite agents created with `agent_setup` have no stable
+Decision record (accepted). Nanite agents created with `agent_setup` have no stable
 Tether address, so Tether mail cannot reach them. This document decides which
 system owns the address, who owns the binding between an agent and that
 address, and how the binding is created, used and retired. It is design only;
@@ -246,32 +246,25 @@ operator can match a Tether directory entry to the install that owns it.
 4. Rollback: disable the binding and retire the instance; deregister in
    Tether. No data migration to undo.
 
-## Open questions for the operator
+## Operator decisions
 
-1. Confirm Tether as the URN authority (option A) and the retirement of
-   `nanite`-authority URNs as durable addresses.
-2. Approve a Tether-side change exposing idempotent registration on
-   `(substrate, external_id)` over HTTP. Without it enrollment has the
-   duplicate-entry window described above.
-3. A `tether.registry` credential for Nanite is needed. Issuing it is a
-   credential action that needs the operator's approval; scope and owner
-   should be decided first.
-4. Should every `agent_setup` agent be enrolled (an explicit
-   `agent enroll` step per agent, or a flag at setup), or only agents marked as
-   messaging participants?
-5. Install identity: see the section below; confirm the proposal.
-   (Original question: is there a stable id for a Nanite install to prefix the
-   external key? If not, one must be introduced (hub and dev installs
-   otherwise collide on a shared Tether.)
-6. Sends to a `deprecated` URN: on `main` the send path has no registry
-   status check, and deregistration does not touch messages. So mail to a
-   retired agent is accepted and sits undelivered. Decide whether Tether
-   should refuse such sends, or whether Nanite should drain or ignore that
-   mail at retire. (Found by reading code; no test run.)
-7. Sender-ownership enforcement is not implemented in Tether even in
-   `enforce` mode, and no date exists. Decide whether more than one enrolled
-   agent per install is acceptable before it exists, or whether that waits for
-   the Tether work.
+Accepted. The operator answered the questions this record raised:
+
+1. Tether is the URN authority. `nanite`-authority URNs stop being addresses.
+2. Tether exposes idempotent registration over HTTP (step T0); it is a Tether
+   change.
+3. Nanite gets a scoped `tether.registry` credential in its own 0600 file,
+   issued at run time with the operator's explicit word. It is never issued
+   as part of this design.
+4. Enrollment is explicit and only for agents that take part in messaging.
+5. Install identity is the `install_identity` table described above: a random
+   UUID on first boot, a regeneration command for cloned databases, and the
+   external key `nanite/<install_id>/<host_settings_id>`.
+6. Tether refuses sends to a deprecated URN, so retire leaves no mail to
+   drain on the Nanite side. This is a Tether change.
+7. More than one enrolled agent per install is allowed with advisory
+   attribution. Sender-identity enforce mode must be on before any production
+   messaging that depends on trusted senders.
 
 ## Task breakdown (dependency order)
 
@@ -280,6 +273,7 @@ Letters refer to the scoping list for this workstream.
 | Step | Owner | Work | Depends on |
 |---|---|---|---|
 | T0 | Tether | Expose idempotent registration over HTTP (new, not in the original list) | none |
+| T0b | Tether | Refuse sends to a deprecated URN | none |
 | A4 | libs/Tether | Typed `ListMessages` and `WatchMessages` in the client, release | none |
 | A6 | Nanite | `Idempotency-Key` on bridge sends, correct stale delivery docs | none |
 | A7 | Nanite | Silence the A2A push notifier log noise | none |

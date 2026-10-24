@@ -36,7 +36,7 @@ Result: the agent sees its own allowlist; the operator's real `~/.gemini` (deskt
 <farm>/                         HOME for the agy process
   <every entry of the real $HOME>   -> symlink to the real entry
                                     EXCEPT: .gemini, .agents, .DS_Store, .CFUserTextEncoding, .Trash
-  .gemini/                      a real directory, private to this agent
+  .gemini/                      private to this agent (Nanite: a symlink to a persistent per-agent directory)
     oauth_creds.json                 -> symlink to ~/.gemini/oauth_creds.json
     google_accounts.json             -> symlink to ~/.gemini/google_accounts.json
     jetski-standalone-oauth-token    -> symlink to ~/.gemini/jetski-standalone-oauth-token
@@ -86,7 +86,7 @@ agy sends a `server/discover` JSON-RPC request first. Your MCP server must answe
 
 ## 3. Evidence
 
-Setup common to both turns: throwaway workspace, a stub stdio MCP server exposing `ok_tool` and `no_tool` (each returns a fixed string and logs its `tools/call`), plugin `stub` with `mcp_config.json`, `agy --model gemini-3.8-flash-low --print-timeout 150s --output-format stream-json -p 'Call the MCP tool ok_tool from the stub server, then call the MCP tool no_tool from the stub server. Use no other tools. Reply with one line per tool: the tool name and either its result text or the denial message.'`, no `--dangerously-skip-permissions`, `permission_mode: request-review`.
+Setup common to rows 1-4 (row 5 used Nanite's own launch path): throwaway workspace, a stub stdio MCP server exposing `ok_tool` and `no_tool` (each returns a fixed string and logs its `tools/call`), plugin `stub` with `mcp_config.json`, `agy --model gemini-3.8-flash-low --print-timeout 150s --output-format stream-json -p 'Call the MCP tool ok_tool from the stub server, then call the MCP tool no_tool from the stub server. Use no other tools. Reply with one line per tool: the tool name and either its result text or the denial message.'`, no `--dangerously-skip-permissions`, `permission_mode: request-review`.
 
 | # | Setup | Result | Tokens |
 | --- | --- | --- | --- |
@@ -94,12 +94,12 @@ Setup common to both turns: throwaway workspace, a stub stdio MCP server exposin
 | 2 | Same hook with a correct gate, `decision: allow` for `ok_tool` | Still `permission check failed ... user denied permission`: hook allow does **not** approve; stub never called | ~9.8k |
 | 3 | **Farm HOME, private `.gemini/antigravity-cli/settings.json` with `permissions.allow: ["mcp(stub_stub/ok_tool)"]`, no hook** | `ok_tool` **executed** (stub logged `tools/call`); `no_tool` **denied** with `permission check failed ... user denied permission for mcp(stub_stub/no_tool)`. Per-tool granularity inside one server proven | 15.7k |
 | 4 | Same as 3, with the operator's global hook plugin (`tether-pulse`, `PreToolUse` matcher `.*`) copied into the private `.gemini/config/plugins/` so it is active | Identical to 3: no interference | 16.1k |
+| 5 | Nanite's real launch path (HOME from the agy layout's AmendEnv, generated settings, two servers: host `stub` granted only `ok_tool` via explicit rule, Nanite's own server via `mcp(tether_nanite/*)`), asked `ok_tool`, `own_tool`, `no_tool` | `ok_tool` ran, `own_tool` ran via the wildcard, `no_tool` denied; ServerNames `tether_stub` and `tether_nanite`; exit 0, empty response, stderr hint. A before/after listing of the real `~/.gemini` and `~/.agents` showed no change | 24.4k (an earlier turn on the same path: 16.1k, denial ended it before the second server was reached) |
 
-(Token counts are agy's `usage.total_tokens`. Turn 3 and 4 numbers include the reply turns.)
+(Token counts are agy's `usage.total_tokens`.)
 
 The hook payload, for reference (workspace hooks are not part of the recommended mechanism): `toolCall.name` is always `call_mcp_tool`, `toolCall.args` = `{ServerName, ToolName, Arguments}`, plus `conversationId`, `stepIdx`, `lastUserInput`, `workspacePaths`, `modelName`. Do not match on the whole stdin: it contains the prompt.
 
-| 5 | Nanite's real launch path (HOME from the agy layout's AmendEnv, generated settings, two servers: host `stub` granted only `ok_tool` via explicit rule, Nanite's own server via `mcp(tether_nanite/*)`), asked `ok_tool`, `own_tool`, `no_tool` | `ok_tool` ran, `own_tool` ran via the wildcard, `no_tool` denied; ServerNames `tether_stub` and `tether_nanite`; exit 0, empty response, stderr hint. A before/after listing of the real `~/.gemini` and `~/.agents` showed no change | 24.4k (an earlier turn on the same path: 16.1k, denial ended it before the second server was reached) |
 
 Note on ordering: a denial can end the turn, so put the tool you expect to be denied last when a run must reach several allowed tools.
 

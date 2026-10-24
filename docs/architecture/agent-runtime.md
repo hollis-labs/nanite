@@ -216,9 +216,12 @@ Open:
   (`store.SkillGrantCurrent`) does not check `Enabled`, and adding it changes
   `Gate.Authorize`'s contract and many test fixtures, so that is left for its own
   change.
-- **Tool roots and `directories`.** Rooting API tools in the host's
-  directories and workspace is step 2 of the same task (PR #546) and is not
-  described here until it lands.
+- **Tool roots and `directories`.** An API session's file and shell tools are
+  rooted in the host's `directories` (first entry first) and the session
+  workspace (`runtimeagent.SessionToolRoots`), as a CLI launch's roots are. A
+  create-time `work_root` inside those directories leads them for either runtime.
+  Control-plane directories are protected, and a host directory that contains one
+  withholds `dev_bash` (`SessionToolProtection`).
 
 ## Subagent runtime
 

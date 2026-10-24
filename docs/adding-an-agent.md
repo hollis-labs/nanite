@@ -281,8 +281,9 @@ nanite agent load --dry-run            # show the diff, write nothing
 nanite agent load --grant-same-as <previous-slug> --reason "same tools"
 ```
 
-`host.yaml` accepts `version`, `runtime`, `provider`, `model`, `directories`, plus
-`slug`, `title` and `mode` (`live` or `pinned`); unknown keys are refused. A load installs the definition and records a **new**
+`host.yaml` accepts `version`, `runtime`, `provider`, `model`, `directories`,
+`harness_profile`, `mcp_servers`, plus `slug`, `title` and `mode` (`live` or
+`pinned`); unknown keys are refused. A load installs the definition and records a **new**
 host-settings row named from the agent and a hash of the definition and host
 settings, so loading the same state twice changes nothing, and an edit never
 touches the row an older session was admitted under (see
@@ -294,11 +295,29 @@ revision and the body to start a session against the new row.
   carries forward.
 - Editing `agent.md` needs a new `revision:` label (a revision names one set of
   bytes); the error says so.
-- `mode: pinned` refuses a second revision unless `--force`.
-- `skills/` is listed but not installed yet, and a definition that declares more
-  than the native runtime can launch is refused, as in `agent setup`.
+- `mode: pinned` refuses a second revision unless `--force`. With no `mode`, the
+  default rule decides (`NANITE_AGENT_MODE`, then the target's labels in
+  `NANITE_RESOURCE_ENV`/`NANITE_RESOURCE_ADMIN`): `live` only for a target
+  labeled `env: dev` and not `admin: owner`, else `pinned`. The load output says
+  which mode applied and why. Set `mode: live` to republish on every load. An
+  operator's own `agent load`/`agent run` does not treat the bare fallback as
+  `pinned` (it publishes), so editing and running again keeps working; the
+  reload endpoint, which is unattended, applies the full rule.
+- A `live` agent's directory may not sit inside, or contain, one of its own
+  `directories`: the agent could rewrite its definition. A `pinned` one may.
+- Skills in `skills/` that `agent.md` requests are packed, digest-pinned and
+  stored; they are not delivered to the session yet (the load says so). A
+  definition that declares more than the native runtime can launch is refused, as
+  in `agent setup`. Each field's disposition is in the load output (`fields`).
 - The load writes the database directly, like `setup`; a running server uses the
-  new row for its next session without a restart. HTTP reload is not built.
+  new row for its next session without a restart. A running server reloads a
+  directory with `POST /api/agent-reload` `{"host": "<slug or id>"}` (maintain
+  scope; `force`, `dry_run`, and, with an admin credential and a `reason`,
+  `grant_same_as`). It re-reads the directory recorded on that host row
+  (`agent_dir`), publishes a new row when the state changed, and returns the body
+  to start a session on it; sessions already running keep their row, and an API
+  session's later turns fail with `host_revision_changed` if its own row is
+  edited or disabled.
 
 ### Running it from the project
 
@@ -313,7 +332,8 @@ nanite agent run --session <id>     # resume (no reload)
 `run` does an `agent load` first (same flags: `--force`, `--grant-same-as`,
 `--reason`), then starts a session on the loaded revision and host row. For a
 `runtime: cli` agent the current directory is the work root and must sit inside
-`directories` in `host.yaml`; an API agent gets none. Edit the directory and run
+`directories` in `host.yaml`; an API agent gets it as work root too when a
+`directories` entry contains it, and otherwise works from its first directory. Edit the directory and run
 again to pick the change up; the server is not restarted and running sessions
 keep their revision. A fresh revision has no tool grants, so `run` prints the
 `agent load --grant-same-as` command to give it the previous row's tools.

@@ -58,6 +58,9 @@ var routeRules = []routeRule{
 	rule("", `^/api/native-authority(/|$)`, ScopeAdmin),
 	// One-call agent setup grants authority, and the agent views list it.
 	rule("", `^/api/(agent-setup|native-agents)(/|$)`, ScopeAdmin),
+	// A reload writes host settings (maintain); re-granting tools on it needs
+	// admin, which the handler checks itself.
+	rule("POST", `^/api/agent-reload$`, ScopeMaintain),
 
 	// Code execution, credentials, retirement and posture: admin.
 	rule("!GET", `^/api/agents/\{[^}]+\}/(retire|retirement-export)$`, ScopeAdmin),

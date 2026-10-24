@@ -140,6 +140,10 @@ func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	for relPath, content := range skillFiles {
 		files[relPath] = content
 	}
+	// The definition's pinned reference files, under agent/.
+	for relPath, content := range definitionFiles(params) {
+		files[relPath] = content
+	}
 
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {
@@ -186,6 +190,9 @@ func (codexLayout) populateInactive(bootDir string, params SetupParams, authoriz
 		return result, err
 	}
 	if err := linkCodexHostAuth(bootDir); err != nil {
+		return result, err
+	}
+	if err := linkCodexSessions(bootDir, params); err != nil {
 		return result, err
 	}
 	return result, nil

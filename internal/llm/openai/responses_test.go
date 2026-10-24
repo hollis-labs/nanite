@@ -291,3 +291,29 @@ func TestResponsesPreservesAccountingPresence(t *testing.T) {
 		t.Fatal("no Responses accounting usage event")
 	}
 }
+
+// A wire pinned in the registry beats the model-name rules: go-gpt always uses
+// Responses (with no tools or reasoning config), a chat alias never does.
+func TestUseResponsesHonorsPinnedWire(t *testing.T) {
+	for _, tc := range []struct {
+		model  string
+		tools  bool
+		budget int
+		want   bool
+	}{
+		{"go-gpt", false, 0, true},
+		{"go-gpt", true, 0, true},
+		{"go-glm", true, 20000, false},
+		{"openai-mini", false, 0, false},
+		{"gpt-5.6", true, 8000, true}, // unpinned: name rules still apply
+		{"gpt-4o", false, 0, false},
+	} {
+		req := llmtypes.ChatRequest{Model: tc.model}
+		if tc.tools {
+			req = toolReq(tc.model)
+		}
+		if got := useResponses(reasoningContext(tc.budget), req); got != tc.want {
+			t.Errorf("useResponses(%s, tools=%v, budget=%d) = %v, want %v", tc.model, tc.tools, tc.budget, got, tc.want)
+		}
+	}
+}

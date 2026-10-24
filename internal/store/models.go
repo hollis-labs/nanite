@@ -84,10 +84,27 @@ func (s *Store) SyncModelsFromRegistry(ctx context.Context) (int, error) {
 		if providerID == "" {
 			continue
 		}
-		pricing, err := json.Marshal(map[string]float64{
-			"input_per_m":  current.InputPricePerM,
-			"output_per_m": current.OutputPricePerM,
-		})
+		var pricing []byte
+		var err error
+		if current.PriceUnknown {
+			// A gateway alias has no price Nanite can know: say so instead of
+			// writing zeroes a reader would take for free.
+			// The same JSON carries the other unknowns, since the table has no
+			// column for them: unpublished limits and unprobed tool support.
+			meta := map[string]any{"price_unknown": true}
+			if current.LimitsUnknown {
+				meta["limits_unknown"] = true
+			}
+			if current.ToolsUnknown {
+				meta["tools_unknown"] = true
+			}
+			pricing, err = json.Marshal(meta)
+		} else {
+			pricing, err = json.Marshal(map[string]float64{
+				"input_per_m":  current.InputPricePerM,
+				"output_per_m": current.OutputPricePerM,
+			})
+		}
 		if err != nil {
 			return applied, fmt.Errorf("marshal pricing for %s: %w", current.ModelID, err)
 		}

@@ -21,7 +21,7 @@ func (c *Client) completeResponse(ctx context.Context, req llmtypes.ChatRequest)
 	if err != nil {
 		return "", err
 	}
-	response, err := api.Responses.New(ctx, params)
+	response, err := api.Responses.New(ctx, params, c.requestOptions(ctx)...)
 	if err != nil {
 		return "", translateError(err)
 	}
@@ -65,7 +65,7 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 	if err != nil {
 		return nil, err
 	}
-	stream := api.Responses.NewStreaming(ctx, params)
+	stream := api.Responses.NewStreaming(ctx, params, c.requestOptions(ctx)...)
 	out := make(chan llmtypes.StreamEvent, 16)
 	go func() {
 		defer close(out)

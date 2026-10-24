@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentdir"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -27,6 +29,17 @@ type AgentLoadOptions struct {
 	// to the new revision. Empty means the new revision has no authority.
 	GrantFrom string
 	Reason    string
+	// AppDefaultMode and Labels feed the default mode rule when host.yaml names
+	// none (ResolveAgentMode). Zero values give the conservative default, pinned.
+	AppDefaultMode string
+	Labels         DeployLabels
+	// Attended says an operator ran this load from a shell (`agent load`, `agent run`)
+	// and is present to see the result. Then the conservative fallback of the
+	// default rule (pinned because nothing says dev) does not pin the agent or
+	// bar a directory inside its own directories, so editing and running again
+	// keeps working; an explicit mode, the application default and a dev label
+	// still apply. An unattended reload never sets it.
+	Attended bool
 }
 
 // AgentLoadResponse is the outcome of a load and the body to start a session.
@@ -34,6 +47,7 @@ type AgentLoadResponse struct {
 	Path           string          `json:"path"`
 	Agent          string          `json:"agent"`
 	Mode           string          `json:"mode,omitempty"`
+	ModeReason     string          `json:"mode_reason,omitempty"`
 	DryRun         bool            `json:"dry_run,omitempty"`
 	Changed        bool            `json:"changed"`
 	DefinitionRef  DefinitionRef   `json:"definition_ref"`
@@ -46,17 +60,32 @@ type AgentLoadResponse struct {
 	Tools          []string        `json:"tools"`
 	// Notes are things the operator should know: skills present but not
 	// installed, tools that need granting before the agent can launch.
-	Notes          []string       `json:"notes,omitempty"`
-	SessionRequest map[string]any `json:"session_request"`
+	Notes []string `json:"notes,omitempty"`
+	// Fields says what a launch does with each field agent.md declares:
+	// applied, recorded, unmet (launches without it) or refused.
+	Fields         []agentpolicy.FieldReport `json:"fields,omitempty"`
+	Requests       store.AgentRequests       `json:"requests"`
+	SessionRequest map[string]any            `json:"session_request"`
 }
 
 // Load reads the directory, checks that the native runtime could launch what it
 // declares, and records it. Loading the same state twice changes nothing.
 func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, opts AgentLoadOptions, grantedBy string) (AgentLoadResponse, error) {
 	var out AgentLoadResponse
-	settings := store.NativeHostSettings{Version: "1", Runtime: dir.Host.Runtime, Provider: dir.Host.Provider, Model: dir.Host.Model, Directories: dir.Host.Directories}
+	settings := store.NativeHostSettings{Version: "1", Runtime: dir.Host.Runtime, Provider: dir.Host.Provider, Model: dir.Host.Model, Directories: dir.Host.Directories, HarnessProfile: dir.Host.HarnessProfile, MCPServers: dir.Host.MCPServers, Mode: string(dir.Host.Mode), AgentDir: dir.Path}
 	if err := settings.Validate(); err != nil {
 		return out, fmt.Errorf("%w: host.yaml: %w", ErrAgentSetupInvalid, err)
+	}
+	mode, modeWhy, fallback := resolveAgentMode(string(dir.Host.Mode), opts.AppDefaultMode, opts.Labels)
+	if fallback && opts.Attended {
+		mode, modeWhy = "unpinned", "attended load: nothing says pinned, so each load publishes (set mode in host.yaml to choose)"
+	}
+	if mode == "live" {
+		// A live agent is republished by a reload, so it must not be able to
+		// rewrite the definition the reload reads.
+		if err := agentdir.CheckOwnDirectories(dir.Path, dir.Host.Directories); err != nil {
+			return out, setupInvalid("%v; move the agent directory outside the agent's directories or set mode: pinned in host.yaml", err)
+		}
 	}
 	digest, err := agentdef.Digest(dir.Parsed)
 	if err != nil {
@@ -92,9 +121,12 @@ func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, op
 	}
 	res, err := s.Store.LoadAgent(ctx, store.AgentLoad{
 		Definition: dir.Definition, Resources: resources, Agent: agent, Title: dir.Host.Title, Settings: settings,
-		Pinned: dir.Host.Mode == agentdir.ModePinned, Force: opts.Force, GrantFrom: opts.GrantFrom, GrantedBy: grantedBy, Reason: opts.Reason, DryRun: opts.DryRun,
+		Pinned: mode == "pinned", Force: opts.Force, GrantFrom: opts.GrantFrom, GrantedBy: grantedBy, Reason: opts.Reason, DryRun: opts.DryRun,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrAgentLoadPinned) {
+			return out, fmt.Errorf("%w; mode is pinned (%s)", err, modeWhy)
+		}
 		if errors.Is(err, store.ErrDefinitionRevisionConflict) {
 			return out, fmt.Errorf("%w: agent.md changed but revision %q of %s is already installed with different content; bump `revision` in agent.md", ErrAgentSetupInvalid, dir.Parsed.Revision, dir.Parsed.DefinitionID)
 		}
@@ -106,7 +138,7 @@ func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, op
 	ref := DefinitionRef{DefinitionID: res.DefinitionRef.ID, Revision: res.DefinitionRef.Revision, SemanticDigest: res.DefinitionRef.Digest}
 	hostRef := HostSettingsRef{ID: res.HostSettings.ID, Revision: res.HostSettings.Revision}
 	out = AgentLoadResponse{
-		Path: dir.Path, Agent: agent, Mode: string(dir.Host.Mode), DryRun: opts.DryRun, Changed: res.HostCreated,
+		Path: dir.Path, Agent: agent, Mode: mode, ModeReason: modeWhy, DryRun: opts.DryRun, Changed: res.HostCreated,
 		DefinitionRef: ref, HostSettings: hostRef, HostSettingsID: res.HostSettings.ID, Slug: res.HostSettings.Slug,
 		Diff: loadDiff(res), AuthorityID: res.AuthorityID, Tools: res.Tools,
 		SessionRequest: map[string]any{
@@ -120,8 +152,20 @@ func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, op
 	if res.Previous != nil {
 		out.Previous = res.Previous.Slug
 	}
-	if len(dir.Skills) > 0 {
-		out.Notes = append(out.Notes, fmt.Sprintf("skills/ holds %v; skills are not installed yet", dir.Skills))
+	out.Fields = agentpolicy.ExecutionReport(dir.Parsed)
+	for _, f := range out.Fields {
+		if f.Disposition == agentpolicy.Unmet {
+			out.Notes = append(out.Notes, fmt.Sprintf("%s: %s", f.Field, f.Detail))
+		}
+	}
+	if unrequested := unrequestedSkills(dir); len(unrequested) > 0 {
+		out.Notes = append(out.Notes, fmt.Sprintf("skills/ holds %v, which agent.md does not request; they are ignored", unrequested))
+	}
+	if out.Requests, err = s.Store.AgentRequestsFor(ctx, dir.Parsed, res.HostSettings); err != nil {
+		return out, err
+	}
+	if pending := out.Requests.PendingTools(); len(pending) > 0 {
+		out.Notes = append(out.Notes, fmt.Sprintf("requested tools not granted yet: %v", pending))
 	}
 	if res.AuthorityID == "" {
 		out.Notes = append(out.Notes, "this revision has no tool authority; grant tools (or reload with --grant-same-as) before starting a session")
@@ -159,4 +203,52 @@ func loadDiff(res store.AgentLoadResult) []string {
 		d = []string{"title or other non-behavioral change"}
 	}
 	return d
+}
+
+// unrequestedSkills lists the skill folders agent.md does not request.
+func unrequestedSkills(dir *agentdir.Directory) []string {
+	asked := map[string]bool{}
+	for _, sk := range dir.Parsed.Requirements.Skills {
+		asked[sk.Name] = true
+	}
+	var out []string
+	for _, n := range dir.Skills {
+		if !asked[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Reload re-reads the agent directory a loaded host row came from and publishes
+// its current state, as `agent load` does. It is the server-side event behind
+// "live": an operator (maintain scope) calls it, never a session create. The
+// directory is the one the earlier load recorded on the host row, not a path
+// from the request, and the result must still belong to the same agent. A pinned
+// agent reloads only with opts.Force. It returns the body to start a session on
+// the new row; sessions already running keep the row they started under.
+func (s *AgentLoadService) Reload(ctx context.Context, hostIDOrSlug string, opts AgentLoadOptions, grantedBy string) (AgentLoadResponse, error) {
+	view, err := s.Store.GetAgentView(ctx, hostIDOrSlug)
+	if err != nil {
+		return AgentLoadResponse{}, err
+	}
+	host := view.HostSettings
+	if !strings.HasPrefix(host.Source, store.AgentLoadSource) {
+		return AgentLoadResponse{}, setupInvalid("host settings %s were not loaded from an agent directory, so there is nothing to reload", host.Slug)
+	}
+	if host.Settings.AgentDir == "" {
+		return AgentLoadResponse{}, setupInvalid("host settings %s do not name their agent directory; load the directory again with `nanite agent load`", host.Slug)
+	}
+	dir, err := agentdir.Load(host.Settings.AgentDir)
+	if err != nil {
+		return AgentLoadResponse{}, setupInvalid("%v", err)
+	}
+	agent := dir.Host.Slug
+	if agent == "" {
+		agent = store.AgentSetupSlug(dir.Parsed.DefinitionID)
+	}
+	if store.AgentLoadSource+agent != host.Source {
+		return AgentLoadResponse{}, setupInvalid("the directory now names agent %q, but host settings %s belong to %q; load it as its own agent", agent, host.Slug, strings.TrimPrefix(host.Source, store.AgentLoadSource))
+	}
+	return s.Load(ctx, dir, opts, grantedBy)
 }

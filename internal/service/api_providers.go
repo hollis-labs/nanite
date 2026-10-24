@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	nllmanthropic "github.com/hollis-labs/nanite/internal/llm/anthropic"
 	nllmopenai "github.com/hollis-labs/nanite/internal/llm/openai"
+	"github.com/hollis-labs/nanite/internal/llm/station"
 )
 
 // APIProviderSpec is one HTTP API provider Nanite has an adapter for.
@@ -34,14 +36,51 @@ type APIProviderSpec struct {
 	// (providerkeys.EnvEnableVar); see internal/providerkeys.
 	EnvKey string
 
+	// Station marks a Station LLM gateway provider: an OpenAI- or
+	// Anthropic-wire adapter whose base URL, headers and flags come from the
+	// provider row's settings (WithSettings) and which sends the session id.
+	Station bool
+	gw      *station.Settings
+
 	create  func() llmcontracts.Provider
 	setKey  func(llmcontracts.Provider, string)
 	lazyKey func(llmcontracts.Provider, func(context.Context) (string, error))
 }
 
+// WithSettings binds a provider row's settings JSON to the spec. Only a
+// Station spec reads them: it needs a valid base_url, and a bad row is an
+// error so the provider is reported, not registered pointing nowhere. Other
+// specs are returned as they are.
+func (s APIProviderSpec) WithSettings(settings string) (APIProviderSpec, error) {
+	if !s.Station {
+		return s, nil
+	}
+	gw, err := station.ParseSettings(settings)
+	if err != nil {
+		return s, fmt.Errorf("provider %s: %w", s.Name, err)
+	}
+	s.gw = &gw
+	return s, nil
+}
+
+// build creates the adapter and, for a Station spec, points it at the gateway
+// before any key is set so the key's SDK rebuild keeps the gateway options.
+func (s APIProviderSpec) build() llmcontracts.Provider {
+	p := s.create()
+	if s.Station && s.gw != nil {
+		switch c := p.(type) {
+		case *nllmanthropic.Client:
+			c.SetGateway(*s.gw)
+		case *nllmopenai.Client:
+			c.SetGateway(*s.gw)
+		}
+	}
+	return p
+}
+
 // NewProvider builds a fresh adapter authenticated with key.
 func (s APIProviderSpec) NewProvider(key string) llmcontracts.Provider {
-	p := s.create()
+	p := s.build()
 	s.setKey(p, key)
 	return p
 }
@@ -51,7 +90,7 @@ func (s APIProviderSpec) NewProvider(key string) llmcontracts.Provider {
 // been asked to use, and a failed fetch surfaces on that request as keyFn's
 // own (typed) error.
 func (s APIProviderSpec) NewLazyProvider(keyFn func(context.Context) (string, error)) llmcontracts.Provider {
-	p := s.create()
+	p := s.build()
 	s.lazyKey(p, keyFn)
 	return p
 }
@@ -85,6 +124,28 @@ func APIProviderSpecs() []APIProviderSpec {
 			// llmcontracts.Provider; no rate-budget plumbing per spike
 			// verdict (parity deferred to followup
 			// followups.nanite.cw_20260508_0012.openai_rate_budget_parity).
+			create: func() llmcontracts.Provider { return nllmopenai.New("", nil) },
+			setKey: func(p llmcontracts.Provider, k string) { p.(*nllmopenai.Client).SetAPIKey(k) },
+			lazyKey: func(p llmcontracts.Provider, fn func(context.Context) (string, error)) {
+				p.(*nllmopenai.Client).SetKeyFunc(fn)
+			},
+		},
+		// Station LLM gateway (CW-20261024-0012). Two providers because the
+		// gateway serves two wires: the Anthropic one at the gateway root
+		// (no /v1) and the OpenAI one at the root plus /v1. Which alias goes
+		// to which wire is the alias catalog's business.
+		{
+			Name: "station-anthropic", DisplayName: "Station (Anthropic wire)", ProviderID: "station-anthropic-001", Station: true,
+			// A new Client without the env rate-budget override: the gateway
+			// owns the budget (see anthropic.Client.SetGateway).
+			create: func() llmcontracts.Provider { return nllmanthropic.New() },
+			setKey: func(p llmcontracts.Provider, k string) { p.(*nllmanthropic.Client).SetAPIKey(k) },
+			lazyKey: func(p llmcontracts.Provider, fn func(context.Context) (string, error)) {
+				p.(*nllmanthropic.Client).SetKeyFunc(fn)
+			},
+		},
+		{
+			Name: "station-openai", DisplayName: "Station (OpenAI wire)", ProviderID: "station-openai-001", Station: true,
 			create: func() llmcontracts.Provider { return nllmopenai.New("", nil) },
 			setKey: func(p llmcontracts.Provider, k string) { p.(*nllmopenai.Client).SetAPIKey(k) },
 			lazyKey: func(p llmcontracts.Provider, fn func(context.Context) (string, error)) {

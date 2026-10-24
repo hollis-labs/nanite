@@ -39,7 +39,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 	if err != nil {
 		return nil, err
 	}
-	stream := api.Chat.Completions.NewStreaming(ctx, params)
+	stream := api.Chat.Completions.NewStreaming(ctx, params, c.requestOptions(ctx)...)
 
 	out := make(chan llmtypes.StreamEvent, 16)
 	go func() {

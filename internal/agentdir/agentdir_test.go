@@ -93,3 +93,36 @@ func TestDiscover(t *testing.T) {
 		t.Fatalf("direct agent.md should win, got %q", got)
 	}
 }
+
+func TestCheckOwnDirectories(t *testing.T) {
+	base := t.TempDir()
+	agent := filepath.Join(base, "proj", ".nanite")
+	other := filepath.Join(base, "elsewhere")
+	if err := os.MkdirAll(agent, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(filepath.Join(base, "proj"), link); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		dirs    []string
+		refused bool
+	}{
+		"disjoint":                   {[]string{other}, false},
+		"a sibling of the same stem": {[]string{filepath.Join(base, "proj-2")}, false},
+		"the agent directory itself": {[]string{agent}, true},
+		"a directory that contains":  {[]string{filepath.Join(base, "proj")}, true},
+		"one inside the agent dir":   {[]string{filepath.Join(agent, "work")}, true},
+		"through a symlink":          {[]string{link}, true},
+		"not existing yet, inside":   {[]string{filepath.Join(agent, "new", "deep")}, true},
+		"not existing yet, beside":   {[]string{filepath.Join(base, "proj", "new", "deep")}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := CheckOwnDirectories(agent, tc.dirs)
+			if (err != nil) != tc.refused {
+				t.Fatalf("err = %v, refused = %v", err, tc.refused)
+			}
+		})
+	}
+}

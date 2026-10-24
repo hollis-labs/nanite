@@ -6,6 +6,7 @@ import (
 
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/pkg/models"
 	"github.com/openai/openai-go/v3/shared"
 )
 
@@ -39,7 +40,16 @@ func modelSupportsReasoningNone(model string) bool {
 	return false
 }
 
+// useResponses decides the endpoint for a request. A wire pinned in the model
+// registry wins: a gateway alias such as go-gpt is served on one endpoint only
+// and cannot be recognized by name. Otherwise the model-name rules below apply.
 func useResponses(ctx context.Context, req llmtypes.ChatRequest) bool {
+	switch models.WireFor(req.Model) {
+	case models.WireResponses:
+		return true
+	case models.WireChat:
+		return false
+	}
 	if isAstra(req.Model) {
 		return true
 	}

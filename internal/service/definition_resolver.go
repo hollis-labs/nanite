@@ -169,6 +169,17 @@ type ChatDefinitionConfig struct {
 	HostSettingsRef *HostSettingsRef `json:"host_settings_ref,omitempty"`
 	// WorkRoot is the validated work root chosen at create time (CLI hosts).
 	WorkRoot string `json:"work_root,omitempty"`
+	// Files are the definition's pinned reference files (requirements.resources
+	// and harness_profile.context.sources), keyed by path relative to the
+	// session root, planted before the first turn.
+	Files map[string][]byte `json:"files,omitempty"`
+	// FieldReport says what a launch did with each field the definition declares.
+	FieldReport []agentpolicy.FieldReport `json:"field_report,omitempty"`
+}
+
+// definitionPinsDocuments reports whether rendering d reads any pinned document.
+func definitionPinsDocuments(d *agentdef.Definition) bool {
+	return len(d.Behavior.Instructions)+len(d.Behavior.SOPs)+len(d.Requirements.Resources)+len(d.HarnessProfile.Steering)+len(d.HarnessProfile.Context.Sources) > 0
 }
 
 func MapChatDefinition(verified VerifiedDefinition) (ChatDefinitionConfig, error) {
@@ -219,24 +230,15 @@ func mapChatDefinition(ctx context.Context, verified VerifiedDefinition) (ChatDe
 	}
 	// Unknown optional extensions are preserved by the resolver/digest. They are
 	// neither negotiated host policy nor an authority source. Mandatory ones fail Validate.
-	instructions := d.Behavior.Purpose + "\n\n" + d.Body
-	for _, refs := range [][]agentdef.Ref{d.Behavior.Instructions, d.Behavior.SOPs} {
-		for _, ref := range refs {
-			if verified.ReadResource == nil {
-				return ChatDefinitionConfig{}, unsupportedCause(CauseResourceResolverMissing, "instruction resource resolver unavailable")
-			}
-			body, err := verified.ReadResource(ctx, ref)
-			if err != nil {
-				return ChatDefinitionConfig{}, err
-			}
-			if agentdef.ArtifactDigest(body) != ref.Digest {
-				return ChatDefinitionConfig{}, ErrDefinitionDigestMismatch
-			}
-			instructions += "\n\n" + string(body)
+	if verified.ReadResource == nil && definitionPinsDocuments(d) {
+		return ChatDefinitionConfig{}, unsupportedCause(CauseResourceResolverMissing, "definition resource resolver unavailable")
+	}
+	rendered, err := agentpolicy.Render(d, func(ref agentdef.Ref) ([]byte, error) { return verified.ReadResource(ctx, ref) })
+	if err != nil {
+		if errors.Is(err, agentpolicy.ErrRenderContent) {
+			return ChatDefinitionConfig{}, fmt.Errorf("%w: %w", ErrDefinitionDigestMismatch, err)
 		}
+		return ChatDefinitionConfig{}, err
 	}
-	if d.Behavior.Completion != "" {
-		instructions += "\n\nCompletion: " + d.Behavior.Completion
-	}
-	return ChatDefinitionConfig{Instructions: instructions, PermissionProfile: p, NativePolicy: native, ReflexBundle: bundle}, nil
+	return ChatDefinitionConfig{Instructions: rendered.Instructions, Files: rendered.Files, FieldReport: agentpolicy.ExecutionReport(d), PermissionProfile: p, NativePolicy: native, ReflexBundle: bundle}, nil
 }

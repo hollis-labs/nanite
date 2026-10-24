@@ -100,6 +100,11 @@ func (s *ProviderConfigService) checkAPIKey(ctx context.Context, spec APIProvide
 		return ProviderCheckResult{Status: ProviderCheckNoKey, Message: msg}
 	}
 	key := secret.Reveal()
+	spec, serr := s.boundSpec(ctx, spec)
+	if serr != nil {
+		return ProviderCheckResult{Status: ProviderCheckUnreachable,
+			Message: fmt.Sprintf("%s settings are not valid: %v", spec.DisplayName, serr)}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
 	defer cancel()

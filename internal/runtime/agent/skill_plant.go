@@ -97,6 +97,11 @@ func ResolvePlantableSkills(ctx context.Context, grants SkillGrantStore, catalog
 		if !store.SkillGrantCurrent(k, sk) {
 			continue
 		}
+		// A disabled skill is withheld, as skill_get withholds it: the operator
+		// turned it off, so a granted approval does not put it in the boot dir.
+		if !sk.Enabled {
+			continue
+		}
 		out = append(out, PlantableSkill{Slug: sk.Slug, ContentHash: sk.ContentHash})
 	}
 	return out, nil

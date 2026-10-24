@@ -151,13 +151,15 @@ The farm and private `.gemini` are additive and live outside the real `~/.gemini
 
 ## 9. Platforms and fleet notes
 
-Verified 2026-10-24, agy 1.4.7:
+Fleet snapshot 2026-10-24 (versions from a read-only check; only the machines marked verified ran a turn). Verified with agy 1.4.7:
 
 | Machine | Verified | Notes |
 | --- | --- | --- |
 | macOS (operator workstation) | yes, rows 3-5 | `~/.gemini` holds `oauth_creds.json`, `google_accounts.json`, `jetski-standalone-oauth-token`, `installation_id` and `antigravity-cli/antigravity-oauth-token` (mode 0600) |
 | Linux x86_64 (agent-os, service user) | yes, row 6 | agy at `~/.local/bin/agy`, config under `~/.gemini/antigravity-cli/` (no XDG paths). Auth file: `antigravity-cli/antigravity-oauth-token` (0600). `oauth_creds.json`, `google_accounts.json` and `jetski-standalone-oauth-token` do not exist, and `installation_id` lives under `antigravity-cli/` (not top level). `~/.gemini/config/{mcp_config.json,plugins,projects}` and `~/.agents/skills` exist. Same settings.json keys (`model`, `permissions.allow`, `trustedWorkspaces`) |
-| other worker-* machines | not checked | assumed to match the Linux layout until checked |
+| worker-2, worker-3, worker-4, build-1 | layout checked read-only (2026-10-24), no turn run | agy 1.4.6. Same shape as agent-os: auth token ~555 bytes, `settings.json` ~55 bytes, no `~/.agents`. Assumed compatible until a stub turn runs there |
+| worker-1 | layout checked read-only, **unverified** | agy **1.4.0** (older). Config looks different: token ~1430 bytes, `settings.json` ~921 bytes. Do not assume the `permissions.allow` `mcp(<server>/<tool>)` rule syntax or the farm recipe holds; upgrade agy or run the stub turn (section 5) first |
+| util-2, lab-1, lab-2 | no agy installed | nothing to verify |
 
 What this means for the farm recipe: link only the auth files that exist (already in 2.1), and note that `antigravity-cli/installation_id` is not in the linked set, so agy mints a fresh one in the private `.gemini` (harmless in the runs above). Linking it too is a reasonable option if you want one installation identity.
 

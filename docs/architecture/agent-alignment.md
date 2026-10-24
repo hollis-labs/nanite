@@ -278,7 +278,7 @@ operator approves, and the agent view shows each request as pending or granted.
 | `requirements.requires` | apply as a check; an unmet entry refuses and names it | checked against the host vocabulary (`agentpolicy.HostCapabilities`, empty today), so any entry is refused and named |
 | `requirements.uses` | record; an unmet entry is shown, not refused | recorded; an unmet entry is reported as `unmet` |
 | `requirements.tools` | record as a request: shown as pending until the operator grants; never a grant | recorded; the agent view and the load response show each request as `pending` or `granted` against the revision's authority |
-| `requirements.skills` | apply: pinned tree verified, requested skills granted at setup, tree delivered through the shared planting layer; a runtime with no skill location refuses with a cause | install accepts it: the directory loader packs `skills/<name>/` into a canonical tree (`agentpolicy.EncodeSkillTree`) and the pin must equal that tree's digest, verified at install. Launch reports it `unmet` and does not deliver it: a definition's skill request has no grant yet (below) |
+| `requirements.skills` | apply: pinned tree verified, requested skills granted at setup, tree delivered through the shared planting layer; a runtime with no skill location refuses with a cause | install accepts it: the directory loader packs `skills/<name>/` into a canonical tree (`agentpolicy.EncodeSkillTree`) and the pin must equal that tree's digest, verified at install. Launch plants it only when a skill grant covers it at the pinned digest (below), else reports it `unmet` |
 | `requirements.resources` | apply: pinned files materialized into the boot root | applied: planted under `agent/` in the CLI boot root, or the API session workspace |
 | `harness_profile.steering` | apply: appended after the instructions, in order | applied, after the completion line, in order |
 | `harness_profile.context.sources` | apply: planted as reference files and listed in the instructions | applied: planted under `agent/` and listed |
@@ -297,30 +297,49 @@ definition declares (`applied`, `recorded`, `unmet`, `refused`), and a load
 prints it; `unmet` is a field the launch goes ahead without and says so.
 `ValidateExecution` fails exactly when the report has a `refused` entry.
 
-**Skills are the one `apply` row not yet delivered.** Nanite grants a skill to an
-agent through `agent_known_skills`, which only issuer-owned authority may write,
-and a native authority has no skill grants. Delivering a directory's skills
-therefore needs a decision on who may grant a skill to a definition's request and
-how the grant ties to the tree digest. Until it is made, the tree is stored and
-pinned, shown as a pending request, and not planted.
+**Skill grants.** A skill a definition requests is delivered only after an
+operator grants it, the same way tools are. A native authority holds skill
+grants in `native_authority_skills` (migration 183), separate from
+`agent_known_skills`, which stays issuer-only and is not written by this path.
 
-**Contract for granting a requested skill (not built).** Skills are granted
-through Tachyon, operator-approved, like tool requests. Nanite will expose
 `PUT /api/native-authority/{authority_id}/skills/{skill}` with
-`{"digest": "sha256:...", "reason": "..."}` (and `DELETE` to revoke), modeled on
-the tool-grant route `PUT .../tools/{tool}`. It is admin class, the same scope rule as the tool-grant routes
-(`agents:manage` when CW-20261024-0025 lands), never an agent
-credential, and the granting credential is recorded from authentication, not the
-body. It succeeds only when the authority is live and current, the authority's
-definition requests a skill of that name, and the digest equals the pinned tree
-digest and the stored tree decodes; otherwise 422 (`skill_not_requested`,
-`skill_digest_mismatch`, `skill_tree_missing`) or 409 (revoked, stale, a different
-digest already granted). The grant belongs to the authority, so it is tied to one
-host revision and definition pin and is **not carried across revisions**; a
-re-approval is an explicit act. Each grant and revoke is an audit row in
-`native_authority_audit`. A repeat of the same grant is a no-op with
-`already_granted: true`. Until it exists, requested skills stay recorded and
-pending and none is delivered.
+`{"digest": "sha256:...", "reason": "..."}` grants, `DELETE` (with a `reason`)
+revokes, and `GET /api/native-authority/{id}` lists granted skills beside tools
+(`skills`). The admin MCP tools are `skill_grant` and `skill_ungrant`. The rule
+is the tool-grant rule, not a weaker one: writes are `admin` class, so a client
+holding only `agents:manage` gets 403 (it may read authority), as does an agent
+credential or a credential with no id; the granting credential is recorded from
+authentication, never the body. A grant succeeds only when the authority is live
+and its host settings revision is current (409 `authority_stale` otherwise), the
+authority's definition requests a skill of that name, the digest equals the
+digest the definition pins for it, and the stored tree decodes. Otherwise 422
+(`skill_not_requested`, `skill_digest_mismatch`, `skill_tree_missing`), 400 for a
+bad name, digest or missing reason, or 409 (`skill_grant_conflict`: a different
+digest is already granted; revoke first). A repeat of the same grant is a no-op
+with `already_granted: true`, keeps the original receipt and writes no audit row.
+Each grant and revoke is a row in `native_authority_audit` (`skill_granted`,
+`skill_revoked`, with `skill_name` and `skill_digest`).
+
+The grant belongs to the authority, so it is tied to one host settings revision
+and definition pin and is **not carried across revisions**: a new revision's view
+shows the request `pending` again. The one explicit way to carry it is
+`grant_same_as` on `agent load` / `POST /api/agent-reload` (admin, with a
+reason), which re-grants a skill from the source host only when the new
+definition requests it at the same digest; a changed digest stays pending and
+needs its own grant. A request shows `granted` only while the grant's digest
+equals the digest the definition currently pins.
+
+Delivery: when a session is created from host settings, each requested skill
+granted at its pinned digest is planted from the stored tree under
+`agent/skills/<name>/` in the session root (the boot root for a CLI runtime, the
+session workspace for an API session), and for a CLI runtime whose shared layout
+row has a skill location (`sharedSkillRoot`) also at `<root>/<name>/`. The
+launch report moves `requirements.skills` from `unmet` to `applied` when every
+requested skill is delivered. A skill with no grant, a grant at another digest,
+or no readable stored tree is not planted. The files are fixed when the session
+is created: a grant made later reaches the next session, and a revoke applies to
+sessions created after it. A runtime whose layout table has no skill location
+still gets the copy under `agent/skills/`.
 
 Where the files go: `requirements.resources` and `harness_profile.context.sources`
 are planted under `agent/` in the session root, which is the boot root for a CLI

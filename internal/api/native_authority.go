@@ -23,6 +23,10 @@ func (a *API) registerNativeAuthorityRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/native-authority/{id}/revoke", a.handleNativeAuthorityRevoke)
 	mux.HandleFunc("PUT /api/native-authority/{id}/tools/{tool}", a.handleNativeAuthorityGrant)
 	mux.HandleFunc("DELETE /api/native-authority/{id}/tools/{tool}", a.handleNativeAuthorityUngrant)
+	// Skill grants are the same class as tool grants: nativeAuthorityOperator
+	// requires admin for every write, so an agents:manage credential is refused.
+	mux.HandleFunc("PUT /api/native-authority/{id}/skills/{skill}", a.handleNativeAuthoritySkillGrant)
+	mux.HandleFunc("DELETE /api/native-authority/{id}/skills/{skill}", a.handleNativeAuthoritySkillRevoke)
 }
 
 type nativeAuthorityReason struct {
@@ -77,8 +81,12 @@ func (a *API) nativeAuthorityError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, store.ErrNativeAuthorityExists), errors.Is(err, store.ErrNativeAuthorityStale), errors.Is(err, store.ErrNativeAuthorityRevoked):
 		status = http.StatusConflict
-	case errors.Is(err, store.ErrNativeToolNotGrantable):
+	case errors.Is(err, store.ErrNativeToolNotGrantable), errors.Is(err, store.ErrSkillNotRequested), errors.Is(err, store.ErrSkillDigestMismatch), errors.Is(err, store.ErrSkillTreeMissing):
 		status = http.StatusUnprocessableEntity
+	case errors.Is(err, store.ErrSkillGrantConflict):
+		status = http.StatusConflict
+	case errors.Is(err, store.ErrSkillInvalid):
+		status = http.StatusBadRequest
 	}
 	if status == http.StatusInternalServerError {
 		a.errorResp(w, status, "native authority operation failed")
@@ -89,7 +97,8 @@ func (a *API) nativeAuthorityError(w http.ResponseWriter, err error) {
 
 type nativeAuthorityView struct {
 	store.NativeAuthority
-	Tools []store.NativeAuthorityTool `json:"tools"`
+	Tools  []store.NativeAuthorityTool  `json:"tools"`
+	Skills []store.NativeAuthoritySkill `json:"skills"`
 }
 
 func (a *API) handleNativeAuthorityList(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +127,12 @@ func (a *API) handleNativeAuthorityList(w http.ResponseWriter, r *http.Request) 
 			a.nativeAuthorityError(w, terr)
 			return
 		}
-		out = append(out, nativeAuthorityView{NativeAuthority: item, Tools: tools})
+		skills, serr := writer.ListSkills(r.Context(), item.ID)
+		if serr != nil {
+			a.nativeAuthorityError(w, serr)
+			return
+		}
+		out = append(out, nativeAuthorityView{NativeAuthority: item, Tools: tools, Skills: skills})
 	}
 	a.jsonResp(w, http.StatusOK, out)
 }
@@ -157,7 +171,12 @@ func (a *API) handleNativeAuthorityGet(w http.ResponseWriter, r *http.Request) {
 		a.nativeAuthorityError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, nativeAuthorityView{NativeAuthority: item, Tools: tools})
+	skills, err := writer.ListSkills(r.Context(), item.ID)
+	if err != nil {
+		a.nativeAuthorityError(w, err)
+		return
+	}
+	a.jsonResp(w, http.StatusOK, nativeAuthorityView{NativeAuthority: item, Tools: tools, Skills: skills})
 }
 
 func (a *API) handleNativeAuthorityCreate(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +197,7 @@ func (a *API) handleNativeAuthorityCreate(w http.ResponseWriter, r *http.Request
 		a.nativeAuthorityError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusCreated, nativeAuthorityView{NativeAuthority: item, Tools: []store.NativeAuthorityTool{}})
+	a.jsonResp(w, http.StatusCreated, nativeAuthorityView{NativeAuthority: item, Tools: []store.NativeAuthorityTool{}, Skills: []store.NativeAuthoritySkill{}})
 }
 
 func (a *API) handleNativeAuthorityRevoke(w http.ResponseWriter, r *http.Request) {
@@ -223,6 +242,51 @@ func (a *API) handleNativeAuthorityUngrant(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := writer.RevokeTool(r.Context(), by, r.PathValue("id"), r.PathValue("tool"), reason); err != nil {
+		a.nativeAuthorityError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleNativeAuthoritySkillGrant grants a skill the authority's definition
+// requests, at the digest it pins. The granting credential id comes from the
+// authenticated principal; nothing in the body names who grants.
+func (a *API) handleNativeAuthoritySkillGrant(w http.ResponseWriter, r *http.Request) {
+	writer, by, ok := a.nativeAuthorityOperator(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Digest string `json:"digest"`
+		Reason string `json:"reason"`
+	}
+	if err := definitionRequest(w, r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	req.Digest, req.Reason = strings.TrimSpace(req.Digest), strings.TrimSpace(req.Reason)
+	if req.Reason == "" || len(req.Reason) > 500 {
+		a.errorResp(w, http.StatusBadRequest, "a reason of at most 500 characters is required")
+		return
+	}
+	res, err := writer.GrantSkill(r.Context(), by, r.PathValue("id"), r.PathValue("skill"), req.Digest, req.Reason)
+	if err != nil {
+		a.nativeAuthorityError(w, err)
+		return
+	}
+	a.jsonResp(w, http.StatusOK, res)
+}
+
+func (a *API) handleNativeAuthoritySkillRevoke(w http.ResponseWriter, r *http.Request) {
+	writer, by, ok := a.nativeAuthorityOperator(w, r)
+	if !ok {
+		return
+	}
+	reason, ok := a.nativeAuthorityReason(w, r, true)
+	if !ok {
+		return
+	}
+	if err := writer.RevokeSkill(r.Context(), by, r.PathValue("id"), r.PathValue("skill"), reason); err != nil {
 		a.nativeAuthorityError(w, err)
 		return
 	}

@@ -136,3 +136,31 @@ func TestSkillTreeRoundTripAndRefusals(t *testing.T) {
 		t.Error("decoded an absolute path")
 	}
 }
+
+func TestExecutionReportWithSkillGrants(t *testing.T) {
+	d := &agentdef.Definition{Requirements: agentdef.Requirements{Skills: []agentdef.Skill{
+		{Name: "review", Content: agentdef.Ref{URI: "file:skills/review", Digest: "sha256:" + strings.Repeat("a", 64)}},
+		{Name: "lint", Content: agentdef.Ref{URI: "file:skills/lint", Digest: "sha256:" + strings.Repeat("b", 64)}},
+	}}}
+	disp := func(delivered map[string]bool) (Disposition, string) {
+		for _, f := range ExecutionReportWith(d, delivered) {
+			if f.Field == "requirements.skills" {
+				return f.Disposition, f.Detail
+			}
+		}
+		t.Fatal("no requirements.skills entry")
+		return "", ""
+	}
+	if got, _ := disp(nil); got != Unmet {
+		t.Errorf("no grants = %s, want unmet", got)
+	}
+	if got, detail := disp(map[string]bool{"review": true}); got != Unmet || !strings.Contains(detail, "lint") {
+		t.Errorf("partial = %s %q, want unmet naming lint", got, detail)
+	}
+	if got, _ := disp(map[string]bool{"review": true, "lint": true}); got != Applied {
+		t.Errorf("all delivered = %s, want applied", got)
+	}
+	if ExecutionReport(d)[0].Disposition != Unmet {
+		t.Error("ExecutionReport without grants stays unmet")
+	}
+}

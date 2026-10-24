@@ -58,6 +58,9 @@ type AgentLoadResponse struct {
 	Diff           []string        `json:"diff"`
 	AuthorityID    string          `json:"authority_id,omitempty"`
 	Tools          []string        `json:"tools"`
+	// SkillsAdded are skills carried forward by grant_same_as: only those whose
+	// pinned digest is unchanged in this revision.
+	SkillsAdded []string `json:"skills_added,omitempty"`
 	// Notes are things the operator should know: skills present but not
 	// installed, tools that need granting before the agent can launch.
 	Notes []string `json:"notes,omitempty"`
@@ -152,7 +155,19 @@ func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, op
 	if res.Previous != nil {
 		out.Previous = res.Previous.Slug
 	}
-	out.Fields = agentpolicy.ExecutionReport(dir.Parsed)
+	out.SkillsAdded = res.SkillsAdded
+	delivered := map[string]bool{}
+	if granted, gerr := s.Store.GrantedSkillDigests(ctx, res.HostSettings.ID, res.HostSettings.Revision); gerr == nil {
+		for _, sk := range dir.Parsed.Requirements.Skills {
+			if granted[sk.Name] != "" && granted[sk.Name] == sk.Content.Digest {
+				delivered[sk.Name] = true
+			}
+		}
+	}
+	for _, name := range res.SkillsAdded {
+		delivered[name] = true
+	}
+	out.Fields = agentpolicy.ExecutionReportWith(dir.Parsed, delivered)
 	for _, f := range out.Fields {
 		if f.Disposition == agentpolicy.Unmet {
 			out.Notes = append(out.Notes, fmt.Sprintf("%s: %s", f.Field, f.Detail))

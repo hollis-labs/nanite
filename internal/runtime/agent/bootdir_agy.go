@@ -80,7 +80,7 @@ func agyPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 		files[relPath] = content
 	}
 	// The definition's pinned reference files, under agent/.
-	for relPath, content := range definitionFiles(params) {
+	for relPath, content := range definitionFilesFor("antigravity", params) {
 		files[relPath] = content
 	}
 

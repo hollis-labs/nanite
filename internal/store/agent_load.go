@@ -55,6 +55,9 @@ type AgentLoadResult struct {
 	AuthorityID string
 	Tools       []string
 	Added       []string
+	// SkillsAdded are the skills carried forward from GrantFrom: only a skill
+	// whose pinned digest is unchanged in this definition.
+	SkillsAdded []string
 }
 
 // LoadAgent installs the definition and records a host-settings row for this
@@ -194,6 +197,9 @@ func (s *Store) LoadAgent(ctx context.Context, in AgentLoad) (AgentLoadResult, e
 				return res, err
 			}
 			res.Added = append(res.Added, name)
+		}
+		if res.SkillsAdded, err = carrySkillGrantsTx(ctx, tx, d, from, authority, in.GrantedBy, in.Reason); err != nil {
+			return res, err
 		}
 		res.AuthorityID = authority.ID
 		if res.Tools, err = authorityToolNames(ctx, tx, host.ID, host.Revision); err != nil {

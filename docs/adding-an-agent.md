@@ -318,7 +318,9 @@ revision and the body to start a session against the new row.
 - A `live` agent's directory may not sit inside, or contain, one of its own
   `directories`: the agent could rewrite its definition. A `pinned` one may.
 - Skills in `skills/` that `agent.md` requests are packed, digest-pinned and
-  stored; they are not delivered to the session yet (the load says so). A
+  stored, and delivered to a session only after an admin grants the skill
+(`PUT /api/native-authority/{id}/skills/{skill}`, see agent-alignment.md); until
+then the load reports it `unmet`. A
   definition that declares more than the native runtime can launch is refused, as
   in `agent setup`. Each field's disposition is in the load output (`fields`).
 - The load writes the database directly, like `setup`; a running server uses the

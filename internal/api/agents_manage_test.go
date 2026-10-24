@@ -94,6 +94,8 @@ func TestAdminMCPWithAgentsManageCredential(t *testing.T) {
 	}
 	for tool, args := range map[string]map[string]any{
 		"tool_grant":       {"id": "x", "tool": "dev_read", "reason": "r"},
+		"skill_grant":      {"id": "x", "skill": "s", "digest": "sha256:" + strings.Repeat("a", 64), "reason": "r"},
+		"skill_ungrant":    {"id": "x", "skill": "s", "reason": "r"},
 		"tool_ungrant":     {"id": "x", "tool": "dev_read", "reason": "r"},
 		"authority_revoke": {"id": "x", "reason": "r"},
 	} {

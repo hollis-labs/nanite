@@ -29,6 +29,42 @@ func definitionFiles(params SetupParams) map[string][]byte {
 	return out
 }
 
+// definitionFilesFor is definitionFiles plus, for a runtime whose shared layout
+// row places skills (sharedSkillRoot), a copy of every granted skill the
+// definition delivers under agent/skills/<name>/ at that runtime's own skill
+// location, <root>/<name>/..., so the CLI finds it where it looks for skills.
+// A path already planted by the profile's own skills is not replaced.
+func definitionFilesFor(providerName string, params SetupParams) map[string][]byte {
+	out := definitionFiles(params)
+	dest := skillDestPrefixesFor(providerName)
+	if dest == nil {
+		return out
+	}
+	const prefix = agentpolicy.FilesRoot + "/" + agentpolicy.SkillsDir + "/"
+	for rel, content := range definitionFiles(params) {
+		rest, ok := strings.CutPrefix(rel, prefix)
+		if !ok {
+			continue
+		}
+		name, file, ok := strings.Cut(rest, "/")
+		if !ok {
+			continue
+		}
+		prefixes, ok := dest(name)
+		if !ok {
+			continue
+		}
+		for _, p := range prefixes {
+			if target := path.Join(p, file); path.Clean(target) == target {
+				if _, taken := out[target]; !taken {
+					out[target] = content
+				}
+			}
+		}
+	}
+	return out
+}
+
 // PlantDefinitionFiles writes a definition's pinned reference files under
 // <ws.Root>/agent/ so a native-loop session finds them where a CLI session finds
 // them in its boot root. Keys must be clean, relative and under the files root;

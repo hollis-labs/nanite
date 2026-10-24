@@ -29,11 +29,12 @@ resources:
         - --bind-address
         - 127.0.0.1
       dir: ~/dev/hollis-labs/apps/nanite
+      # Absolute paths in PATH: Cerberus expands ~ only at the start of a value.
       # Explicit env only: no env_file (the old .env pinned NANITE_DB_PATH to the default
       # workspace) and nothing inherited from a shell.
       env:
         NANITE_WORKSPACE: mesh-chat
-        PATH: ~/.local/share/mise/installs/go/1.25.3/bin:~/.local/share/mise/installs/node/22.12.0/bin:~/.local/bin:~/.bun/bin:~/go/bin:~/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        PATH: /Users/chrispian/.local/share/mise/installs/go/1.25.3/bin:/Users/chrispian/.local/share/mise/installs/node/22.12.0/bin:/Users/chrispian/.local/bin:/Users/chrispian/.bun/bin:/Users/chrispian/go/bin:/Users/chrispian/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
       mode: os_service
       port: 8090
       run_from: artifact

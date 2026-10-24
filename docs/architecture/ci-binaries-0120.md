@@ -1,6 +1,6 @@
 # CI-built binaries installed from GitHub (CW-20261024-0120): design proposal
 
-Status: PROPOSAL, nothing built. Owner direction (2026-10-24): binaries are built once in CI and installed from GitHub; nothing is built on a target machine; local repo copies are going away. Constraint: no tag is created without the owner's approval; releases (v0.4.0 and so on) stay separate. Cerberus (Local Dev) is a participant; its contract is `ci-build-deploy-workflow-v1`, and its drafts for basalisk, station, mentat and fragments-engine are in `~/dev/workspaces/sysadmin/docs/phaseB-drafts-20261024.md`. This design aims to be one contract for all of them.
+Status: APPROVED with the decisions in section 8; P1/P2 in progress. Owner direction (2026-10-24): binaries are built once in CI and installed from GitHub; nothing is built on a target machine; local repo copies are going away. Constraint: no tag is created without the owner's approval; releases (v0.4.0 and so on) stay separate. Cerberus (Local Dev) is a participant; its contract is `ci-build-deploy-workflow-v1`, and its drafts for basalisk, station, mentat and fragments-engine are in `~/dev/workspaces/sysadmin/docs/phaseB-drafts-20261024.md`. This design aims to be one contract for all of them.
 
 ## 1. CI workflow
 
@@ -116,14 +116,21 @@ How the other apps' needs map (from the Cerberus doc, section 3): per-DB `sqlite
 4. **P4** agent-os: only after the owner lifts the hold on agent-os deploys; first deploy by hand-supervised `fleet-install` with the owner's click for the restart.
 Done when a green main commit yields both binaries, and any commit can be deployed to agent-os and the Mac with one command, no local build or checkout, and rollback has been tested.
 
-## 8. Decisions needed from the owner
+## 8. Decisions (Architect, 2026-10-24; supersede the open questions in this proposal)
 
-1. Artifacts, no tags (Cerberus has chosen this; confirm).
-2. Download credential: existing `gh` login now (GitHub App later per CW-20261015-0049): confirm.
-3. `fleet-install` as a Go binary in `hollis-labs/tools` (recommended: YAML parsing, tests, one static binary; runtime needs only gh, sqlite3, tar, systemctl, sha256 done in-process) or a POSIX sh script (acceptable for v1 per Cerberus, but weak at deploy.yaml and untestable)?
-4. agent-os restart path: keep `systemctl --user` (approved manual exception) or Cerberus with Approve and Run?
-5. Is `hub-nanite` to stay `run_from: workspace` behind a symlink for now?
-6. Attestation (`gh attestation verify`) required or optional?
+1. agent-os stays on `6fb83f29`; no rollback. No agent-os or Mac deploys until 0120 delivers, except an urgent fix the Architect approves explicitly.
+2. Artifacts, **no tags and no rolling prerelease** (tags need the owner). Retention 30 days for `main`, 7 for PRs. Keep the deployed binaries on the targets for rollback.
+3. The build job runs on the org runner `[self-hosted, build-1]` (Go 1.27.3, Node 22; Cerberus owns upkeep), after a green test job; tests stay on `ubuntu-latest`. Include the fork-PR guard and `fetch-depth: 0` + tags. `go-test.yml` stays the PR gate; the reusable workflow's test job (same full test command) gates the build on `main`; the duplicate run on `main` is accepted for now. A binary exists only for a fully tested commit. Until `go-app-build.yml` (tools PR #9) merges, an equivalent local workflow file is used and replaced when it lands.
+4. Credential: the existing `gh` login now; a fine-grained read-only token or GitHub App is the owner's later decision (CW-20261015-0049). `--from-file` pull-and-copy mode is supported.
+5. `fleet-install` is a standalone static Go binary with its own `go.mod`, built for now inside this repo (`tools/fleet-install`) because other repos are outside the standing approval; moving it to `hollis-labs/tools` later is cheap. App-agnostic: all app specifics live in `deploy.yaml`.
+6. agent-os restart: `systemctl --user restart` (the approved manual exception) behind a `restart` mode in `deploy.yaml`; a `cerberus` mode that prints the request for Approve and Run exists but is not the default until an actions credential exists. Never `cerberus resource apply/deploy` (it re-renders units and rebuilds from checkouts).
+7. `hub-nanite` stays `run_from: workspace` behind the symlink `/var/lib/fabric/bin/nanite -> /var/lib/fabric/releases/nanite/<version>/nanite`.
+8. Attestation: optional; verified when present, never required.
+9. The migration-aware `--accept-migration` gate: yes. `build-info.json` `fleet-build-info/v1` accepted; Nanite provides `migrations_max`.
+10. Scope: no commitments for basalisk, station, mentat or fragments-engine (portfolio work, CW-20261024-0121); schema questions are answered by mail only. No first install on basalisk; the proving ground is the Mac Nanite.
+11. Mac `nanite-api-service`: `run_from: workspace` on the stable symlink (not `run_from: artifact`), restart through Cerberus as the local user.
+
+Phasing: P1 workflow PR and P2 `fleet-install` + `deploy.yaml` (tested on the Mac: deploy N, N+1, forced health failure to exercise rollback, manual rollback) now; P3 Mac Cerberus switch (drop `build_strategy`, `command[0]` to `~/.local/share/nanite/current/nanite`) after P2 passes; P4 agent-os after the Architect lifts the hold, with the first pipeline deploy a dry run plus an explicit go.
 
 ## 9. Not verified
 

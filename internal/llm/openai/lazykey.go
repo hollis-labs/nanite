@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	sdk "github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 )
 
 // KeyFunc supplies the API key at the moment a request first needs it.
@@ -23,7 +22,7 @@ func (c *Client) SetKeyFunc(fn KeyFunc) {
 	defer c.keyMu.Unlock()
 	c.keyFn, c.keyLoaded = fn, false
 	c.apiKey = ""
-	c.sdk = sdk.NewClient(option.WithAPIKey(""), option.WithMaxRetries(0))
+	c.sdk = c.newSDK("")
 }
 
 // client returns the SDK client for one request, resolving a deferred key
@@ -38,7 +37,7 @@ func (c *Client) client(ctx context.Context) (sdk.Client, error) {
 			return sdk.Client{}, err
 		}
 		c.apiKey, c.keyLoaded = key, true
-		c.sdk = sdk.NewClient(option.WithAPIKey(key), option.WithMaxRetries(0))
+		c.sdk = c.newSDK(key)
 	}
 	if c.keyFn != nil && c.apiKey == "" {
 		return sdk.Client{}, errors.New("OPENAI_API_KEY not set")

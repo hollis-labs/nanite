@@ -34,6 +34,7 @@ import (
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 
 	"github.com/hollis-labs/nanite/internal/llm/keycheck"
+	"github.com/hollis-labs/nanite/internal/llm/station"
 	"github.com/hollis-labs/nanite/pkg/models"
 )
 
@@ -94,6 +95,9 @@ type Client struct {
 	// to honor the RateLimited contract: return 0 when the limit is unknown
 	// (i.e. before the first calibrated response), not the seeded default.
 	calibrated atomic.Bool
+	// gw is set for a Station gateway provider (SetGateway); rebuildSDK
+	// applies it so a key set never drops the base URL or headers.
+	gw *station.Settings
 }
 
 // StatusCallback is the optional pacing-wait progress reporter shape.
@@ -172,7 +176,17 @@ func (c *Client) rebuildSDK() {
 		option.WithMiddleware(rateAwareMiddleware(c.RateTracker, c.CircuitBreaker, &c.calibrated)),
 	}
 	if c.apiKey != "" {
-		opts = append(opts, option.WithAPIKey(c.apiKey))
+		if c.gw != nil && c.gw.Auth == station.AuthBearer {
+			opts = append(opts, option.WithAuthToken(c.apiKey))
+		} else {
+			opts = append(opts, option.WithAPIKey(c.apiKey))
+		}
+	}
+	if c.gw != nil {
+		opts = append(opts, option.WithBaseURL(c.gw.BaseURL))
+		for name, v := range c.gw.Headers {
+			opts = append(opts, option.WithHeader(name, v))
+		}
 	}
 	c.sdk = sdk.NewClient(opts...)
 }
@@ -201,6 +215,9 @@ func (c *Client) SetCacheHints(hints []llmcontracts.CacheHint) {
 // concurrent sessions on the same Client cannot leak hints across calls.
 // When both are empty the result is nil and the cache pipeline is no-op.
 func (c *Client) effectiveCacheHints(req llmtypes.ChatRequest) []llmcontracts.CacheHint {
+	if c.gw != nil && c.gw.DisableCacheControl {
+		return nil // a gateway that does not take cache_control gets no markers
+	}
 	if len(req.CacheHints) > 0 {
 		return req.CacheHints
 	}

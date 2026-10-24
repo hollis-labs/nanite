@@ -23,6 +23,7 @@ import (
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/llm/keycheck"
+	"github.com/hollis-labs/nanite/internal/llm/station"
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -37,6 +38,9 @@ type Client struct {
 	keyLoaded bool
 	sdk       sdk.Client
 	apiKey    string
+	// gw is set for a Station gateway provider (SetGateway). It is part of
+	// every SDK rebuild so a key set never drops the base URL or headers.
+	gw *station.Settings
 }
 
 // Compile-time interface assertion. The Client also exposes Embed* methods
@@ -76,10 +80,7 @@ func (c *Client) SetAPIKey(key string) {
 	defer c.keyMu.Unlock()
 	c.keyFn, c.keyLoaded = nil, false
 	c.apiKey = key
-	c.sdk = sdk.NewClient(
-		option.WithAPIKey(key),
-		option.WithMaxRetries(0),
-	)
+	c.sdk = c.newSDK(key)
 }
 
 // VerifyKey makes the cheapest authenticated call the API has — listing
@@ -130,7 +131,7 @@ func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string
 	if err != nil {
 		return "", err
 	}
-	resp, err := api.Chat.Completions.New(ctx, params)
+	resp, err := api.Chat.Completions.New(ctx, params, c.requestOptions(ctx)...)
 	if err != nil {
 		return "", translateError(err)
 	}

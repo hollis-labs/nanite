@@ -6,6 +6,17 @@ lives in the git log.
 
 ## Unreleased
 
+### Added
+
+- **Station LLM gateway providers** (`station-openai`, `station-anthropic`).
+  Two seeded provider rows point the OpenAI- and Anthropic-wire adapters at a
+  Station gateway: `base_url`, optional `headers`, `disable_anthropic_beta`,
+  `disable_cache_control`, `auth: bearer` and `key_ref` (for example `file://`)
+  live in the row's settings. Every call carries `X-Station-Session`, taken
+  from the Nanite session id. The providers stay unregistered until a key
+  resolves. The gateway's `session_required`, `invalid_session` and
+  `model_not_available` refusals surface as typed errors.
+
 ### Changed
 
 - **Product version now derives from the git tag.** `nanite version` reports

@@ -202,6 +202,23 @@ func (m *Manager) KeyRef(ctx context.Context, providerID string) (string, error)
 	return readKeyRef(row.Settings), nil
 }
 
+// RowSettings returns the settings JSON of a provider row, or "" when the row
+// does not exist yet or the manager has no settings store. The gateway
+// providers read their base URL and headers from it.
+func (m *Manager) RowSettings(ctx context.Context, providerID string) (string, error) {
+	if m.settings == nil {
+		return "", nil
+	}
+	row, err := m.settings.GetProvider(ctx, providerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return row.Settings, nil
+}
+
 func readKeyRef(settings string) string {
 	if strings.TrimSpace(settings) == "" {
 		return ""

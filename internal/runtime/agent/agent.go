@@ -14,6 +14,7 @@ import (
 	runtimeevents "github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	"github.com/hollis-labs/libs/harness/core/adapters/wrapper"
 	"github.com/hollis-labs/libs/harness/core/sandbox"
+	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
 	"github.com/hollis-labs/nanite/internal/runtimekind"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/oklog/ulid/v2"
@@ -511,7 +512,14 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 		}
 	}
 
-	if !providerSessionSurvivesBoot(selection) {
+	// Native Codex keeps a thread's rollout under CODEX_HOME, the per-boot dir.
+	// codexLayout links its sessions/ to a per-session persistent dir for
+	// long-lived boots (bootdir_codex_sessions.go), so only a thread found
+	// there can be resumed.
+	if !selection.ACP() && selection.Runtime == runtimes.Codex && sessionIDPreset != "" && !codexThreadResumable(sessID, sessionIDPreset) {
+		// The thread's rollout is not in the session's persisted codex
+		// sessions dir (pruned, or created before it was kept); `exec resume`
+		// would fail the first turn, so start a fresh thread.
 		sessionIDPreset = ""
 	}
 
@@ -533,9 +541,6 @@ func Boot(ctx context.Context, deps *Dependencies, opts Options) (*Session, erro
 	}
 
 	onSessionID := func(id string) {
-		if !providerSessionSurvivesBoot(selection) {
-			return // nothing a later Boot could resume
-		}
 		_ = deps.Store.SetProviderSessionID(sessID, id)
 	}
 

@@ -160,6 +160,10 @@ func (s *Store) Seed(ctx context.Context) error {
 // providerRow is the DB-layer tuple seeded into providers.
 type providerRow struct {
 	id, name, provType string
+	// settings is the row's initial settings JSON ("" for none). It is written
+	// only when the row is first inserted; an operator's edits are never
+	// overwritten.
+	settings string
 }
 
 // seededProviders is the canonical provider catalog. Order matters: parent
@@ -170,8 +174,16 @@ type providerRow struct {
 // ollama API rows have been removed. CLI launches are surfaced through
 // boot-profile harness entries, not raw PTY provider rows.
 var seededProviders = []providerRow{
-	{"anthropic-001", "Anthropic", "anthropic"},
-	{"openai-001", "OpenAI", "openai"},
+	{id: "anthropic-001", name: "Anthropic", provType: "anthropic"},
+	{id: "openai-001", name: "OpenAI", provType: "openai"},
+	// Station LLM gateway (CW-20261024-0012): one provider per wire. They
+	// register only once a key is saved or a key_ref (file://, ...) is set in
+	// settings; until then they are inert. base_url differs by wire: the
+	// Anthropic one is the gateway root, the OpenAI one carries /v1.
+	{id: "station-anthropic-001", name: "Station (Anthropic wire)", provType: "station-anthropic",
+		settings: `{"base_url":"https://llm.nanite.cloud/api/llm-gateway"}`},
+	{id: "station-openai-001", name: "Station (OpenAI wire)", provType: "station-openai",
+		settings: `{"base_url":"https://llm.nanite.cloud/api/llm-gateway/v1"}`},
 }
 
 // providerIDForType resolves a registry provider_type to the DB row id. Used
@@ -200,6 +212,16 @@ func (s *Store) SeedProviders(ctx context.Context) error {
 	defer rollbackUnlessCommitted(tx)
 
 	for _, p := range providers {
+		if p.settings != "" {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT OR IGNORE INTO providers (id, name, provider_type, settings)
+				 VALUES (?, ?, ?, ?)`,
+				p.id, p.name, p.provType, p.settings,
+			); err != nil {
+				return fmt.Errorf("upsert provider %s: %w", p.id, err)
+			}
+			continue
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO providers (id, name, provider_type)
 			 VALUES (?, ?, ?)`,

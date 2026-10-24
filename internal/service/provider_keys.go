@@ -128,7 +128,16 @@ func (s *ProviderConfigService) SetAPIKey(ctx context.Context, id, key string) (
 		return result, nil
 	}
 	if status.Usable {
-		s.registry.Register(spec.Name, spec.NewLazyProvider(s.keys.Func(spec.ProviderID)))
+		bound, serr := s.boundSpec(ctx, spec)
+		if serr != nil {
+			s.registry.Unregister(spec.Name)
+			if s.catalog != nil {
+				s.catalog.Remove(spec.Name)
+			}
+			slog.WarnContext(ctx, "provider unregistered: invalid provider settings", "provider", spec.Name, "err", serr)
+			return result, nil
+		}
+		s.registry.Register(spec.Name, bound.NewLazyProvider(s.keys.Func(spec.ProviderID)))
 		if s.catalog != nil {
 			s.addToCatalogInSpecOrder(spec)
 		}
@@ -172,5 +181,53 @@ func (s *ProviderConfigService) addToCatalogInSpecOrder(spec APIProviderSpec) {
 	s.catalog.Add(entry)
 	for _, e := range later {
 		s.catalog.Add(e)
+	}
+}
+
+// boundSpec binds the provider row's settings to spec, so a Station gateway
+// adapter is built with the row's base URL and headers.
+func (s *ProviderConfigService) boundSpec(ctx context.Context, spec APIProviderSpec) (APIProviderSpec, error) {
+	if !spec.Station {
+		return spec, nil
+	}
+	row, err := s.store.GetProvider(ctx, spec.ProviderID)
+	if err != nil {
+		return spec, fmt.Errorf("provider %s: %w", spec.Name, err)
+	}
+	return spec.WithSettings(row.Settings)
+}
+
+// reregisterAfterSettings rebuilds a registered Station adapter after its row's
+// settings changed, so a new base URL or header takes effect without a
+// restart. A key_ref change needs it too: the adapter caches the key it
+// resolved on first use. Other rows, and Station providers that are not
+// registered, are left alone.
+func (s *ProviderConfigService) reregisterAfterSettings(ctx context.Context, id string) {
+	spec, ok := APIProviderSpecByID(id)
+	if !ok || !spec.Station || s.registry == nil {
+		return
+	}
+	s.keyMu.Lock()
+	defer s.keyMu.Unlock()
+	status := s.keys.Status(ctx, id)
+	if !status.Usable {
+		s.registry.Unregister(spec.Name)
+		if s.catalog != nil {
+			s.catalog.Remove(spec.Name)
+		}
+		return
+	}
+	bound, err := s.boundSpec(ctx, spec)
+	if err != nil {
+		s.registry.Unregister(spec.Name)
+		if s.catalog != nil {
+			s.catalog.Remove(spec.Name)
+		}
+		slog.WarnContext(ctx, "provider unregistered: invalid provider settings", "provider", spec.Name, "err", err)
+		return
+	}
+	s.registry.Register(spec.Name, bound.NewLazyProvider(s.keys.Func(spec.ProviderID)))
+	if s.catalog != nil {
+		s.addToCatalogInSpecOrder(spec)
 	}
 }

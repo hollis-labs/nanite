@@ -7,6 +7,7 @@ import (
 
 	secrets "github.com/hollis-labs/libs/security/secrets"
 
+	"github.com/hollis-labs/nanite/internal/llm/station"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -74,7 +75,20 @@ func (s *ProviderConfigService) Update(ctx context.Context, id string, u store.P
 			return err
 		}
 	}
-	return s.store.UpdateProvider(ctx, id, u)
+	if u.Settings != nil {
+		if spec, ok := APIProviderSpecByID(id); ok && spec.Station {
+			if err := station.ValidateSettings(*u.Settings); err != nil {
+				return err
+			}
+		}
+	}
+	if err := s.store.UpdateProvider(ctx, id, u); err != nil {
+		return err
+	}
+	if u.Settings != nil {
+		s.reregisterAfterSettings(ctx, id)
+	}
+	return nil
 }
 
 // ListModels returns every model row, joined with its provider's type.

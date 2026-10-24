@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go/option"
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 )
@@ -27,10 +26,10 @@ func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string,
 		return "", err
 	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
-	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
+	interleavedThinking := c.interleavedThinking(reasoningCfg, model)
 	params := c.buildMessageParams(nonStreamingRequest(in), model, interleavedThinking, reasoningCfg)
 
-	opts := []option.RequestOption{betaHeaderRequestOption(interleavedThinking)}
+	opts := c.requestOptions(ctx, interleavedThinking)
 	resp, err := api.Messages.New(ctx, params, opts...)
 	if err != nil {
 		return "", translateError(err)

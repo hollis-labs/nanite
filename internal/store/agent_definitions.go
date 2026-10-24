@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -73,9 +74,6 @@ func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*def
 	if err != nil {
 		return &definitionInstall{}, err
 	}
-	if len(d.Requirements.Skills) != 0 {
-		return &definitionInstall{}, errors.New("skill installation requires a verified whole packaged tree")
-	}
 	digest, err := agentdef.Digest(d)
 	if err != nil {
 		return &definitionInstall{}, err
@@ -84,6 +82,14 @@ func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*def
 	refs := append([]agentdef.Ref{}, d.Behavior.Instructions...)
 	refs = append(refs, d.Behavior.SOPs...)
 	refs = append(refs, d.Requirements.Resources...)
+	// A skill pin covers its whole packaged tree: the resource under it is the
+	// canonical tree encoding (agentpolicy.EncodeSkillTree), digest-verified below
+	// like any other pinned document.
+	skillRefs := map[agentdef.Ref]bool{}
+	for _, sk := range d.Requirements.Skills {
+		refs = append(refs, sk.Content)
+		skillRefs[sk.Content] = true
+	}
 	refs = append(refs, d.HarnessProfile.Steering...)
 	refs = append(refs, d.HarnessProfile.Context.Sources...)
 	refs = append(refs, d.HarnessProfile.Approvals...)
@@ -132,6 +138,11 @@ func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*def
 			}
 		} else if agentdef.ArtifactDigest(body) != r.Digest {
 			return &definitionInstall{pin: pin}, fmt.Errorf("%w: resource %q", ErrDefinitionContent, r.URI)
+		}
+		if skillRefs[r] {
+			if _, treeErr := agentpolicy.DecodeSkillTree(body); treeErr != nil {
+				return &definitionInstall{pin: pin}, fmt.Errorf("%w: skill %q: %w", ErrDefinitionContent, r.URI, treeErr)
+			}
 		}
 	}
 	if len(used) != len(contents) {
@@ -221,6 +232,14 @@ type NativeHostSettings struct {
 	Directories     []string             `json:"directories,omitempty"`
 	MCPServers      []string             `json:"mcp_servers,omitempty"`
 	Debug           bool                 `json:"debug,omitempty"`
+	// Mode is how edits to the agent directory reach new sessions: "live" or
+	// "pinned". Empty means the default rule decides, evaluated when the
+	// directory is loaded (service.ResolveAgentMode), so it is never frozen here.
+	Mode string `json:"mode,omitempty"`
+	// AgentDir is the agent directory a load read this row from: how a live host
+	// names the directory a reload re-reads. It is provenance and a reload
+	// target, never an input to what the agent may do.
+	AgentDir string `json:"agent_dir,omitempty"`
 }
 
 func (h NativeHostSettings) Validate() error {
@@ -229,6 +248,12 @@ func (h NativeHostSettings) Validate() error {
 	}
 	if err := ValidateAgentACPFields(h.Protocol, h.Transport); err != nil {
 		return err
+	}
+	if h.Mode != "" && h.Mode != "live" && h.Mode != "pinned" {
+		return fmt.Errorf("host settings mode %q is not supported; use live or pinned", h.Mode)
+	}
+	if h.AgentDir != "" && !filepath.IsAbs(h.AgentDir) {
+		return errors.New("host settings agent_dir must be an absolute path")
 	}
 	if h.Runtime == "api" && (h.Protocol != "" || h.Transport != "") {
 		return errors.New("native API host settings cannot select a CLI transport")

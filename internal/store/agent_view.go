@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+
+	"github.com/hollis-labs/libs/mesh/core/agentdef"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 )
 
 // AgentView is the read model of one set-up agent: its host settings (which
@@ -17,6 +20,8 @@ type AgentView struct {
 	State       string   `json:"state"`
 	AuthorityID string   `json:"authority_id,omitempty"`
 	Tools       []string `json:"tools"`
+	// Requests are what the definition asks for, each pending or granted.
+	Requests AgentRequests `json:"requests"`
 }
 
 // ListAgentViews returns every host-settings record with its active authority.
@@ -74,6 +79,14 @@ func (s *Store) agentViewFor(ctx context.Context, h AgentHostSettings) (AgentVie
 			return v, err
 		}
 	}
+	v.Requests = AgentRequests{Tools: []RequestState{}, Skills: []RequestState{}}
+	if a, artErr := s.GetAgentDefinitionArtifact(ctx, h.DefinitionRef); artErr == nil {
+		if d, parseErr := agentdef.Parse(a.Data, agentpolicy.Option()); parseErr == nil {
+			if v.Requests, err = s.AgentRequestsFor(ctx, d, h); err != nil {
+				return v, err
+			}
+		}
+	}
 	switch {
 	case !h.Enabled:
 		v.State = "disabled"
@@ -83,4 +96,60 @@ func (s *Store) agentViewFor(ctx context.Context, h AgentHostSettings) (AgentVie
 		v.State = "ready"
 	}
 	return v, nil
+}
+
+// AgentRequests is what a definition asks for, set against what has been
+// granted. A request is never a grant: a tool is "granted" only when the active
+// authority for the host revision lists it.
+type AgentRequests struct {
+	Tools  []RequestState `json:"tools"`
+	Skills []RequestState `json:"skills"`
+}
+
+// RequestState is one requested name and whether it is granted or still pending.
+type RequestState struct {
+	Name  string `json:"name"`
+	State string `json:"state"` // "granted" or "pending"
+}
+
+// PendingTools lists the requested tools no grant covers.
+func (r AgentRequests) PendingTools() []string {
+	var out []string
+	for _, t := range r.Tools {
+		if t.State == "pending" {
+			out = append(out, t.Name)
+		}
+	}
+	return out
+}
+
+// AgentRequestsFor reads the tool and skill requests of d against host's active
+// tool authority. Skill requests are always pending: this host has no skill
+// grant for a definition's request yet.
+func (s *Store) AgentRequestsFor(ctx context.Context, d *agentdef.Definition, host AgentHostSettings) (AgentRequests, error) {
+	out := AgentRequests{Tools: []RequestState{}, Skills: []RequestState{}}
+	if d == nil {
+		return out, nil
+	}
+	granted := map[string]bool{}
+	if len(d.Requirements.Tools) > 0 {
+		names, err := authorityToolNames(ctx, s.DB, host.ID, host.Revision)
+		if err != nil {
+			return out, err
+		}
+		for _, n := range names {
+			granted[n] = true
+		}
+	}
+	for _, name := range d.Requirements.Tools {
+		state := "pending"
+		if granted[name] || granted[strings.ReplaceAll(name, ".", "_")] {
+			state = "granted"
+		}
+		out.Tools = append(out.Tools, RequestState{Name: name, State: state})
+	}
+	for _, sk := range d.Requirements.Skills {
+		out.Skills = append(out.Skills, RequestState{Name: sk.Name, State: "pending"})
+	}
+	return out, nil
 }

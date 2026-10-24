@@ -6,6 +6,25 @@ lives in the git log.
 
 ## Unreleased
 
+### Added
+
+- **Station LLM gateway providers** (`station-openai`, `station-anthropic`).
+  Two seeded provider rows point the OpenAI- and Anthropic-wire adapters at a
+  Station gateway: `base_url`, optional `headers`, `disable_anthropic_beta`,
+  `disable_cache_control`, `auth: bearer` and `key_ref` (for example `file://`)
+  live in the row's settings. Every call carries `X-Station-Session`, taken
+  from the Nanite session id. The providers stay unregistered until a key
+  resolves. The gateway's `session_required`, `invalid_session` and
+  `model_not_available` refusals surface as typed errors.
+
+### Changed
+
+- **Product version now derives from the git tag.** `nanite version` reports
+  the nearest repo-level `v*` tag (`git describe --tags --match 'v*'`), injected
+  by the Makefile (`build`, `build-dev`, `install`, `package-release`). A plain
+  `go build` reports `dev`. `pkg/pluginapi/vN` tags version the plugin API
+  module only and are not the product version. Baseline: `v0.3.0-beta.1`.
+
 ### Security
 
 - Go toolchain 1.26.10 (`go` directive and CI pin) for GO-2026-6809 (crypto/x509); no behavior change.

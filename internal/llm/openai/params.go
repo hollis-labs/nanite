@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/pkg/models"
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
 )
@@ -21,7 +22,8 @@ import (
 //     messages keyed by ToolUseID).
 //   - Tool definitions translated via translateTools.
 //   - MaxTokens routed to MaxCompletionTokens (OpenAI's recommended field
-//     for newer models).
+//     for newer models), or to max_tokens for a model the registry marks
+//     LegacyMaxTokens (gateway alias go-glm).
 func buildChatParams(req llmtypes.ChatRequest) (sdk.ChatCompletionNewParams, error) {
 	msgs := make([]sdk.ChatCompletionMessageParamUnion, 0, 1+len(req.Messages))
 
@@ -42,7 +44,11 @@ func buildChatParams(req llmtypes.ChatRequest) (sdk.ChatCompletionNewParams, err
 		Messages: msgs,
 	}
 	if req.MaxTokens > 0 {
-		params.MaxCompletionTokens = sdk.Int(int64(req.MaxTokens))
+		if models.UsesLegacyMaxTokens(req.Model) {
+			params.MaxTokens = sdk.Int(int64(req.MaxTokens))
+		} else {
+			params.MaxCompletionTokens = sdk.Int(int64(req.MaxTokens))
+		}
 	}
 	if tools := translateTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools

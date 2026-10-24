@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hollis-labs/nanite/internal/store"
@@ -202,5 +204,42 @@ func TestCreateRefusesARelativeAPIHostDirectory(t *testing.T) {
 	}
 	if err = create("abs", t.TempDir()); err != nil {
 		t.Fatalf("absolute directory: %v", err)
+	}
+}
+
+// An API session takes a work_root inside its host's directories, as a CLI
+// session does, and records it for the tool roots (CW-20261024-0010).
+func TestCreateAcceptsAWorkRootForAnAPIHost(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	pin, err := st.InstallAgentDefinition(ctx, []byte("---\nschema_version: \"2\"\ndefinition_id: def:api-root\nrevision: \"1\"\nname: api-root\ndescription: API root.\nbehavior:\n  purpose: Answer.\nrequirements: {}\nharness_profile:\n  context: {}\n  permissions:\n    profile: default\ncontinuity:\n  mode: ephemeral\n---\nBody.\n"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := &CognitiveViews{Store: st, Resolver: &StoredDefinitionResolver{Store: st}, Models: ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
+		return ModelSelection{"mock-provider", "mock-model"}, nil
+	})}
+	host := canonicalTempDir(t)
+	sub := filepath.Join(host, "sub")
+	if err = os.Mkdir(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	h, err := st.CreateAgentHostSettings(ctx, store.AgentHostSettings{Slug: "api-root", Title: "api-root", Source: "test", DefinitionRef: pin, Enabled: true,
+		Settings: store.NativeHostSettings{Version: "1", Runtime: "api", Provider: "mock-provider", Model: "mock-model", Directories: []string{host}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(root string) (*store.Session, error) {
+		return views.Create(ctx, CreateDefinedView{DefinitionRef: DefinitionRefFromMesh(pin), HostSettings: &HostSettingsRef{ID: h.ID, Revision: h.Revision}, WorkRoot: root})
+	}
+	view, err := create(sub)
+	if err != nil {
+		t.Fatalf("work root inside the host directories: %v", err)
+	}
+	if _, cfg, getErr := views.Get(ctx, view.ID); getErr != nil || cfg.WorkRoot != sub {
+		t.Fatalf("recorded work root = %q, %v", cfg.WorkRoot, getErr)
+	}
+	if _, err = create(canonicalTempDir(t)); CauseCode(err) != CauseWorkRootInvalid {
+		t.Fatalf("work root outside the host directories: %v", err)
 	}
 }

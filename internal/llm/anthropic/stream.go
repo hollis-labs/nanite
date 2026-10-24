@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -42,7 +41,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 		return nil, err
 	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
-	interleavedThinking := shouldEnableInterleavedThinking(reasoningCfg, model)
+	interleavedThinking := c.interleavedThinking(reasoningCfg, model)
 	params := c.buildMessageParams(in, model, interleavedThinking, reasoningCfg)
 
 	// Marshal the params once so the rate-budget pre-flight estimate uses
@@ -116,7 +115,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 
 	// Per-call options: anthropic-beta header (prompt caching baseline +
 	// optional interleaved thinking).
-	opts := []option.RequestOption{betaHeaderRequestOption(interleavedThinking)}
+	opts := c.requestOptions(ctx, interleavedThinking)
 
 	stream := api.Messages.NewStreaming(ctx, params, opts...)
 	if streamErr := stream.Err(); streamErr != nil {

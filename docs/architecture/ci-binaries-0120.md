@@ -6,11 +6,11 @@ Status: PROPOSAL, nothing built. Owner direction (2026-10-24): binaries are buil
 
 New `.github/workflows/build-binaries.yml` in this repo (additive; `release.yml` stays the tag-only macOS/Homebrew path).
 
-- **Trigger:** `workflow_run` of "Go test" on `main`, `conclusion == success`, plus `workflow_dispatch` (input: ref). A binary exists only for a commit whose full suite passed. (A plain `push` trigger would race the tests; the deploy command also re-checks the commit's check runs.)
-- **Runner:** `ubuntu-latest` (hosted). One job cross-builds both targets, so the two binaries come from the same checkout and toolchain. The self-hosted `build` runner group from the Cerberus draft is not needed here and is the riskier choice on a public repo.
+- **Shape (aligned with Cerberus' contract `ci-build-deploy-workflow-v1`, 2026-10-24):** a per-repo `.github/workflows/build.yml` that calls the reusable workflow `hollis-labs/tools/.github/workflows/go-app-build.yml` (tools PR #9, inputs `app`, `main_pkg`, `binary`, `targets`, `test_cmd`, `ui_cmd`, `node_version`, `ldflags_var`, `extra_files`). Triggers: push to `main`, `pull_request`, `workflow_dispatch`. A `test` job runs on `ubuntu-latest`; the `build` job `needs: test` and runs on the org self-hosted runner `[self-hosted, build-1]` (group `build`; Go 1.27.3, Node 22, sqlite3, make; Cerberus owns runner upkeep and reports a ~60 s Nanite build there). Fork PRs never reach the self-hosted runner: `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`. Nanite's call passes `ui_cmd: "make generate-envelopes build-ui"`, `node_version: "22"`, `main_pkg: ./cmd/nanite`, `binary: nanite`, `extra_files: deploy.yaml`. Nanite's existing "Go test" workflow keeps running for PRs; the reusable workflow's `test` job would duplicate it, so either Nanite passes `test_cmd` and drops the separate gate on main or the build job also requires the "Go test" check (decision for the Architect; a binary must exist only for a commit whose full suite passed).
+- **Runner:** the build runs on build-1 (above); one job cross-builds both targets so both binaries come from the same checkout and toolchain.
 - **Steps:** checkout with `fetch-depth: 0` (tags for `git describe --match 'v*'`), `setup-go` from `go.mod`, `setup-node` (22), `make generate-envelopes build-ui` (the UI is embedded), then for each of `linux/amd64` and `darwin/arm64`: `CGO_ENABLED=0 GOOS=.. GOARCH=.. GOWORK=off go build -trimpath -ldflags "-s -w -X ...version.GitSHA=<sha12> -X ...version.Version=<describe>"` (the same ldflags `make build` uses).
 - **CGO-free check:** Nanite already uses `modernc.org/sqlite` and ships `CGO_ENABLED=0` darwin archives and a `CGO_ENABLED=0` Dockerfile build, so cross-compiling from Ubuntu is expected to work. The workflow proves it instead of assuming it: the build itself runs with `CGO_ENABLED=0`; a step fails if `go list -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./...` prints anything outside the allowlist; `go version -m` of each binary is checked for `CGO_ENABLED=0`; the linux binary is run once (`nanite version`) and started against a temporary data dir to read `/api/health`.
-- **Outputs per commit:** `nanite_<version>_<os>_<arch>.tar.gz` (a bare `nanite` binary, `deploy.yaml`, README, LICENSE), `SHA256SUMS`, and `build-info.json` (`commit`, `version`, `go_version`, `migrations_max` read from `internal/store/migrations`, so a deploy can tell whether a migration is coming). Uploaded as one workflow artifact named `nanite-<sha12>` (same naming as the Cerberus draft). Optional but recommended: `actions/attest-build-provenance` so the installer can run `gh attestation verify`.
+- **Outputs per commit:** `nanite_<version>_<os>_<arch>.tar.gz` (a bare `nanite` binary, `deploy.yaml`, README, LICENSE), `SHA256SUMS`, and `build-info.json` (`commit`, `version`, `go_version`, `migrations_max` read from `internal/store/migrations`, so a deploy can tell whether a migration is coming). Uploaded as one workflow artifact named `nanite-<sha12>` (the shared contract), retention 30 days for `main` and 7 days for PRs. Optional but recommended: `actions/attest-build-provenance` so the installer can run `gh attestation verify`.
 - **Reuse:** if Cerberus' reusable workflow (`hollis-labs/tools/.github/workflows/go-app-build.yml`) accepts a pre-build command, Nanite calls it with `make generate-envelopes build-ui`; if not, this workflow produces the identical contract (names, sums, artifact name). The proposal is that the contract is the shared thing.
 
 ## 2. Artifact or rolling prerelease
@@ -24,7 +24,7 @@ Recommendation: **workflow artifacts, no tags.**
 | History | one artifact per commit, default 90-day retention (can be raised) | only the latest, unless per-commit prereleases are created (tag churn) |
 | Deploy "any commit" | yes, by sha | no |
 
-If the owner would rather have zero-credential downloads, the rolling prerelease is the alternative; it still needs a decision on the tag. Artifacts expire; a deploy of an old commit may need a rebuild via `workflow_dispatch`.
+If the owner would rather have zero-credential downloads, the rolling prerelease is the alternative; it still needs a decision on the tag. Artifacts expire after 30 days (main); a deploy of an older commit needs a rebuild via `workflow_dispatch`. Cerberus has decided artifacts, no tags/releases (those stay the owner's).
 
 ## 3. Credentials to download artifacts
 
@@ -34,7 +34,7 @@ Options, in order of preference:
 3. **Pull from a machine that has a token** and copy the tarball over (`fleet-install --from-file`), so targets hold nothing.
 4. **Rolling prerelease** (no token), see section 2.
 
-Question for the owner: option 1 now, option 2 when more machines are enrolled?
+Per Cerberus (citing the owner, CW-20261015-0049): a GitHub App is the target; until it exists machines use their existing `gh` login for `gh run download`. No credential file format is built in v1.
 
 ## 4. The install command: `fleet-install`
 
@@ -56,6 +56,13 @@ Flow, each step logged and fatal on failure:
 5. **Restart** through the configured restarter (`cerberus`, `systemd`, or `print` to emit the request for a human click, see section 6), in the listed order.
 6. **Health check** with an expected-status list (mentat answers 401 on `/api/repos`, which proves liveness) and, when the endpoint reports one, the expected version, within a timeout.
 7. **Roll back** on failure: relink the previous version, restart, re-check; print the database backup path and the restore commands. A restore is manual because a migration that already ran is not safely reversible; `rollback` can also be run by hand later.
+
+### build-info.json (proposed format; Cerberus asked for it to add to `go-app-build`)
+
+```json
+{"schema": "fleet-build-info/v1", "app": "nanite", "commit": "<full sha>", "sha12": "<12>", "version": "0.3.0-beta.1-71-g6fb83f29", "go_version": "go1.27.3", "built_at": "<RFC3339>", "targets": ["linux/amd64", "darwin/arm64"], "migrations_max": 184}
+```
+`migrations_max` is optional and app-specific: the highest numbered file in the app's migration directory (for Nanite `internal/store/migrations/*.sql`, goose numbering). The reusable workflow can take it from an input (`migrations_glob`) and omit the field when unset; `fleet-install` compares it with the live database's goose version and stops unless `--accept-migration`.
 
 ## 5. `deploy.yaml` schema (v1), with Nanite as the example
 
@@ -97,6 +104,7 @@ How the other apps' needs map (from the Cerberus doc, section 3): per-DB `sqlite
 ## 6. Cerberus changes
 
 - **Mac `nanite-api-service`:** stop building from the checkout. Remove `build_strategy` and point `command[0]` at the stable downloaded binary (`~/.local/share/nanite/current/nanite`); keep `run_from: artifact`. `fleet-install` flips the symlink and runs `cerberus resource apply nanite-api-service --ack` (Cerberus copies `command[0]` into its install dir and activates it). This is a change to the repo's `nanite.cerberus.yaml`, no privileged action.
+- **Restart path (two positions, owner to settle):** the Architect's earlier direction was `cerberus resource reload hub-nanite` (Approve and Run click); Cerberus' draft says plain `systemctl --user restart <unit>` as the `chrispian` user (no Cerberus write, no click) and warns that `cerberus resource apply/deploy` re-renders units and rebuilds from checkouts, so it must not be used. The schema supports both (`restart.via: systemd-user | cerberus`); systemctl matches the manual restart already approved for Nanite deploys.
 - **agent-os `hub-nanite`:** smallest change first: no Cerberus edit. `/var/lib/fabric/bin/nanite` becomes a symlink managed by `fleet-install`; the unit and the `run_from: workspace` manifest stay as they are. Restart stays `systemctl --user restart` (the manual restart the Architect already approved) or becomes `cerberus resource reload hub-nanite` with an Approve and Run click; the owner chooses. Moving `hub-nanite` to `run_from: artifact` is possible later; it is a privileged manifest change (Approve and Run).
 - **Cerberus (Local Dev):** one question: can `resource apply` take the artifact source from a symlink target outside `~/.cerberus` (the `command[0]` path)? It does today for `./nanite`, so yes.
 
@@ -110,9 +118,9 @@ Done when a green main commit yields both binaries, and any commit can be deploy
 
 ## 8. Decisions needed from the owner
 
-1. Artifacts (no tags) or a rolling `ci-main` prerelease (one moving tag)?
-2. Download credential: reuse the existing `gh` login, or a per-machine read-only token?
-3. `fleet-install` as a Go binary in `hollis-labs/tools` (recommended) or a bash script in this repo?
+1. Artifacts, no tags (Cerberus has chosen this; confirm).
+2. Download credential: existing `gh` login now (GitHub App later per CW-20261015-0049): confirm.
+3. `fleet-install` as a Go binary in `hollis-labs/tools` (recommended: YAML parsing, tests, one static binary; runtime needs only gh, sqlite3, tar, systemctl, sha256 done in-process) or a POSIX sh script (acceptable for v1 per Cerberus, but weak at deploy.yaml and untestable)?
 4. agent-os restart path: keep `systemctl --user` (approved manual exception) or Cerberus with Approve and Run?
 5. Is `hub-nanite` to stay `run_from: workspace` behind a symlink for now?
 6. Attestation (`gh attestation verify`) required or optional?

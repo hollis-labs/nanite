@@ -66,6 +66,10 @@ reason it carries no filter is written in the script's own header.
   still serves it. `make` targets set `GONOPROXY=none` for you; for a plain
   `go build`/`go test` run `go env -w GONOPROXY=none` once (or export it). Private
   modules still resolve: the proxy answers 404 and Go falls back to git.
+  Trade-offs: the paths of private modules reach proxy.golang.org first, and because
+  `GOPRIVATE` still keeps them out of the checksum database, what the proxy serves
+  for `hollis-labs/*` is not verified against sumdb (only against `go.sum`).
+  Undo with `go env -u GONOPROXY`.
 - **`go build` does not produce the binary the running service executes.** The
   deployment boundary is in `AGENTS.md`, and the failure mode — a deploy that
   leaves the old process running — is quiet.

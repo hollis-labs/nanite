@@ -1696,8 +1696,15 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 			}
 		})
 	}
-	if c.Tasks != nil {
+	// CW-20261011-0082: the task snapshot reads the coordination store, so
+	// the store may not close until the snapshot is done. tasksDone is closed
+	// when the snapshot returns (or panics), and the coord close waits on it.
+	tasksDone := make(chan struct{})
+	if c.Tasks == nil {
+		close(tasksDone)
+	} else {
 		run("tasks", func() {
+			defer close(tasksDone)
 			ctx, cancel := context.WithTimeout(context.Background(), maxWait)
 			defer cancel()
 			if err := c.Tasks.Snapshot(ctx); err != nil {
@@ -1707,6 +1714,11 @@ func (c *Container) shutdownWithMaxWait(maxWait time.Duration) {
 	}
 	if c.Coord != nil {
 		run("coord", func() {
+			select {
+			case <-tasksDone:
+			case <-shutdownCtx.Done():
+				slog.Warn("shutdown: task snapshot did not finish; closing coordination store anyway", "timeout", maxWait.String())
+			}
 			if err := c.Coord.Close(); err != nil {
 				slog.Warn("shutdown: coordination store close", "err", err)
 			}

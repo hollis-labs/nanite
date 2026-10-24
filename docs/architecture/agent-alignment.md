@@ -283,6 +283,23 @@ therefore needs a decision on who may grant a skill to a definition's request an
 how the grant ties to the tree digest. Until it is made, the tree is stored and
 pinned, shown as a pending request, and not planted.
 
+**Contract for granting a requested skill (not built).** Skills are granted
+through Tachyon, operator-approved, like tool requests. Nanite will expose
+`PUT /api/native-authority/{authority_id}/skills/{skill}` with
+`{"digest": "sha256:...", "reason": "..."}` (and `DELETE` to revoke), modeled on
+the tool-grant route `PUT .../tools/{tool}`. It is maintain scope, never an agent
+credential, and the granting credential is recorded from authentication, not the
+body. It succeeds only when the authority is live and current, the authority's
+definition requests a skill of that name, and the digest equals the pinned tree
+digest and the stored tree decodes; otherwise 422 (`skill_not_requested`,
+`skill_digest_mismatch`, `skill_tree_missing`) or 409 (revoked, stale, a different
+digest already granted). The grant belongs to the authority, so it is tied to one
+host revision and definition pin and is **not carried across revisions**; a
+re-approval is an explicit act. Each grant and revoke is an audit row in
+`native_authority_audit`. A repeat of the same grant is a no-op with
+`already_granted: true`. Until it exists, requested skills stay recorded and
+pending and none is delivered.
+
 Where the files go: `requirements.resources` and `harness_profile.context.sources`
 are planted under `agent/` in the session root, which is the boot root for a CLI
 runtime and `<workspace>/agent/` for an API session (the instructions then name

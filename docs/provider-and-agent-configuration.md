@@ -140,8 +140,10 @@ The adapter caches the key after its first fetch, so rotating the file takes
 effect after a settings save (which re-registers the provider) or a restart.
 
 `nanite provider status` confirms a key resolves without calling the gateway.
-`POST /api/providers/{id}/test` does call the gateway (it checks the key by
-listing models).
+`POST /api/providers/{id}/test` does call the gateway: it verifies the key with
+a lightweight model-list request (the adapters' `VerifyKey`) that makes no
+completion. The status is `accepted`, `rejected` (HTTP 401 or 403),
+`unreachable` or `no_key`.
 
 ### Session header
 

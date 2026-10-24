@@ -229,6 +229,26 @@ enrolled from it; enrolled agents keep their stored URN, so regenerating
 does not break them. The id is shown on a read-only admin surface so an
 operator can match a Tether directory entry to the install that owns it.
 
+### Regenerating the install id on a cloned database
+
+The id is minted on first boot after the `install_identity` migration and
+read back on every later boot, so it is stable across restarts. A database
+that is cloned or restored onto a second machine carries the source's id
+along, and two installs would then build the same external keys. Before any
+agent is enrolled from the clone:
+
+    nanite install-identity --db <clone.db> show     # compare with the source's id
+    nanite install-identity --db <clone.db> regen    # mint a fresh id
+
+`regen` refuses when any `agent_actor_bindings` or `actor_instances` row exists
+(enabled or not, archived or not), because an external key built from the old
+id may already be registered in Tether. `--force` overrides that. Agents that
+are already enrolled keep their stored URN: regeneration changes only the key
+used by later enrollments and never rewrites a binding, an instance or a
+registered Tether entry. Every regeneration is recorded in `event_log`
+(`install_identity_regenerated`, category `audit`) with the old and new id, and
+the row keeps the previous id and the time of the last change.
+
 ## Migration plan
 
 1. Schema: add `install_identity` and the `enrolling` record table and a `deregister_pending`

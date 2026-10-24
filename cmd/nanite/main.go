@@ -90,7 +90,7 @@ func loadServeRuntimeConfig(load serveRuntimeConfigLoader) (*config.RuntimeConfi
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: %s <command>\n", brand.BinaryName)
-		fmt.Fprintln(os.Stderr, "commands: serve, workflow, chat, plugin, mcp, skill, profile, provider, agent, message, admin, path, version (framework-injection moved to `nanite-agent init`)")
+		fmt.Fprintln(os.Stderr, "commands: serve, workflow, chat, plugin, mcp, skill, profile, provider, agent, message, admin, install-identity, path, version (framework-injection moved to `nanite-agent init`)")
 		os.Exit(1)
 	}
 
@@ -151,6 +151,8 @@ func main() {
 		cmdAuth(args)
 	case "authority":
 		cmdAuthority(args)
+	case "install-identity":
+		cmdInstallIdentity(args)
 	case "version", "--version", "-v":
 		fmt.Println(brand.BinaryName + " " + version.Full())
 	default:

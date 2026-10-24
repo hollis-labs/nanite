@@ -65,6 +65,11 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 		_ = db.Close() // Preserve the bootstrap error; closing is best-effort cleanup.
 		return nil, err
 	}
+	// Mint the install id on first boot after migration 184; idempotent after.
+	if _, err := s.EnsureInstallID(ctx); err != nil {
+		_ = db.Close() // Preserve the bootstrap error; closing is best-effort cleanup.
+		return nil, err
+	}
 	// TASKS/scheduling/01-schema-schedule-kind-collapse-and-retry-columns.md:
 	// migration 127 adds agent_schedules.next_run but deliberately leaves
 	// it NULL for pre-existing rows (real cron computation needs

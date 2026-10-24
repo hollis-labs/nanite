@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/nanite/internal/brand"
 )
 
 func TestExtractDBFlag(t *testing.T) {
@@ -162,5 +164,17 @@ func TestAgentInstallHonoursDBFlag(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "def:a1-db-flag") {
 		t.Fatalf("output lacks the pin: %s", out.String())
+	}
+}
+
+func TestLoginLinkBase(t *testing.T) {
+	t.Setenv(brand.Env("API_URL"), "http://127.0.0.1:8090")
+	t.Setenv(brand.Env("PUBLIC_URL"), "")
+	if got := loginLinkBase(); got != "http://127.0.0.1:8090" {
+		t.Fatalf("without PUBLIC_URL got %q", got)
+	}
+	t.Setenv(brand.Env("PUBLIC_URL"), " https://nanite.nanite.cloud/ ")
+	if got := loginLinkBase(); got != "https://nanite.nanite.cloud" {
+		t.Fatalf("with PUBLIC_URL got %q", got)
 	}
 }

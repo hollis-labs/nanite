@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/api"
 	"github.com/hollis-labs/nanite/internal/apiauth"
+	"github.com/hollis-labs/nanite/internal/brand"
 	"github.com/hollis-labs/nanite/internal/config"
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/service"
@@ -145,7 +147,7 @@ func New(s *store.Store, a *api.API, port int, dev bool, pluginHost *naniteplugi
 	}
 	mux.Handle("/api/admin", adminHandler)
 	mux.Handle("/api/admin/", adminHandler)
-	(&apiauth.Handlers{Guard: srv.guard, OperatorTokenPath: auth.OperatorTokenPath, SecureCookies: resolvedHTTPConfig.SecureCookies}).Register(mux)
+	(&apiauth.Handlers{Guard: srv.guard, OperatorTokenPath: auth.OperatorTokenPath, SecureCookies: resolvedHTTPConfig.SecureCookies, PublicURL: os.Getenv(brand.Env("PUBLIC_URL"))}).Register(mux)
 	srv.routes()
 	return srv, nil
 }

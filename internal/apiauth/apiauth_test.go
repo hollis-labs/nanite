@@ -565,3 +565,37 @@ func TestAdminAuthenticator(t *testing.T) {
 		t.Errorf("operator: %q %v", got, ok)
 	}
 }
+
+func TestLoginLinkCarriesPublicURL(t *testing.T) {
+	h := newHarness(t)
+	_, secret := h.mint(KindOperator)
+	mint := func() map[string]string {
+		resp, body := postJSON(h, "/api/auth/login-links", secret, map[string]string{}, nil)
+		if resp.StatusCode != 201 {
+			t.Fatalf("mint link = %d %s", resp.StatusCode, body)
+		}
+		var out map[string]string
+		_ = json.Unmarshal([]byte(body), &out)
+		return out
+	}
+	if out := mint(); out["url"] != "" {
+		t.Fatalf("url without a public URL = %q, want none", out["url"])
+	}
+	mux := http.NewServeMux()
+	(&Handlers{Guard: h.guard, PublicURL: " https://nanite.example/ "}).Register(mux)
+	srv := httptest.NewServer(h.guard.Middleware(mux))
+	defer srv.Close()
+	req, _ := http.NewRequest("POST", srv.URL+"/api/auth/login-links", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer "+secret)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if want := "https://nanite.example" + out["path"]; resp.StatusCode != 201 || out["url"] != want {
+		t.Fatalf("status %d url %q, want %q", resp.StatusCode, out["url"], want)
+	}
+}

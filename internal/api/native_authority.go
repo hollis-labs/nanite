@@ -134,7 +134,12 @@ func (a *API) handleNativeAuthorityTools(w http.ResponseWriter, r *http.Request)
 		a.nativeAuthorityError(w, err)
 		return
 	}
-	a.jsonResp(w, http.StatusOK, tools)
+	page, err := pageOf(r, tools)
+	if err != nil {
+		a.errorResp(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.jsonResp(w, http.StatusOK, page)
 }
 
 func (a *API) handleNativeAuthorityGet(w http.ResponseWriter, r *http.Request) {

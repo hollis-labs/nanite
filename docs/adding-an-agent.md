@@ -87,7 +87,8 @@ review, so nothing is granted for the new revision) or `disabled`.
 Changing an agent uses the existing routes: grant or withdraw a tool with
 `PUT`/`DELETE /api/native-authority/{authority_id}/tools/{tool}`, withdraw all
 authority with `POST /api/native-authority/{authority_id}/revoke`, retire by
-`PUT /api/agent-host-settings/{id}` with `"enabled": false`, change host
+`POST /api/agent-host-settings/{id}/retire` with a `reason` (or
+`PUT /api/agent-host-settings/{id}` with `"enabled": false`), change host
 settings the same way (send the current `revision`).
 
 Credential: the setup and view routes need the `agents:manage` scope and refuse

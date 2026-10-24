@@ -211,6 +211,69 @@ default of 50. Request JSON rejects removed/unknown fields and trailing values.
 Errors use a typed private envelope; credentials and internal errors are not
 returned as raw diagnostic details.
 
+## Agent management contract (non-browser clients)
+
+What a client such as Tachyon can rely on to manage agents without the browser
+UI (CW-20261024-0027). Credentials and scopes are in `docs/adding-an-agent.md`
+(`agents:manage`, plus `operate` for sessions and turns). Every route below has
+an admin MCP tool of the same behavior except the turn event stream.
+
+| Need | Route | MCP tool |
+|---|---|---|
+| Create or converge an agent | `POST /api/agent-setup` | `agent_setup` |
+| List / read agents | `GET /api/native-agents[/{id}]` (`limit`, `offset`) | `agent_list`, `agent_get` |
+| Host settings | `GET/POST /api/agent-host-settings`, `PUT .../{id}` | `host_settings_*` |
+| Retire (disable) | `POST /api/agent-host-settings/{id}/retire` `{"reason"}` | `host_settings_retire` |
+| Read authority and grantable tools | `GET /api/native-authority[/{id}]`, `GET /api/native-authority/tools` (`limit`, `offset`) | `authority_list`, `authority_get` |
+| Grant or withdraw (admin only) | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}`, `POST .../{id}/revoke` | `tool_grant`, `tool_ungrant`, `authority_revoke` |
+| Run | `/api/agent/v1/sessions...` | `session_*`, `turn_*` |
+| Observe a turn | `GET /api/agent/v1/sessions/{id}/turns/{turnId}/events` (SSE) | none |
+
+**Retire versus delete.** `POST .../retire` is disable-only: it sets
+`enabled=false`, keeps the row, needs no revision, works when the model or
+definition has gone stale, is repeatable, and requires a `reason` of at most 500
+characters that is written to the auth audit. It does not stop live sessions
+(stop them with the session routes) or withdraw grants (admin). `DELETE
+/api/agent-host-settings/{id}` is a real hard delete of the row, guarded by the
+`revision` in the body (409 on a stale one); it leaves definitions and
+authorities alone. A client that wants an agent gone but auditable retires it.
+
+**Reading what an agent can do and its status.** `GET /api/agent/v1/capabilities`
+is global (operations, stream transports, event verbs, turn states, queue
+limits, route hints); it is not per agent. Per agent, `GET /api/native-agents/{id}`
+gives `state`, the authority id and the granted tools. There is no per-agent
+live-session or health endpoint yet: derive it from `GET /api/agent/v1/sessions`
+(paged) and `GET .../sessions/{id}`. That gap is recorded, not papered over.
+
+**Pagination.** `limit` (1-500) and `offset` on `native-agents`,
+`agent-host-settings`, `native-authority` and `native-authority/tools` (without
+them the whole list is returned, as before); an offset past the end is an empty
+page, a bad value is 400. Sessions and history use signed cursors, limit 1-200.
+
+**Turn event stream.** `GET /api/agent/v1/sessions/{id}/turns/{turnId}/events`
+returns `text/event-stream`, header `X-Chat-Encoding: chatstream/v1`, one JSON
+`chatstream.Event` per frame (`id` is the numeric `seq`). Fields on every event:
+`v`, `seq`, `run_id`, `time`, `verb`; the rest depend on the verb. Verbs:
+`run.start`, `run.finish` (`reason`, optional `usage`), `run.error` (`code`,
+`message`, `retryable`), `run.abort` (`reason`), `message.start|end`,
+`part.start|delta|end`, `approval.request`, `activity` and `gap`. The terminal
+events are `run.finish`, `run.error` and `run.abort`; after one the server ends
+the stream. A turn queued behind another is silent apart from `: keepalive`
+comment lines every 15 seconds. Resume with `Last-Event-ID: <last seq>` (digits
+only; query parameters are refused with 400). A `gap` event (`reason`
+`retention`, `cursor_ahead`, `dropped_slow` or `ingest_overflow`, `from`, `to`) means events were lost: read
+`GET .../turns/{turnId}` (the authoritative snapshot, with `event_checkpoint`)
+and continue from `to`. When the log has expired and your cursor already equals
+the checkpoint the stream is simply empty and ends. A dropped connection is not completion and never cancels
+the turn. There is no session-level stream (`session_stream_supported` is
+false). The event schema is the shared `chatstream/v1` contract
+(`libs/ui/ui-go/chatstream`); Nanite's tests run its conformance validator over a
+real turn.
+
+Contract tests: `internal/api/agent_management_contract_test.go` (retire, delete,
+pagination, capabilities, tool names) and `TestAgentV1RealTurnHTTPReplayStatusCancelAndRestart`
+(event stream, replay, bad cursor, gap).
+
 ## Host authentication
 
 The host binds loopback only and authenticates every `/api/` route, including

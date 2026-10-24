@@ -179,6 +179,9 @@ func TestAgentsManageRouteClassification(t *testing.T) {
 			t.Errorf("%s = %v, want admin", p, got)
 		}
 	}
+	if got, named := ScopeFor("", "POST /api/agent-host-settings/{id}/retire"); !named || got != ScopeAgentsManage {
+		t.Errorf("retire = %v (named %v), want agents:manage", got, named)
+	}
 	// Host settings writes also stay open to maintain.
 	if need, alt, _ := ScopesFor("", "PUT /api/agent-host-settings/{id}"); need != ScopeAgentsManage || alt != ScopeMaintain {
 		t.Errorf("host settings write = %v/%v, want agents:manage or maintain", need, alt)

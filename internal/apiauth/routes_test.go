@@ -127,6 +127,8 @@ func TestNativeAuthorityRoutesAreAdminOnly(t *testing.T) {
 		{"POST", "POST /api/native-authority/{id}/revoke"},
 		{"PUT", "PUT /api/native-authority/{id}/tools/{tool}"},
 		{"DELETE", "DELETE /api/native-authority/{id}/tools/{tool}"},
+		{"PUT", "PUT /api/native-authority/{id}/skills/{skill}"},
+		{"DELETE", "DELETE /api/native-authority/{id}/skills/{skill}"},
 	} {
 		scope, named := ScopeFor(tc.method, tc.pattern)
 		if !named || scope != ScopeAdmin {

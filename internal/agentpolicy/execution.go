@@ -42,7 +42,13 @@ type FieldReport struct {
 // ExecutionReport lists every field d declares and its disposition, in a stable
 // order. A report with a Refused entry is exactly when ValidateExecution fails.
 // Fields d does not declare are omitted.
-func ExecutionReport(d *agentdef.Definition) []FieldReport {
+func ExecutionReport(d *agentdef.Definition) []FieldReport { return ExecutionReportWith(d, nil) }
+
+// ExecutionReportWith is ExecutionReport for a launch that holds skill grants:
+// delivered lists the requested skills actually granted at their pinned digest
+// and planted for the session. Those are Applied; any other requested skill
+// stays Unmet.
+func ExecutionReportWith(d *agentdef.Definition, delivered map[string]bool) []FieldReport {
 	var out []FieldReport
 	add := func(field string, disp Disposition, format string, args ...any) {
 		out = append(out, FieldReport{Field: field, Disposition: disp, Detail: fmt.Sprintf(format, args...)})
@@ -86,7 +92,22 @@ func ExecutionReport(d *agentdef.Definition) []FieldReport {
 		add("requirements.tools", Recorded, "%d tool request(s) stay pending until an operator grants them; a request is never a grant", n)
 	}
 	if n := len(d.Requirements.Skills); n > 0 {
-		add("requirements.skills", Unmet, "%d skill(s) are stored and digest-pinned but not delivered: this host has no skill grant for a definition's request yet", n)
+		var got, missing []string
+		for _, sk := range d.Requirements.Skills {
+			if delivered[sk.Name] {
+				got = append(got, sk.Name)
+			} else {
+				missing = append(missing, sk.Name)
+			}
+		}
+		switch {
+		case len(missing) == 0:
+			add("requirements.skills", Applied, "%d skill(s) are granted at their pinned digest and planted for the session", len(got))
+		case len(got) == 0:
+			add("requirements.skills", Unmet, "%d skill(s) are stored and digest-pinned but not delivered: no skill grant covers them for this host revision", len(missing))
+		default:
+			add("requirements.skills", Unmet, "%d skill(s) are planted; %d are not delivered because no skill grant covers them: %s", len(got), len(missing), strings.Join(quoted(missing), ", "))
+		}
 	}
 	if n := len(d.Requirements.Resources); n > 0 {
 		add("requirements.resources", Applied, "%d file(s) are planted for the session", n)

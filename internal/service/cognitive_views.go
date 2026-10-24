@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/provider"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
 	"github.com/hollis-labs/nanite/internal/providerkeys"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
@@ -194,6 +196,9 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		}
 		cfg.HostSettings = &h.Settings
 		cfg.HostSettingsRef = &HostSettingsRef{ID: h.ID, Revision: h.Revision}
+		if err = v.deliverGrantedSkills(ctx, verified, h, &cfg); err != nil {
+			return nil, err
+		}
 	}
 	if req.WorkRoot != "" {
 		if cfg.HostSettings == nil {
@@ -368,5 +373,39 @@ func (v *CognitiveViews) checkHostMCPServers(ctx context.Context, names []string
 			return unsupportedCause(CauseCLIHostUnsupportedField, "host settings mcp_servers: %v", err)
 		}
 	}
+	return nil
+}
+
+// deliverGrantedSkills plants the skills the definition requests and the host
+// revision's live authority has granted at the digest the definition pins, under
+// agent/skills/<name>/ in the session's files, and reports them as applied. A
+// skill with no grant, a grant at another digest, or no readable stored tree is
+// not planted and stays unmet. Files are fixed when the session is created: a
+// grant made later reaches the next session, and revoking one takes effect for
+// sessions created after it.
+func (v *CognitiveViews) deliverGrantedSkills(ctx context.Context, verified VerifiedDefinition, h store.AgentHostSettings, cfg *ChatDefinitionConfig) error {
+	d := verified.Definition
+	if d == nil || len(d.Requirements.Skills) == 0 {
+		return nil
+	}
+	trees, err := v.Store.GrantedSkillTrees(ctx, d, h)
+	if err != nil {
+		return err
+	}
+	delivered := map[string]bool{}
+	for _, name := range store.SortedKeys(trees) {
+		for rel, content := range trees[name] {
+			dest := path.Join(agentpolicy.FilesRoot, agentpolicy.SkillsDir, name, rel)
+			if !strings.HasPrefix(dest, path.Join(agentpolicy.FilesRoot, agentpolicy.SkillsDir, name)+"/") {
+				return fmt.Errorf("skill %q file %q escapes its folder", name, rel)
+			}
+			if cfg.Files == nil {
+				cfg.Files = map[string][]byte{}
+			}
+			cfg.Files[dest] = content
+		}
+		delivered[name] = true
+	}
+	cfg.FieldReport = agentpolicy.ExecutionReportWith(d, delivered)
 	return nil
 }

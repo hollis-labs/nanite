@@ -124,8 +124,9 @@ func (r AgentRequests) PendingTools() []string {
 }
 
 // AgentRequestsFor reads the tool and skill requests of d against host's active
-// tool authority. Skill requests are always pending: this host has no skill
-// grant for a definition's request yet.
+// tool authority. A skill request is "granted" only when the active authority
+// for the host revision holds a grant whose digest equals the digest the
+// definition currently pins for that skill; otherwise it is pending.
 func (s *Store) AgentRequestsFor(ctx context.Context, d *agentdef.Definition, host AgentHostSettings) (AgentRequests, error) {
 	out := AgentRequests{Tools: []RequestState{}, Skills: []RequestState{}}
 	if d == nil {
@@ -148,8 +149,19 @@ func (s *Store) AgentRequestsFor(ctx context.Context, d *agentdef.Definition, ho
 		}
 		out.Tools = append(out.Tools, RequestState{Name: name, State: state})
 	}
+	var grantedSkills map[string]string
+	if len(d.Requirements.Skills) > 0 {
+		var err error
+		if grantedSkills, err = s.GrantedSkillDigests(ctx, host.ID, host.Revision); err != nil {
+			return out, err
+		}
+	}
 	for _, sk := range d.Requirements.Skills {
-		out.Skills = append(out.Skills, RequestState{Name: sk.Name, State: "pending"})
+		state := "pending"
+		if g := grantedSkills[sk.Name]; g != "" && g == sk.Content.Digest {
+			state = "granted"
+		}
+		out.Skills = append(out.Skills, RequestState{Name: sk.Name, State: state})
 	}
 	return out, nil
 }

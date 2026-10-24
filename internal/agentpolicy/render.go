@@ -14,6 +14,10 @@ import (
 // planted.
 const FilesRoot = "agent"
 
+// SkillsDir is the directory under FilesRoot where granted skills are delivered,
+// as agent/skills/<name>/<file>.
+const SkillsDir = "skills"
+
 // ErrRenderContent marks a pinned document whose bytes do not match its pin.
 var ErrRenderContent = errors.New("definition resource does not match its pin")
 

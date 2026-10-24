@@ -117,6 +117,15 @@ var adminMCPTools = []adminMCPTool{
 		description: "Withdraw one tool grant from an authority." + grantCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Authority id."), "tool": prop("string", "Tool name."), "reason": reasonProp},
 		required:    []string{"id", "tool"}, scope: apiauth.ScopeAdmin},
+	{name: "skill_grant", method: "PUT", path: "/api/native-authority/{id}/skills/{skill}", pathParams: []string{"id", "skill"}, body: true,
+		description: "Grant a skill the authority's definition requests, at the digest the definition pins for it. Same rule as tool_grant: granting requires an admin credential." + grantCredentialNote,
+		properties: map[string]any{"id": prop("string", "Authority id."), "skill": prop("string", "Requested skill name (lowercase words joined by hyphens)."),
+			"digest": prop("string", "The skill's pinned content digest, sha256:<64 hex>, as in the definition's requirements.skills."), "reason": reasonProp},
+		required: []string{"id", "skill", "digest", "reason"}, scope: apiauth.ScopeAdmin},
+	{name: "skill_ungrant", method: "DELETE", path: "/api/native-authority/{id}/skills/{skill}", pathParams: []string{"id", "skill"}, body: true,
+		description: "Withdraw one skill grant from an authority." + grantCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Authority id."), "skill": prop("string", "Skill name."), "reason": reasonProp},
+		required:    []string{"id", "skill", "reason"}, scope: apiauth.ScopeAdmin},
 	{name: "authority_revoke", method: "POST", path: "/api/native-authority/{id}/revoke", pathParams: []string{"id"}, body: true,
 		description: "Revoke an authority and every grant it holds." + grantCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Authority id."), "reason": reasonProp}, required: []string{"id", "reason"}, scope: apiauth.ScopeAdmin},
@@ -202,7 +211,7 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 	}
 	// Reasons stay in the domain audit; the route row names the tool and target.
 	var targets []string
-	for _, k := range []string{"id", "tool", "turnId", "slug"} {
+	for _, k := range []string{"id", "tool", "skill", "turnId", "slug"} {
 		if v, ok := args[k].(string); ok && v != "" {
 			targets = append(targets, v)
 		}

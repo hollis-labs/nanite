@@ -68,24 +68,17 @@ func (s *Store) projectAgentHost(ctx context.Context, h AgentHostSettings) (*Age
 		}
 		bundle = &b
 	}
-	parts := []string{d.Behavior.Purpose, d.Body}
-	for _, refs := range [][]agentdef.Ref{d.Behavior.Instructions, d.Behavior.SOPs} {
-		for _, ref := range refs {
-			body, err := s.GetAgentDefinitionResource(ctx, h.DefinitionRef, ref)
-			if err != nil {
-				return nil, err
-			}
-			parts = append(parts, string(body))
-		}
-	}
-	if d.Behavior.Completion != "" {
-		parts = append(parts, "Completion: "+d.Behavior.Completion)
+	rendered, err := agentpolicy.Render(d, func(ref agentdef.Ref) ([]byte, error) {
+		return s.GetAgentDefinitionResource(ctx, h.DefinitionRef, ref)
+	})
+	if err != nil {
+		return nil, err
 	}
 	status := "active"
 	if !h.Enabled {
 		status = "disabled"
 	}
-	return &AgentProfile{ID: h.ID, Name: h.Title, Slug: h.Slug, Revision: h.Revision, Source: h.Source, PluginID: h.PluginID, Status: status, SystemPrompt: strings.Join(parts, "\n\n"), Class: p.Class, DefinitionPolicy: &p, DefinitionReflex: bundle, NativeHost: &h.Settings, RuntimeKind: h.Settings.Runtime, Protocol: h.Settings.Protocol, Transport: h.Settings.Transport, DefaultProvider: h.Settings.Provider, DefaultModel: h.Settings.Model, Tools: "[]", Settings: "{}", Constraints: "{}", Tags: "[]", Directories: directoriesJSON(h.Settings.Directories), MCPServers: "[]", HostSettingsID: h.ID}, nil
+	return &AgentProfile{ID: h.ID, Name: h.Title, Slug: h.Slug, Revision: h.Revision, Source: h.Source, PluginID: h.PluginID, Status: status, SystemPrompt: rendered.Instructions, DefinitionFiles: rendered.Files, Class: p.Class, DefinitionPolicy: &p, DefinitionReflex: bundle, NativeHost: &h.Settings, RuntimeKind: h.Settings.Runtime, Protocol: h.Settings.Protocol, Transport: h.Settings.Transport, DefaultProvider: h.Settings.Provider, DefaultModel: h.Settings.Model, Tools: "[]", Settings: "{}", Constraints: "{}", Tags: "[]", Directories: directoriesJSON(h.Settings.Directories), MCPServers: "[]", HostSettingsID: h.ID}, nil
 }
 
 var ErrImmutableAgentProfile = errors.New("mutable agent profiles are retired; author a pinned definition and configure host settings")

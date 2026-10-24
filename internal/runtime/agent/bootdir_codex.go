@@ -140,6 +140,10 @@ func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	for relPath, content := range skillFiles {
 		files[relPath] = content
 	}
+	// The definition's pinned reference files, under agent/.
+	for relPath, content := range definitionFiles(params) {
+		files[relPath] = content
+	}
 
 	mcp, err := mcpConfigBytes(params)
 	if err != nil {

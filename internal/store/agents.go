@@ -16,7 +16,10 @@ type AgentProfile struct {
 	// content. It is never accepted or persisted as editable profile JSON.
 	DefinitionPolicy *agentpolicy.NativePolicy `json:"-"`
 	DefinitionReflex *agentpolicy.ReflexBundle `json:"-"`
-	NativeHost       *NativeHostSettings       `json:"-"`
+	// DefinitionFiles are the pinned reference files of the definition this
+	// profile was projected from, keyed by path relative to the session root.
+	DefinitionFiles map[string][]byte   `json:"-"`
+	NativeHost      *NativeHostSettings `json:"-"`
 	// HostSettingsID is the host settings row a projected profile came from;
 	// empty for any other profile. It is a runtime projection, never persisted.
 	HostSettingsID string `json:"-"`

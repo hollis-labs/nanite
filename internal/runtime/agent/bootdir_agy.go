@@ -79,6 +79,10 @@ func agyPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	for relPath, content := range skillFiles {
 		files[relPath] = content
 	}
+	// The definition's pinned reference files, under agent/.
+	for relPath, content := range definitionFiles(params) {
+		files[relPath] = content
+	}
 
 	// agy's mcp_config.json has the shape of .mcp.json for a stdio server
 	// ({"mcpServers": {name: {command, args, env}}}).

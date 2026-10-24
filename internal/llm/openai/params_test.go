@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"testing"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -101,6 +102,30 @@ func TestModelSupportsReasoning(t *testing.T) {
 	for model, want := range cases {
 		if got := modelSupportsReasoning(model); got != want {
 			t.Errorf("modelSupportsReasoning(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+// go-glm takes max_tokens; every other model keeps max_completion_tokens.
+func TestBuildChatParams_MaxTokensField(t *testing.T) {
+	for model, want := range map[string]string{"go-glm": "max_tokens", "openai-mini": "max_completion_tokens"} {
+		params, err := buildChatParams(llmtypes.ChatRequest{Model: model, MaxTokens: 77,
+			Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hi"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		other := "max_tokens"
+		if want == other {
+			other = "max_completion_tokens"
+		}
+		if body[want] != float64(77) || body[other] != nil {
+			t.Errorf("%s: body %s, want %s only", model, raw, want)
 		}
 	}
 }

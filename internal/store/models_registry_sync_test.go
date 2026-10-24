@@ -65,3 +65,46 @@ func TestSyncModelsFromRegistry_CurrentChatModelsReachTheTable(t *testing.T) {
 		})
 	}
 }
+
+// Gateway aliases reach the models table under the right station provider with
+// their limits and tool support, and their price is recorded as unknown, not 0.
+func TestSyncModelsFromRegistry_StationAliases(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedProviders(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SyncModelsFromRegistry(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for modelID, want := range map[string]struct {
+		provider string
+		tools    bool
+	}{
+		"go-glm": {"station-openai", true}, "openai-mini": {"station-openai", true},
+		"gemini-flash": {"station-openai", true}, "openrouter-auto": {"station-openai", true},
+		"hf-llama": {"station-openai", false}, "local-light": {"station-openai", false},
+		"go-haiku": {"station-anthropic", true}, "anthropic-haiku": {"station-anthropic", true},
+	} {
+		var provider, pricing string
+		var window, maxOut int
+		var tools bool
+		err := s.DB.QueryRowContext(ctx,
+			`SELECT p.provider_type, m.context_window, m.max_output, m.supports_tools, m.pricing
+			   FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.model_id = ?`, modelID).
+			Scan(&provider, &window, &maxOut, &tools, &pricing)
+		if err != nil {
+			t.Errorf("%s: no models row: %v", modelID, err)
+			continue
+		}
+		if provider != want.provider || tools != want.tools || window <= 0 || maxOut <= 0 {
+			t.Errorf("%s: provider %q tools %v window %d out %d", modelID, provider, tools, window, maxOut)
+		}
+		if pricing != `{"price_unknown":true}` {
+			t.Errorf("%s: pricing = %s, want unknown", modelID, pricing)
+		}
+	}
+}

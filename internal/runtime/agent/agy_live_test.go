@@ -131,3 +131,83 @@ for line in sys.stdin:
     else:
         send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
 `
+
+// TestLiveAgyPathAllowlist drives one real agy turn through the real launch
+// path to prove the non-MCP path rules (agy_path_allow.go): a file write and a
+// read inside the allowed root (and a subdirectory of it) execute, a write
+// outside every root and a shell command (no command rule exists) are denied.
+// One model turn, cheapest model; skipped unless NANITE_LIVE_AGY=1 (same env
+// as TestLiveAgyPerToolAllowlist). The evidence lands in NANITE_LIVE_AGY_OUT.
+func TestLiveAgyPathAllowlist(t *testing.T) {
+	if os.Getenv("NANITE_LIVE_AGY") != "1" {
+		t.Skip("set NANITE_LIVE_AGY=1 to run the live agy proof (spends model tokens)")
+	}
+	realHome := os.Getenv("NANITE_LIVE_AGY_REAL_HOME")
+	if realHome == "" {
+		t.Skip("set NANITE_LIVE_AGY_REAL_HOME to the home holding the agy login")
+	}
+	out := os.Getenv("NANITE_LIVE_AGY_OUT")
+	if out == "" {
+		out = t.TempDir()
+	}
+	out, _ = filepath.EvalSymlinks(out)
+	work := filepath.Join(out, "work")
+	outside := filepath.Join(out, "outside")
+	for _, d := range []string{work, filepath.Join(work, "sub"), outside} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", realHome)
+	oldRoot := agyGeminiRoot
+	agyGeminiRoot = func() string { return filepath.Join(out, "data", "agy-gemini") }
+	t.Cleanup(func() { agyGeminiRoot = oldRoot })
+
+	params := SetupParams{
+		SessionID:        "live-agy-path",
+		Mode:             ModeLongLived,
+		AgentProfile:     &store.AgentProfile{Name: "Live", Slug: "live-agy-path", ID: "live-agy-path"},
+		BootContent:      "live proof",
+		CLIWritableRoots: []string{work},
+	}
+	layout := bootdirLayoutFor("agy")
+	boot, err := layout.Setup(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(boot) })
+	t.Logf("rules: %q", agyAllowRules(params))
+
+	env := layout.AmendEnv(composeEnv(params.AgentProfile, Options{}), boot)
+	argv := []string{"--model", "gemini-3.8-flash-low", "--print-timeout", "150s", "--output-format", "stream-json"}
+	argv = append(argv, agyPermissionArgs(&Dependencies{}, "antigravity")...)
+	argv = append(argv, addDirArgs("agy", work, nil)...)
+	argv = append(argv, "-p", "Do these in order and stop at the first one that is refused. 1) Write a file "+filepath.Join(work, "ok.txt")+" containing exactly: ok. 2) Write a file "+filepath.Join(work, "sub", "deep.txt")+" containing exactly: deep. 3) Read "+filepath.Join(work, "ok.txt")+" back. 4) Write a file "+filepath.Join(outside, "denied.txt")+" containing exactly: no. 5) Run the shell command: echo hi. A denied step ends your turn, so do the steps in this order. Use no other tools. Reply with one line per step: done, or the denial message.")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, filepath.Join(realHome, ".local/bin/agy"), argv...) //nolint:gosec // live proof, fixed argv
+	cmd.Dir = layout.SpawnWorkdir(boot, "")
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	stdout, _ := os.Create(filepath.Join(out, "stream.jsonl"))
+	stderr, _ := os.Create(filepath.Join(out, "stderr.txt"))
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	runErr := cmd.Run()
+	_ = stdout.Close()
+	_ = stderr.Close()
+	t.Logf("agy exit: %v; HOME=%s", runErr, env["HOME"])
+
+	read := func(p string) string {
+		b, _ := os.ReadFile(p) //nolint:gosec // G304: the test's own files
+		return strings.TrimSpace(string(b))
+	}
+	if got := read(filepath.Join(work, "ok.txt")); got != "ok" {
+		t.Errorf("ok.txt = %q: the write under the allowed root did not run", got)
+	}
+	t.Logf("sub/deep.txt = %q (a path rule covering subdirectories)", read(filepath.Join(work, "sub", "deep.txt")))
+	if _, err := os.Stat(filepath.Join(outside, "denied.txt")); err == nil {
+		t.Error("denied.txt exists: a write outside every allowed root executed")
+	}
+}

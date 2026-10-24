@@ -130,7 +130,7 @@ Note on ordering: a denial can end the turn, so put the tool you expect to be de
 - **Version coupling.** The rule syntax `mcp(<server>/<tool>)`, the settings path, the `<plugin>_<server>` naming and the print-mode behaviour are observed (binary strings, changelog, live runs), not a documented API. Keep the live stub turn as a smoke test and re-run it on every agy update.
 - **Shared login through symlinks.** The auth files in the private `.gemini` are symlinks to the real ones, so a token refresh by the agent writes through to the operator's real files, and the desktop app and agents share one login. Same trade-off as any farm home. Do not copy tokens instead (they would go stale).
 - **Wildcards.** Only `mcp(<ServerName>/*)` was verified (one live run on agy 1.4.7). Everything else is untested; prefer per-tool rules for third-party servers.
-- **Non-MCP tools stay denied.** `run_command`, file writes and `read_url` need their own rules (`command(<prefix>)`, `write_file(<path>)`, `read_file(<path>)`, `read_url(<domain>)`) and are denied headless without them. Do not silently allow them. Define an explicit per-agent policy; never wildcard.
+- **Non-MCP tools stay denied unless you give them a rule.** See section 10 for the file rules; `run_command` and `read_url` need `command(<prefix>)` / `read_url(<domain>)` and are denied headless without them. Do not silently allow them. Define an explicit per-agent policy; never wildcard.
 - **Platforms.** Verified on macOS and on Linux x86_64 (see section 9). Other machines are assumed to match Linux until checked.
 - **Files written at `~` land in the farm,** not the real home, if the agent writes outside the symlinked entries.
 - **Empty exit-0 after denial** (section 1): supervisors must not read it as success or as a crash.
@@ -172,3 +172,48 @@ agy --version; ls -l ~/.gemini ~/.gemini/antigravity-cli | grep -E 'oauth|instal
 ```
 
 Expect `1.4.7` or newer, an `antigravity-oauth-token` in `~/.gemini/antigravity-cli/`, and a `settings.json` there. If the layout differs, run the one-turn stub test (section 5) before trusting the farm; do not improvise.
+
+## 10. Non-MCP tools: file read and write
+
+Status: verified live on 2026-10-24 (macOS, agy 1.4.7, `gemini-3.8-flash-low`). Written from the Nanite implementation (CW-20261024-0110).
+
+Headless agy auto-denies the non-MCP tools the same way as MCP ones (exit 0, empty response, stderr `a tool required the "write_file" permission that headless mode cannot prompt for ... Add an allow-rule under permissions.allow`). Passing a directory with `--add-dir` does not lift that. The same `permissions.allow` mechanism does, with these rules (agy's own grammar):
+
+| Tool | Rule | Notes |
+| --- | --- | --- |
+| shell | `command(<binary and subcommand>)`, e.g. `command(gh pr list)` | prefix; never `command(*)` |
+| file read | `read_file(<absolute path>)` | never `read_file(*)` or `read_file(/)` |
+| file write | `write_file(<absolute path>)` | never `write_file(*)` or `write_file(/)` |
+| network | `read_url(<domain>)`, `execute_url(<domain>)` | never `read_url(*)` |
+
+### 10.1 Mapping chosen: default deny, explicit allowlist, no wildcards
+
+Derive rules only from policy that actually carries scope. In Nanite that is the list of directories every CLI agent is already offered (work root, the host settings' directories, configured extra writable roots; each an existing directory, none inside a control-plane directory). Each directory `D` yields `read_file(D)` and `write_file(D)`, work root first. Nothing else is derived.
+
+Refuse (no rule, fail closed) any root that is empty, relative, not already in clean form, `/`, the real home or a parent of it, a secrets directory under the home (`.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker`, `.gemini`, `.agents`, `.nanite`) or inside one (symlinks are resolved for these checks), or that contains `(`, `)`, `*`, whitespace or a newline. The grammar documents no quoting for spaces, so a path with a space gets no rule rather than a guessed one.
+
+The rules go through the same merge as the MCP rules: user-authored entries are untouched, and the rules the harness wrote last time (the sidecar) are replaced, so a revoked or changed directory loses its rule at the next launch.
+
+### 10.2 Not mapped, and why
+
+- `command(<prefix>)`: the harness's grants are tool names; no field carries command prefixes. Inventing one from a tool name would be a guess that widens access. Stays denied.
+- `read_url` / `execute_url`: no field carries domains. Stays denied.
+- Wildcards of any kind.
+
+Follow-up, not built: an explicit per-agent host-settings list (for example `cli_allow`) of command prefixes and domains, each entry validated against an allowlist grammar (a command is binary plus fixed subcommand tokens with no shell metacharacters; a domain is a bare hostname), emitted as `command(...)` / `read_url(...)`, default empty.
+
+### 10.3 Evidence
+
+Throwaway data dir and workspace, real launch path, `--add-dir <work>`, no `--dangerously-skip-permissions`, a single model turn. Rules in the private settings: `read_file(<work>)` and `write_file(<work>)` for the one root `<work>` (a plain absolute path, no trailing slash). Prompt: write `<work>/ok.txt`, write `<work>/sub/deep.txt`, read `ok.txt`, write `<outside>/denied.txt` (outside every root), run `echo hi`; allowed steps first because a denial ends the turn.
+
+| Step | Result |
+| --- | --- |
+| `write_file <work>/ok.txt` | executed; file on disk with `ok` |
+| `write_file <work>/sub/deep.txt` | executed; file on disk with `deep`. A rule on a directory covers files in its subdirectories, i.e. matching is by path prefix |
+| `read_file <work>/ok.txt` | executed |
+| `write_file <outside>/denied.txt` | denied: file not created; stderr hint for the `write_file` permission; exit 0, empty response. The stream marks the step `DONE` with no error text, so detect the denial from stderr and the empty response, not the step state |
+| `command echo hi` | not reached (the previous denial ended the turn); not verified live |
+
+Tokens (`usage.total_tokens`): 33.5k for the turn (four model calls, 8k input each). A before/after listing of the real `~/.gemini` and `~/.agents` (10,236 files, path, size and mtime) was identical.
+
+Not verified: that `read_file` and `write_file` rules are each needed separately (both were given), whether a trailing slash or a symlinked path form matches, and the rule with spaces in the path.

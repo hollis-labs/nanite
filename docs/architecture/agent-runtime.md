@@ -164,15 +164,25 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
     time (recorded in the sidecar `antigravity-cli/nanite-owned-rules.json`) are
     replaced, so a revoked grant is gone at the next launch. Mode 0600, atomic
     rename. An unparsable file is kept as `settings.json.bak-<time>`.
-  - **Not covered.** Other agy tools (`run_command`, file read/write, `read_url`)
-    keep being auto-denied headless: Nanite maps nothing for them. Hooks are
-    refused (an agy workspace hook's allow is advisory and does not approve).
-    Concurrent launches of one agent share the private dir and write the same
-    rules. macOS/Unix only (symlinks); coupled to agy 1.4.x's settings loader.
-  - Proposed follow-up (not built): map an explicit per-agent allowlist from
-    Nanite's tool policy to agy's `command(<prefix>)`, `read_file(<path>)`,
-    `write_file(<path>)` and `read_url(<domain>)` rules, default deny, no
-    wildcards.
+  - **File access.** The same private settings carry `read_file(<dir>)` and
+    `write_file(<dir>)` for each of `SetupParams.CLIWritableRoots` (the list
+    codex and claude get: the work root first, the host settings `directories`,
+    the configured `dev_tools_allowed_paths`; existing directories outside the
+    control plane). A root that is `/`, the real home or a parent of it, a
+    secrets directory of the home (`.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker`,
+    `.gemini`, `.agents`, `.nanite`) or inside one, relative, not clean, or
+    contains whitespace, `*`, `(`, `)` or a newline gets no rule. The sidecar
+    tracks these rules together with the MCP ones, so a changed or revoked
+    directory loses its rule at the next launch. Verified live (see the guide).
+  - **Not covered.** `run_command` and `read_url` keep being auto-denied
+    headless: Nanite has no per-agent policy field for command prefixes or URL
+    domains, so it maps nothing for them. Hooks are refused (an agy workspace
+    hook's allow is advisory and does not approve). Concurrent launches of one
+    agent share the private dir and write the same rules. macOS/Unix only
+    (symlinks); coupled to agy 1.4.x's settings loader.
+  - Proposed follow-up (not built): an explicit host-settings `cli_allow` list
+    mapped to `command(<prefix>)` and `read_url(<domain>)`, validated by an
+    allowlist grammar, default deny, no wildcards.
   See [the adoption guide](../guides/agy-per-agent-mcp-allowlist.md).
 - **Permissions.** The CLI runs under the boot dir's Claude permissions and the
   planted strict `.mcp.json`; Nanite's tools reach it only through the Nanite

@@ -582,3 +582,44 @@ func TestResolvePlantableSkills_SkipsDisabled(t *testing.T) {
 		t.Fatalf("plantable = %+v, %v; want only the enabled skill", got, err)
 	}
 }
+
+// Every runtime that plants skills through the shared layout table withholds a
+// disabled skill from its boot dir, both through skillFilesForProvider and
+// through the runtime's own plant spec (CW-20261024-0011).
+func TestDisabledSkillIsNotPlantedForAnyRuntime(t *testing.T) {
+	vendor := &fakeSkillVendor{files: map[string]skillvendor.FileMap{skillAddrGood: {"SKILL.md": []byte("body")}}}
+	sstore := &fakeSkillStore{
+		skills: map[string]*store.Skill{
+			"on":  {Slug: "on", ContentHash: skillAddrGood, Enabled: true},
+			"off": {Slug: "off", ContentHash: skillAddrGood, Enabled: false},
+		},
+		known: map[string][]store.AgentKnownSkill{"agent-1": {
+			{AgentID: "agent-1", SkillName: "on", ApprovedContentHash: skillAddrGood},
+			{AgentID: "agent-1", SkillName: "off", ApprovedContentHash: skillAddrGood},
+		}},
+	}
+	params := SetupParams{
+		SessionID: "s", AgentProfile: &store.AgentProfile{ID: "agent-1", Name: "A", Slug: "a"},
+		SystemPrompt: "p", BootContent: "b", Skills: sstore, SkillVendor: vendor,
+	}
+	specs := map[string]func() (map[string][]byte, error){
+		"claude":      func() (map[string][]byte, error) { s, err := claudePlantSpec(t.TempDir(), params); return s.Files, err },
+		"codex":       func() (map[string][]byte, error) { s, err := codexPlantSpec(params); return s.Files, err },
+		"opencode":    func() (map[string][]byte, error) { s, err := opencodePlantSpec(params); return s.Files, err },
+		"antigravity": func() (map[string][]byte, error) { s, err := agyPlantSpec(params); return s.Files, err },
+	}
+	for name, spec := range specs {
+		files, err := spec()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var on, off bool
+		for p := range files {
+			on = on || strings.Contains(p, "/on/") || strings.HasPrefix(p, "skills/on/")
+			off = off || strings.Contains(p, "/off/") || strings.HasPrefix(p, "skills/off/")
+		}
+		if !on || off {
+			t.Errorf("%s: enabled skill planted = %v, disabled skill planted = %v", name, on, off)
+		}
+	}
+}

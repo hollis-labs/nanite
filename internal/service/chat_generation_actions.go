@@ -1949,7 +1949,7 @@ func (s *chatServiceImpl) prepareTurn(
 			}
 			policy = cfg.NativePolicy.Defaults()
 		}
-		agent = &store.AgentProfile{Name: "Defined chat", SystemPrompt: cfg.Instructions, DefinitionPolicy: &policy, DefinitionReflex: cfg.ReflexBundle, NativeHost: cfg.HostSettings, Class: policy.Class, DefaultProvider: cfg.Model.Provider, DefaultModel: cfg.Model.Model, RuntimeKind: "api", Constraints: "{}", Settings: "{}", Tags: "[]", Tools: "[]"}
+		agent = &store.AgentProfile{Name: "Defined chat", SystemPrompt: cfg.Instructions, DefinitionFiles: cfg.Files, DefinitionPolicy: &policy, DefinitionReflex: cfg.ReflexBundle, NativeHost: cfg.HostSettings, Class: policy.Class, DefaultProvider: cfg.Model.Provider, DefaultModel: cfg.Model.Model, RuntimeKind: "api", Constraints: "{}", Settings: "{}", Tags: "[]", Tools: "[]"}
 		if cfg.HostSettings != nil && cfg.HostSettings.Runtime == "cli" && cfg.HostSettingsRef != nil {
 			// A CLI view boots the host's projected profile, pinned to the revision
 			// the view was admitted under (driveBootSession checks it).
@@ -2010,6 +2010,14 @@ func (s *chatServiceImpl) prepareTurn(
 			return prepareTurnResult{directive: runloop.Terminate}
 		}
 		sessionWorkspace = ws
+		if len(agent.DefinitionFiles) > 0 {
+			if plantErr := runtimeagent.PlantDefinitionFiles(ws, agent.DefinitionFiles); plantErr != nil {
+				slog.Error("prepareTurn: plant definition files", "session_id", sessionID, "err", plantErr)
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "The definition's reference files could not be planted", nil)
+				return prepareTurnResult{directive: runloop.Terminate}
+			}
+			agent.SystemPrompt += "\n\nYour session root is " + ws.Root + "."
+		}
 		// The session's file and shell tools work inside the host's directories
 		// and the workspace, as a CLI session does; nothing wider is implied.
 		if s.pathGrants != nil {

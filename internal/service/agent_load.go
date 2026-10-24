@@ -7,6 +7,7 @@ import (
 
 	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentdir"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -46,15 +47,19 @@ type AgentLoadResponse struct {
 	Tools          []string        `json:"tools"`
 	// Notes are things the operator should know: skills present but not
 	// installed, tools that need granting before the agent can launch.
-	Notes          []string       `json:"notes,omitempty"`
-	SessionRequest map[string]any `json:"session_request"`
+	Notes []string `json:"notes,omitempty"`
+	// Fields says what a launch does with each field agent.md declares:
+	// applied, recorded, unmet (launches without it) or refused.
+	Fields         []agentpolicy.FieldReport `json:"fields,omitempty"`
+	Requests       store.AgentRequests       `json:"requests"`
+	SessionRequest map[string]any            `json:"session_request"`
 }
 
 // Load reads the directory, checks that the native runtime could launch what it
 // declares, and records it. Loading the same state twice changes nothing.
 func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, opts AgentLoadOptions, grantedBy string) (AgentLoadResponse, error) {
 	var out AgentLoadResponse
-	settings := store.NativeHostSettings{Version: "1", Runtime: dir.Host.Runtime, Provider: dir.Host.Provider, Model: dir.Host.Model, Directories: dir.Host.Directories}
+	settings := store.NativeHostSettings{Version: "1", Runtime: dir.Host.Runtime, Provider: dir.Host.Provider, Model: dir.Host.Model, Directories: dir.Host.Directories, HarnessProfile: dir.Host.HarnessProfile, MCPServers: dir.Host.MCPServers}
 	if err := settings.Validate(); err != nil {
 		return out, fmt.Errorf("%w: host.yaml: %w", ErrAgentSetupInvalid, err)
 	}
@@ -120,8 +125,20 @@ func (s *AgentLoadService) Load(ctx context.Context, dir *agentdir.Directory, op
 	if res.Previous != nil {
 		out.Previous = res.Previous.Slug
 	}
-	if len(dir.Skills) > 0 {
-		out.Notes = append(out.Notes, fmt.Sprintf("skills/ holds %v; skills are not installed yet", dir.Skills))
+	out.Fields = agentpolicy.ExecutionReport(dir.Parsed)
+	for _, f := range out.Fields {
+		if f.Disposition == agentpolicy.Unmet {
+			out.Notes = append(out.Notes, fmt.Sprintf("%s: %s", f.Field, f.Detail))
+		}
+	}
+	if unrequested := unrequestedSkills(dir); len(unrequested) > 0 {
+		out.Notes = append(out.Notes, fmt.Sprintf("skills/ holds %v, which agent.md does not request; they are ignored", unrequested))
+	}
+	if out.Requests, err = s.Store.AgentRequestsFor(ctx, dir.Parsed, res.HostSettings); err != nil {
+		return out, err
+	}
+	if pending := out.Requests.PendingTools(); len(pending) > 0 {
+		out.Notes = append(out.Notes, fmt.Sprintf("requested tools not granted yet: %v", pending))
 	}
 	if res.AuthorityID == "" {
 		out.Notes = append(out.Notes, "this revision has no tool authority; grant tools (or reload with --grant-same-as) before starting a session")
@@ -159,4 +176,19 @@ func loadDiff(res store.AgentLoadResult) []string {
 		d = []string{"title or other non-behavioral change"}
 	}
 	return d
+}
+
+// unrequestedSkills lists the skill folders agent.md does not request.
+func unrequestedSkills(dir *agentdir.Directory) []string {
+	asked := map[string]bool{}
+	for _, sk := range dir.Parsed.Requirements.Skills {
+		asked[sk.Name] = true
+	}
+	var out []string
+	for _, n := range dir.Skills {
+		if !asked[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }

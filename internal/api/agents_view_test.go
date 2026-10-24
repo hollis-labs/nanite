@@ -48,6 +48,9 @@ func populatedAgentProfile(t *testing.T) store.AgentProfile {
 			f.Set(reflect.New(f.Type().Elem()))
 		case reflect.Int:
 			f.SetInt(int64(1000 + i))
+		case reflect.Map:
+			// DefinitionFiles is a runtime-only projection, excluded like the pointers above.
+			f.Set(reflect.MakeMap(f.Type()))
 		default:
 			t.Fatalf("store.AgentProfile.%s has kind %s; teach populatedAgentProfile about it", v.Type().Field(i).Name, f.Kind())
 		}

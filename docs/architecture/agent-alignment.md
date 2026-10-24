@@ -6,11 +6,13 @@ provider or on top of a CLI runtime, and behaves the same either way: same
 workspace, same instructions, same skills, same tool grants, same wake. The
 model is shared with Tether so an agent authored once can be launched by either.
 
-This document is a **proposal**, not a description of the running system.
-Nothing here that is not marked "today" is built: no code reads an agent
-directory, and `agent.md`, `host.yaml`, `live` mode and the shared launch
-pipeline do not exist. `agent-runtime.md`, `native-agent-api.md` and
-`native-authority.md` describe the parts that exist.
+This document describes the model and says, for each part, what runs today. The
+directory loader (`nanite agent load`, `nanite agent run`, `POST
+/api/agent-reload`), `agent.md` and `host.yaml`, the `live`/`pinned` modes and the
+definition-field handling are built; the shared launch pipeline and the
+endpoint-backed mode are not, and where a part is still a proposal it says so.
+`agent-runtime.md`, `native-agent-api.md` and `native-authority.md` describe the
+runtimes.
 
 ## The agent directory
 
@@ -49,11 +51,11 @@ could accept them.
 | `provider`, `model` | exists | for `api`, a registered API provider and model; for `cli`, the runtime (`claude`, `codex`, `opencode`, `agy`) and the model flag it accepts |
 | `directories` | exists | filesystem the agent may use; the first entry is its work root. Required for `cli`, which refuses a relative entry. Proposed: the same meaning for `api` (see Launch materialization); today an `api` host ignores it |
 | `native_loop`, `recall_limit`, `recall_timeout_ms` | exists | `api` only |
-| `harness_profile`, `mcp_servers`, `debug` | exists | `harness_profile` is a native-loop knob. Today a `cli` host refuses a non-empty `harness_profile`. `mcp_servers` names registry servers; a `cli` host carries them only on `claude` (granted tools allowed per tool, see agent-runtime.md) and refuses them on other providers |
+| `harness_profile`, `mcp_servers`, `debug` | exists; `host.yaml` carries the first two | `harness_profile` is a native-loop knob. Today a `cli` host refuses a non-empty `harness_profile`. `mcp_servers` names registry servers; a `cli` host carries them only on `claude` (granted tools allowed per tool, see agent-runtime.md) and refuses them on other providers |
 | `protocol`, `transport` | exists | select an ACP CLI transport. `Validate` rejects them on an `api` host, and a `cli` host refuses them today |
 | (all of the above on a `cli` host) | exists | a non-empty `harness_profile`, `native_loop`, `recall_*`, `protocol` or `transport`, or `mcp_servers` on a provider other than `claude`, is refused with cause `cli_host_unsupported_field` |
-| `mode` | **proposed** | `live` or `pinned` (below). Absent means the default rule |
-| a reference to the agent directory | **proposed** | how a `live` host names the directory it reads. Needs a field or a registration; not chosen here |
+| `mode` | exists | `live` or `pinned` (below). Absent means the default rule, evaluated when the directory is loaded |
+| `agent_dir` | exists | the agent directory a load read the row from, recorded by the loader (not authored): the directory a reload re-reads |
 | skill selection hints (trigger phrases, priority) | **proposed** | host-side hints keyed by skill name (see Skills) |
 
 Authority over the filesystem comes from this file, not from a request. A
@@ -81,11 +83,11 @@ profile, not of the definition.
 - **Tool authority.** One grant set per host-settings revision, enforced at
   Nanite's tool boundary. A CLI does not widen it: its tools arrive through the
   Nanite MCP server, which asks the same authority.
-- **Host revision pinning.** The intended rule is that a session records the
-  host revision it started under and a later turn after the host changed fails
-  rather than silently using the new one. Today only a defined CLI session
-  checks this (`host_revision_changed`); an `api` session does not, and
-  bringing it to the same rule is part of the work.
+- **Host revision pinning.** A session records the host revision it started
+  under, and a later turn after the host changed or was disabled fails with
+  `host_revision_changed` rather than silently using the new one. This holds for
+  a CLI session (checked at boot) and an API session (checked at the start of each
+  turn).
 - **Wake and messaging, session events.** The same session record and event
   stream.
 
@@ -134,7 +136,7 @@ An edit to the agent directory reaches new sessions in one of two ways.
 - **`pinned`.** The host settings name an exact definition pin. Only an explicit
   operator action changes it (install a new revision, update the host settings).
   This is the behavior of a database-only deployment, and it is what runs today.
-- **`live`** (proposed). The host names the directory. A **reload** reads it,
+- **`live`.** The host names the directory (`agent_dir`). A **reload** reads it,
   validates it, installs the result as an immutable revision (the same bytes
   give the same digest and the same pin) and records a new host revision that
   points at it. New sessions then start against the new pin exactly as
@@ -150,9 +152,8 @@ session B would break session A's next turn. `live` therefore must not move a
 shared row: a reload records a **new host row per loaded revision** (named
 from the agent and the pin), leaves the row A was admitted under untouched, and
 A keeps working until it ends. The cost is one host row per distinct state of the
-directory. This is a design choice that needs the owner's agreement; the
-alternative is to say that any reload ends the older sessions' ability to take
-another turn.
+directory. This is the built behavior; the alternative, that any reload ends
+the older sessions' ability to take another turn, was not chosen.
 
 **Who may reload.** A reload writes host settings, which is a *maintain*
 operation. Creating a session is *operate*. A session create must therefore
@@ -164,10 +165,14 @@ that carries no authority (below). The caller of a later session create only
 selects among revisions that already exist.
 
 **The agent must not be able to edit its own definition.** An agent's
-`directories` are its filesystem. The loader refuses a directory that is inside,
-or contains, any entry of its own `host.yaml` `directories`, and refuses a
-directory the agent's boot root is allowed to write. Otherwise an agent could
-rewrite its `agent.md` and a reload would hand the new text its old grants.
+`directories` are its filesystem. For a `live` agent the loader refuses a
+directory that is inside, or contains, any entry of its own `host.yaml`
+`directories` (`agentdir.CheckOwnDirectories`, symlinks resolved). A `pinned`
+agent is exempt: nothing republishes it without an explicit operator load, which
+is what lets `nanite agent run` keep a `.nanite` inside the project the agent
+works in. (The boot root is not checked: the loader does not know it.)
+Otherwise an agent could rewrite its `agent.md` and a reload would hand the new
+text its old grants.
 
 **Authority and a changed pin.** Tool authority is recorded against a host
 revision and a definition digest. A reload therefore yields a revision with no
@@ -179,12 +184,21 @@ same tool set, with a reason), which is recorded as an ordinary new authority
 with its own audit entry. That keeps every grant tied to a decision made about
 the text it applies to.
 
+### Chosen names
+
+The names the design left open, as built:
+
+- `agent_dir`: the host setting that records the agent directory a load read.
+- `NANITE_AGENT_MODE`: the application default mode (`live` or `pinned`).
+- `NANITE_RESOURCE_ENV`: the service's Cerberus `env` label.
+- `NANITE_RESOURCE_ADMIN`: the service's Cerberus `admin` label.
+
 ### Choosing the default
 
 One rule, evaluated in order, first match wins:
 
 1. `mode` in `host.yaml`.
-2. The user or application setting for the default mode.
+2. The application setting for the default mode (`NANITE_AGENT_MODE`).
 3. Otherwise **`pinned`, unless the target is positively labeled development:
    the Cerberus resource labels of the service Nanite runs as read `env: dev`
    and `admin` is not `owner`.** Then the default is `live`.
@@ -192,9 +206,16 @@ One rule, evaluated in order, first match wins:
 A production label, an `admin: owner` label and a missing label all give
 `pinned`. Today every labeled resource is `env: dev`, so a labeled Nanite
 defaults to `live` and an unlabeled one to `pinned`; no `prod` label exists
-anywhere yet, so the production branch has not been exercised. Nanite reads no
-such label today; the rule needs an input for it (config or environment
-populated from the manifest).
+anywhere yet, so the production branch has not been exercised. Nanite reads the
+labels from the environment, `NANITE_RESOURCE_ENV` and `NANITE_RESOURCE_ADMIN`,
+to be populated from the manifest's `env` and `admin`; nothing populates them
+yet, so until something does an unlabeled server defaults to `pinned`
+(`service.ResolveAgentMode`). `agent load` and the reload endpoint read the same
+variables, and a load prints the mode and which step of the rule chose it. One deviation: an
+attended `agent load`/`agent run` treats the step 3 fallback (pinned only because
+nothing says dev) as "publish", so the edit-and-run loop works on an unlabeled
+machine; an explicit `mode`, the application setting and a dev label still apply,
+and the unattended reload applies the rule as written.
 
 Other signals can only tighten this rule, never loosen it: the fabric
 authentication mode and saved posture profiles, once they exist. A host name

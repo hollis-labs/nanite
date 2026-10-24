@@ -31,6 +31,11 @@ func writeLoadDirRev(t *testing.T, root, work, rev, body, hostExtra string) {
 	if err := os.WriteFile(filepath.Join(root, "agent.md"), []byte(def), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// These tests exercise republishing, so they say live; the default rule has
+	// its own tests (TestAgentLoadDefaultModeFollowsTheRule).
+	if !strings.Contains(hostExtra, "mode:") {
+		hostExtra = "mode: live\n" + hostExtra
+	}
 	host := "runtime: cli\nprovider: claude\nmodel: haiku\ndirectories: [" + work + "]\n" + hostExtra
 	if err := os.WriteFile(filepath.Join(root, "host.yaml"), []byte(host), 0o600); err != nil {
 		t.Fatal(err)

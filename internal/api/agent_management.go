@@ -24,6 +24,7 @@ import (
 // /api/agent/v1/sessions to start one.
 func (a *API) registerAgentManagementRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-setup", a.handleAgentSetup)
+	mux.HandleFunc("POST /api/agent-reload", a.handleAgentReload)
 	mux.HandleFunc("GET /api/native-agents", a.handleNativeAgentList)
 	mux.HandleFunc("GET /api/native-agents/{id}", a.handleNativeAgentGet)
 }
@@ -173,4 +174,72 @@ func pageOf[T any](r *http.Request, list []T) ([]T, error) {
 		return list[:0], nil
 	}
 	return list[offset:min(offset+limit, len(list))], nil
+}
+
+type agentReloadBody struct {
+	// Host is the host settings (id or slug) of a loaded agent revision.
+	Host string `json:"host"`
+	// Force publishes a new revision of a pinned agent.
+	Force bool `json:"force,omitempty"`
+	// DryRun reports what would change and writes nothing.
+	DryRun bool `json:"dry_run,omitempty"`
+	// GrantSameAs re-grants the tools of this host to the new revision; it
+	// needs an admin credential and a reason.
+	GrantSameAs string `json:"grant_same_as,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// handleAgentReload re-reads the agent directory a host row was loaded from and
+// publishes its current state as a new revision (docs/architecture/agent-alignment.md,
+// "Live and pinned"). It is an operator call: the directory is the one recorded
+// on the host row, never a path from the request, and the new row carries no
+// authority unless an admin names a host to copy tools from.
+func (a *API) handleAgentReload(w http.ResponseWriter, r *http.Request) {
+	p, ok := apiauth.FromContext(r.Context())
+	if !ok {
+		a.errorResp(w, http.StatusUnauthorized, "authentication is required")
+		return
+	}
+	if p.Kind == apiauth.KindAgent || !p.Has(apiauth.ScopeMaintain) || strings.TrimSpace(p.CredentialID) == "" {
+		a.errorResp(w, http.StatusForbidden, "the credential lacks the required scope")
+		return
+	}
+	if a.Services == nil || a.Services.AgentLoad == nil {
+		a.errorResp(w, http.StatusServiceUnavailable, "agent reload unavailable")
+		return
+	}
+	var body agentReloadBody
+	if err := definitionRequest(w, r, &body); err != nil || strings.TrimSpace(body.Host) == "" {
+		a.errorResp(w, http.StatusBadRequest, "invalid agent reload request: name the host settings to reload")
+		return
+	}
+	body.Reason = strings.TrimSpace(body.Reason)
+	if len(body.Reason) > 500 {
+		a.errorResp(w, http.StatusBadRequest, "reason is at most 500 characters")
+		return
+	}
+	if body.GrantSameAs != "" && (!p.Has(apiauth.ScopeAdmin) || body.Reason == "") {
+		a.errorResp(w, http.StatusForbidden, "granting tools on a reload needs an admin credential and a reason")
+		return
+	}
+	res, err := a.Services.AgentLoad.Reload(r.Context(), strings.TrimSpace(body.Host), service.AgentLoadOptions{
+		Force: body.Force, DryRun: body.DryRun, GrantFrom: body.GrantSameAs, Reason: body.Reason,
+		AppDefaultMode: service.AppDefaultModeFromEnv(), Labels: service.DeployLabelsFromEnv(),
+	}, p.CredentialID)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			a.errorResp(w, http.StatusNotFound, "host settings not found")
+		case errors.Is(err, store.ErrAgentLoadPinned):
+			a.errorResp(w, http.StatusConflict, err.Error())
+		default:
+			a.agentSetupError(w, err)
+		}
+		return
+	}
+	status := http.StatusOK
+	if res.Changed && !res.DryRun {
+		status = http.StatusCreated
+	}
+	a.jsonResp(w, status, res)
 }

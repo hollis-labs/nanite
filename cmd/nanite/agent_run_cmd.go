@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/service"
@@ -122,8 +123,10 @@ func runAgentRun(ctx context.Context, args []string, out io.Writer) error {
 
 // loadForRun publishes the directory and returns the session request for it.
 // The database is opened only for the load and closed before the server is
-// talked to. A CLI agent gets the current directory as its work root; an API
-// agent has none (the server refuses one).
+// talked to. The current directory is the session's work root: required for a CLI
+// agent, and for an API agent when a host directory contains it (the server
+// refuses a work root outside the host's directories, so one that is not inside
+// is not sent).
 func loadForRun(ctx context.Context, arg string, opts service.AgentLoadOptions) (agentCreateSessionRequest, error) {
 	var req agentCreateSessionRequest
 	st, err := store.New(ctx, resolveDBPath())
@@ -141,15 +144,40 @@ func loadForRun(ctx context.Context, arg string, opts service.AgentLoadOptions) 
 	if res.Changed {
 		fmt.Fprintf(os.Stderr, "loaded %s as host %s\n", res.Agent, res.Slug)
 	}
-	if dir.Host.Runtime == "cli" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return req, err
+	cwd, cwdErr := os.Getwd()
+	switch {
+	case dir.Host.Runtime == "cli":
+		if cwdErr != nil {
+			return req, cwdErr
 		}
 		req.WorkRoot = cwd
 		if res.Changed && res.Previous != "" && len(res.Tools) == 0 {
 			fmt.Fprintf(os.Stderr, "this revision has no tool grants; to give it the tools of %s run:\n  nanite agent load --grant-same-as %s\n", res.Previous, res.Previous)
 		}
+	case cwdErr == nil && insideAny(cwd, dir.Host.Directories):
+		// An API agent works in the current directory too when the host grants
+		// it; otherwise it keeps the host's first directory as its work root.
+		req.WorkRoot = cwd
 	}
 	return req, nil
+}
+
+// insideAny reports whether path is, or is inside, one of dirs, comparing
+// symlink-resolved paths so it agrees with the server's check.
+func insideAny(path string, dirs []string) bool {
+	resolve := func(p string) string {
+		p = filepath.Clean(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	target := resolve(path)
+	for _, d := range dirs {
+		rel, err := filepath.Rel(resolve(d), target)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

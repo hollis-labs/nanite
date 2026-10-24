@@ -122,9 +122,10 @@ type CreateDefinedView struct {
 	HostSettings               *HostSettingsRef
 	ModelSelection             *ModelSelection
 	ProjectID, Title, Metadata string
-	// WorkRoot is where a CLI agent works, chosen at create time. It must be an
-	// existing directory inside one of the host settings' directories; the host
-	// document, not the request, owns filesystem authority.
+	// WorkRoot is where the agent works, chosen at create time, for a CLI or an
+	// API host alike (an API session's file and shell tools lead with it). It must
+	// be an existing directory inside one of the host settings' directories; the
+	// host document, not the request, owns filesystem authority.
 	WorkRoot string
 }
 
@@ -195,8 +196,8 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		cfg.HostSettingsRef = &HostSettingsRef{ID: h.ID, Revision: h.Revision}
 	}
 	if req.WorkRoot != "" {
-		if cfg.HostSettings == nil || cfg.HostSettings.Runtime != "cli" {
-			return nil, unsupportedCause(CauseWorkRootUnsupported, "work_root applies to CLI agents; this session has no CLI host settings")
+		if cfg.HostSettings == nil {
+			return nil, unsupportedCause(CauseWorkRootUnsupported, "work_root needs host settings: it must lie inside the directories they grant")
 		}
 		root, rootErr := resolveWorkRoot(req.WorkRoot, cfg.HostSettings.Directories)
 		if rootErr != nil {

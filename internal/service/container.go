@@ -78,6 +78,9 @@ type Container struct {
 	// AgentSetup installs, configures and authorizes an agent in one
 	// transaction; it backs POST /api/agent-setup and `nanite agent setup`.
 	AgentSetup *AgentSetupService
+	// AgentLoad publishes an agent directory and reloads one; it backs
+	// `nanite agent load` and POST /api/agent-reload.
+	AgentLoad *AgentLoadService
 	// NativeAuthority is the operator-only writer of native-view tool authority.
 	NativeAuthority *NativeAuthorityAdmin
 	// NativeGrants decides native-view tool authority per call; the credential
@@ -1458,6 +1461,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		CognitiveViews:      cognitiveViews,
 		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
 		AgentSetup:          &AgentSetupService{Store: cfg.Store, Keys: providerKeys, ConfineDirectories: true},
+		AgentLoad:           &AgentLoadService{Store: cfg.Store},
 		NativeAuthority:     &NativeAuthorityAdmin{Writer: cfg.Store.LocalAuthority()},
 		NativeGrants:        nativeGrants,
 		Agents:              agents,

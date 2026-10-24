@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/agentdir"
 	"github.com/hollis-labs/nanite/internal/apiauth"
+	"github.com/hollis-labs/nanite/internal/service"
 )
 
 const setupFixtureDef = "---\nschema_version: \"2\"\ndefinition_id: def:http-setup\nrevision: \"1\"\nname: http-setup\ndescription: Fixture.\nbehavior:\n  purpose: Complete the requested work.\nrequirements: {}\nharness_profile:\n  context: {}\n  permissions:\n    profile: default\ncontinuity:\n  mode: ephemeral\n---\nFixture.\n"
@@ -218,5 +220,66 @@ func TestAgentSetupErrorMapsUnknownErrorsTo500WithoutDetail(t *testing.T) {
 		if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "sql") {
 			t.Errorf("%v -> %d %s", err, w.Code, w.Body)
 		}
+	}
+}
+
+func writeReloadDir(t *testing.T, root, work, rev, mode string) {
+	t.Helper()
+	def := strings.Replace(setupFixtureDef, `revision: "1"`, `revision: "`+rev+`"`, 1)
+	def = strings.Replace(def, "def:http-setup", "def:http-reload", 1)
+	if err := os.WriteFile(filepath.Join(root, "agent.md"), []byte(def), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := "runtime: cli\nprovider: claude\nmodel: haiku\nmode: " + mode + "\ndirectories: [" + work + "]\n"
+	if err := os.WriteFile(filepath.Join(root, "host.yaml"), []byte(host), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAgentReloadOverHTTP(t *testing.T) {
+	a, mux := newTestAPI(t)
+	for name, p := range map[string]*apiauth.Principal{"no principal": nil, "agent credential": &agentPrincipal} {
+		if w := naReq(mux, p, "POST", "/api/agent-reload", map[string]any{"host": "x"}); w.Code != http.StatusForbidden && w.Code != http.StatusUnauthorized {
+			t.Errorf("%s = %d, want 401/403", name, w.Code)
+		}
+	}
+	root, work := t.TempDir(), t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(work); err == nil {
+		work = resolved
+	}
+	writeReloadDir(t, root, work, "1", "live")
+	dir, err := agentdir.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := a.Services.AgentLoad.Load(t.Context(), dir, service.AgentLoadOptions{}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := naReq(mux, &clientPrincipal, "POST", "/api/agent-reload", map[string]any{"host": first.Slug, "grant_same_as": first.Slug, "reason": "r"}); w.Code != http.StatusForbidden {
+		t.Errorf("a maintain credential re-granted tools: %d %s", w.Code, w.Body.String())
+	}
+	if w := naReq(mux, &clientPrincipal, "POST", "/api/agent-reload", map[string]any{"host": "nope"}); w.Code != http.StatusNotFound {
+		t.Errorf("unknown host = %d: %s", w.Code, w.Body.String())
+	}
+	if w := naReq(mux, &clientPrincipal, "POST", "/api/agent-reload", map[string]any{"host": first.Slug}); w.Code != http.StatusOK {
+		t.Fatalf("reload of an unchanged directory = %d: %s", w.Code, w.Body.String())
+	}
+	writeReloadDir(t, root, work, "2", "live")
+	w := naReq(mux, &clientPrincipal, "POST", "/api/agent-reload", map[string]any{"host": first.Slug})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("reload after an edit = %d: %s", w.Code, w.Body.String())
+	}
+	var res service.AgentLoadResponse
+	if err = json.Unmarshal(w.Body.Bytes(), &res); err != nil || !res.Changed || res.HostSettingsID == first.HostSettingsID || res.Mode != "live" {
+		t.Fatalf("response = %+v, %v", res, err)
+	}
+	// A pinned agent does not move on a reload unless forced.
+	writeReloadDir(t, root, work, "3", "pinned")
+	if w = naReq(mux, &clientPrincipal, "POST", "/api/agent-reload", map[string]any{"host": res.Slug}); w.Code != http.StatusConflict {
+		t.Fatalf("pinned reload = %d: %s", w.Code, w.Body.String())
+	}
+	if w = naReq(mux, &clientPrincipal, "POST", "/api/agent-reload", map[string]any{"host": res.Slug, "force": true}); w.Code != http.StatusCreated {
+		t.Fatalf("forced reload = %d: %s", w.Code, w.Body.String())
 	}
 }

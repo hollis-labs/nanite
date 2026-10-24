@@ -307,3 +307,36 @@ func packSkill(root string, sk agentdef.Skill) (Resource, error) {
 	}
 	return Resource{URI: sk.Content.URI, Content: blob}, nil
 }
+
+// CheckOwnDirectories refuses an agent directory that is inside, or contains, a
+// directory its own host.yaml lets the agent use. An agent that can write its own
+// agent.md could otherwise hand new text to the next reload. Paths are compared
+// after resolving symlinks in their existing part.
+func CheckOwnDirectories(agentDir string, directories []string) error {
+	root := resolveLoose(agentDir)
+	for _, dir := range directories {
+		d := resolveLoose(dir)
+		if within(d, root) || within(root, d) {
+			return fmt.Errorf("the agent directory %s overlaps %s, a directory host.yaml grants the agent: it could rewrite its own definition", agentDir, dir)
+		}
+	}
+	return nil
+}
+
+// resolveLoose evaluates symlinks in the deepest existing ancestor of p, so a
+// directory that does not exist yet still compares by where it would be.
+func resolveLoose(p string) string {
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
+}

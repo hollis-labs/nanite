@@ -70,6 +70,15 @@ func loadAgentDirectory(ctx context.Context, st *store.Store, arg string, opts s
 	if err != nil {
 		return nil, service.AgentLoadResponse{}, err
 	}
+	// The default mode reads the same environment a server would (NANITE_AGENT_MODE,
+	// NANITE_RESOURCE_ENV/ADMIN), so a load and a reload agree.
+	if opts.AppDefaultMode == "" {
+		opts.AppDefaultMode = service.AppDefaultModeFromEnv()
+	}
+	if opts.Labels == (service.DeployLabels{}) {
+		opts.Labels = service.DeployLabelsFromEnv()
+	}
+	opts.Attended = true
 	svc := &service.AgentLoadService{Store: st}
 	res, err := svc.Load(ctx, dir, opts, loadCLIActor)
 	return dir, res, err

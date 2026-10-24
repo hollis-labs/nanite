@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/llm/station"
 	sdk "github.com/openai/openai-go/v3"
 )
 
@@ -26,6 +27,9 @@ func translateError(err error) error {
 	}
 	var apierr *sdk.Error
 	if errors.As(err, &apierr) {
+		if gwErr := station.Classify(apierr.StatusCode, apierr.Code, apierr.RawJSON(), fmt.Errorf("%d %s: %s", apierr.StatusCode, apierr.Code, apierr.Message)); gwErr != nil {
+			return gwErr
+		}
 		return fmt.Errorf("openai: %s %d %s: %s",
 			http.StatusText(apierr.StatusCode), apierr.StatusCode, apierr.Code, apierr.Message)
 	}

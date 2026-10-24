@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
+	"github.com/hollis-labs/nanite/internal/llm/station"
 )
 
 // Wrapper-local sentinels for non-rate-budget transient categories. The
@@ -52,6 +53,10 @@ func translateError(err error) error {
 	var apiErr *sdk.Error
 	if !errors.As(err, &apiErr) {
 		return err
+	}
+
+	if gwErr := station.Classify(apiErr.StatusCode, string(apiErr.Type()), apiErr.RawJSON(), apiErr); gwErr != nil {
+		return gwErr
 	}
 
 	switch apiErr.StatusCode {

@@ -1,6 +1,6 @@
 # Per-agent MCP allowlist for headless Antigravity (agy)
 
-Status: verified live on 2026-10-24 (agy CLI on macOS, model `gemini-3.8-flash-low`). Generic: it applies to any harness that launches `agy` headlessly (`agy -p`, `--print`) and wants an agent to call a chosen set of MCP tools and no others. Written from the Nanite implementation (CW-20261024-0035 research, CW-20261024-0109 implementation); the Nanite names in the examples are placeholders for your own.
+Status: verified live on 2026-10-24 on macOS and Linux (agy CLI 1.4.7, model `gemini-3.8-flash-low`). Generic: it applies to any harness that launches `agy` headlessly (`agy -p`, `--print`) and wants an agent to call a chosen set of MCP tools and no others. Written from the Nanite implementation (CW-20261024-0035 research, CW-20261024-0109 implementation); the Nanite names in the examples are placeholders for your own.
 
 ## 1. The problem
 
@@ -99,7 +99,7 @@ Setup common to rows 1-4 (row 5 used Nanite's own launch path): throwaway worksp
 (Token counts are agy's `usage.total_tokens`.)
 
 The hook payload, for reference (workspace hooks are not part of the recommended mechanism): `toolCall.name` is always `call_mcp_tool`, `toolCall.args` = `{ServerName, ToolName, Arguments}`, plus `conversationId`, `stepIdx`, `lastUserInput`, `workspacePaths`, `modelName`. Do not match on the whole stdin: it contains the prompt.
-
+| 6 | Linux x86_64 (agent-os, service user), same farm recipe as row 3 built by hand in a throwaway home/workspace (Nanite's farm links the same files), agy 1.4.7 | `ok_tool` executed (stub logged it), `no_tool` denied `user denied permission`; ServerName `stub_stub`; exit 0, empty response, stderr hint | 14.8k |
 
 Note on ordering: a denial can end the turn, so put the tool you expect to be denied last when a run must reach several allowed tools.
 
@@ -131,7 +131,7 @@ Note on ordering: a denial can end the turn, so put the tool you expect to be de
 - **Shared login through symlinks.** The auth files in the private `.gemini` are symlinks to the real ones, so a token refresh by the agent writes through to the operator's real files, and the desktop app and agents share one login. Same trade-off as any farm home. Do not copy tokens instead (they would go stale).
 - **Wildcards.** Only `mcp(<ServerName>/*)` was verified (one live run on agy 1.4.7). Everything else is untested; prefer per-tool rules for third-party servers.
 - **Non-MCP tools stay denied.** `run_command`, file writes and `read_url` need their own rules (`command(<prefix>)`, `write_file(<path>)`, `read_file(<path>)`, `read_url(<domain>)`) and are denied headless without them. Do not silently allow them. Define an explicit per-agent policy; never wildcard.
-- **macOS only verified.** Symlink semantics and the auth-file set may differ elsewhere.
+- **Platforms.** Verified on macOS and on Linux x86_64 (see section 9). Other machines are assumed to match Linux until checked.
 - **Files written at `~` land in the farm,** not the real home, if the agent writes outside the symlinked entries.
 - **Empty exit-0 after denial** (section 1): supervisors must not read it as success or as a crash.
 - Hook-based gating is out: `allow` is advisory.
@@ -148,3 +148,25 @@ Note on ordering: a denial can end the turn, so put the tool you expect to be de
 ## 8. Rollback
 
 The farm and private `.gemini` are additive and live outside the real `~/.gemini`. To roll back: stop setting `HOME` for agy launches (agy returns to the real home and its shared global config), remove the farm directories and the per-agent private `.gemini`, and restore the previous refusal for agy MCP grants so nothing runs ungated. The real `~/.gemini` was never edited, so there is nothing to restore there.
+
+## 9. Platforms and fleet notes
+
+Verified 2026-10-24, agy 1.4.7:
+
+| Machine | Verified | Notes |
+| --- | --- | --- |
+| macOS (operator workstation) | yes, rows 3-5 | `~/.gemini` holds `oauth_creds.json`, `google_accounts.json`, `jetski-standalone-oauth-token`, `installation_id` and `antigravity-cli/antigravity-oauth-token` (mode 0600) |
+| Linux x86_64 (agent-os, service user) | yes, row 6 | agy at `~/.local/bin/agy`, config under `~/.gemini/antigravity-cli/` (no XDG paths). Auth file: `antigravity-cli/antigravity-oauth-token` (0600). `oauth_creds.json`, `google_accounts.json` and `jetski-standalone-oauth-token` do not exist, and `installation_id` lives under `antigravity-cli/` (not top level). `~/.gemini/config/{mcp_config.json,plugins,projects}` and `~/.agents/skills` exist. Same settings.json keys (`model`, `permissions.allow`, `trustedWorkspaces`) |
+| other worker-* machines | not checked | assumed to match the Linux layout until checked |
+
+What this means for the farm recipe: link only the auth files that exist (already in 2.1), and note that `antigravity-cli/installation_id` is not in the linked set, so agy mints a fresh one in the private `.gemini` (harmless in the runs above). Linking it too is a reasonable option if you want one installation identity.
+
+Token refresh write-through was observed on Linux: the real `antigravity-oauth-token` was rewritten at the time of the throwaway turn (mtime and size changed by one byte). Another agy process was running on that machine at the same moment, so the cause is not isolated, but this is exactly the shared-login trade-off in section 6: expect the real token file to be refreshed through the symlink.
+
+Check on each machine before relying on this (read-only, no secrets):
+
+```
+agy --version; ls -l ~/.gemini ~/.gemini/antigravity-cli | grep -E 'oauth|installation_id|settings.json'
+```
+
+Expect `1.4.7` or newer, an `antigravity-oauth-token` in `~/.gemini/antigravity-cli/`, and a `settings.json` there. If the layout differs, run the one-turn stub test (section 5) before trusting the farm; do not improvise.

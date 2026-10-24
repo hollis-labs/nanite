@@ -36,11 +36,23 @@ func (a *API) agentManagementActor(w http.ResponseWriter, r *http.Request) (apia
 		a.errorResp(w, http.StatusUnauthorized, "authentication is required")
 		return p, false
 	}
-	if p.Kind == apiauth.KindAgent || !p.Has(apiauth.ScopeAdmin) || strings.TrimSpace(p.CredentialID) == "" {
+	if !agentManager(p) {
 		a.errorResp(w, http.StatusForbidden, "the credential lacks the required scope")
 		return p, false
 	}
 	return p, true
+}
+
+// agentManager is the test every agent-management route applies: a non-agent
+// credential with agents:manage (the operator holds every scope).
+func agentManager(p apiauth.Principal) bool {
+	return p.Kind != apiauth.KindAgent && p.Has(apiauth.ScopeAgentsManage) && strings.TrimSpace(p.CredentialID) != ""
+}
+
+// canGrantTools reports whether the principal may grant or withdraw native
+// tool authority. That stays admin: granting is the privilege-escalation path.
+func canGrantTools(p apiauth.Principal) bool {
+	return p.Kind != apiauth.KindAgent && p.Has(apiauth.ScopeAdmin) && strings.TrimSpace(p.CredentialID) != ""
 }
 
 type agentSetupBody struct {
@@ -79,7 +91,15 @@ func (a *API) handleAgentSetup(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "a reason of at most 500 characters is required")
 		return
 	}
-	req := service.AgentSetupRequest{Definition: []byte(body.Artifact), Archetype: body.Archetype, Slug: body.Slug, Title: body.Title,
+	// Setup grants the tools it names, so naming any needs admin. An
+	// agents:manage caller creates the agent with no grants (tools: []) and an
+	// admin grants tools afterwards.
+	grantsAllowed := canGrantTools(p)
+	if !grantsAllowed && len(body.Tools) > 0 {
+		a.errorResp(w, http.StatusForbidden, "granting tools requires the admin scope; send tools as an empty list")
+		return
+	}
+	req := service.AgentSetupRequest{AllowNoTools: !grantsAllowed, Definition: []byte(body.Artifact), Archetype: body.Archetype, Slug: body.Slug, Title: body.Title,
 		Provider: body.Provider, Model: body.Model, Runtime: body.Runtime, Directories: body.Directories, Tools: body.Tools, Reason: body.Reason}
 	for _, res := range body.Resources {
 		req.Resources = append(req.Resources, store.DefinitionResource{URI: res.URI, Content: []byte(res.Content)})

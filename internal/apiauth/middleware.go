@@ -116,8 +116,8 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 		if pattern == "" {
 			pattern = r.Method + " " + path
 		}
-		need, _ := ScopeFor(r.Method, pattern)
-		if !p.Has(need) {
+		need, alt, _ := ScopesFor(r.Method, pattern)
+		if !p.Has(need) && (alt == "" || !p.Has(alt)) {
 			g.audit(r, p, pattern, "forbidden")
 			writeForbidden(w, r, need)
 			return
@@ -134,7 +134,7 @@ func (g *Guard) Middleware(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if need == ScopeAdmin || (need == ScopeMaintain && unsafeMethod(r.Method)) {
+		if need == ScopeAdmin || ((need == ScopeMaintain || need == ScopeAgentsManage) && unsafeMethod(r.Method)) {
 			g.audit(r, p, pattern, "allowed")
 		}
 		base := WithAudit(WithPrincipal(r.Context(), p), func(method, route, outcome string) {

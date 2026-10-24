@@ -90,13 +90,20 @@ authority with `POST /api/native-authority/{authority_id}/revoke`, retire by
 `PUT /api/agent-host-settings/{id}` with `"enabled": false`, change host
 settings the same way (send the current `revision`).
 
-Credential: the setup and view routes are admin-class and refuse agent
-credentials. Client credentials cannot hold `admin` (`nanite auth create`
-refuses it), so today the caller must present the operator credential
-(`nanite auth token-path`). The accountable actor recorded on the authority is
-that credential's id, not anything in the body. Giving Tether and Tachyon their
-own narrower credential for these routes would need a scope decision and is not
-done here; until then treat the operator token as the key to granting tools.
+Credential: the setup and view routes need the `agents:manage` scope and refuse
+agent credentials. A client credential can hold `agents:manage` (add `operate`
+to also run sessions and turns); it cannot hold `admin`. `agents:manage` covers
+`/api/agent-setup`, `/api/native-agents*`, writes to `/api/agent-host-settings*`
+(`maintain` still works there too), reads of `/api/native-authority*` and the
+admin MCP endpoint. It never grants tools: creating, granting, withdrawing and
+revoking authority (`POST /api/native-authority`, `PUT`/`DELETE
+.../tools/{tool}`, `.../revoke`) stay `admin`, which only the operator holds,
+and so do `/api/auth` and `/api/providers`. Because `agent-setup` grants the
+tools it names, an `agents:manage` caller must send `"tools": []` (naming any is
+a 403) and gets the agent with no grants; an operator then grants tools. The
+accountable actor recorded on the authority is the credential's id, not anything
+in the body. `admin` includes `agents:manage`, so the operator token still does
+everything (`nanite auth token-path`).
 
 The steps below are what `setup` does, for when you need one on its own.
 
@@ -110,8 +117,10 @@ validation and reason-required rules apply. An error comes back as an MCP tool
 error whose text starts `HTTP <status>:`; any non-2xx status, redirects
 included, is an error. The inner call does not pass the auth middleware's
 per-route scope rules or the `/api/admin` Origin allowlist a second time (the
-outer request did); the endpoint instead re-checks for a non-agent admin
-principal itself. Today only the operator holds admin, so this changes nothing.
+outer request did); the endpoint instead re-checks for a non-agent principal
+with `agents:manage` itself, and each tool checks any scope it needs beyond
+that: `tool_grant`, `tool_ungrant` and `authority_revoke` need `admin`, and the
+session and turn tools need `operate`.
 Ids must be a single path segment (`.`, `..` and `/` are refused).
 
 | Tool | Route |
@@ -126,8 +135,10 @@ Ids must be a single path segment (`.`, `..` and `/` are refused).
 
 Every mutating tool writes an auth-audit row naming the tool and its target (`mcp:tool_grant <authority> <tool>`), since the middleware only sees `POST /api/admin/mcp`; `host_settings_retire` also records its reason there. `agent_list`, `host_settings_list` and `authority_list` take `limit` (default 50) and `offset`; `authority_list` needs `host_settings_id`. `session_list` and `session_history` page with `limit`/`cursor`/`older_cursor`; any
 response over 256 KiB is refused rather than cut. The endpoint sits under
-`/api/admin`, so it needs the admin scope: the operator token. Agent credentials are refused, and so is any client credential without
-admin. That credential stays admin for now; narrower credentials come later.
+`/api/admin` but is classified `agents:manage`, so a client holding that scope
+(and `operate` for sessions) can use it. Agent credentials are refused, and so
+is any client credential without `agents:manage`. Other `/api/admin/*` routes
+stay admin.
 Directories and `work_root` are absolute paths on the machine Nanite runs on.
 
 The `agent_create` and `agent_update` self-tools are gone: they only ever

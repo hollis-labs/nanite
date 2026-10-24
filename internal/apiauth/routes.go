@@ -14,6 +14,9 @@ type routeRule struct {
 	methods []string // empty means any method; "!GET" means every method but GET
 	path    *regexp.Regexp
 	scope   Scope
+	// alt, when set, is a second scope that also satisfies the rule. It keeps
+	// an existing scope working where a narrower one is added beside it.
+	alt Scope
 }
 
 func rule(methods string, path string, scope Scope) routeRule {
@@ -22,6 +25,12 @@ func rule(methods string, path string, scope Scope) routeRule {
 		ms = strings.Split(methods, ",")
 	}
 	return routeRule{methods: ms, path: regexp.MustCompile(path), scope: scope}
+}
+
+func altRule(methods, path string, scope, alt Scope) routeRule {
+	r := rule(methods, path, scope)
+	r.alt = alt
+	return r
 }
 
 func (r routeRule) matches(method, path string) bool {
@@ -53,11 +62,21 @@ var routeRules = []routeRule{
 	rule("GET", `^/api/auth/session$`, ScopeRead),
 	rule("POST", `^/api/auth/logout$`, ScopeRead),
 	rule("", `^/api/auth(/|$)`, ScopeAdmin),
+	// The admin MCP endpoint is agent management for agents:manage holders.
+	// Each tool re-checks its own scope (grants stay admin), because the inner
+	// call does not pass this table again.
+	rule("", `^/api/admin/mcp$`, ScopeAgentsManage),
 	rule("", `^/api/admin(/|$)`, ScopeAdmin),
-	// Native-view tool authority: reading it and changing it are both admin.
+	// Native-view tool authority: reading it is agent management; creating,
+	// granting, withdrawing and revoking it are admin (grants are the
+	// privilege-escalation path).
+	rule("GET", `^/api/native-authority(/|$)`, ScopeAgentsManage),
 	rule("", `^/api/native-authority(/|$)`, ScopeAdmin),
-	// One-call agent setup grants authority, and the agent views list it.
-	rule("", `^/api/(agent-setup|native-agents)(/|$)`, ScopeAdmin),
+	// One-call agent setup and the agent views. Setup granting tools is
+	// refused inside the handler for a caller without admin.
+	rule("", `^/api/(agent-setup|native-agents)(/|$)`, ScopeAgentsManage),
+	// Agent host settings writes: agents:manage, or maintain as before.
+	altRule("!GET", `^/api/agent-host-settings(/.*)?$`, ScopeAgentsManage, ScopeMaintain),
 	// A reload writes host settings (maintain); re-granting tools on it needs
 	// admin, which the handler checks itself.
 	rule("POST", `^/api/agent-reload$`, ScopeMaintain),
@@ -105,6 +124,13 @@ var routeRules = []routeRule{
 // named it. An unmatched pattern is treated as admin for writes, read for
 // reads, and reported unmatched so tests can fail.
 func ScopeFor(method, pattern string) (Scope, bool) {
+	need, _, matched := ScopesFor(method, pattern)
+	return need, matched
+}
+
+// ScopesFor is ScopeFor plus the alternative scope that also satisfies the
+// route, or "" when there is none.
+func ScopesFor(method, pattern string) (need, alt Scope, matched bool) {
 	path := pattern
 	if m, p, ok := strings.Cut(pattern, " "); ok {
 		if method == "" {
@@ -117,13 +143,13 @@ func ScopeFor(method, pattern string) (Scope, bool) {
 	}
 	for _, r := range routeRules {
 		if r.matches(method, path) {
-			return r.scope, true
+			return r.scope, r.alt, true
 		}
 	}
 	if method == http.MethodGet || method == http.MethodHead {
-		return ScopeRead, false
+		return ScopeRead, "", false
 	}
-	return ScopeAdmin, false
+	return ScopeAdmin, "", false
 }
 
 // isPublic reports routes that need no credential. Each public route does

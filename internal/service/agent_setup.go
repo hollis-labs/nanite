@@ -61,7 +61,10 @@ type AgentSetupRequest struct {
 	Runtime     string // "api" (default) or "cli"
 	Directories []string
 	Tools       []string // tool names, or store.AllAvailableTools
-	Reason      string
+	// AllowNoTools lets Tools be empty: the agent is set up with no grants. Set
+	// for a caller that may not grant tools (agents:manage without admin).
+	AllowNoTools bool
+	Reason       string
 }
 
 // AgentSetupResponse is the setup outcome and the body to start a session.
@@ -110,7 +113,7 @@ func (s *AgentSetupService) Setup(ctx context.Context, req AgentSetupRequest, gr
 	default:
 		return out, setupInvalid("runtime %q is not supported; use api or cli", runtime)
 	}
-	if len(req.Tools) == 0 {
+	if len(req.Tools) == 0 && !req.AllowNoTools {
 		return out, setupInvalid("tools is required: name the tools to grant (see GET /api/native-authority/tools) or pass [\"*\"] for all")
 	}
 	name := req.Slug

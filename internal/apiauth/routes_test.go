@@ -123,8 +123,6 @@ func TestScopeForKeyRoutes(t *testing.T) {
 
 func TestNativeAuthorityRoutesAreAdminOnly(t *testing.T) {
 	for _, tc := range []struct{ method, pattern string }{
-		{"GET", "GET /api/native-authority"},
-		{"GET", "GET /api/native-authority/{id}"},
 		{"POST", "POST /api/native-authority"},
 		{"POST", "POST /api/native-authority/{id}/revoke"},
 		{"PUT", "PUT /api/native-authority/{id}/tools/{tool}"},
@@ -153,5 +151,52 @@ func TestAgentSessionLifecycleRoutesRequireOperate(t *testing.T) {
 	}
 	if got, _ := ScopeFor(http.MethodDelete, "/api/sessions/{id}"); got != ScopeOperate {
 		t.Fatalf("DELETE session = %v, want operate (stop must not be stricter than the route it shares a body with, nor looser)", got)
+	}
+}
+
+// agents:manage opens agent management and nothing that grants tools or
+// touches credentials and providers (CW-20261024-0025).
+func TestAgentsManageRouteClassification(t *testing.T) {
+	manage := []string{
+		"POST /api/agent-setup", "GET /api/native-agents", "GET /api/native-agents/{id}",
+		"POST /api/agent-host-settings", "PUT /api/agent-host-settings/{id}", "DELETE /api/agent-host-settings/{id}",
+		"GET /api/native-authority", "GET /api/native-authority/tools", "GET /api/native-authority/{id}",
+		"POST /api/admin/mcp",
+	}
+	for _, p := range manage {
+		if got, named := ScopeFor("", p); !named || got != ScopeAgentsManage {
+			t.Errorf("%s = %v (named %v), want agents:manage", p, got, named)
+		}
+	}
+	admin := []string{
+		"POST /api/native-authority", "POST /api/native-authority/{id}/revoke",
+		"PUT /api/native-authority/{id}/tools/{tool}", "DELETE /api/native-authority/{id}/tools/{tool}",
+		"GET /api/auth/credentials", "POST /api/auth/credentials", "POST /api/auth/credentials/{id}/revoke",
+		"PUT /api/providers/{id}/api-key", "POST /api/providers", "/api/admin/", "POST /api/admin/other",
+	}
+	for _, p := range admin {
+		if got, _ := ScopeFor("", p); got != ScopeAdmin {
+			t.Errorf("%s = %v, want admin", p, got)
+		}
+	}
+	// Host settings writes also stay open to maintain.
+	if need, alt, _ := ScopesFor("", "PUT /api/agent-host-settings/{id}"); need != ScopeAgentsManage || alt != ScopeMaintain {
+		t.Errorf("host settings write = %v/%v, want agents:manage or maintain", need, alt)
+	}
+}
+
+func TestAgentsManageScopeRules(t *testing.T) {
+	s, err := ParseScope("agents:manage")
+	if err != nil || s != ScopeAgentsManage {
+		t.Fatalf("ParseScope = %v, %v", s, err)
+	}
+	if !(Credential{Kind: KindClient, Scopes: []Scope{ScopeAdmin}}).Has(ScopeAgentsManage) {
+		t.Error("admin must include agents:manage")
+	}
+	if (Credential{Kind: KindClient, Scopes: []Scope{ScopeAgentsManage}}).Has(ScopeAdmin) {
+		t.Error("agents:manage must not include admin")
+	}
+	if (Principal{Kind: KindClient, Scopes: []Scope{ScopeMaintain, ScopeOperate}}).Has(ScopeAgentsManage) {
+		t.Error("maintain and operate must not include agents:manage")
 	}
 }

@@ -47,6 +47,16 @@ func newHarness(t *testing.T) *harness {
 	mux.HandleFunc("PUT /api/settings", mark("settings"))
 	mux.HandleFunc("POST /api/agents/{id}/retire", mark("retire"))
 	mux.HandleFunc("GET /api/plugin-host/query/{resource}", mark("hostquery"))
+	for _, pat := range []string{
+		"POST /api/agent-setup", "GET /api/native-agents", "GET /api/native-agents/{id}",
+		"POST /api/agent-host-settings", "PUT /api/agent-host-settings/{id}", "DELETE /api/agent-host-settings/{id}",
+		"GET /api/native-authority/{id}", "POST /api/native-authority", "POST /api/native-authority/{id}/revoke",
+		"PUT /api/native-authority/{id}/tools/{tool}", "DELETE /api/native-authority/{id}/tools/{tool}",
+		"POST /api/admin/mcp", "POST /api/admin/other", "POST /api/agent/v1/sessions",
+		"POST /api/providers",
+	} {
+		mux.HandleFunc(pat, mark("route"))
+	}
 	mux.HandleFunc("/api/", mark("fallback"))
 	mux.HandleFunc("GET /api/stream/hang", func(w http.ResponseWriter, r *http.Request) {
 		h.blocks <- struct{}{}
@@ -166,6 +176,55 @@ func TestScopes_ClientAndAgentLimits(t *testing.T) {
 		{"operator does everything", op, "POST", "/api/agents/x/retire", 200},
 		{"unknown write is admin: client refused", operate, "POST", "/api/never-heard-of-it", 403},
 		{"unknown write is admin: operator", op, "POST", "/api/never-heard-of-it", 200},
+	}
+	for _, c := range cases {
+		if got := h.status(c.method, c.path, c.secret); got != c.want {
+			t.Errorf("%s: %s %s = %d, want %d", c.name, c.method, c.path, got, c.want)
+		}
+	}
+}
+
+// A client holding agents:manage (and operate) manages agents but cannot
+// grant tools, mint credentials or touch providers; admin is still refused on a
+// client (CW-20261024-0025).
+func TestAgentsManageClientThroughTheGuard(t *testing.T) {
+	h := newHarness(t)
+	_, mgr := h.mint(KindClient, ScopeRead, ScopeOperate, ScopeAgentsManage)
+	_, mgrOnly := h.mint(KindClient, ScopeAgentsManage)
+	_, maint := h.mint(KindClient, ScopeRead, ScopeMaintain)
+	_, plain := h.mint(KindClient, ScopeRead, ScopeOperate)
+	if _, _, err := h.store.Create(context.Background(), CreateParams{Kind: KindClient, Label: "x", Scopes: []Scope{ScopeAgentsManage, ScopeAdmin}}); err == nil {
+		t.Fatal("a client must still be refused the admin scope")
+	}
+	cases := []struct {
+		name         string
+		secret       string
+		method, path string
+		want         int
+	}{
+		{"setup", mgr, "POST", "/api/agent-setup", 200},
+		{"list agents", mgr, "GET", "/api/native-agents", 200},
+		{"get agent", mgr, "GET", "/api/native-agents/x", 200},
+		{"host settings create", mgr, "POST", "/api/agent-host-settings", 200},
+		{"host settings update", mgr, "PUT", "/api/agent-host-settings/x", 200},
+		{"host settings delete", mgr, "DELETE", "/api/agent-host-settings/x", 200},
+		{"authority read", mgr, "GET", "/api/native-authority/x", 200},
+		{"admin mcp", mgr, "POST", "/api/admin/mcp", 200},
+		{"sessions with operate", mgr, "POST", "/api/agent/v1/sessions", 200},
+		{"sessions without operate", mgrOnly, "POST", "/api/agent/v1/sessions", 403},
+		{"setup without scope", plain, "POST", "/api/agent-setup", 403},
+		{"native agents without scope", plain, "GET", "/api/native-agents", 403},
+		{"admin mcp without scope", plain, "POST", "/api/admin/mcp", 403},
+		{"maintain alone may still write host settings", maint, "PUT", "/api/agent-host-settings/x", 200},
+		{"maintain alone cannot set up agents", maint, "POST", "/api/agent-setup", 403},
+		{"tool grant refused", mgr, "PUT", "/api/native-authority/x/tools/dev_read", 403},
+		{"tool ungrant refused", mgr, "DELETE", "/api/native-authority/x/tools/dev_read", 403},
+		{"authority create refused", mgr, "POST", "/api/native-authority", 403},
+		{"authority revoke refused", mgr, "POST", "/api/native-authority/x/revoke", 403},
+		{"credentials list refused", mgr, "GET", "/api/auth/credentials", 403},
+		{"credentials mint refused", mgr, "POST", "/api/auth/credentials", 403},
+		{"providers refused", mgr, "POST", "/api/providers", 403},
+		{"other admin routes refused", mgr, "POST", "/api/admin/other", 403},
 	}
 	for _, c := range cases {
 		if got := h.status(c.method, c.path, c.secret); got != c.want {

@@ -35,7 +35,8 @@ const adminMCPDefaultLimit = 50
 // own validation, reason-required rules and error bodies apply. The inner
 // call does not pass the auth middleware's per-route scope rules or the
 // /api/admin Origin allowlist again; the outer request did, and the endpoint
-// re-checks for an admin principal itself (adminMCPPrincipal).
+// re-checks for an agents:manage principal itself (adminMCPPrincipal), and
+// each tool checks any scope it needs beyond that (admin for grants).
 type adminMCPTool struct {
 	name, description string
 	method, path      string   // path may hold {param} placeholders filled from arguments
@@ -45,17 +46,24 @@ type adminMCPTool struct {
 	defaultLimit      bool     // list tool: send limit=50 when the caller gives none
 	properties        map[string]any
 	required          []string
+	// scope is what the tool needs beyond agents:manage (which reaching the
+	// endpoint already needs): admin for grants, operate for sessions and turns.
+	scope apiauth.Scope
 }
 
 func prop(typ, desc string) map[string]any { return map[string]any{"type": typ, "description": desc} }
 
-const adminCredentialNote = " Needs an admin credential (the operator token); agent credentials are refused."
+const adminCredentialNote = " Needs a credential with the agents:manage scope (or the operator token); agent credentials are refused."
+
+const grantCredentialNote = " Needs an admin credential (the operator token): an agents:manage credential is refused."
+
+const sessionCredentialNote = " Needs agents:manage and operate (or the operator token); agent credentials are refused."
 
 var reasonProp = prop("string", "Why this change is made (required, at most 500 characters); recorded with the change.")
 
 var adminMCPTools = []adminMCPTool{
 	{name: "agent_setup", method: "POST", path: "/api/agent-setup", body: true,
-		description: "Create or update a Nanite agent in one call: definition, host settings and tool grants. Same input and rules as POST /api/agent-setup. Give an archetype or a full definition artifact; provider selects API or CLI runtime; tools lists native tool grants (granting needs an admin credential); directories are absolute paths on the machine Nanite runs on." + adminCredentialNote,
+		description: "Create or update a Nanite agent in one call: definition, host settings and tool grants. Same input and rules as POST /api/agent-setup. Give an archetype or a full definition artifact; provider selects API or CLI runtime; tools lists native tool grants (naming any needs an admin credential; with agents:manage send an empty list and an admin grants tools afterwards); directories are absolute paths on the machine Nanite runs on." + adminCredentialNote,
 		properties: map[string]any{
 			"artifact":    prop("string", "Full agent definition artifact (JSON text); alternative to archetype."),
 			"archetype":   prop("string", "Name of a built-in archetype to start from."),
@@ -68,7 +76,7 @@ var adminMCPTools = []adminMCPTool{
 			"directories": map[string]any{"type": "array", "description": "Absolute directories the agent may use, on the Nanite machine.", "items": map[string]any{"type": "string"}},
 			"tools":       map[string]any{"type": "array", "description": "Native tools to grant.", "items": map[string]any{"type": "string"}},
 			"reason":      reasonProp,
-		}, required: []string{"provider", "tools", "reason"}},
+		}, required: []string{"provider", "reason"}},
 	{name: "agent_list", method: "GET", path: "/api/native-agents", queryParams: []string{"limit", "offset"}, defaultLimit: true,
 		description: "List Nanite native agents (definition, host settings, grants), at most limit per call (default 50)." + adminCredentialNote,
 		properties:  map[string]any{"limit": prop("integer", "Page size, 1-500 (default 50)."), "offset": prop("integer", "Items to skip; a full page means there may be more.")}},
@@ -102,18 +110,18 @@ var adminMCPTools = []adminMCPTool{
 		description: "Show one native authority and its grants." + adminCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Authority id.")}, required: []string{"id"}},
 	{name: "tool_grant", method: "PUT", path: "/api/native-authority/{id}/tools/{tool}", pathParams: []string{"id", "tool"}, body: true,
-		description: "Grant a native tool to an authority. Granting requires an admin credential." + adminCredentialNote,
+		description: "Grant a native tool to an authority. Granting requires an admin credential." + grantCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Authority id."), "tool": prop("string", "Tool name."), "reason": reasonProp},
-		required:    []string{"id", "tool", "reason"}},
+		required:    []string{"id", "tool", "reason"}, scope: apiauth.ScopeAdmin},
 	{name: "tool_ungrant", method: "DELETE", path: "/api/native-authority/{id}/tools/{tool}", pathParams: []string{"id", "tool"}, body: true,
-		description: "Withdraw one tool grant from an authority." + adminCredentialNote,
+		description: "Withdraw one tool grant from an authority." + grantCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Authority id."), "tool": prop("string", "Tool name."), "reason": reasonProp},
-		required:    []string{"id", "tool"}},
+		required:    []string{"id", "tool"}, scope: apiauth.ScopeAdmin},
 	{name: "authority_revoke", method: "POST", path: "/api/native-authority/{id}/revoke", pathParams: []string{"id"}, body: true,
-		description: "Revoke an authority and every grant it holds." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Authority id."), "reason": reasonProp}, required: []string{"id", "reason"}},
+		description: "Revoke an authority and every grant it holds." + grantCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Authority id."), "reason": reasonProp}, required: []string{"id", "reason"}, scope: apiauth.ScopeAdmin},
 	{name: "session_start", method: "POST", path: "/api/agent/v1/sessions", body: true,
-		description: "Start an agent session from a pinned definition and optional host settings. work_root, when set, must be an absolute path on the machine Nanite runs on." + adminCredentialNote,
+		description: "Start an agent session from a pinned definition and optional host settings. work_root, when set, must be an absolute path on the machine Nanite runs on." + sessionCredentialNote,
 		properties: map[string]any{
 			"definition_ref":  map[string]any{"type": "object", "description": "Pinned definition reference."},
 			"model_selection": map[string]any{"type": "object"},
@@ -121,30 +129,30 @@ var adminMCPTools = []adminMCPTool{
 			"project_id":      prop("string", "Project id."), "title": prop("string", "Session title."),
 			"work_root": prop("string", "Absolute working directory on the Nanite machine."),
 			"metadata":  map[string]any{"type": "object"},
-		}, required: []string{"definition_ref"}},
+		}, required: []string{"definition_ref"}, scope: apiauth.ScopeOperate},
 	{name: "session_list", method: "GET", path: "/api/agent/v1/sessions", queryParams: []string{"limit", "cursor", "include_archived"},
-		description: "List agent sessions, a page at a time (limit 1-200, default 50); pass next_cursor back as cursor for the next page." + adminCredentialNote,
+		description: "List agent sessions, a page at a time (limit 1-200, default 50); pass next_cursor back as cursor for the next page." + sessionCredentialNote,
 		properties: map[string]any{"limit": prop("integer", "Page size, 1-200."), "cursor": prop("string", "next_cursor from the previous page."),
-			"include_archived": prop("string", "\"true\" to include archived sessions.")}},
+			"include_archived": prop("string", "\"true\" to include archived sessions.")}, scope: apiauth.ScopeOperate},
 	{name: "session_get", method: "GET", path: "/api/agent/v1/sessions/{id}", pathParams: []string{"id"},
-		description: "Show one agent session." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}},
+		description: "Show one agent session." + sessionCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}, scope: apiauth.ScopeOperate},
 	{name: "session_history", method: "GET", path: "/api/agent/v1/sessions/{id}/messages", pathParams: []string{"id"}, queryParams: []string{"limit", "older_cursor"},
-		description: "Read a session's message history, newest page first; pass the returned older cursor back as older_cursor for earlier messages." + adminCredentialNote,
+		description: "Read a session's message history, newest page first; pass the returned older cursor back as older_cursor for earlier messages." + sessionCredentialNote,
 		properties: map[string]any{"id": prop("string", "Session view id."), "limit": prop("integer", "Page size, 1-200."),
-			"older_cursor": prop("string", "Cursor from the previous page.")}, required: []string{"id"}},
+			"older_cursor": prop("string", "Cursor from the previous page.")}, required: []string{"id"}, scope: apiauth.ScopeOperate},
 	{name: "session_stop", method: "POST", path: "/api/agent/v1/sessions/{id}/stop", pathParams: []string{"id"}, body: true,
-		description: "Stop an agent session." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}},
+		description: "Stop an agent session." + sessionCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Session view id.")}, required: []string{"id"}, scope: apiauth.ScopeOperate},
 	{name: "turn_send", method: "POST", path: "/api/agent/v1/sessions/{id}/turns", pathParams: []string{"id"}, body: true,
-		description: "Send a turn (a user message) to a session." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Session view id."), "content": prop("string", "Message text.")}, required: []string{"id"}},
+		description: "Send a turn (a user message) to a session." + sessionCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Session view id."), "content": prop("string", "Message text.")}, required: []string{"id"}, scope: apiauth.ScopeOperate},
 	{name: "turn_get", method: "GET", path: "/api/agent/v1/sessions/{id}/turns/{turnId}", pathParams: []string{"id", "turnId"},
-		description: "Show a turn's state." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Session view id."), "turnId": prop("string", "Turn id.")}, required: []string{"id", "turnId"}},
+		description: "Show a turn's state." + sessionCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Session view id."), "turnId": prop("string", "Turn id.")}, required: []string{"id", "turnId"}, scope: apiauth.ScopeOperate},
 	{name: "turn_cancel", method: "POST", path: "/api/agent/v1/sessions/{id}/turns/{turnId}/cancel", pathParams: []string{"id", "turnId"}, body: true,
-		description: "Cancel a running turn." + adminCredentialNote,
-		properties:  map[string]any{"id": prop("string", "Session view id."), "turnId": prop("string", "Turn id.")}, required: []string{"id", "turnId"}},
+		description: "Cancel a running turn." + sessionCredentialNote,
+		properties:  map[string]any{"id": prop("string", "Session view id."), "turnId": prop("string", "Turn id.")}, required: []string{"id", "turnId"}, scope: apiauth.ScopeOperate},
 }
 
 // adminMCPServer builds the tool set. dispatch runs one request through the
@@ -185,8 +193,12 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 	if args == nil {
 		args = map[string]any{}
 	}
-	if _, ok := adminMCPPrincipal(ctx); !ok {
-		return mcpToolError("an admin credential is required"), nil
+	p, ok := adminMCPPrincipal(ctx)
+	if !ok {
+		return mcpToolError("an agents:manage credential is required"), nil
+	}
+	if t.scope != "" && !p.Has(t.scope) {
+		return mcpToolError("this tool needs the " + string(t.scope) + " scope"), nil
 	}
 	// Reasons stay in the domain audit; the route row names the tool and target.
 	var targets []string
@@ -256,7 +268,7 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 
 func (a *API) retireHost(ctx context.Context, _ *http.Request, raw json.RawMessage) (*mcp.CallToolResult, error) {
 	if _, ok := adminMCPPrincipal(ctx); !ok {
-		return mcpToolError("an admin credential is required"), nil
+		return mcpToolError("an agents:manage credential is required"), nil
 	}
 	var args struct {
 		ID     string `json:"id"`
@@ -336,10 +348,11 @@ func adminMCPSafeID(v string) bool {
 }
 
 // adminMCPPrincipal is the same test the agent-management handlers apply: a
-// non-agent credential with the admin scope.
+// non-agent credential with the agents:manage scope. Individual tools can need
+// more (adminMCPTool.scope).
 func adminMCPPrincipal(ctx context.Context) (apiauth.Principal, bool) {
 	p, ok := apiauth.FromContext(ctx)
-	if !ok || p.Kind == apiauth.KindAgent || !p.Has(apiauth.ScopeAdmin) || strings.TrimSpace(p.CredentialID) == "" {
+	if !ok || !agentManager(p) {
 		return p, false
 	}
 	return p, true

@@ -38,7 +38,7 @@ else http://127.0.0.1:8090); -db does not select a server.
 Every command takes -db <path> (or NANITE_DB_PATH) to find the credentials
 of a server started with serve -db <path>; they live beside that database.
 
-Scopes: read, operate, tools, maintain, admin (operator only).`
+Scopes: read, operate, tools, maintain, agents:manage, admin (admin is operator only; agents:manage lets a client set up and manage agents but never grant tools).`
 
 func cmdAuth(args []string) {
 	if len(args) == 0 {

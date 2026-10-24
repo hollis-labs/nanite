@@ -19,12 +19,7 @@ func (p Principal) Has(s Scope) bool {
 	if p.Kind == KindOperator {
 		return true
 	}
-	for _, have := range p.Scopes {
-		if have == s {
-			return true
-		}
-	}
-	return false
+	return scopesInclude(p.Scopes, s)
 }
 
 type principalKey struct{}

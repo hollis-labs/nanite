@@ -39,9 +39,15 @@ const (
 	ScopeTools    Scope = "tools"
 	ScopeMaintain Scope = "maintain"
 	ScopeAdmin    Scope = "admin"
+	// ScopeAgentsManage lets a client set up and manage agents (setup, list,
+	// host settings, reading authority and the admin MCP agent tools) without
+	// holding admin. It never grants tools: granting, withdrawing and revoking
+	// authority stay admin (CW-20261024-0025). A client holds it alongside
+	// operate to also run sessions and turns.
+	ScopeAgentsManage Scope = "agents:manage"
 )
 
-var allScopes = []Scope{ScopeRead, ScopeOperate, ScopeTools, ScopeMaintain, ScopeAdmin}
+var allScopes = []Scope{ScopeRead, ScopeOperate, ScopeTools, ScopeMaintain, ScopeAdmin, ScopeAgentsManage}
 
 // AllScopes returns every scope, the set an operator holds.
 func AllScopes() []Scope { return append([]Scope(nil), allScopes...) }
@@ -53,7 +59,7 @@ func ParseScope(name string) (Scope, error) {
 			return s, nil
 		}
 	}
-	return "", fmt.Errorf("unknown scope %q (want one of read, operate, tools, maintain, admin)", name)
+	return "", fmt.Errorf("unknown scope %q (want one of read, operate, tools, maintain, agents:manage, admin)", name)
 }
 
 // ParseScopes validates and de-duplicates a scope list.
@@ -93,8 +99,14 @@ func (c Credential) Has(s Scope) bool {
 	if c.Kind == KindOperator {
 		return true
 	}
-	for _, have := range c.Scopes {
-		if have == s {
+	return scopesInclude(c.Scopes, s)
+}
+
+// scopesInclude reports whether have grants s. admin is a superset of
+// agents:manage; every other scope stands alone.
+func scopesInclude(have []Scope, s Scope) bool {
+	for _, h := range have {
+		if h == s || (h == ScopeAdmin && s == ScopeAgentsManage) {
 			return true
 		}
 	}

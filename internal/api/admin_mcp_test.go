@@ -43,7 +43,10 @@ func newGuarded(t *testing.T) *guarded {
 	for name, p := range map[string]apiauth.CreateParams{
 		"operator": {Kind: apiauth.KindOperator, Label: "op", Scopes: apiauth.AllScopes()},
 		"client":   {Kind: apiauth.KindClient, Label: "cl", Scopes: []apiauth.Scope{apiauth.ScopeRead, apiauth.ScopeOperate}},
-		"agent":    {Kind: apiauth.KindAgent, Label: "ag", Scopes: apiauth.AllScopes(), BoundSessionID: "s1"},
+		// manager holds agents:manage and operate; manageronly lacks operate.
+		"manager":     {Kind: apiauth.KindClient, Label: "mg", Scopes: []apiauth.Scope{apiauth.ScopeRead, apiauth.ScopeOperate, apiauth.ScopeAgentsManage}},
+		"manageronly": {Kind: apiauth.KindClient, Label: "mo", Scopes: []apiauth.Scope{apiauth.ScopeAgentsManage}},
+		"agent":       {Kind: apiauth.KindAgent, Label: "ag", Scopes: apiauth.AllScopes(), BoundSessionID: "s1"},
 	} {
 		_, secret, err := st.Create(t.Context(), p)
 		if err != nil {
@@ -208,7 +211,7 @@ func TestAdminMCPToolsRefuseNonAdminContexts(t *testing.T) {
 			"tool_grant":           {"id": "x", "tool": "dev_read", "reason": "r"},
 			"host_settings_retire": {"id": "x", "reason": "r"},
 		} {
-			if text, isErr := adminMCPCall(t, cs, tool, args); !isErr || !strings.Contains(text, "admin credential is required") {
+			if text, isErr := adminMCPCall(t, cs, tool, args); !isErr || !strings.Contains(text, "credential is required") {
 				t.Errorf("%s via %s = %q err=%v, want the admin refusal", tool, name, text, isErr)
 			}
 		}

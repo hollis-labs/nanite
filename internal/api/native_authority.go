@@ -37,7 +37,13 @@ func (a *API) nativeAuthorityOperator(w http.ResponseWriter, r *http.Request) (*
 		a.errorResp(w, http.StatusUnauthorized, "authentication is required")
 		return nil, "", false
 	}
-	if p.Kind == apiauth.KindAgent || !p.Has(apiauth.ScopeAdmin) || strings.TrimSpace(p.CredentialID) == "" {
+	// Reads need agents:manage; every write is admin (grants are the
+	// privilege-escalation path).
+	allowed := canGrantTools(p)
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		allowed = agentManager(p)
+	}
+	if !allowed {
 		a.errorResp(w, http.StatusForbidden, "the credential lacks the required scope")
 		return nil, "", false
 	}

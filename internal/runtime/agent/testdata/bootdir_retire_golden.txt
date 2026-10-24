@@ -1,0 +1,4247 @@
+# CW-20261024-0011 golden: CURRENT planters vs SHARED planner (agentlaunch/planting + adapter ProviderProjection)
+# legend: '-' only in CURRENT   '+' only in SHARED   'M' mode differs   'B' bytes differ ('<' current line, '>' shared line)
+
+== claude / minimal / projection-default
+  files: current=5 shared=6  diffs: -0 +1 M0 B2
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / minimal / projection-pinned
+  files: current=5 shared=6  diffs: -0 +1 M0 B1
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / minimal / canonical-strict
+  files: current=5 shared=6  diffs: -0 +1 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / minimal / canonical-hostdefaults
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / mcp / projection-default
+  files: current=6 shared=6  diffs: -0 +0 M0 B3
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / mcp / projection-pinned
+  files: current=6 shared=6  diffs: -0 +0 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / mcp / canonical-strict
+  files: current=6 shared=6  diffs: -0 +0 M1 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / mcp / canonical-hostdefaults
+  files: current=6 shared=6  diffs: -0 +0 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / mcp-no-credential / projection-default
+  files: current=6 shared=6  diffs: -0 +0 M1 B3
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / mcp-no-credential / projection-pinned
+  files: current=6 shared=6  diffs: -0 +0 M1 B2
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / mcp-no-credential / canonical-strict
+  files: current=6 shared=6  diffs: -0 +0 M2 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / mcp-no-credential / canonical-hostdefaults
+  files: current=6 shared=6  diffs: -0 +0 M2 B1
+  M .claude/settings.json current=0644 shared=0600
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / host-mcp-and-grants / projection-default
+  files: current=6 shared=6  diffs: -0 +0 M0 B3
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__*,mcp__tether__agent_list --setting-sources project,local --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / host-mcp-and-grants / projection-pinned
+  files: current=6 shared=6  diffs: -0 +0 M0 B2
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__*,mcp__tether__agent_list --setting-sources project,local --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / host-mcp-and-grants / canonical-strict
+  files: current=6 shared=6  diffs: -0 +0 M1 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__*,mcp__tether__agent_list --setting-sources project,local --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / host-mcp-and-grants / canonical-hostdefaults
+  files: current=6 shared=6  diffs: -0 +0 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__*,mcp__tether__agent_list --setting-sources project,local --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / skills-with-disabled / projection-default
+  files: current=8 shared=8  diffs: -0 +0 M0 B3
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / skills-with-disabled / projection-pinned
+  files: current=8 shared=8  diffs: -0 +0 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / skills-with-disabled / canonical-strict
+  files: current=8 shared=8  diffs: -0 +0 M1 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / skills-with-disabled / canonical-hostdefaults
+  files: current=8 shared=8  diffs: -0 +0 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / definition-files / projection-default
+  files: current=13 shared=13  diffs: -0 +0 M0 B3
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / definition-files / projection-pinned
+  files: current=13 shared=13  diffs: -0 +0 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / definition-files / canonical-strict
+  files: current=13 shared=13  diffs: -0 +0 M1 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / definition-files / canonical-hostdefaults
+  files: current=13 shared=13  diffs: -0 +0 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / directories / projection-default
+  files: current=6 shared=6  diffs: -0 +0 M0 B3
+  B .claude/settings.json (150 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "additionalDirectories": [
+        <       "<PROJECT>",
+        <       "<ROOT1>",
+        <       "<ROOT2>"
+        <     ],
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / directories / projection-pinned
+  files: current=6 shared=6  diffs: -0 +0 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / directories / canonical-strict
+  files: current=6 shared=6  diffs: -0 +0 M1 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (150 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "additionalDirectories": [
+        <       "<PROJECT>",
+        <       "<ROOT1>",
+        <       "<ROOT2>"
+        <     ],
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / directories / canonical-hostdefaults
+  files: current=6 shared=6  diffs: -0 +0 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / hooks / projection-default
+  files: current=7 shared=6  diffs: -1 +0 M0 B3
+  B .claude/settings.json (251 -> 3 bytes)
+        < {
+        <   "hooks": {
+        <     "Stop": [
+        <       {
+        <         "hooks": [
+        <           {
+        <             "command": "<BOOT>/hooks/claude/stop.sh",
+        <             "type": "command"
+        <           }
+        <         ]
+        <       }
+        <     ]
+        <   },
+        <   "permissions": {
+        ... (more lines elided)
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  - hooks/claude/stop.sh 0700
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / hooks / projection-pinned
+  files: current=7 shared=6  diffs: -1 +0 M0 B3
+  B .claude/settings.json (251 -> 60 bytes)
+        <   "hooks": {
+        <     "Stop": [
+        <       {
+        <         "hooks": [
+        <           {
+        <             "command": "<BOOT>/hooks/claude/stop.sh",
+        <             "type": "command"
+        <           }
+        <         ]
+        <       }
+        <     ]
+        <   },
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  - hooks/claude/stop.sh 0700
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / hooks / canonical-strict
+  files: current=7 shared=7  diffs: -0 +0 M1 B2
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (251 -> 194 bytes)
+        <   },
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / hooks / canonical-hostdefaults
+  files: current=7 shared=7  diffs: -0 +0 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--mcp-config <BOOT>/.mcp.json --strict-mcp-config --allowedTools=mcp__nanite__* --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / posture-absent / projection-default
+  files: current=5 shared=6  diffs: -0 +1 M0 B2
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-absent / projection-pinned
+  files: current=5 shared=6  diffs: -0 +1 M0 B1
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-absent / canonical-strict
+  files: current=5 shared=6  diffs: -0 +1 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / posture-absent / canonical-hostdefaults
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / posture-default / projection-default
+  files: current=5 shared=6  diffs: -0 +1 M0 B2
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode default --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-default / projection-pinned
+  files: current=5 shared=6  diffs: -0 +1 M0 B1
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode default --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-default / canonical-strict
+  files: current=5 shared=6  diffs: -0 +1 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 56 bytes)
+        <     "defaultMode": "acceptEdits"
+        >     "defaultMode": "default"
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference "default"
+
+== claude / posture-default / canonical-hostdefaults
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / posture-accept-edits / projection-default
+  files: current=5 shared=6  diffs: -0 +1 M0 B2
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode acceptEdits --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-accept-edits / projection-pinned
+  files: current=5 shared=6  diffs: -0 +1 M0 B1
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode acceptEdits --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-accept-edits / canonical-strict
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference "accept-edits"
+
+== claude / posture-accept-edits / canonical-hostdefaults
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / posture-plan / projection-default
+  files: current=5 shared=6  diffs: -0 +1 M0 B2
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode plan --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-plan / projection-pinned
+  files: current=5 shared=6  diffs: -0 +1 M0 B1
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode plan --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-plan / canonical-strict
+  files: current=5 shared=6  diffs: -0 +1 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 53 bytes)
+        <     "defaultMode": "acceptEdits"
+        >     "defaultMode": "plan"
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference "plan"
+
+== claude / posture-plan / canonical-hostdefaults
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== claude / posture-yolo / projection-default
+  files: current=5 shared=6  diffs: -0 +1 M0 B2
+  B .claude/settings.json (60 -> 3 bytes)
+        < {
+        <   "permissions": {
+        <     "defaultMode": "acceptEdits"
+        <   }
+        < }
+        > {}
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode bypassPermissions --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-yolo / projection-pinned
+  files: current=5 shared=6  diffs: -0 +1 M0 B1
+  + .mcp.json 0600
+  B CLAUDE.md (1167 -> 37 bytes)
+        < # Nanite Agent — Golden Agent
+        < 
+        < Golden description.
+        < 
+        < ## Operating Instructions
+        < 
+        < ## Envelope Format
+        < Emit structured envelopes as fenced code blocks with the `nanite-envelope` language tag.
+        < ALWAYS set "version": 1. NEVER invent envelope types — only use registered types.
+        < 
+        < The envelope registry was not yet populated when this boot dir was planted (this should not happen outside of tests) — consult `.sandbox/envelope-schema.md` once available. Unregistered types are silently dropped by the UI — no error, no warning.
+        < 
+        < ## Rules
+        < 1. ALWAYS use envelopes for data collection — never ask users to type structured data
+        ... (more lines elided)
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[claude -p --input-format stream-json --output-format stream-json --verbose --mcp-config <BOOT>/.mcp.json --permission-mode bypassPermissions --add-dir <PROJECT>]
+  launch: shared effect credential -> .claude/settings.json
+  launch: shared effect host_config -> 
+
+== claude / posture-yolo / canonical-strict
+  files: current=5 shared=6  diffs: -0 +1 M1 B1
+  M .claude/settings.json current=0644 shared=0600
+  B .claude/settings.json (60 -> 66 bytes)
+        <     "defaultMode": "acceptEdits"
+        >     "defaultMode": "bypassPermissions"
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference "yolo"
+
+== claude / posture-yolo / canonical-hostdefaults
+  files: current=5 shared=6  diffs: -0 +1 M1 B0
+  M .claude/settings.json current=0644 shared=0600
+  + .mcp.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[] shared-binding-env=[]
+  launch: argv current-extras=[--strict-mcp-config --add-dir <PROJECT> <ROOT1> <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT> --mcp-config <BOOT>/.mcp.json]
+  launch: shared posture reference ""
+
+== codex / minimal / projection-default
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / minimal / projection-pinned
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / minimal / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / minimal / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B0
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / mcp / projection-default
+  files: current=8 shared=7  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / mcp / projection-pinned
+  files: current=8 shared=7  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / mcp / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / mcp / canonical-hostdefaults
+  files: current=8 shared=5  diffs: -3 +0 M0 B0
+  - .mcp.json 0600
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / mcp-no-credential / projection-default
+  files: current=8 shared=7  diffs: -1 +0 M2 B3
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / mcp-no-credential / projection-pinned
+  files: current=8 shared=7  diffs: -1 +0 M2 B3
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / mcp-no-credential / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / mcp-no-credential / canonical-hostdefaults
+  files: current=8 shared=5  diffs: -3 +0 M0 B0
+  - .mcp.json 0644
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / host-mcp-and-grants / projection-default
+  files: current=8 shared=7  diffs: -1 +0 M1 B4
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  B config.toml (291 -> 390 bytes)
+        > [mcp_servers.tether]
+        > command = "tether"
+        > args = ["mcp"]
+        > 
+        > [mcp_servers.tether.env]
+        > "TETHER_X" = "1"
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / host-mcp-and-grants / projection-pinned
+  files: current=8 shared=7  diffs: -1 +0 M1 B4
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  B config.toml (291 -> 390 bytes)
+        > [mcp_servers.tether]
+        > command = "tether"
+        > args = ["mcp"]
+        > 
+        > [mcp_servers.tether.env]
+        > "TETHER_X" = "1"
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / host-mcp-and-grants / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / host-mcp-and-grants / canonical-hostdefaults
+  files: current=8 shared=5  diffs: -3 +0 M0 B1
+  - .mcp.json 0600
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  B config.toml (291 -> 390 bytes)
+        > [mcp_servers.tether]
+        > command = "tether"
+        > args = ["mcp"]
+        > 
+        > [mcp_servers.tether.env]
+        > "TETHER_X" = "1"
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / skills-with-disabled / projection-default
+  files: current=10 shared=9  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / skills-with-disabled / projection-pinned
+  files: current=10 shared=9  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / skills-with-disabled / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / skills-with-disabled / canonical-hostdefaults
+  files: current=10 shared=7  diffs: -3 +0 M0 B0
+  - .mcp.json 0600
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / definition-files / projection-default
+  files: current=15 shared=14  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / definition-files / projection-pinned
+  files: current=15 shared=14  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / definition-files / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / definition-files / canonical-hostdefaults
+  files: current=15 shared=12  diffs: -3 +0 M0 B0
+  - .mcp.json 0600
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / directories / projection-default
+  files: current=8 shared=7  diffs: -1 +0 M1 B4
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  B config.toml (371 -> 291 bytes)
+        < [sandbox_workspace_write]
+        < writable_roots = ["<PROJECT>", "<ROOT1>", "<ROOT2>"]
+        < 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / directories / projection-pinned
+  files: current=8 shared=7  diffs: -1 +0 M1 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / directories / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / directories / canonical-hostdefaults
+  files: current=8 shared=5  diffs: -3 +0 M0 B0
+  - .mcp.json 0600
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / hooks / projection-default
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "codex" are not supported: no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape
+
+== codex / hooks / projection-pinned
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "codex" are not supported: no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape
+
+== codex / hooks / canonical-strict
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "codex" are not supported: no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape
+  shared: ERROR (hooks: the planter API has no hook input for this runtime; CURRENT refuses it)
+
+== codex / hooks / canonical-hostdefaults
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "codex" are not supported: no verified declaration mechanism; go-providers reports hooks as explicit-effect but Nanite has not confirmed the config shape
+  shared: ERROR (hooks: the planter API has no hook input for this runtime; CURRENT refuses it)
+
+== codex / posture-absent / projection-default
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-absent / projection-pinned
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-absent / canonical-strict
+  shared: ERROR posture_required: provider=codex mode=subprocess-per-turn concern=permissions: headless Codex requires a bound posture or explicit host-declared native default
+
+== codex / posture-absent / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B0
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / posture-default / projection-default
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="read-only" -c approval_policy="on-request" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-default / projection-pinned
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="read-only" -c approval_policy="on-request" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-default / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B1
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  B config.toml (59 -> 58 bytes)
+        < approval_policy = "never"
+        < sandbox_mode = "workspace-write"
+        > approval_policy = "on-request"
+        > sandbox_mode = "read-only"
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared posture reference "default"
+
+== codex / posture-default / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B0
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / posture-accept-edits / projection-default
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="workspace-write" -c approval_policy="on-request" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-accept-edits / projection-pinned
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="workspace-write" -c approval_policy="on-request" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-accept-edits / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B1
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  B config.toml (59 -> 64 bytes)
+        < approval_policy = "never"
+        > approval_policy = "on-request"
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared posture reference "accept-edits"
+
+== codex / posture-accept-edits / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B0
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / posture-plan / projection-default
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="read-only" -c approval_policy="never" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-plan / projection-pinned
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="read-only" -c approval_policy="never" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-plan / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B1
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  B config.toml (59 -> 53 bytes)
+        < sandbox_mode = "workspace-write"
+        > sandbox_mode = "read-only"
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared posture reference "plan"
+
+== codex / posture-plan / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B0
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== codex / posture-yolo / projection-default
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="danger-full-access" -c approval_policy="never" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-yolo / projection-pinned
+  files: current=7 shared=7  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  M auth.json current=symlink-><HOST_CODEX_HOME>/auth.json shared=0600
+  B auth.json (27 -> 0 bytes)
+        < <HOST_CODEX_HOME>/auth.json
+        > 
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[codex exec -c sandbox_mode="danger-full-access" -c approval_policy="never" --json --skip-git-repo-check --cd <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> auth.json
+
+== codex / posture-yolo / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B1
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  B config.toml (59 -> 62 bytes)
+        < sandbox_mode = "workspace-write"
+        > sandbox_mode = "danger-full-access"
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared posture reference "yolo"
+
+== codex / posture-yolo / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B0
+  - auth.json symlink-><HOST_CODEX_HOME>/auth.json
+  - sessions symlink-><HOME>/.nanite/codex-sessions/sess-golden
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[CODEX_HOME=<BOOT>] shared-binding-env=[CODEX_HOME=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[--cd <PROJECT>]
+  launch: shared effect credentials link auth.json (link-only-never-write)
+  launch: shared diagnostic informational posture_absent: posture absent: host-declared native policy retained; runtime posture overrides absent
+  launch: shared posture reference ""
+
+== opencode / minimal / projection-default
+  files: current=6 shared=6  diffs: -2 +2 M1 B1
+  + .mcp.json 0600
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / minimal / projection-pinned
+  files: current=6 shared=6  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / minimal / canonical-strict
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / minimal / canonical-hostdefaults
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / mcp / projection-default
+  files: current=7 shared=6  diffs: -2 +1 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / mcp / projection-pinned
+  files: current=7 shared=6  diffs: -1 +0 M0 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / mcp / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B2
+  - .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / mcp / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B2
+  - .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / mcp-no-credential / projection-default
+  files: current=7 shared=6  diffs: -2 +1 M2 B2
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (373 -> 253 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        <       "environment": {},
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / mcp-no-credential / projection-pinned
+  files: current=7 shared=6  diffs: -1 +0 M2 B3
+  M .mcp.json current=0644 shared=0600
+  B .mcp.json (236 -> 243 bytes)
+        <       "env": {}
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (373 -> 253 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        <       "environment": {},
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / mcp-no-credential / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M1 B2
+  - .mcp.json 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (373 -> 253 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        <       "environment": {},
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / mcp-no-credential / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M1 B2
+  - .mcp.json 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (373 -> 253 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        <       "environment": {},
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / host-mcp-and-grants / projection-default
+  files: current=7 shared=6  diffs: -2 +1 M0 B2
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  B opencode.json (470 -> 559 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        >     },
+        >     "tether": {
+        >       "command": [
+        >         "tether",
+        >         "mcp"
+        >       ],
+        >       "enabled": true,
+        >       "environment": {
+        >         "TETHER_X": "1"
+        ... (more lines elided)
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / host-mcp-and-grants / projection-pinned
+  files: current=7 shared=6  diffs: -1 +0 M0 B3
+  B .mcp.json (469 -> 516 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  B opencode.json (470 -> 559 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        >     },
+        >     "tether": {
+        >       "command": [
+        >         "tether",
+        >         "mcp"
+        >       ],
+        >       "enabled": true,
+        >       "environment": {
+        >         "TETHER_X": "1"
+        ... (more lines elided)
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / host-mcp-and-grants / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B2
+  - .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 559 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        >     },
+        >     "tether": {
+        >       "command": [
+        >         "tether",
+        >         "mcp"
+        >       ],
+        >       "enabled": true,
+        >       "environment": {
+        >         "TETHER_X": "1"
+        ... (more lines elided)
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / host-mcp-and-grants / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B2
+  - .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 559 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        >     },
+        >     "tether": {
+        >       "command": [
+        >         "tether",
+        >         "mcp"
+        >       ],
+        >       "enabled": true,
+        >       "environment": {
+        >         "TETHER_X": "1"
+        ... (more lines elided)
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / skills-with-disabled / projection-default
+  files: current=11 shared=8  diffs: -4 +1 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / skills-with-disabled / projection-pinned
+  files: current=11 shared=8  diffs: -3 +0 M0 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / skills-with-disabled / canonical-strict
+  files: current=11 shared=7  diffs: -4 +0 M0 B2
+  - .mcp.json 0600
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / skills-with-disabled / canonical-hostdefaults
+  files: current=11 shared=7  diffs: -4 +0 M0 B2
+  - .mcp.json 0600
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / definition-files / projection-default
+  files: current=18 shared=15  diffs: -4 +1 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / definition-files / projection-pinned
+  files: current=18 shared=15  diffs: -3 +0 M0 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / definition-files / canonical-strict
+  files: current=18 shared=12  diffs: -6 +0 M0 B2
+  - .mcp.json 0600
+  - .opencode/skills/delivered/SKILL.md 0644
+  - .opencode/skills/delivered/scripts/x.sh 0644
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / definition-files / canonical-hostdefaults
+  files: current=18 shared=12  diffs: -6 +0 M0 B2
+  - .mcp.json 0600
+  - .opencode/skills/delivered/SKILL.md 0644
+  - .opencode/skills/delivered/scripts/x.sh 0644
+  - .opencode/skills/enabled-skill/SKILL.md 0644
+  - .opencode/skills/enabled-skill/scripts/run.sh 0644
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / directories / projection-default
+  files: current=7 shared=6  diffs: -2 +1 M0 B2
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / directories / projection-pinned
+  files: current=7 shared=6  diffs: -1 +0 M0 B3
+  B .mcp.json (333 -> 357 bytes)
+        <       }
+        >       },
+        >       "type": "stdio"
+        > 
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / directories / canonical-strict
+  files: current=7 shared=5  diffs: -2 +0 M0 B2
+  - .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / directories / canonical-hostdefaults
+  files: current=7 shared=5  diffs: -2 +0 M0 B2
+  - .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  B opencode.json (470 -> 375 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   },
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / hooks / projection-default
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "opencode" are not supported: opencode extends through JS plugin entry points, not command hooks
+
+== opencode / hooks / projection-pinned
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "opencode" are not supported: opencode extends through JS plugin entry points, not command hooks
+
+== opencode / hooks / canonical-strict
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "opencode" are not supported: opencode extends through JS plugin entry points, not command hooks
+  shared: ERROR (hooks: the planter API has no hook input for this runtime; CURRENT refuses it)
+
+== opencode / hooks / canonical-hostdefaults
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "opencode" are not supported: opencode extends through JS plugin entry points, not command hooks
+  shared: ERROR (hooks: the planter API has no hook input for this runtime; CURRENT refuses it)
+
+== opencode / posture-absent / projection-default
+  files: current=6 shared=6  diffs: -2 +2 M1 B1
+  + .mcp.json 0600
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-absent / projection-pinned
+  files: current=6 shared=6  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-absent / canonical-strict
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / posture-absent / canonical-hostdefaults
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / posture-default / projection-default
+  files: current=6 shared=6  diffs: -2 +2 M1 B1
+  + .mcp.json 0600
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"ask","bash":"ask"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-default / projection-pinned
+  files: current=6 shared=6  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"ask","bash":"ask"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-default / canonical-strict
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 63 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        >   "permission": {
+        >     "bash": "ask",
+        >     "edit": "ask"
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference "default"
+
+== opencode / posture-default / canonical-hostdefaults
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / posture-accept-edits / projection-default
+  files: current=6 shared=6  diffs: -2 +2 M1 B1
+  + .mcp.json 0600
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"allow","bash":"ask"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-accept-edits / projection-pinned
+  files: current=6 shared=6  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"allow","bash":"ask"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-accept-edits / canonical-strict
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 65 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        >   "permission": {
+        >     "bash": "ask",
+        >     "edit": "allow"
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference "accept-edits"
+
+== opencode / posture-accept-edits / canonical-hostdefaults
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / posture-plan / projection-default
+  files: current=6 shared=6  diffs: -2 +2 M1 B1
+  + .mcp.json 0600
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"deny","bash":"ask"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-plan / projection-pinned
+  files: current=6 shared=6  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"deny","bash":"ask"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-plan / canonical-strict
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 64 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        >   "permission": {
+        >     "bash": "ask",
+        >     "edit": "deny"
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference "plan"
+
+== opencode / posture-plan / canonical-hostdefaults
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== opencode / posture-yolo / projection-default
+  files: current=6 shared=6  diffs: -2 +2 M1 B1
+  + .mcp.json 0600
+  - agents.json 0644
+  + agents/Golden Agent.md 0644
+  - agents/golden-agent.md 0644
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent Golden Agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-yolo / projection-pinned
+  files: current=6 shared=6  diffs: -1 +1 M1 B2
+  + .mcp.json 0600
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 114 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+        > # golden-agent
+        > 
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT> OPENCODE_PERMISSION={"edit":"allow","bash":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}]
+  launch: argv current-extras=[]
+  launch: argv shared=[opencode run --format json --agent golden-agent --dir <PROJECT> -- Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== opencode / posture-yolo / canonical-strict
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 153 bytes)
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        >   "permission": {
+        >     "bash": "allow",
+        >     "doom_loop": "allow",
+        >     "edit": "allow",
+        >     "external_directory": "allow",
+        >     "webfetch": "allow"
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference "yolo"
+
+== opencode / posture-yolo / canonical-hostdefaults
+  files: current=6 shared=5  diffs: -1 +0 M1 B2
+  - agents.json 0644
+  B agents/golden-agent.md (52 -> 98 bytes)
+        < # Golden Agent
+        > ---
+        > description: Launch agent golden-agent
+        > mode: primary
+        > ---
+  M opencode.json current=0644 shared=0600
+  B opencode.json (98 -> 3 bytes)
+        < {
+        <   "agent": {
+        <     "golden-agent": {
+        <       "prompt": "{file:./agents/golden-agent.md}"
+        <     }
+        <   }
+        < }
+        > {}
+        > 
+  launch: cwd current=<PROJECT> shared=<PROJECT>
+  launch: env current-amend=[OPENCODE_CONFIG_DIR=<BOOT> XDG_CONFIG_HOME=<BOOT>/xdg-config] shared-binding-env=[OPENCODE_CONFIG_DIR=<BOOT>]
+  launch: argv current-extras=[]
+  launch: argv shared=[run --agent golden-agent --dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / minimal / projection-default
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / minimal / projection-pinned
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / minimal / canonical-strict
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / minimal / canonical-hostdefaults
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / mcp / projection-default
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / mcp / projection-pinned
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / mcp / canonical-strict
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / mcp / canonical-hostdefaults
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / mcp-no-credential / projection-default
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (236 -> 220 bytes)
+        <       "command": "/opt/nanite/bin/nanite",
+        <       "env": {}
+        >       "command": "/opt/nanite/bin/nanite"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / mcp-no-credential / projection-pinned
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (236 -> 220 bytes)
+        <       "command": "/opt/nanite/bin/nanite",
+        <       "env": {}
+        >       "command": "/opt/nanite/bin/nanite"
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / mcp-no-credential / canonical-strict
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (236 -> 220 bytes)
+        <       "command": "/opt/nanite/bin/nanite",
+        <       "env": {}
+        >       "command": "/opt/nanite/bin/nanite"
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / mcp-no-credential / canonical-hostdefaults
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (236 -> 220 bytes)
+        <       "command": "/opt/nanite/bin/nanite",
+        <       "env": {}
+        >       "command": "/opt/nanite/bin/nanite"
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / host-mcp-and-grants / projection-default
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (469 -> 470 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / host-mcp-and-grants / projection-pinned
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (469 -> 470 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / host-mcp-and-grants / canonical-strict
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (469 -> 470 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / host-mcp-and-grants / canonical-hostdefaults
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (469 -> 470 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / skills-with-disabled / projection-default
+  files: current=15 shared=8  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / skills-with-disabled / projection-pinned
+  files: current=15 shared=8  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / skills-with-disabled / canonical-strict
+  files: current=15 shared=8  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / skills-with-disabled / canonical-hostdefaults
+  files: current=15 shared=8  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / definition-files / projection-default
+  files: current=20 shared=13  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / definition-files / projection-pinned
+  files: current=20 shared=13  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / definition-files / canonical-strict
+  files: current=20 shared=13  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / definition-files / canonical-hostdefaults
+  files: current=20 shared=13  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / directories / projection-default
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / directories / projection-pinned
+  files: current=13 shared=6  diffs: -7 +0 M0 B2
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / directories / canonical-strict
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / directories / canonical-hostdefaults
+  files: current=13 shared=6  diffs: -7 +0 M0 B1
+  B .agents/plugins/tether/mcp_config.json (333 -> 334 bytes)
+        > 
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / hooks / projection-default
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "antigravity" are not supported: no verified hook declaration mechanism for agy
+
+== antigravity / hooks / projection-pinned
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "antigravity" are not supported: no verified hook declaration mechanism for agy
+
+== antigravity / hooks / canonical-strict
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "antigravity" are not supported: no verified hook declaration mechanism for agy
+  shared: ERROR (hooks: the planter API has no hook input for this runtime; CURRENT refuses it)
+
+== antigravity / hooks / canonical-hostdefaults
+  current: ERROR agent: boot artifacts retained at <BOOT>: agent: bootdir hooks for provider "antigravity" are not supported: no verified hook declaration mechanism for agy
+  shared: ERROR (hooks: the planter API has no hook input for this runtime; CURRENT refuses it)
+
+== antigravity / posture-absent / projection-default
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-absent / projection-pinned
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-absent / canonical-strict
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / posture-absent / canonical-hostdefaults
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / posture-default / projection-default
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-default / projection-pinned
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-default / canonical-strict
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared diagnostic informational native_permission_omitted: no evidenced native permission file; runtime posture reference only
+  launch: shared posture reference "default"
+
+== antigravity / posture-default / canonical-hostdefaults
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / posture-accept-edits / projection-default
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --mode accept-edits --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-accept-edits / projection-pinned
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --mode accept-edits --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-accept-edits / canonical-strict
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared diagnostic informational native_permission_omitted: no evidenced native permission file; runtime posture reference only
+  launch: shared posture reference "accept-edits"
+
+== antigravity / posture-accept-edits / canonical-hostdefaults
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / posture-plan / projection-default
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --mode plan --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-plan / projection-pinned
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --mode plan --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-plan / canonical-strict
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared diagnostic informational native_permission_omitted: no evidenced native permission file; runtime posture reference only
+  launch: shared posture reference "plan"
+
+== antigravity / posture-plan / canonical-hostdefaults
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+== antigravity / posture-yolo / projection-default
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < description: "Golden description."
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --dangerously-skip-permissions --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-yolo / projection-pinned
+  files: current=12 shared=6  diffs: -7 +1 M0 B1
+  + .agents/plugins/tether/mcp_config.json 0600
+  B AGENTS.md (118 -> 83 bytes)
+        < name: "Golden Agent"
+        < description: "Golden description."
+        > name: "golden-agent"
+        < # Golden Agent
+        > # golden-agent
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[agy --output-format stream-json --dangerously-skip-permissions --add-dir <PROJECT> -p=Kickoff: do the golden thing.]
+  launch: shared effect credential -> 
+
+== antigravity / posture-yolo / canonical-strict
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared diagnostic informational native_permission_omitted: no evidenced native permission file; runtime posture reference only
+  launch: shared posture reference "yolo"
+
+== antigravity / posture-yolo / canonical-hostdefaults
+  files: current=12 shared=6  diffs: -7 +1 M0 B0
+  + .agents/plugins/tether/mcp_config.json 0600
+  - agy-home/.gemini symlink-><HOME>/.nanite/agy-gemini/golden-agent
+  - agy-home/.gitconfig symlink-><HOME>/.gitconfig
+  - agy-home/.nanite symlink-><HOME>/.nanite
+  - agy-home/.ssh symlink-><HOME>/.ssh
+  - agy-home/dev symlink-><HOME>/dev
+  - agy-private-gemini/antigravity-cli/nanite-owned-rules.json 0600
+  - agy-private-gemini/antigravity-cli/settings.json 0600
+  launch: cwd current=<BOOT> shared=<BOOT>
+  launch: env current-amend=[HOME=<BOOT>/agy-home] shared-binding-env=[]
+  launch: argv current-extras=[--add-dir <PROJECT> --add-dir <ROOT1> --add-dir <ROOT2>]
+  launch: argv shared=[--add-dir <PROJECT>]
+  launch: shared posture reference ""
+
+# SUMMARY (sum over scenarios): runtime/variant  scenarios  identical  only-current  only-shared  mode  bytes
+claude/projection-default scenarios=13 identical=0 -1 +6 M1 B33
+claude/projection-pinned scenarios=13 identical=0 -1 +6 M1 B21
+claude/canonical-strict  scenarios=13 identical=0 -0 +6 M14 B19
+claude/canonical-hostdefaults scenarios=13 identical=0 -0 +6 M14 B7
+codex/projection-default scenarios=13 identical=0 -12 +6 M13 B32
+codex/projection-pinned  scenarios=13 identical=0 -12 +6 M13 B31
+codex/canonical-strict   scenarios=13 identical=0 -8 +0 M0 B4
+codex/canonical-hostdefaults scenarios=13 identical=0 -30 +0 M0 B1
+opencode/projection-default scenarios=13 identical=0 -28 +18 M8 B18
+opencode/projection-pinned scenarios=13 identical=0 -16 +6 M8 B30
+opencode/canonical-strict scenarios=13 identical=0 -24 +0 M7 B24
+opencode/canonical-hostdefaults scenarios=13 identical=0 -24 +0 M7 B24
+antigravity/projection-default scenarios=13 identical=0 -84 +6 M0 B18
+antigravity/projection-pinned scenarios=13 identical=0 -84 +6 M0 B18
+antigravity/canonical-strict scenarios=13 identical=0 -84 +6 M0 B6
+antigravity/canonical-hostdefaults scenarios=13 identical=0 -84 +6 M0 B6

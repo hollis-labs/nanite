@@ -277,44 +277,46 @@ func (a *API) retireHost(ctx context.Context, _ *http.Request, raw json.RawMessa
 	if err := json.Unmarshal(raw, &args); err != nil || !adminMCPSafeID(args.ID) {
 		return mcpToolError("id is required and must be a single path segment"), nil
 	}
-	args.Reason = strings.TrimSpace(args.Reason)
-	if args.Reason == "" || len(args.Reason) > 500 {
-		return mcpToolError("HTTP 400: a reason of at most 500 characters is required"), nil
+	host, status, msg := a.retireHostSettings(ctx, args.ID, args.Reason, "mcp:host_settings_retire")
+	if status != http.StatusOK {
+		return mcpToolError(fmt.Sprintf("HTTP %d: %s", status, msg)), nil
+	}
+	out, _ := json.Marshal(host)
+	return mcpToolResult(http.StatusOK, out), nil
+}
+
+// retireHostSettings is the disable-only retire shared by the MCP tool and
+// POST /api/agent-host-settings/{id}/retire. It returns the HTTP status and, on
+// failure, a message safe to show. The reason goes into the audit row: host
+// settings have no audit table of their own.
+func (a *API) retireHostSettings(ctx context.Context, id, reason, auditPrefix string) (store.AgentHostSettings, int, string) {
+	var host store.AgentHostSettings
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 500 {
+		return host, http.StatusBadRequest, "a reason of at most 500 characters is required"
 	}
 	if a.Services == nil || a.Services.AgentDefinitions == nil {
-		return mcpToolError("HTTP 503: agent definition host unavailable"), nil
+		return host, http.StatusServiceUnavailable, "agent definition host unavailable"
 	}
-	var host store.AgentHostSettings
 	var err error
 	// The revision can move between the read and the write; read again and retry.
 	for attempt := 0; attempt < 3; attempt++ {
-		host, err = a.Services.AgentDefinitions.DisableHost(ctx, args.ID)
+		host, err = a.Services.AgentDefinitions.DisableHost(ctx, id)
 		if !errors.Is(err, store.ErrAgentHostRevisionConflict) {
 			break
 		}
 	}
-	status := http.StatusOK
+	status, msg := http.StatusOK, ""
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		status = http.StatusNotFound
+		status, msg = http.StatusNotFound, "host settings not found"
 	case errors.Is(err, store.ErrAgentHostRevisionConflict):
-		status = http.StatusConflict
+		status, msg = http.StatusConflict, "host settings kept changing; retry"
 	case err != nil:
-		status = http.StatusInternalServerError
+		status, msg = http.StatusInternalServerError, "retiring host settings failed"
 	}
-	// The reason goes into the audit row: host settings have no audit table of
-	// their own.
-	adminMCPAudit(ctx, "mcp:host_settings_retire "+args.ID+" reason="+args.Reason, status)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return mcpToolError("HTTP 404: host settings not found"), nil
-	case errors.Is(err, store.ErrAgentHostRevisionConflict):
-		return mcpToolError("HTTP 409: host settings kept changing; retry"), nil
-	case err != nil:
-		return mcpToolError("HTTP 500: retiring host settings failed"), nil
-	}
-	out, _ := json.Marshal(host)
-	return mcpToolResult(http.StatusOK, out), nil
+	adminMCPAudit(ctx, auditPrefix+" "+id+" reason="+reason, status)
+	return host, status, msg
 }
 
 // adminDispatch runs one inner request. Only what the handlers need is copied

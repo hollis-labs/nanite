@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/libs/mesh/core/agentdef"
 	"github.com/hollis-labs/nanite/internal/agentauthor"
 	"github.com/hollis-labs/nanite/internal/agentpolicy"
+	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -22,6 +23,7 @@ func (a *API) registerAgentDefinitionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-host-settings", a.handleHostSettingsCreate)
 	mux.HandleFunc("PUT /api/agent-host-settings/{id}", a.handleHostSettingsUpdate)
 	mux.HandleFunc("DELETE /api/agent-host-settings/{id}", a.handleHostSettingsDelete)
+	mux.HandleFunc("POST /api/agent-host-settings/{id}/retire", a.handleHostSettingsRetire)
 }
 
 func (a *API) handleDefinitionAuthor(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +206,31 @@ func (a *API) handleHostSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	a.jsonResp(w, http.StatusOK, saved)
 }
+
+// handleHostSettingsRetire disables host settings (enabled=false) with a
+// required reason; the same disable-only write as the host_settings_retire MCP
+// tool. Unlike DELETE it needs no revision and keeps the row. It does not stop
+// live sessions or withdraw grants.
+func (a *API) handleHostSettingsRetire(w http.ResponseWriter, r *http.Request) {
+	if p, ok := apiauth.FromContext(r.Context()); !ok || p.Kind == apiauth.KindAgent || !(p.Has(apiauth.ScopeAgentsManage) || p.Has(apiauth.ScopeMaintain)) {
+		a.errorResp(w, http.StatusForbidden, "the credential lacks the required scope")
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := definitionRequest(w, r, &req); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid retire request")
+		return
+	}
+	host, status, msg := a.retireHostSettings(r.Context(), r.PathValue("id"), req.Reason, "retire_host_settings")
+	if status != http.StatusOK {
+		a.errorResp(w, status, msg)
+		return
+	}
+	a.jsonResp(w, http.StatusOK, host)
+}
+
 func (a *API) handleHostSettingsDelete(w http.ResponseWriter, r *http.Request) {
 	host := a.definitionHost(w)
 	if host == nil {

@@ -42,3 +42,25 @@ jobs:
           bwrap --ro-bind / / true
       - name: Run the full test suite
         run: go test -count=1 -timeout=20m ./...
+
+  # tools/fleet-install is its own module (CW-20261024-0120), so the root `go test ./...`
+  # does not see it. It needs only git and go (one test builds a P1 tarball).
+  fleet-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/fleet-install/go.mod
+          cache-dependency-path: tools/fleet-install/go.sum
+      - name: Vet and test tools/fleet-install
+        working-directory: tools/fleet-install
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -count=1 ./...

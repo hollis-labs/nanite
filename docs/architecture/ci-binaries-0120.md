@@ -86,8 +86,10 @@ targets:
       - {kind: sqlite_backup, db: /var/lib/fabric/xdg/data/nanite/auth/auth.db,  dest: "{backup_dir}/auth.pre-{version}.db"}
       - {kind: sqlite_backup, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db, dest: "{backup_dir}/main.pre-{version}.db"}
       - {kind: migration_check, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db}
-    restart: {via: systemd-user, unit: com.hollis-labs.cerberus.hub-nanite.service}   # or {via: cerberus, resource: hub-nanite, approval: print}
-    health: {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+    restart:                                     # ordered list (a single mapping is also accepted)
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.hub-nanite.service}   # or {via: cerberus, resource: hub-nanite} (prints the request)
+    health:                                      # ordered list (a single mapping is also accepted)
+      - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
   - id: mac-nanite
     when: {os: darwin, arch: arm64}
     hosts: [mac]
@@ -95,11 +97,15 @@ targets:
     install_root: ~/.local/share/nanite/releases
     symlinks: [{path: ~/.local/share/nanite/current/nanite}]
     preflight: [ ...same shape with the mesh-chat databases... ]
-    restart: {via: cerberus, resource: nanite-api-service, verb: apply}   # local user, --ack
-    health: {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+    restart:
+      - {via: cerberus, resource: nanite-api-service, verb: reload, run: true}   # local user: runs `cerberus resource reload ... --ack`
+    health:
+      - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
 ```
 
-How the other apps' needs map (from the Cerberus doc, section 3): per-DB `sqlite_backup` entries (WAL ok); `health.expect_status: [401]` for mentat; station's two units are two `symlinks` entries plus one `unit_dropins` entry that resets `ExecStart=` and two `restart` steps (usage monitor first, ordered); fragments-engine and basalisk are one symlink each. Restarts of agent-os resources that need a Cerberus write use `via: cerberus, approval: print`, which prints the exact request for the Approve and Run click instead of running it.
+Implemented as `tools/fleet-install` (reference: `tools/fleet-install/README.md`). Differences from the first draft: `restart` and `health` are ordered lists (a single mapping still parses); the `cerberus` mode prints the request by default and runs it only with `run: true` for a local user (the draft's `approval: print` flag is gone, printing is the default), and its verb is limited to `reload`, `restart` or `apply`, never `deploy`; the `command` and `none` restart modes were added; `preflight` also has `file_backup`; `health` accepts `method`, `interval`, `expect_status` (default `[200]`) and `version_json` (dotted path); an optional `backup_dir` per target. Unknown fields are rejected.
+
+How the other apps' needs map (from the Cerberus doc, section 3): per-DB `sqlite_backup` entries (WAL ok); `health.expect_status: [401]` for mentat; station's two units are two `symlinks` entries plus one `unit_dropins` entry that resets `ExecStart=` and two `restart` steps (usage monitor first, ordered); fragments-engine and basalisk are one symlink each. Restarts of agent-os resources that need a Cerberus write use `via: cerberus` (the default prints, `run: true` executes locally), which prints the exact request for the Approve and Run click instead of running it.
 
 ## 6. Cerberus changes
 

@@ -40,6 +40,6 @@ targets:
       - {kind: sqlite_backup, db: ~/.local/share/nanite/workspaces/mesh-chat/main.db, dest: "{backup_dir}/main.pre-{version}.db"}
       - {kind: migration_check, db: ~/.local/share/nanite/workspaces/mesh-chat/main.db}
     restart:
-      - {via: cerberus, resource: nanite-api-service, verb: reload}
+      - {via: cerberus, resource: nanite-api-service, verb: reload, run: true}
     health:
       - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}

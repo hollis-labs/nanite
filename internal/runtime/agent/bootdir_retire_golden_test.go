@@ -34,7 +34,7 @@ package agent
 // and the author has to re-read docs/architecture/bootdir-retirement-0011.md.
 // Regenerate with:
 //
-//	go test ./internal/runtime/agent -run TestBootdirRetireGolden -update-bootdir-golden
+//	NANITE_BOOTDIR_GOLDEN=1 go test ./internal/runtime/agent -run TestBootdirRetireGolden -update-bootdir-golden
 //
 // The differences themselves are EXPECTED (that is the point); only a change in
 // them fails the test.
@@ -227,6 +227,12 @@ func goldenRuntimes() []goldenRuntime {
 }
 
 func TestBootdirRetireGolden(t *testing.T) {
+	// Opt-in (Architect decision 2026-10-24): retirement is deferred, so this is not
+	// part of the default suite. It becomes the acceptance test once the shared planner
+	// closes the gaps listed in docs/architecture/bootdir-retirement-0011.md.
+	if os.Getenv("NANITE_BOOTDIR_GOLDEN") != "1" {
+		t.Skip("opt-in: set NANITE_BOOTDIR_GOLDEN=1 (see docs/architecture/bootdir-retirement-0011.md)")
+	}
 	var out bytes.Buffer
 	type tally struct{ only, shared, mode, bytes, scenarios, identical int }
 	totals := map[string]*tally{}

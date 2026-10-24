@@ -393,10 +393,22 @@ above that is a CLI-version regression check, not a migration check.
 ## 12. Reproduce
 
 ```
-GOWORK=<go.work that uses this worktree> go test ./internal/runtime/agent/ -run TestBootdirRetireGolden
-GOWORK=... go test ./internal/runtime/agent/ -run TestBootdirRetireGolden -update-bootdir-golden   # after reading this doc
+NANITE_BOOTDIR_GOLDEN=1 GOWORK=<go.work that uses this worktree> go test ./internal/runtime/agent/ -run TestBootdirRetireGolden
+NANITE_BOOTDIR_GOLDEN=1 GOWORK=... go test ./internal/runtime/agent/ -run TestBootdirRetireGolden -update-bootdir-golden   # after reading this doc
 ```
 
 The test needs no network, no CLI and no credentials; it isolates `HOME`, sets the
 Nanite switches it reads, and uses a fixed non-secret session credential string that
 is replaced by `<TOKEN>` in the golden.
+
+## 13. Decision 2026-10-24: deferred
+
+Analysis complete; retirement of `bootdir_{claude,codex,opencode,agy}.go` is **deferred** (Architect decision, Chrispian may override). Today's planters stay the supported path: no scenario is byte-identical and the shared planner cannot express Nanite's postures, so retiring them now would be a regression with no near-term goal. The golden harness is opt-in (`NANITE_BOOTDIR_GOLDEN=1`; skipped by default so it does not tax other PRs) and its testdata is kept; it becomes the acceptance test when the gaps below close.
+
+Shared-planner gaps that must close first (queued as libs/harness work):
+1. **Codex posture.** A posture that yields `approval_policy = "never"` with `sandbox_mode = "workspace-write"` (today the nearest bound posture gives `on-request`, the headless hang Nanite already fixed, and yolo gives `danger-full-access`); and `writable_roots` alongside a bound posture, which the renderer refuses today.
+2. **OpenCode isolation.** Config dir plus the `XDG_CONFIG_HOME` redirect, so the operator's own MCP servers do not reach the agent (the shared table sets only `OPENCODE_CONFIG_DIR`).
+3. **Claude fidelity.** `CLAUDE.md` content (1167 vs 37 bytes through `planting.Plant`) and `permissions.defaultMode: acceptEdits`.
+4. **Refusal semantics.** The `posture_required` refusal and the hooks refusal for non-Claude runtimes behave as Nanite's `cli_host_unsupported_field`/`hooksUnsupportedError` do today.
+
+The improvements in section 5 that do not need the shared planner are done as standalone changes in the existing planters: 0600 for Claude `settings.json` and `opencode.json`, and no agent-credential copy in `.mcp.json` for Codex and OpenCode (see the follow-up PR for CW-20261024-0011).

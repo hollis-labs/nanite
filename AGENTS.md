@@ -1,3 +1,5 @@
+> **READ FIRST: the hollis-labs libs, plugins and tools were MOVED, not removed.** If a repo or Go module 404s or "does not exist any more", it moved into the `libs`, `plugins`, `tools`, `infra` or `frontend-support` monorepos (2026-10-15 decision, 2026-10-19 sweep). Do not recreate or vendor it. See `~/dev/hollis-labs/READ_FIRST_LIBS_MOVED_NOT_GONE.md` and Tesseract `project/hollis-labs/knowledge/orientation` key `READ_FIRST_libs_plugins_tools_moved_not_gone`.
+
 # Nanite
 
 Nanite is a CLI agent framework and plugin host: a Go backend with an embedded

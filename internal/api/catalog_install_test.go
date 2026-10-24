@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
-	sharedcatalog "github.com/hollis-labs/plugins-catalog"
+	sharedcatalog "github.com/hollis-labs/plugins/plugin-catalog"
 
 	naniteplugin "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/plugin/install"
@@ -113,6 +114,8 @@ func catalogInstallFixture(t *testing.T, id, url, checksum string, size int64) s
 	if id != "" {
 		digest := sha256.Sum256([]byte(minimalCatalogPluginManifest(t, id)))
 		doc.Plugins = append(doc.Plugins, sharedcatalog.Plugin{ID: id, Name: "Test Plugin", Version: "1.0.0", Source: sharedcatalog.Source{Type: "git", Repo: "https://github.com/example/plugins", Tag: "v1.0.0"}, Archives: []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: url, SHA256: checksum, Size: size}}, ManifestSHA256: hex.EncodeToString(digest[:]), Directory: sharedcatalog.Directory{Status: "active"}})
+		// plugin-catalog v2 rejects a null summary: send empty lists.
+		doc.Plugins[0].Summary = sharedcatalog.Summary{Capabilities: []subprocess.CapabilityRequest{}, Operations: []sharedcatalog.Operation{}, Effects: []string{}}
 		if err := json.Unmarshal([]byte(`{"nanite":{"min":"0.1.0"}}`), &doc.Plugins[0].Hosts); err != nil {
 			t.Fatal(err)
 		}

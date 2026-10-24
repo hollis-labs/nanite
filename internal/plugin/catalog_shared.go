@@ -5,7 +5,7 @@ import (
 
 	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/manifest"
 
-	sharedcatalog "github.com/hollis-labs/plugins-catalog"
+	sharedcatalog "github.com/hollis-labs/plugins/plugin-catalog"
 )
 
 // DecodeCatalog validates the released catalog schema and selects this host's

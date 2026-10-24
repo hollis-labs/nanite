@@ -13,7 +13,7 @@ import (
 
 	catalogfetch "github.com/hollis-labs/nanite/internal/plugin/catalog"
 	"github.com/hollis-labs/nanite/internal/safego"
-	sharedcatalog "github.com/hollis-labs/plugins-catalog"
+	sharedcatalog "github.com/hollis-labs/plugins/plugin-catalog"
 )
 
 // CatalogEntry represents a single plugin in a remote catalog.

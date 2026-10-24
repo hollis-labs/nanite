@@ -79,7 +79,7 @@ refused at discovery, installation and reload. Execution uses one executable
 inside the bundle and literal arguments; PATH commands and symlink escapes are
 refused.
 
-Catalogs use the released `plugins-catalog` decoder. Canonical `id` identifies
+Catalogs use the released `plugin-catalog` decoder (`github.com/hollis-labs/plugins/plugin-catalog`). Canonical `id` identifies
 an install, while `name` is presentation. The host selects the current OS and
 architecture archive; entries without a matching archive can be browsed but
 cannot be installed. SHA-256 checks cover both downloaded archive bytes and

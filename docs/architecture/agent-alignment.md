@@ -287,7 +287,8 @@ pinned, shown as a pending request, and not planted.
 through Tachyon, operator-approved, like tool requests. Nanite will expose
 `PUT /api/native-authority/{authority_id}/skills/{skill}` with
 `{"digest": "sha256:...", "reason": "..."}` (and `DELETE` to revoke), modeled on
-the tool-grant route `PUT .../tools/{tool}`. It is maintain scope, never an agent
+the tool-grant route `PUT .../tools/{tool}`. It is admin class, the same scope rule as the tool-grant routes
+(`agents:manage` when CW-20261024-0025 lands), never an agent
 credential, and the granting credential is recorded from authentication, not the
 body. It succeeds only when the authority is live and current, the authority's
 definition requests a skill of that name, and the digest equals the pinned tree

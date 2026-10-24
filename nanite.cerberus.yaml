@@ -6,7 +6,7 @@ project:
   name: Nanite
 resources:
   - id: nanite-api-service
-    name: Nanite API Service
+    name: Nanite (Mac, secondary instance)
     type: process
     project: nanite
     connector: local
@@ -18,23 +18,37 @@ resources:
         kind: make_standard
         rules:
           output: nanite
+      # The main chat instance runs on agent-os (hub-nanite). This is the Mac's own
+      # instance (workspace mesh-chat) for local agents and experiments. Deploy with
+      # scripts/mac-nanite/predeploy.sh then `cerberus resource deploy nanite-api-service --ack`.
       command:
         - ./nanite
         - serve
-        - -db
-        - ~/.local/share/nanite/workspaces/default/main.db
+        - --port
+        - "8090"
+        - --bind-address
+        - 127.0.0.1
       dir: ~/dev/hollis-labs/apps/nanite
-      env_file: .env
+      # Explicit env only: no env_file (the old .env pinned NANITE_DB_PATH to the default
+      # workspace) and nothing inherited from a shell.
+      env:
+        NANITE_WORKSPACE: mesh-chat
+        PATH: ~/.local/share/mise/installs/go/1.25.3/bin:~/.local/share/mise/installs/node/22.12.0/bin:~/.local/bin:~/.bun/bin:~/go/bin:~/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
       mode: os_service
       port: 8090
       run_from: artifact
       supervisor: launchd
       url: http://127.0.0.1:8090
+      auto_start: true
+      auto_restart: true
+      restart_delay: 10s
+      max_restart_attempts: 5
     tags:
       - api
       - go
       - launchd
       - v2
+      - mac
   - id: nanite-frontend
     name: Nanite Frontend
     type: process

@@ -1,78 +1,42 @@
-# Running the Mac (dev) Nanite under launchd
+# Running the Mac Nanite under Cerberus
 
-Status: design and files only (CW-20261024-0113). Nothing is installed or loaded by this change. The cut-over needs the operator's confirmation because it touches the login session.
+Status: implemented for the Mac (CW-20261024-0113). The main chat instance of Nanite lives on agent-os (`hub-nanite`, already managed by Cerberus there). The Mac instance is secondary: it serves local agents and experiments, workspace `mesh-chat`, `127.0.0.1:8090`, data `~/.local/share/nanite`.
 
-## Why
+## Why Cerberus
 
-The Mac Nanite (workspace `mesh-chat`, `127.0.0.1:8090`, data `~/.local/share/nanite`) was started by hand from a Claude session shell. That gives it:
+The Mac instance used to be started by hand from a Claude session shell. That left it without a supervisor (a crash or reboot kept it down), with a stale inherited environment, and a deploy that depended on whoever was at the keyboard (its database fell five migrations behind). Cerberus already runs on the Mac and generates one launchd agent per resource (`~/Library/LaunchAgents/com.fragments-engine.cerberus.*`), so Nanite is declared as a Cerberus resource instead of a hand-written unit. No second supervisor is used.
 
-- no supervisor: a crash or a reboot leaves it down;
-- a stale environment inherited from that shell (session tokens and variables that mean nothing to a service);
-- a deploy that depends on whoever is at the keyboard, which let the database fall five migrations behind (goose 179 against 184) before the 2026-10-24 update.
+## The resource
 
-It is also the instance that launches Mac-side agents, so a stable, reproducible process matters.
+Defined in the repository's `nanite.cerberus.yaml` (the file Cerberus has registered; Cerberus stores only a pointer to it):
 
-## Decision: a plain launchd user agent
-
-- A user LaunchAgent in the `gui/<uid>` domain, label `com.hollis-labs.nanite.mac`. It runs in the login session, so the login keychain (`keychain://nanite/provider/...` provider keys), `SSH_AUTH_SOCK` and the user's CLIs (claude, codex, agy, opencode) resolve as they do in a terminal.
-- Not a Cerberus resource for now. A Cerberus-labelled plist for `nanite-api-service` already sits in `~/Library/LaunchAgents` (not loaded, pointing at the `default` workspace and a binary under `~/.cerberus/`). It is stale and would fight for port 8090 if loaded. It is left alone; reconciling it belongs with the Cerberus state task (CW-20261024-0099). If Cerberus later manages Mac processes, the same plist is the unit to register.
-
-## Layout
-
-| Thing | Path |
+| Field | Value |
 | --- | --- |
-| Plist template | `scripts/mac-nanite/com.hollis-labs.nanite.mac.plist.tmpl` |
-| Helper | `scripts/mac-nanite/mac-nanite.sh` |
-| Stable binary path | `~/.local/bin/nanite`, a symlink to `~/.local/share/nanite/bin/nanite-<version>` |
-| Previous binary record | `~/.local/share/nanite/PREVIOUS_BINARY` |
-| Backups | `~/.local/share/nanite/backups/<timestamp>-pre-<version>/` (0700; `auth.db`, `main.db`) |
-| Logs | `~/Library/Logs/nanite/stdout.log`, `stderr.log` |
-| Installed plist | `~/.local/share/nanite/launchd/` (manual start) or `~/Library/LaunchAgents/` (autostart) |
+| id | `nanite-api-service` (kept: it already existed and owned the stale launchd agent and install directory) |
+| mode / supervisor / run_from | `os_service` / `launchd` / `artifact` |
+| command | `./nanite serve --port 8090 --bind-address 127.0.0.1`, in `~/dev/hollis-labs/apps/nanite` |
+| env | `NANITE_WORKSPACE=mesh-chat` and an explicit `PATH`; nothing else, no `env_file`, nothing inherited from a shell |
+| lifecycle | `auto_start`, `auto_restart`, `restart_delay: 10s`, `max_restart_attempts: 5` |
+| build | `make_standard`, output `nanite` (`make build`) |
 
-The service runs `~/.local/bin/nanite serve` in `~/dev/hollis-labs/apps/nanite` (the directory the hand-started process used) with an explicit environment: `HOME`, `USER`, `LOGNAME`, a fixed `PATH`, and `NANITE_WORKSPACE=mesh-chat`. No session variables are inherited. Override with `NANITE_MAC_WORKSPACE`, `NANITE_MAC_PORT`, `NANITE_MAC_WORKDIR`, `NANITE_MAC_PATH`.
+The installed copy Cerberus runs lives at `~/.cerberus/apps/nanite/nanite-api-service/bin/nanite-api-service`; logs are Cerberus's (`cerberus resource logs nanite-api-service`).
 
-## Auto-start at login: the operator's decision, default OFF
-
-launchd loads every plist in `~/Library/LaunchAgents` at login. So the choice is where the plist lives:
-
-- `install` (default): the plist is kept in `~/.local/share/nanite/launchd/` and loaded with `launchctl bootstrap`. It survives crashes while the login session lasts (`KeepAlive`), but after a reboot or logout nothing starts it until `mac-nanite.sh start`.
-- `install --autostart`: the plist goes into `~/Library/LaunchAgents/` and the service starts at every login and is restarted after crashes. This is the setting that gives reboot recovery, and it is a login item, so it is opt-in.
-
-Switching later is `uninstall` then `install [--autostart]`.
-
-## Crash recovery and logs
-
-- `KeepAlive: {SuccessfulExit: false}` restarts after a crash or a signal, not after a clean exit; `ThrottleInterval` 10 s stops a crash loop from spinning. `stop` uses `launchctl bootout`, which sends SIGTERM and unloads the job, so a deliberate stop stays stopped.
-- launchd does not rotate logs. `mac-nanite.sh rotate` copy-truncates anything over 20 MB and keeps five generations; `deploy` runs it. For unattended rotation add the helper to a periodic job later; not needed yet.
-
-## Deploy and rollback: one command each
+## Deploy and rollback
 
 ```
-scripts/mac-nanite/mac-nanite.sh deploy /path/to/nanite-darwin-arm64      # build it first, see CONTRIBUTING / the Makefile
-scripts/mac-nanite/mac-nanite.sh rollback
+scripts/mac-nanite/predeploy.sh                      # refuses if an agent runtime is active; sqlite .backup of auth + workspace DBs with integrity check
+cerberus resource plan nanite-api-service deploy     # optional: shows what an approval would bind to
+cerberus resource deploy nanite-api-service --ack    # builds (make build) from the checkout and activates
+cerberus resource status nanite-api-service          # health / artifact state
 ```
 
-`deploy`: reads the new binary's version; refuses if any agent runtime is `launching`/`running` (override with `--force`); takes a sqlite `.backup` of `auth.db` and the workspace `main.db` with an integrity check; copies the binary to `bin/nanite-<version>`; records the previous binary; flips the `~/.local/bin/nanite` symlink; rotates logs; `launchctl kickstart -k`; waits for `/api/health` to report `ok` and the new version; on failure points the symlink back and restarts the old binary. It keeps the last three binaries.
+Deploy builds whatever is checked out in `~/dev/hollis-labs/apps/nanite`, so update that checkout (`git pull --ff-only`, clean tree) first, and run `npm ci` in `ui/` once on a fresh checkout. Other verbs: `reload` (restart only), `stop`, `sync`, `doctor`, `logs`.
 
-A migration is not safely reversible once the database has been written to. When the new binary's migrations ran, a rollback of the binary alone can leave an older binary on a newer schema. The failure message prints the backup directory; restore the two database copies with the service stopped (`mac-nanite.sh stop`, copy over, delete `-wal`/`-shm`, `start`).
+Rollback: `cerberus resource stop nanite-api-service --ack`; if the failed build ran a migration, restore the two database copies printed by `predeploy.sh` over the live databases (delete `-wal`/`-shm`); check out the previous commit and deploy again. A migration is not safely reversible once the database has been written to, so the backup is the rollback for the data.
 
-## Cut-over plan (after the operator confirms)
+## Things to know
 
-1. Build the binary for the current `main` (darwin/arm64) as for any deploy.
-2. `mac-nanite.sh deploy <binary>`: installs the versioned binary and the `~/.local/bin/nanite` symlink; the service is not loaded yet, so nothing restarts.
-3. Stop the hand-started `./nanite*.serve` process cleanly (SIGTERM) after checking that no sessions or agent runtimes are active.
-4. `mac-nanite.sh install` (or `install --autostart`).
-5. Verify: `/api/health` version, `nanite agent list`, 401 on unauthenticated routes, log files filling, then `launchctl kill SIGKILL gui/$(id -u)/com.hollis-labs.nanite.mac` and confirm it comes back (crash recovery).
-6. Leave the old hand-started binary where it is as the rollback.
-
-## Risks and unknowns
-
-- **launchd environment differences.** The service gets only the variables in the plist. A CLI that needs another variable from the operator's shell (for example a token exported in `.zshrc`) will not see it. The fixed `PATH` was taken from the process that ran until now; check each agent runtime once after cut-over.
-- **Keychain access.** A LaunchAgent in the GUI domain can read the login keychain, but the first access after a reboot may prompt while the screen is locked.
-- **Port.** `install` refuses to load while a hand-started `nanite serve` holds the port.
-- **Working directory.** `WorkingDirectory` points at the repository checkout, as the hand-started process did; a service should not depend on a source tree long term, but changing it can change relative-path behaviour of agent launches, so it is not changed here.
-- **macOS only.** agent-os already runs under a systemd user unit.
-
-## Not covered
-
-Autostart policy (operator's decision), unattended log rotation, Cerberus registration, removal of the stale `com.fragments-engine.cerberus.nanite.nanite-api-service.plist`.
+- **Port 8090 has one owner.** Cerberus refuses a mutation while another process holds the port, so a hand-started `nanite serve` must be stopped first. The stale `com.fragments-engine.cerberus.nanite.nanite-api-service.plist` (pointing at the `default` workspace and a September binary) was Cerberus's own earlier output; it is regenerated by `deploy`/`apply`, not edited by hand.
+- **Workspace.** The old resource passed `-db .../workspaces/default/main.db` and an `.env` with `NANITE_DB_PATH`; both are gone. The instance that has been running is `mesh-chat`, so that is what the resource declares. The `default` workspace database on the Mac is untouched.
+- **Launching agents.** The service runs in the login session (login keychain, `SSH_AUTH_SOCK`, the user's CLIs). Only the variables in the resource are set; a CLI that needs another variable from the shell will not see it.
+- **Cerberus on agent-os is separate** and is not touched by any of this.

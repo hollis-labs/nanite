@@ -10,9 +10,9 @@ import (
 func TestMigration184_UpDownAndNoRows(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := newTestStoreAtVersion(t, 182)
+	s := newTestStoreAtVersion(t, 183)
 	if _, err := s.DB.ExecContext(ctx, `SELECT install_id FROM install_identity`); err == nil {
-		t.Fatal("install_identity exists at version 182")
+		t.Fatal("install_identity exists at version 183")
 	}
 	if _, err := gooseProviderFor(t, s).UpTo(ctx, 184); err != nil {
 		t.Fatalf("Up: %v", err)
@@ -24,7 +24,7 @@ func TestMigration184_UpDownAndNoRows(t *testing.T) {
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO install_identity (id, install_id) VALUES (2, 'x')`); err == nil {
 		t.Fatal("singleton CHECK allowed id=2")
 	}
-	if _, err := gooseProviderFor(t, s).DownTo(ctx, 182); err != nil {
+	if _, err := gooseProviderFor(t, s).DownTo(ctx, 183); err != nil {
 		t.Fatalf("Down: %v", err)
 	}
 	if _, err := s.DB.ExecContext(ctx, `SELECT install_id FROM install_identity`); err == nil {
@@ -61,7 +61,7 @@ func TestEnsureInstallID_MintsOnFirstBootAndIsStable(t *testing.T) {
 func TestEnsureInstallID_UpgradeFromBeforeMigrationMintsOnBoot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := newTestStoreAtVersion(t, 182)
+	s := newTestStoreAtVersion(t, 183)
 	if _, err := gooseProviderFor(t, s).UpTo(ctx, 184); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestEnsureInstallID_UpgradeFromBeforeMigrationMintsOnBoot(t *testing.T) {
 func TestEnsureInstallID_Concurrent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := newTestStoreAtVersion(t, 182)
+	s := newTestStoreAtVersion(t, 183)
 	if _, err := gooseProviderFor(t, s).UpTo(ctx, 184); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestTetherEnrollmentKey(t *testing.T) {
 			t.Fatalf("accepted %q", bad)
 		}
 	}
-	s := newTestStoreAtVersion(t, 182)
+	s := newTestStoreAtVersion(t, 183)
 	if _, err := gooseProviderFor(t, s).UpTo(context.Background(), 184); err != nil {
 		t.Fatal(err)
 	}

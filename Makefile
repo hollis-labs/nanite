@@ -1,5 +1,16 @@
 .PHONY: build build-dev install dev clean test lint vuln generate-envelopes eval package-release
 
+# GONOPROXY=none (CW-20261024-0098): a developer machine often sets
+# GOPRIVATE=github.com/hollis-labs/*, which also implies GONOPROXY and makes Go
+# fetch every hollis-labs module straight from git. A module whose GitHub repo
+# was renamed or removed (plugins-catalog) then fails with "Repository not
+# found", although proxy.golang.org still serves it and CI, which sets no
+# GOPRIVATE, builds fine. none = try the proxy first; GOPROXY's trailing
+# `direct` still falls back to git on a 404/410, so genuinely private modules
+# resolve as before, and GOPRIVATE still keeps them out of the checksum
+# database. Cost: the paths of private modules reach proxy.golang.org first.
+export GONOPROXY := none
+
 # GOWORK=off: a shipped/deployed artifact must resolve dependencies from
 # go.mod/go.sum only, never from a developer's ambient portfolio-wide
 # go.work substituting a local sibling-repo checkout. Without this, `make

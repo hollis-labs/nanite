@@ -84,7 +84,7 @@ func TestSyncModelsFromRegistry_StationAliases(t *testing.T) {
 		provider string
 		tools    bool
 	}{
-		"go-glm": {"station-openai", true}, "openai-mini": {"station-openai", true},
+		"go-glm": {"station-openai", true}, "go-gpt": {"station-openai", true}, "openai-mini": {"station-openai", true},
 		"gemini-flash": {"station-openai", true}, "openrouter-auto": {"station-openai", true},
 		"hf-llama": {"station-openai", false}, "local-light": {"station-openai", false},
 		"go-haiku": {"station-anthropic", true}, "anthropic-haiku": {"station-anthropic", true},

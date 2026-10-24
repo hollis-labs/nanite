@@ -6,7 +6,7 @@ func TestStationAliasCatalog(t *testing.T) {
 	want := map[string]string{
 		"go-glm": ProviderStationOpenAI, "openai-mini": ProviderStationOpenAI, "gemini-flash": ProviderStationOpenAI,
 		"openrouter-auto": ProviderStationOpenAI, "hf-llama": ProviderStationOpenAI, "local-light": ProviderStationOpenAI,
-		"go-haiku": ProviderStationAnthropic, "anthropic-haiku": ProviderStationAnthropic,
+		"go-gpt": ProviderStationOpenAI, "go-haiku": ProviderStationAnthropic, "anthropic-haiku": ProviderStationAnthropic,
 	}
 	seeded := map[string]Model{}
 	for _, m := range AllSeeded() {
@@ -58,6 +58,17 @@ func TestUsesLegacyMaxTokens(t *testing.T) {
 	for _, id := range []string{"openai-mini", "gpt-5.6", "no-such-model"} {
 		if UsesLegacyMaxTokens(id) {
 			t.Errorf("%s must keep max_completion_tokens", id)
+		}
+	}
+}
+
+func TestStationWire(t *testing.T) {
+	for id, want := range map[string]string{
+		"go-gpt": WireResponses, "go-glm": WireChat, "openai-mini": WireChat, "local-light": WireChat,
+		"gpt-5.6": "", "no-such-model": "",
+	} {
+		if got := WireFor(id); got != want {
+			t.Errorf("WireFor(%q) = %q, want %q", id, got, want)
 		}
 	}
 }

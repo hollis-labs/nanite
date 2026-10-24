@@ -64,10 +64,22 @@ type Model struct {
 	// cost is shown as unknown rather than free.
 	PriceUnknown bool
 
+	// Wire pins which OpenAI endpoint a model is called on: WireChat
+	// (chat/completions), WireResponses (responses) or "" to let the OpenAI
+	// adapter choose by model name. A gateway alias cannot be recognized by
+	// name, so it carries its wire here.
+	Wire string
+
 	// LegacyMaxTokens marks a chat/completions model that takes max_tokens
 	// rather than max_completion_tokens.
 	LegacyMaxTokens bool
 }
+
+// Wire values for Model.Wire.
+const (
+	WireChat      = "chat"
+	WireResponses = "responses"
+)
 
 // Default-model and default-provider constants were removed from this
 // package in CW-20260526-0003 and the resolver that replaced them was

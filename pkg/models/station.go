@@ -34,36 +34,46 @@ const (
 var stationModels = []Model{
 	// --- chat/completions aliases (station-openai) ---
 	{
-		ID: "station-go-glm", ModelID: "go-glm", DisplayName: "Station go-glm", Provider: ProviderStationOpenAI,
+		ID: "station-go-glm", ModelID: "go-glm", DisplayName: "Station go-glm", Provider: ProviderStationOpenAI, Wire: WireChat,
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true,
 		// go-glm takes max_tokens, not max_completion_tokens.
 		LegacyMaxTokens: true,
 		Capabilities:    Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
-		ID: "station-openai-mini", ModelID: "openai-mini", DisplayName: "Station openai-mini", Provider: ProviderStationOpenAI,
+		ID: "station-openai-mini", ModelID: "openai-mini", DisplayName: "Station openai-mini", Provider: ProviderStationOpenAI, Wire: WireChat,
 		ContextWindow: 128000, MaxOutput: 16384, PriceUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},
 	{
-		ID: "station-gemini-flash", ModelID: "gemini-flash", DisplayName: "Station gemini-flash", Provider: ProviderStationOpenAI,
+		ID: "station-gemini-flash", ModelID: "gemini-flash", DisplayName: "Station gemini-flash", Provider: ProviderStationOpenAI, Wire: WireChat,
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
-		ID: "station-openrouter-auto", ModelID: "openrouter-auto", DisplayName: "Station openrouter-auto", Provider: ProviderStationOpenAI,
+		ID: "station-openrouter-auto", ModelID: "openrouter-auto", DisplayName: "Station openrouter-auto", Provider: ProviderStationOpenAI, Wire: WireChat,
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
-		ID: "station-hf-llama", ModelID: "hf-llama", DisplayName: "Station hf-llama", Provider: ProviderStationOpenAI,
+		ID: "station-hf-llama", ModelID: "hf-llama", DisplayName: "Station hf-llama", Provider: ProviderStationOpenAI, Wire: WireChat,
 		ContextWindow: 32768, MaxOutput: 4096, PriceUnknown: true,
 		Capabilities: Capabilities{SupportsStreaming: true},
 	},
 	{
-		ID: "station-local-light", ModelID: "local-light", DisplayName: "Station local-light", Provider: ProviderStationOpenAI,
+		ID: "station-local-light", ModelID: "local-light", DisplayName: "Station local-light", Provider: ProviderStationOpenAI, Wire: WireChat,
 		ContextWindow: 8192, MaxOutput: 2048, PriceUnknown: true,
 		Capabilities: Capabilities{SupportsStreaming: true},
+	},
+
+	// --- responses-only alias (station-openai) ---
+	// go-gpt is served at /responses only; chat/completions answers 400
+	// model_not_available, so the wire is pinned here rather than inferred
+	// from the name (CW-20261024-0013). Limits are the same unverified floors.
+	{
+		ID: "station-go-gpt", ModelID: "go-gpt", DisplayName: "Station go-gpt", Provider: ProviderStationOpenAI, Wire: WireResponses,
+		ContextWindow: 128000, MaxOutput: 16384, PriceUnknown: true,
+		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},
 
 	// --- messages aliases (station-anthropic) ---
@@ -94,6 +104,13 @@ func IsStationProvider(provider string) bool {
 func PriceKnown(modelID string) bool {
 	m, ok := ByModelID(modelID)
 	return ok && !m.PriceUnknown
+}
+
+// WireFor returns the OpenAI endpoint pinned for a model (WireChat or
+// WireResponses), or "" when none is and the adapter chooses by name.
+func WireFor(modelID string) string {
+	m, _ := ByModelID(modelID)
+	return m.Wire
 }
 
 // UsesLegacyMaxTokens reports whether a model's chat/completions endpoint takes

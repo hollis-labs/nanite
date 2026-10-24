@@ -184,6 +184,15 @@ same tool set, with a reason), which is recorded as an ordinary new authority
 with its own audit entry. That keeps every grant tied to a decision made about
 the text it applies to.
 
+### Chosen names
+
+The names the design left open, as built:
+
+- `agent_dir`: the host setting that records the agent directory a load read.
+- `NANITE_AGENT_MODE`: the application default mode (`live` or `pinned`).
+- `NANITE_RESOURCE_ENV`: the service's Cerberus `env` label.
+- `NANITE_RESOURCE_ADMIN`: the service's Cerberus `admin` label.
+
 ### Choosing the default
 
 One rule, evaluated in order, first match wins:

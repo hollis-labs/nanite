@@ -179,7 +179,19 @@ completed on `local-light`, `go-glm`, `go-gpt` (Responses wire) and `go-haiku`
 (Anthropic wire). `anthropic-beta` and `cache_control` were sent by default and
 the gateway tolerated them, so no `disable_*` flag was needed.
 
-Tool calling: to be recorded.
+Tool calling, verified 2026-10-24 on the same build: with host settings for
+`station-openai`/`go-glm` and for `station-anthropic`/`go-haiku` on the chat
+definition, and a native authority granting only the read-only `datetime` tool,
+one tiny turn on each completed with a successful `datetime` call and assistant
+text `DONE`. The event stream carried `run.start`, `message.start`,
+`part.start`, `part.delta`, `part.end`, `message.end` and `run.finish`. Not
+captured: the exact Anthropic auth header on the wire (`auth` was unset and the
+gateway accepted the call) and the usage ledger.
+
+To repeat the test: create host settings for the station model with `provider`
+set to the registry name (`station-openai` or `station-anthropic`) and `model`
+the bare alias, create a native authority granting only the tools needed, and
+retire the host settings and revoke the authority after the test.
 
 ### Attribution and usage
 

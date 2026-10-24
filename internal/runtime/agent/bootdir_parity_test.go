@@ -19,6 +19,11 @@ func TestPlantedFilesMatchTheSharedLayoutTable(t *testing.T) {
 	// Intentional differences, each with its reason.
 	skip := map[string]string{
 		"codex:auth.json": "linked from the host login by codexLayout at Setup, only when the host is logged in",
+		// The shared table places a .mcp.json mirror that neither runtime reads; Nanite
+		// deliberately does not plant it, so the agent credential has one copy fewer
+		// in the boot dir (CW-20261024-0011).
+		"codex:.mcp.json":    "deliberately not planted: codex reads config.toml, the mirror only duplicates the credential",
+		"opencode:.mcp.json": "deliberately not planted: opencode reads opencode.json, the mirror only duplicates the credential",
 	}
 	fields := map[plan.Field]bool{plan.Instructions: true, plan.Kickoff: true, plan.Settings: true, plan.PlantingPlugin: true, plan.MCP: true}
 	for _, id := range []runtimes.ID{runtimes.Claude, runtimes.Codex, runtimes.OpenCode, runtimes.Antigravity} {

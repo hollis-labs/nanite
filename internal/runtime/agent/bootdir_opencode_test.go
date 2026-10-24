@@ -382,8 +382,9 @@ func TestOpencodeLayout_OneShotGetsTheBareStoreScope(t *testing.T) {
 	}
 }
 
-// The session credential reaches opencode.json (and .mcp.json) through the
-// MCP server's environment, so both are owner-only like Codex's config.toml.
+// The session credential reaches opencode.json through the MCP server's
+// environment, so it is owner-only like Codex's config.toml; no .mcp.json mirror
+// (a second copy of the credential) is planted.
 func TestOpencodeLayout_CredentialBearingFilesAreOwnerOnly(t *testing.T) {
 	boot, err := opencodeLayout{}.Setup(SetupParams{
 		SessionID:    "oc-cred",
@@ -397,7 +398,7 @@ func TestOpencodeLayout_CredentialBearingFilesAreOwnerOnly(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(boot) })
-	for _, name := range []string{"opencode.json", ".mcp.json"} {
+	for _, name := range []string{"opencode.json"} {
 		path := filepath.Join(boot, name)
 		b, err := os.ReadFile(path) // #nosec G304 -- the test's own planted temp dir
 		if err != nil {
@@ -409,6 +410,9 @@ func TestOpencodeLayout_CredentialBearingFilesAreOwnerOnly(t *testing.T) {
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
 			t.Errorf("%s mode = %v, %v; it carries a credential and must be 0600", name, info.Mode().Perm(), err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(boot, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf(".mcp.json mirror must not be planted for opencode: %v", err)
 	}
 	// Files without the credential keep the default mode.
 	if info, err := os.Stat(filepath.Join(boot, "boot.md")); err != nil || info.Mode().Perm() != 0o644 {

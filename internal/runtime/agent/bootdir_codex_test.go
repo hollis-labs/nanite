@@ -57,10 +57,13 @@ func TestCodexLayout_Setup_FileShape(t *testing.T) {
 		t.Errorf("codex layout should not plant CLAUDE.md")
 	}
 
-	// Sandbox + boot.md + .mcp.json common to nanite layouts must exist,
+	// Sandbox + boot.md common to nanite layouts must exist (no .mcp.json mirror, see below),
 	// plus config.toml and the auth.json link. Lstat: under TestMain's
 	// empty CODEX_HOME the auth.json link dangles by design.
-	for _, p := range []string{"boot.md", ".sandbox/agent-context.md", ".sandbox/envelope-schema.md", ".mcp.json", "config.toml", "auth.json"} {
+	if _, err := os.Lstat(filepath.Join(bootDir, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("codex reads config.toml; the .mcp.json mirror must not be planted (credential copy): %v", err)
+	}
+	for _, p := range []string{"boot.md", ".sandbox/agent-context.md", ".sandbox/envelope-schema.md", "config.toml", "auth.json"} {
 		if _, err := os.Lstat(filepath.Join(bootDir, p)); err != nil {
 			t.Errorf("missing common file %s: %v", p, err)
 		}

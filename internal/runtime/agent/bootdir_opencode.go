@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/hollis-labs/libs/harness/core/agentlaunch"
@@ -49,7 +50,12 @@ type opencodePlanter struct {
 var _ plant.Planter = opencodePlanter{}
 
 func (p opencodePlanter) Plant(ctx context.Context, bootDir string, spec plant.PlantSpec) (plant.PlantResult, error) {
-	return plantSpec(ctx, bootDir, spec, plantConfig{provider: "opencode", authorize: p.authorize})
+	// opencode.json can carry the agent credential in its MCP environment, so it is
+	// owner-only whether or not one is present (CW-20261024-0011).
+	return plantSpec(ctx, bootDir, spec, plantConfig{
+		provider: "opencode", authorize: p.authorize,
+		fileModeOverrides: map[string]os.FileMode{"opencode.json": 0o600},
+	})
 }
 
 // opencodeAgentMD renders the agents/<slug>.md system-prompt body.
@@ -163,12 +169,10 @@ func opencodePlantSpec(params SetupParams) (plant.PlantSpec, error) {
 		files[relPath] = content
 	}
 
-	mcp, err := mcpConfigBytes(params)
-	if err != nil {
-		return plant.PlantSpec{}, err
-	}
-
-	return plant.PlantSpec{Files: files, MCPConfig: mcp}, nil
+	// No .mcp.json mirror: opencode reads its MCP servers from opencode.json, so a
+	// second copy of the agent credential in the boot dir is dropped
+	// (CW-20261024-0011).
+	return plant.PlantSpec{Files: files}, nil
 }
 
 func (l opencodeLayout) Setup(params SetupParams) (string, error) {

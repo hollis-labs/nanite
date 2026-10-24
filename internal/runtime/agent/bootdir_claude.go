@@ -58,6 +58,8 @@ func (p claudePlanter) Plant(ctx context.Context, bootDir string, spec plant.Pla
 	return plantSpec(ctx, bootDir, spec, plantConfig{
 		authorize: p.authorize, provider: "claude",
 		providerSettingsPath: ".claude/settings.json",
+		// settings.json can carry env and apiKeyHelper: owner-only (CW-20261024-0011).
+		providerSettingsMode: 0o600,
 	})
 }
 

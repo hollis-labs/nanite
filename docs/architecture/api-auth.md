@@ -75,6 +75,25 @@ nanite auth login-link            # one-time browser sign-in URL
 nanite auth reset-operator        # OFFLINE recovery; works without the server
 ```
 
+### Show-once issuance to a file
+
+```
+nanite auth create --kind client --label tachyon --scope read,operate,agents:manage \
+  --output ~/.config/tachyon/nanite.token
+nanite auth rotate <id> --output ~/.config/tachyon/nanite.token --force
+```
+
+With `--output` the secret is written only to that file (mode 0600, created
+whole or not at all) and is never printed, logged, placed in argv or put in an
+error: stdout shows the credential's id, scopes and expiry plus `written_to`.
+An existing file is refused before anything is issued unless `--force`. If the
+file cannot be written after the server minted the credential, the new
+credential is revoked, so no credential exists whose secret nobody holds. The
+caller (for example Tachyon) is then given the file path, not the secret. The
+server stores only a hash, logs and audits only the credential id, and the
+secret is in the issuance response alone (tests pin each of these). Issuing a
+credential still needs the operator token and, by policy, the owner's approval.
+
 `NANITE_AUTH_TOKEN` (a `nan_operator_…` secret) overrides the token file for
 headless runs; the server imports it on start.
 

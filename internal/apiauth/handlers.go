@@ -21,6 +21,10 @@ type Handlers struct {
 	// SecureCookies sets the Secure attribute on the session cookie (the
 	// operator's statement that browsers reach Nanite over HTTPS).
 	SecureCookies bool
+	// PublicURL, when set, is the origin browsers reach Nanite on (behind a
+	// proxy this differs from the bind address). Minted login links carry a
+	// ready-to-open "url" built on it.
+	PublicURL string
 }
 
 // Register mounts the credential API on mux.
@@ -275,7 +279,11 @@ func (h *Handlers) loginLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"path": "/api/auth/link?code=" + code, "expires_at": ts(expires)})
+	out := map[string]any{"path": "/api/auth/link?code=" + code, "expires_at": ts(expires)}
+	if base := strings.TrimRight(strings.TrimSpace(h.PublicURL), "/"); base != "" {
+		out["url"] = base + out["path"].(string)
+	}
+	writeJSON(w, http.StatusCreated, out)
 }
 
 // AdminAuthenticator adapts the request's principal to the

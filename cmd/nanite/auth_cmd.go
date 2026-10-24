@@ -26,8 +26,8 @@ Credentials for the Nanite HTTP API (CW-20261011-0036).
                                   create a client credential; the secret is shown ONCE
   revoke <id>                     revoke a credential (open streams close)
   rotate <id>                     replace a credential; the new secret is shown ONCE
-  login-link                      print a one-time (60 s) browser login URL (on NANITE_PUBLIC_URL
-                                  when set, else the API base URL)
+  login-link                      print a one-time (60 s) browser login URL (on the server's
+                                  NANITE_PUBLIC_URL, else this shell's, else the API base URL)
   token-path                      print the operator token file path
   reset-operator                  OFFLINE recovery: revoke every operator credential and
                                   write a fresh one to the token file
@@ -176,17 +176,23 @@ func authLoginLink() error {
 	}
 	var out struct {
 		Path      string `json:"path"`
+		URL       string `json:"url"`
 		ExpiresAt string `json:"expires_at"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		return err
 	}
-	fmt.Println(loginLinkBase() + out.Path)
+	if out.URL != "" {
+		fmt.Println(out.URL)
+	} else {
+		fmt.Println(loginLinkBase() + out.Path)
+	}
 	fmt.Fprintf(os.Stderr, "Open it in a browser within 60 seconds; it works once (expires %s).\n", out.ExpiresAt)
 	return nil
 }
 
-// loginLinkBase is the origin a browser should open the login link on. The
+// loginLinkBase is the fallback origin, used when the server does not return a
+// ready-to-open url (an older server). The origin a browser should open the login link on. The
 // link is minted over the loopback API, but a deployed server sits behind a
 // proxy, so NANITE_PUBLIC_URL (the public URL) wins when set.
 func loginLinkBase() string {

@@ -11,7 +11,9 @@ does the same sequence unattended.
 - Go (see `go.mod`), `jq`, `curl`.
 - For the CLI agent: a logged-in provider CLI. `claude` by default; `codex`,
   `opencode` and `agy` also launch (`SMOKE_CLI_PROVIDER`). Run it once
-  interactively to log in.
+  interactively to log in. `agy` runs under a private HOME with its own
+  `.gemini` (`~/.nanite/agy-gemini/<agent>/`) that links your real login files; your
+  real `~/.gemini` is not written (see `docs/architecture/agent-runtime.md`).
 - For the API agent: a provider key (below).
 
 ## 1. Build
@@ -151,7 +153,7 @@ turn or `DELETE /api/sessions/{id}`; an agent credential cannot reach them.
 | Step | Symptom | Cause |
 |---|---|---|
 | session create, `runtime=cli` | `422`, `error.cause` `host_directories_missing` | the CLI host settings have no `directories` |
-| session create, `runtime=cli` | `422`, `error.cause` `cli_host_unsupported_field` | the host sets `mcp_servers` on a provider other than `claude` (or names a server that is missing, disabled, non-stdio or called `nanite`), `harness_profile`, a non-empty `native_loop`, `recall_*`, `protocol` or `transport`, or a relative directory |
+| session create, `runtime=cli` | `422`, `error.cause` `cli_host_unsupported_field` | the host sets `mcp_servers` on a provider other than `claude` or `agy` (or names a server that is missing, disabled, non-stdio or called `nanite`), `harness_profile`, a non-empty `native_loop`, `recall_*`, `protocol` or `transport`, or a relative directory |
 | session create, `runtime=cli` | `422`, `error.cause` `read_only_unenforceable` | the definition asks for a read-only permission profile, which a CLI process cannot enforce |
 | session create, `runtime=cli` | `422`, `error.cause` `provider_not_launchable` | no provider, or one Nanite cannot launch |
 | session create, `runtime=api` | `422`, `error.cause` `host_directory_invalid` | the host lists a relative directory |

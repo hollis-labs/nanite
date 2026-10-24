@@ -29,10 +29,16 @@ import (
 //     it is the only gate there is. Grants are per tool name, not per server,
 //     so a granted name is allowed on every listed server that exposes it.
 //
+// Antigravity (agy) has the same gate (CW-20261024-0109): headless it
+// auto-denies an MCP tool with no `permissions.allow` entry
+// `mcp(<ServerName>/<tool>)` in settings.json. agy reads settings only from
+// the user's ~/.gemini and an admin file, so the rules go into a private
+// ~/.gemini under a per-launch HOME (bootdir_agy_home.go, agy_mcp_allow.go),
+// never the operator's real one. Same grants, same fail-closed behaviour.
+//
 // Other runtimes are refused rather than planted without a gate: Codex and
-// OpenCode run MCP tools with no per-tool allow Nanite can set, and the
-// Antigravity headless gate is unverified. HostMCPSupported is the one
-// predicate; admission and launch both use it.
+// OpenCode run MCP tools with no per-tool allow Nanite can set.
+// HostMCPSupported is the one predicate; admission and launch both use it.
 
 // HostMCPSource resolves a CLI host's MCP servers and tool grants at launch.
 type HostMCPSource interface {
@@ -56,12 +62,20 @@ type HostMCPLaunch struct {
 	Servers []HostMCPServer
 	// AllowRules are the Claude permission rules the grants produce.
 	AllowRules []string
+	// Tools are the granted tool names (sorted), the input of every runtime's
+	// rule spelling: agy derives its mcp(<server>/<tool>) rules from Servers
+	// and Tools (agy_mcp_allow.go).
+	Tools []string
 }
 
 // HostMCPSupported reports whether a CLI provider can carry host mcp_servers
 // with the grant enforced (see the file comment).
 func HostMCPSupported(providerName string) bool {
-	return normalizeProviderName(providerName) == "claude"
+	switch normalizeProviderName(providerName) {
+	case "claude", "antigravity":
+		return true
+	}
+	return false
 }
 
 // ValidateHostMCPServer returns why a registry row cannot be projected into a
@@ -77,7 +91,7 @@ func ValidateHostMCPServer(name string, row *store.MCPServerConfig, ownID string
 		return fmt.Errorf("mcp server %q is not a stdio server; only stdio servers can be projected into a CLI agent", name)
 	case name == ownID:
 		return fmt.Errorf("mcp server %q would shadow the server Nanite plants for the agent", name)
-	case strings.ContainsAny(name, " \t\n,*"):
+	case strings.ContainsAny(name, " \t\n,*()/"):
 		return fmt.Errorf("mcp server name %q cannot be used in a permission rule", name)
 	}
 	return nil
@@ -175,6 +189,7 @@ func resolveHostMCP(ctx context.Context, src HostMCPSource, profile *store.Agent
 		return nil, err
 	}
 	sort.Strings(granted)
+	out.Tools = granted
 	for _, srv := range out.Servers {
 		for _, tool := range granted {
 			out.AllowRules = append(out.AllowRules, "mcp__"+srv.Name+"__"+tool)

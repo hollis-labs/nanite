@@ -265,7 +265,7 @@ func (v *CognitiveViews) LatestTurn(ctx context.Context, viewID string) (string,
 // anything a CLI process cannot honor: a read-only definition (the CLI has no
 // enforced read-only posture), native-loop knobs (the CLI owns its loop), host
 // MCP servers on a runtime whose tool grants Nanite cannot enforce (only Claude
-// carries them), a model on a runtime whose
+// and Antigravity carry them), a model on a runtime whose
 // model flag is unverified, and a host that grants no directory.
 func admitCLIHost(h store.NativeHostSettings, permissionProfile string, requested *ModelSelection) (ModelSelection, error) {
 	if h.Provider == "" {
@@ -281,7 +281,7 @@ func admitCLIHost(h store.NativeHostSettings, permissionProfile string, requeste
 		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field %q does not apply to a CLI agent; remove it", field)
 	}
 	if len(h.MCPServers) > 0 && !runtimeagent.HostMCPSupported(h.Provider) {
-		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field \"mcp_servers\" is not supported for provider %q: Nanite cannot gate a tool call that runtime makes itself, so it will not plant the servers; use provider \"claude\" or runtime \"api\"", h.Provider)
+		return ModelSelection{}, unsupportedCause(CauseCLIHostUnsupportedField, "host settings field \"mcp_servers\" is not supported for provider %q: Nanite cannot gate a tool call that runtime makes itself, so it will not plant the servers; use provider \"claude\" or \"antigravity\", or runtime \"api\"", h.Provider)
 	}
 	if len(h.Directories) == 0 {
 		return ModelSelection{}, unsupportedCause(CauseHostDirectoriesMissing, "a CLI agent needs at least one directory in host settings; the first is its work root")

@@ -24,11 +24,14 @@ import (
 //	    └── mcp_config.json                    # the Nanite MCP server (0600)
 //
 // Spawn cwd: <bootDir>; the work root and other granted directories are
-// attached with --add-dir (addDirArgs). agy has no config-dir variable and its
-// global config is shared with the Antigravity desktop app, so nothing is
-// written there and no env is amended. Global MCP servers and skills still load
-// alongside the planted ones: agy's isolation is not measured, so unlike Claude
-// there is no strict-MCP guarantee for it.
+// attached with --add-dir (addDirArgs). agy's global config is shared with the
+// Antigravity desktop app and is never written. Instead the launch runs with
+// HOME=<bootDir>/agy-home, a symlink farm of the real home with a private
+// .gemini whose settings.json carries the per-tool MCP allow rules from the
+// agent's grants (bootdir_agy_home.go, agy_mcp_allow.go). The real ~/.agents
+// is not linked, so the operator's global plugins and skills do not load.
+//
+//	<bootDir>/agy-home/                        HOME (farm + .gemini link)
 type agyLayout struct{}
 
 // agyMCPConfigPath is where agy discovers a workspace plugin's MCP servers. The
@@ -122,15 +125,39 @@ func (agyLayout) populateInactive(bootDir string, params SetupParams, authorize 
 	if err != nil {
 		return plant.PlantResult{}, err
 	}
-	return (agyPlanter{authorize: authorize}).Plant(context.Background(), bootDir, spec)
+	result, err := (agyPlanter{authorize: authorize}).Plant(context.Background(), bootDir, spec)
+	if err != nil {
+		return result, err
+	}
+	// The launch's private HOME and settings: outside the planter's file set
+	// (symlinks, and a persistent dir outside the boot dir).
+	if err := plantAgyHome(bootDir, params); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func (agyLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) error {
 	return &ArtifactRefreshUnavailable{Provider: "antigravity", Operation: "refresh system prompt"}
 }
 
-// AmendEnv leaves the environment alone: agy has no config-dir variable.
-func (agyLayout) AmendEnv(base map[string]string, _ string) map[string]string { return base }
+// AmendEnv points HOME at the launch's private home farm (bootdir_agy_home.go):
+// agy has no config-dir variable, but it honours $HOME, and the farm's private
+// .gemini is the only place Nanite can put the MCP allow rules without writing
+// the operator's real one. Everything else of the real home resolves through
+// the farm's links; NANITE_* and the rest of the env are untouched.
+func (agyLayout) AmendEnv(base map[string]string, bootDir string) map[string]string {
+	home := agyHomePath(bootDir)
+	if home == "" {
+		return base
+	}
+	out := make(map[string]string, len(base)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	out["HOME"] = home
+	return out
+}
 
 // SpawnWorkdir is the boot dir; the project is attached with --add-dir.
 func (agyLayout) SpawnWorkdir(bootDir, _ string) string { return bootDir }

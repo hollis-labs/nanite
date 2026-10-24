@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/hollis-labs/libs/harness/core/adapters"
-	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/harness/core/adapters"
 	"github.com/hollis-labs/libs/llm/core/contracts/runtimes"
+	permissionlib "github.com/hollis-labs/libs/security/policy/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -93,7 +93,7 @@ func TestResolveHostMCP_Refusals(t *testing.T) {
 }
 
 func TestHostMCPSupported(t *testing.T) {
-	for p, want := range map[string]bool{"claude": true, "codex": false, "opencode": false, "antigravity": false, "copilot": false} {
+	for p, want := range map[string]bool{"claude": true, "codex": false, "opencode": false, "antigravity": true, "agy": true, "copilot": false} {
 		if got := HostMCPSupported(p); got != want {
 			t.Errorf("HostMCPSupported(%q) = %v", p, got)
 		}

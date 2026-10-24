@@ -165,7 +165,7 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 	if sel.Mode == runtimes.ModePTY {
 		return nil, errTerminalLaunchUnsupported
 	}
-	if x.HostMCPGated && sel.Runtime == runtimes.Claude && deps.yoloMode() {
+	if x.HostMCPGated && (sel.Runtime == runtimes.Claude || sel.Runtime == runtimes.Antigravity) && deps.yoloMode() {
 		// The mode can change between boot params and launch; the developer
 		// variant below would drop the gate the allow rules feed.
 		return nil, errHostMCPNoGate
@@ -218,15 +218,17 @@ func (d *Dependencies) yoloMode() bool {
 // condition (the permission engine is in yolo mode) and with the same audit line.
 //
 // Without it agy's headless mode auto-denies any tool call that needs a
-// permission it cannot prompt for, and the Nanite MCP server's tools are among
-// them. The alternative is an allow-rule in agy's own settings.json, which is
-// global, shared with the Antigravity desktop app, and never written by Nanite.
+// permission it cannot prompt for. Outside yolo the MCP tools are allowed
+// per tool by rules in the launch's private settings.json (agy_mcp_allow.go),
+// not by this flag; Nanite never writes the operator's own ~/.gemini.
 func agyPermissionArgs(deps *Dependencies, runtime runtimes.ID) []string {
 	if runtime != runtimes.Antigravity {
 		return nil
 	}
 	if !deps.yoloMode() {
-		slog.Info("agy launch: the Nanite MCP tools are unavailable to it because the permission mode is not yolo; add an allow-rule to agy's settings.json (permissions.allow) to use them")
+		// The MCP tools it may call carry allow rules in the launch's private
+		// settings (bootdir_agy_home.go); any other tool needing a permission
+		// stays auto-denied headless.
 		return nil
 	}
 	slog.Warn("AUDIT agent launch: agy --dangerously-skip-permissions because the permission mode is yolo")

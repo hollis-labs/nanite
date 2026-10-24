@@ -125,6 +125,51 @@ restarts, send another turn to the same `session_view_id`. A CLI session resumes
 from the provider's session, or from Nanite's recovery pack when the provider
 cannot resume. The smoke script exercises restart recovery and cancellation for both runtimes.
 
+## Give an agent a Tether address (optional)
+
+Enrollment gives an agent a durable `msg://agent/agent-mux/agt_...` address that
+other agents can mail. It is explicit, optional and off the setup path: Nanite
+runs without Tether, and `agent setup` never contacts it. Design and behavior:
+`docs/architecture/tether-durable-actor.md`.
+
+Live enrollment needs a **scoped `tether.registry` credential (`registry.write`
+only) that you issue** on the Tether side. Nanite never issues or rotates one.
+It is a different credential from the delivery bridge's messages/read token
+(`NANITE_TETHER_TOKEN_FILE`) and is never read from it.
+
+```sh
+export NANITE_TETHER_ADDR=http://127.0.0.1:PORT      # the Tether daemon (also enables the bridge)
+install -m 600 /dev/null ~/.nanite/tether-registry-token
+pbpaste > ~/.nanite/tether-registry-token             # the token, from the clipboard; never an argument
+export NANITE_TETHER_REGISTRY_TOKEN_FILE=~/.nanite/tether-registry-token
+```
+
+Set both variables in the environment of the process that enrolls: `nanite
+serve` for the HTTP route and MCP tool, your shell for the CLI. The file must be
+mode 0600 (any group or world permission is refused), is read on each call and
+is never logged or stored in the database.
+
+```sh
+./nanite agent enroll <host-settings-id> --reason "takes part in messaging"
+# or, with an admin credential: POST /api/native-agents/<id>/enroll {"reason": "..."}
+```
+
+The answer carries the `urn`. Repeating the call returns the same URN
+(`already_enrolled`), and if a call is interrupted, repeat it: it resumes. A
+Tether that is down answers `tether_unreachable` (retry later); a missing,
+insecure or absent token or address answers a typed error and writes nothing.
+Enrollment needs the `admin` scope; `agents:manage` alone is refused.
+
+Once enrolled, a session started from the agent's host settings becomes the
+actor's current session (the bridge then delivers its mail), and ending the
+session releases it.
+
+To retire the actor, retire the agent: `host_settings_retire` (MCP) or
+`POST /api/agent-host-settings/{id}/retire`. The actor is archived and made
+unroutable at once, then deregistered in Tether. If Tether is down the response
+shows `actor.deregister_pending: true`; repeat the retire later to retry. A
+retired address is never reused.
+
 ## Work root, listing and stopping
 
 A CLI session runs in the first host directory unless the create request names

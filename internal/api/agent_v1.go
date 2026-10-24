@@ -247,6 +247,12 @@ func (a *API) handleAgentV1CreateSession(w http.ResponseWriter, r *http.Request)
 		a.agentV1ErrorCause(w, status, err.Error(), service.CauseCode(err))
 		return
 	}
+	// CW-20261024-0017: a session started from an enrolled agent's host settings
+	// becomes its actor's current session (a no-op for agents without an actor);
+	// ending the session detaches it (the session archive hook).
+	if req.HostSettings != nil && req.HostSettings.ID != "" && a.Services.Enrollment != nil {
+		a.Services.Enrollment.AttachSession(r.Context(), req.HostSettings.ID, sess.ID)
+	}
 	w.Header().Set("Location", agentV1RoutePrefix+"/sessions/"+url.PathEscape(sess.ID))
 	// No post-commit lookup: the committed view is the create response.
 	view := sessionToView(sess)

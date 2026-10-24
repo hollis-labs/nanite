@@ -34,6 +34,14 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 	if args[0] == "setup" {
 		return runAgentSetupCommand(args[1:], out)
 	}
+	if args[0] == "enroll" {
+		st, err := store.New(context.Background(), resolveDBPath())
+		if err != nil {
+			return err
+		}
+		defer closeStoreBestEffort(context.Background(), st)
+		return runAgentEnroll(context.Background(), service.NewEnrollmentService(st), args[1:], out)
+	}
 	if args[0] == "load" {
 		st, err := store.New(context.Background(), resolveDBPath())
 		if err != nil {
@@ -49,7 +57,7 @@ func runPinnedAgentCommand(args []string, out io.Writer) error {
 		return runAgentSessionCommand(args, out)
 	}
 	if args[0] != "validate" && args[0] != "install" {
-		return fmt.Errorf("unknown agent command %q: use author, validate, install, setup, load, run, list or stop (old profile sync/import is retired); run `nanite agent help`", args[0])
+		return fmt.Errorf("unknown agent command %q: use author, validate, install, setup, enroll, load, run, list or stop (old profile sync/import is retired); run `nanite agent help`", args[0])
 	}
 	fs := flag.NewFlagSet("agent "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)

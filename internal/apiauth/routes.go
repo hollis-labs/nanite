@@ -72,6 +72,9 @@ var routeRules = []routeRule{
 	// privilege-escalation path).
 	rule("GET", `^/api/native-authority(/|$)`, ScopeAgentsManage),
 	rule("", `^/api/native-authority(/|$)`, ScopeAdmin),
+	// Enrolling an agent as a durable Tether actor creates an address other
+	// agents can mail: admin, like grants (ADR tether-durable-actor.md).
+	rule("POST", `^/api/native-agents/\{[^}]+\}/enroll$`, ScopeAdmin),
 	// One-call agent setup and the agent views. Setup granting tools is
 	// refused inside the handler for a caller without admin.
 	rule("", `^/api/(agent-setup|native-agents)(/|$)`, ScopeAgentsManage),

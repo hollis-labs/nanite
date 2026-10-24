@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/apiauth"
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -83,6 +85,11 @@ var adminMCPTools = []adminMCPTool{
 	{name: "agent_get", method: "GET", path: "/api/native-agents/{id}", pathParams: []string{"id"},
 		description: "Show one Nanite native agent by id." + adminCredentialNote,
 		properties:  map[string]any{"id": prop("string", "Agent id.")}, required: []string{"id"}},
+	{name: "agent_enroll", method: "POST", path: "/api/native-agents/{id}/enroll", pathParams: []string{"id"}, body: true,
+		description: "Enroll an agent (host settings id) as a durable Tether actor: Tether mints its msg://agent/... address once, Nanite binds it. Idempotent: an enrolled agent returns the same URN. Needs the Tether address and a separate tether.registry token file configured on the Nanite machine; the token is never accepted here. Retire with host_settings_retire, which also deregisters the actor." + grantCredentialNote,
+		properties: map[string]any{"id": prop("string", "Host settings id of the agent."), "reason": reasonProp,
+			"revision": prop("string", "Optional host settings revision the operator reviewed; a mismatch is refused.")},
+		required: []string{"id", "reason"}, scope: apiauth.ScopeAdmin},
 	{name: "host_settings_list", method: "GET", path: "/api/agent-host-settings", queryParams: []string{"limit", "offset"}, defaultLimit: true,
 		description: "List agent host settings (mutable execution inputs), at most limit per call (default 50)." + adminCredentialNote,
 		properties:  map[string]any{"limit": prop("integer", "Page size, 1-500 (default 50)."), "offset": prop("integer", "Items to skip; a full page means there may be more.")}},
@@ -184,7 +191,7 @@ func adminMCPServer(a *API, dispatch http.Handler, carrier *http.Request) *mcp.S
 			})
 	}
 	srv.AddTool(&mcp.Tool{Name: "host_settings_retire",
-		Description: "Disable an agent's host settings (enabled=false) so no new session starts from them. This is a disable-only write: it skips the model and definition re-validation that host_settings_update does, so it works even when the model is no longer allowed. It does NOT stop live sessions (use session_stop) or remove tool grants (use authority_revoke or tool_ungrant)." + adminCredentialNote,
+		Description: "Disable an agent's host settings (enabled=false) so no new session starts from them. This is a disable-only write: it skips the model and definition re-validation that host_settings_update does, so it works even when the model is no longer allowed. It does NOT stop live sessions (use session_stop) or remove tool grants (use authority_revoke or tool_ungrant). If the agent is enrolled as a durable Tether actor, the actor is archived, its binding disabled and its Tether entry deregistered first (a Tether outage leaves the deregistration pending; repeat the retire to retry)." + adminCredentialNote,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"id": prop("string", "Host settings id."), "reason": reasonProp}, "required": []string{"id", "reason"}}},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return a.retireHost(ctx, carrier, req.Params.Arguments)
@@ -294,12 +301,19 @@ func (a *API) retireHost(ctx context.Context, _ *http.Request, raw json.RawMessa
 	return mcpToolResult(http.StatusOK, out), nil
 }
 
+// retiredHost is the retire response: the host settings, plus the outcome for
+// the agent's durable Tether actor when it had one.
+type retiredHost struct {
+	store.AgentHostSettings
+	Actor *service.RetireResult `json:"actor,omitempty"`
+}
+
 // retireHostSettings is the disable-only retire shared by the MCP tool and
 // POST /api/agent-host-settings/{id}/retire. It returns the HTTP status and, on
 // failure, a message safe to show. The reason goes into the audit row: host
 // settings have no audit table of their own.
-func (a *API) retireHostSettings(ctx context.Context, id, reason, auditPrefix string) (store.AgentHostSettings, int, string) {
-	var host store.AgentHostSettings
+func (a *API) retireHostSettings(ctx context.Context, id, reason, auditPrefix string) (retiredHost, int, string) {
+	var host retiredHost
 	reason = strings.TrimSpace(reason)
 	if reason == "" || len(reason) > 500 {
 		return host, http.StatusBadRequest, "a reason of at most 500 characters is required"
@@ -307,10 +321,29 @@ func (a *API) retireHostSettings(ctx context.Context, id, reason, auditPrefix st
 	if a.Services == nil || a.Services.AgentDefinitions == nil {
 		return host, http.StatusServiceUnavailable, "agent definition host unavailable"
 	}
+	// An enrolled agent's durable actor is retired first (the schema refuses
+	// actor updates once the host is disabled): archived, binding disabled,
+	// then deregistered in Tether, or recorded as pending when Tether is down.
+	// An agent that was never enrolled is unaffected.
+	if a.Services.Enrollment != nil {
+		credential := "unknown"
+		if p, ok := apiauth.FromContext(ctx); ok && strings.TrimSpace(p.CredentialID) != "" {
+			credential = p.CredentialID
+		}
+		res, rerr := a.Services.Enrollment.Retire(ctx, credential, id, reason)
+		if rerr != nil {
+			slog.Error("retire agent actor failed", "host_settings_id", id, "error", rerr)
+			adminMCPAudit(ctx, auditPrefix+" "+id+" reason="+reason, http.StatusInternalServerError)
+			return host, http.StatusInternalServerError, "retiring the agent's Tether actor failed; nothing was disabled, retry"
+		}
+		if res.Enrolled {
+			host.Actor = &res
+		}
+	}
 	var err error
 	// The revision can move between the read and the write; read again and retry.
 	for attempt := 0; attempt < 3; attempt++ {
-		host, err = a.Services.AgentDefinitions.DisableHost(ctx, id)
+		host.AgentHostSettings, err = a.Services.AgentDefinitions.DisableHost(ctx, id)
 		if !errors.Is(err, store.ErrAgentHostRevisionConflict) {
 			break
 		}

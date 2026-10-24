@@ -37,14 +37,29 @@ What is true today, from the code:
   identity; Tether keeps a thin directory projection. Nanite and Tether are
   independently useful and compose through explicit references. Tether also
   has an idempotent registration primitive keyed on `(substrate, external_id)`
-  (`registry.Service.RegisterIdempotent`) that is not exposed over HTTP; the
-  HTTP register path always mints a new URN.
+  (`registry.Service.RegisterIdempotent`, with a storage-level transaction in
+  `RegisterWithExternalKey`) that nothing in the HTTP layer or elsewhere in
+  production code calls; `POST /registry/{kind}` always goes through plain
+  `Register`, which mints a new URN on every call. `GET /registry/agents`
+  can look an entry up by `external_id` and `substrate`.
 - **One Tether gateway per install.** Migration 182 allows one enabled
   `mcp_servers` row that runs `tether ... --token-file`; it authenticates as a
   single actor, and outbound mail's `from` is the bound instance URN.
-- **Sender attribution is not enforced.** Tether's caller-identity mode is
-  `observe`, so a credential can claim a `from` it does not own until
-  `enforce` is flipped for the relevant points.
+- **Sender attribution is not enforced.** Tether's caller-identity mode
+  defaults to `observe`, and its own documentation says the current phase does
+  not enforce sender or mailbox ownership at all, even in `enforce` mode
+  (which only gates authentication). So a credential can claim a `from` it
+  does not own. Sender-ownership enforcement has no scheduled date in
+  Tether's documents; the enforcement runbook says every flip needs a
+  separate owner approval per enforcement point.
+- **Deregistration is a soft delete.** `DELETE /registry/{kind}/{urn}` sets
+  status `deprecated` and returns the profile; child rows are untouched. The
+  message send path does not consult the registry for the recipient's status,
+  so a send to a deprecated URN is not refused by the registry and the mail is
+  addressed by URN string alone.
+
+Every Tether statement in this document was checked against Tether's `main`
+branch, not a working branch.
 - **Credentials.** Tether separates `tether.messages`, `tether.read` and
   `tether.registry`. Nanite's bridge needs the first two; registration needs
   the third, which is a different, more privileged credential.
@@ -106,10 +121,13 @@ which grants).
    substrate `nanite` and an external id that is stable across retries and
    unique across installs (install identity plus host settings id).
    Tether must expose its existing idempotent registration over HTTP (a
-   Tether-side change; see Tasks). Until it does, enrollment uses a
-   lookup-by-external-id then register then attach sequence under a local
-   pending record, accepting a small window of possible duplicate directory
-   entries that deregistration cleans up.
+   Tether-side change; see Tasks; on `main` nothing calls it). Until it does,
+   enrollment uses lookup by external id, then register, then attaching the
+   external id. Plain register does not store external ids, so the attach step
+   has no HTTP route either: the practical interim is to carry the external
+   key in the display name or a registry field and look it up by that, which
+   leaves a window for duplicate directory entries that deregistration cleans
+   up. This is why T0 gates a safe E1, not just a tidy one.
 3. **Enrollment is an explicit, operator-authenticated act, not a side effect
    of `agent_setup`.** A new single writer (modelled on
    `store.LocalAuthority`, with a test pinning it to one consumer) creates the
@@ -194,9 +212,26 @@ Enrollment sequence, crash-safe:
 - The A2A push notifier's `ErrVerifiedActorRequired` log noise remains until
   it is silenced separately; enrollment does not fix it.
 
+## Install identity
+
+Nanite has no stable install id today. Searched: the config layout, the brand
+package, `user_settings` (a single settings row with no id column of this
+kind), host settings, scheduler identity tables, the server and whoami
+surfaces. Only per-row UUIDs exist: `agent_host_settings.id` is globally
+unique, but it identifies an agent, not an install, and a restored or cloned
+database carries it along.
+
+Proposal: add a single-row `install_identity` table holding a random UUID
+minted on first boot after the migration, never derived from hostname or
+address. The external key is `nanite/<install_id>/<host_settings_id>`. An
+operator command regenerates the id on a cloned database, before any agent is
+enrolled from it; enrolled agents keep their stored URN, so regenerating
+does not break them. The id is shown on a read-only admin surface so an
+operator can match a Tether directory entry to the install that owns it.
+
 ## Migration plan
 
-1. Schema: add the `enrolling` record table and a `deregister_pending`
+1. Schema: add `install_identity` and the `enrolling` record table and a `deregister_pending`
    marker; no change to `agent_actor_bindings` or `actor_instances` columns.
    Relaxing the one-gateway index (migration 182) is deferred to the per-actor
    token step.
@@ -224,14 +259,19 @@ Enrollment sequence, crash-safe:
 4. Should every `agent_setup` agent be enrolled (an explicit
    `agent enroll` step per agent, or a flag at setup), or only agents marked as
    messaging participants?
-5. Install identity: is there a stable id for a Nanite install to prefix the
+5. Install identity: see the section below; confirm the proposal.
+   (Original question: is there a stable id for a Nanite install to prefix the
    external key? If not, one must be introduced (hub and dev installs
-   otherwise collide on a shared Tether).
-6. Does Tether reject sends to a `deprecated` URN, and does deprecation
-   cancel its undelivered mail? Not verified; it decides the retire
-   semantics for pending messages.
-7. When is Tether's sender-identity `enforce` mode scheduled relative to
-   running more than one enrolled agent per install?
+   otherwise collide on a shared Tether.)
+6. Sends to a `deprecated` URN: on `main` the send path has no registry
+   status check, and deregistration does not touch messages. So mail to a
+   retired agent is accepted and sits undelivered. Decide whether Tether
+   should refuse such sends, or whether Nanite should drain or ignore that
+   mail at retire. (Found by reading code; no test run.)
+7. Sender-ownership enforcement is not implemented in Tether even in
+   `enforce` mode, and no date exists. Decide whether more than one enrolled
+   agent per install is acceptable before it exists, or whether that waits for
+   the Tether work.
 
 ## Task breakdown (dependency order)
 

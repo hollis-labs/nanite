@@ -261,7 +261,7 @@ machine:
   `https://models.dev/api.json` for model metadata and pricing. The request
   carries no session data.
 - **Plugin catalogs.** Browsing or installing from a catalog fetches its
-  index (by default the `hollis-labs/plugins-catalog` latest release feed) and
+  index (by default the catalog release feed; the catalog moved to `hollis-labs/plugins/plugin-catalog`, and the feed URL in `cmd/nanite/plugin_install_flow.go` still names the deleted `plugins-catalog` repo: known gap, CW-20261024-0117) and
   the plugin archives it names.
 - **Tools, plugins and MCP servers.** Agent tools such as web fetch reach the
   URLs an agent asks for. Configured MCP servers and installed plugins receive

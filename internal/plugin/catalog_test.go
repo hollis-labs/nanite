@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	sharedcatalog "github.com/hollis-labs/plugins-catalog"
+	"github.com/hollis-labs/libs/mcp/plugin-mcp/plugin-sdk/subprocess"
+	sharedcatalog "github.com/hollis-labs/plugins/plugin-catalog"
 )
 
 func catalogFixture(t *testing.T, ids ...string) []byte {
@@ -25,6 +26,8 @@ func catalogFixture(t *testing.T, ids ...string) []byte {
 			Archives:       []sharedcatalog.Archive{{Platform: runtime.GOOS + "-" + runtime.GOARCH, URL: "https://example.com/plugin.tar.gz", SHA256: strings.Repeat("a", 64), Size: 123}},
 			ManifestSHA256: strings.Repeat("b", 64), Directory: sharedcatalog.Directory{Status: "active"},
 		})
+		// plugin-catalog v2 rejects a null summary: send empty lists.
+		doc.Plugins[len(doc.Plugins)-1].Summary = sharedcatalog.Summary{Capabilities: []subprocess.CapabilityRequest{}, Operations: []sharedcatalog.Operation{}, Effects: []string{}}
 		if err := json.Unmarshal([]byte(`{"nanite":{"min":"0.1.0"}}`), &doc.Plugins[len(doc.Plugins)-1].Hosts); err != nil {
 			t.Fatal(err)
 		}

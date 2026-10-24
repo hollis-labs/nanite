@@ -77,6 +77,9 @@ var routeRules = []routeRule{
 	rule("", `^/api/(agent-setup|native-agents)(/|$)`, ScopeAgentsManage),
 	// Agent host settings writes: agents:manage, or maintain as before.
 	altRule("!GET", `^/api/agent-host-settings(/.*)?$`, ScopeAgentsManage, ScopeMaintain),
+	// A reload writes host settings (maintain); re-granting tools on it needs
+	// admin, which the handler checks itself.
+	rule("POST", `^/api/agent-reload$`, ScopeMaintain),
 
 	// Code execution, credentials, retirement and posture: admin.
 	rule("!GET", `^/api/agents/\{[^}]+\}/(retire|retirement-export)$`, ScopeAdmin),

@@ -64,9 +64,9 @@ const (
 // (TASKS/skills/09) applied to planting instead of execution.
 func TestResolvePlantableSkills(t *testing.T) {
 	catalog := map[string]*store.Skill{
-		"good":    {Slug: "good", ContentHash: skillAddrGood},
-		"revoked": {Slug: "revoked", ContentHash: skillAddrGood},
-		"stale":   {Slug: "stale", ContentHash: skillAddrGood}, // re-installed since approval
+		"good":    {Slug: "good", ContentHash: skillAddrGood, Enabled: true},
+		"revoked": {Slug: "revoked", ContentHash: skillAddrGood, Enabled: true},
+		"stale":   {Slug: "stale", ContentHash: skillAddrGood, Enabled: true}, // re-installed since approval
 		// "missing" intentionally absent from the catalog.
 	}
 
@@ -179,7 +179,7 @@ func TestSkillFilesForProvider_Dispatch(t *testing.T) {
 		skillAddrGood: {"SKILL.md": []byte("body")},
 	}}
 	sstore := &fakeSkillStore{
-		skills: map[string]*store.Skill{"demo": {Slug: "demo", ContentHash: skillAddrGood}},
+		skills: map[string]*store.Skill{"demo": {Slug: "demo", ContentHash: skillAddrGood, Enabled: true}},
 		known: map[string][]store.AgentKnownSkill{
 			"agent-1": {{AgentID: "agent-1", SkillName: "demo", ApprovedContentHash: skillAddrGood}},
 		},
@@ -246,7 +246,7 @@ func TestSharedSkillRootsMatchTheLayoutTable(t *testing.T) {
 func TestCodexAndAntigravityLayoutsPlantGrantedSkills(t *testing.T) {
 	vendor := &fakeSkillVendor{files: map[string]skillvendor.FileMap{skillAddrGood: {"SKILL.md": []byte("body")}}}
 	sstore := &fakeSkillStore{
-		skills: map[string]*store.Skill{"demo": {Slug: "demo", ContentHash: skillAddrGood}},
+		skills: map[string]*store.Skill{"demo": {Slug: "demo", ContentHash: skillAddrGood, Enabled: true}},
 		known:  map[string][]store.AgentKnownSkill{"agent-1": {{AgentID: "agent-1", SkillName: "demo", ApprovedContentHash: skillAddrGood}}},
 	}
 	for provider, rel := range map[string]string{"codex": "skills/demo/SKILL.md", "antigravity": ".agents/skills/demo/SKILL.md"} {
@@ -418,8 +418,8 @@ func TestSkillFilesForProvider_AdversarialSlugSkippedButOthersPlanted(t *testing
 	}}
 	sstore := &fakeSkillStore{
 		skills: map[string]*store.Skill{
-			"good": {Slug: "good", ContentHash: skillAddrGood},
-			"evil": {Slug: "../..", ContentHash: skillAddrGood}, // adversarial catalog Slug
+			"good": {Slug: "good", ContentHash: skillAddrGood, Enabled: true},
+			"evil": {Slug: "../..", ContentHash: skillAddrGood, Enabled: true}, // adversarial catalog Slug
 		},
 		known: map[string][]store.AgentKnownSkill{
 			"agent-1": {
@@ -465,8 +465,8 @@ func TestClaudeLayout_Setup_PlantsGrantedSkill(t *testing.T) {
 	}}
 	sstore := &fakeSkillStore{
 		skills: map[string]*store.Skill{
-			"demo":  {Slug: "demo", ContentHash: skillAddrGood},
-			"stale": {Slug: "stale", ContentHash: skillAddrGood},
+			"demo":  {Slug: "demo", ContentHash: skillAddrGood, Enabled: true},
+			"stale": {Slug: "stale", ContentHash: skillAddrGood, Enabled: true},
 		},
 		known: map[string][]store.AgentKnownSkill{
 			"agent-plant-1": {
@@ -515,7 +515,7 @@ func TestPlantAgentSkillFiles_MidSession(t *testing.T) {
 		skillAddrGood: {"SKILL.md": []byte("# Late Grant\n")},
 	}}
 	sstore := &fakeSkillStore{
-		skills: map[string]*store.Skill{"late": {Slug: "late", ContentHash: skillAddrGood}},
+		skills: map[string]*store.Skill{"late": {Slug: "late", ContentHash: skillAddrGood, Enabled: true}},
 		known:  map[string][]store.AgentKnownSkill{}, // nothing granted yet
 	}
 	deps := &Dependencies{Skills: sstore, SkillVendor: vendor}
@@ -561,5 +561,65 @@ func TestPlantAgentSkillFiles_NoWiring(t *testing.T) {
 func TestPlantAgentSkillFiles_NilDeps(t *testing.T) {
 	if err := PlantAgentSkillFiles(context.Background(), nil, "/tmp/x", "claude", "agent-1"); err == nil {
 		t.Fatal("expected error for nil Dependencies")
+	}
+}
+
+// A disabled skill is withheld from the boot dir even when its grant is current
+// (CW-20261024-0009): the operator turned it off, and skill_get already refuses it.
+func TestResolvePlantableSkills_SkipsDisabled(t *testing.T) {
+	fake := &fakeSkillStore{
+		skills: map[string]*store.Skill{
+			"on":  {Slug: "on", ContentHash: skillAddrGood, Enabled: true},
+			"off": {Slug: "off", ContentHash: skillAddrGood, Enabled: false},
+		},
+		known: map[string][]store.AgentKnownSkill{"agent-1": {
+			{AgentID: "agent-1", SkillName: "on", ApprovedContentHash: skillAddrGood},
+			{AgentID: "agent-1", SkillName: "off", ApprovedContentHash: skillAddrGood},
+		}},
+	}
+	got, err := ResolvePlantableSkills(context.Background(), fake, fake, "agent-1")
+	if err != nil || len(got) != 1 || got[0].Slug != "on" {
+		t.Fatalf("plantable = %+v, %v; want only the enabled skill", got, err)
+	}
+}
+
+// Every runtime that plants skills through the shared layout table withholds a
+// disabled skill from its boot dir, both through skillFilesForProvider and
+// through the runtime's own plant spec (CW-20261024-0011).
+func TestDisabledSkillIsNotPlantedForAnyRuntime(t *testing.T) {
+	vendor := &fakeSkillVendor{files: map[string]skillvendor.FileMap{skillAddrGood: {"SKILL.md": []byte("body")}}}
+	sstore := &fakeSkillStore{
+		skills: map[string]*store.Skill{
+			"on":  {Slug: "on", ContentHash: skillAddrGood, Enabled: true},
+			"off": {Slug: "off", ContentHash: skillAddrGood, Enabled: false},
+		},
+		known: map[string][]store.AgentKnownSkill{"agent-1": {
+			{AgentID: "agent-1", SkillName: "on", ApprovedContentHash: skillAddrGood},
+			{AgentID: "agent-1", SkillName: "off", ApprovedContentHash: skillAddrGood},
+		}},
+	}
+	params := SetupParams{
+		SessionID: "s", AgentProfile: &store.AgentProfile{ID: "agent-1", Name: "A", Slug: "a"},
+		SystemPrompt: "p", BootContent: "b", Skills: sstore, SkillVendor: vendor,
+	}
+	specs := map[string]func() (map[string][]byte, error){
+		"claude":      func() (map[string][]byte, error) { s, err := claudePlantSpec(t.TempDir(), params); return s.Files, err },
+		"codex":       func() (map[string][]byte, error) { s, err := codexPlantSpec(params); return s.Files, err },
+		"opencode":    func() (map[string][]byte, error) { s, err := opencodePlantSpec(params); return s.Files, err },
+		"antigravity": func() (map[string][]byte, error) { s, err := agyPlantSpec(params); return s.Files, err },
+	}
+	for name, spec := range specs {
+		files, err := spec()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var on, off bool
+		for p := range files {
+			on = on || strings.Contains(p, "/on/") || strings.HasPrefix(p, "skills/on/")
+			off = off || strings.Contains(p, "/off/") || strings.HasPrefix(p, "skills/off/")
+		}
+		if !on || off {
+			t.Errorf("%s: enabled skill planted = %v, disabled skill planted = %v", name, on, off)
+		}
 	}
 }

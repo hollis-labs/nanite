@@ -1103,6 +1103,17 @@ func initProviders(keys *providerkeys.Manager) (*provider.Registry, *providercat
 	var registeredAPI, missingAPI []string
 	for _, spec := range service.APIProviderSpecs() {
 		st := keys.Status(context.Background(), spec.ProviderID)
+		// A Station gateway provider takes its base URL and headers from its
+		// row; a row that is not valid is reported, not registered.
+		rowSettings, serr := keys.RowSettings(context.Background(), spec.ProviderID)
+		if serr == nil {
+			spec, serr = spec.WithSettings(rowSettings)
+		}
+		if serr != nil {
+			slog.Warn("provider not registered: invalid provider settings", "provider", spec.Name, "err", serr)
+			missingAPI = append(missingAPI, spec.Name)
+			continue
+		}
 		if st.Usable {
 			registry.Register(spec.Name, spec.NewLazyProvider(keys.Func(spec.ProviderID)))
 			catalog.Add(providercatalog.Entry{
@@ -1113,7 +1124,11 @@ func initProviders(keys *providerkeys.Manager) (*provider.Registry, *providercat
 			slog.Info("provider registered", "provider", spec.Name, "key_source", st.Source)
 			registeredAPI = append(registeredAPI, spec.Name)
 		} else {
-			slog.Warn("provider not registered: no usable API key",
+			lvl := slog.LevelWarn
+			if spec.Station {
+				lvl = slog.LevelInfo // optional: most installs have no gateway
+			}
+			slog.Log(context.Background(), lvl, "provider not registered: no usable API key",
 				"provider", spec.Name, "code", st.Code, "ref", st.Ref, "guidance", st.Guidance)
 			missingAPI = append(missingAPI, spec.Name)
 		}

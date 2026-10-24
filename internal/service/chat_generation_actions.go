@@ -1949,7 +1949,7 @@ func (s *chatServiceImpl) prepareTurn(
 			}
 			policy = cfg.NativePolicy.Defaults()
 		}
-		agent = &store.AgentProfile{Name: "Defined chat", SystemPrompt: cfg.Instructions, DefinitionPolicy: &policy, DefinitionReflex: cfg.ReflexBundle, NativeHost: cfg.HostSettings, Class: policy.Class, DefaultProvider: cfg.Model.Provider, DefaultModel: cfg.Model.Model, RuntimeKind: "api", Constraints: "{}", Settings: "{}", Tags: "[]", Tools: "[]"}
+		agent = &store.AgentProfile{Name: "Defined chat", SystemPrompt: cfg.Instructions, DefinitionFiles: cfg.Files, DefinitionPolicy: &policy, DefinitionReflex: cfg.ReflexBundle, NativeHost: cfg.HostSettings, Class: policy.Class, DefaultProvider: cfg.Model.Provider, DefaultModel: cfg.Model.Model, RuntimeKind: "api", Constraints: "{}", Settings: "{}", Tags: "[]", Tools: "[]"}
 		if cfg.HostSettings != nil && cfg.HostSettings.Runtime == "cli" && cfg.HostSettingsRef != nil {
 			// A CLI view boots the host's projected profile, pinned to the revision
 			// the view was admitted under (driveBootSession checks it).
@@ -1971,6 +1971,35 @@ func (s *chatServiceImpl) prepareTurn(
 						host.Directories = append(host.Directories, dir)
 					}
 				}
+				agent.NativeHost = &host
+			}
+		}
+		if cfg.HostSettings != nil && cfg.HostSettings.Runtime == "api" && cfg.HostSettingsRef != nil {
+			// An API view is held to the host revision it was admitted under, as a
+			// CLI view is: a later turn after the host moved or was disabled fails
+			// with a stated cause instead of quietly running the old settings.
+			admitted := &store.AgentProfile{HostSettingsID: cfg.HostSettingsRef.ID, Revision: cfg.HostSettingsRef.Revision}
+			if hostErr := s.checkHostRevision(ctx, admitted); hostErr != nil {
+				var cause *UnsupportedCause
+				details := map[string]interface{}{}
+				if errors.As(hostErr, &cause) {
+					details["cause"] = cause.Code
+				} else {
+					details["raw"] = hostErr.Error()
+				}
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, hostErr.Error(), details)
+				return prepareTurnResult{directive: runloop.Terminate}
+			}
+			if cfg.WorkRoot != "" {
+				// The create-time work root leads the host's directories for the
+				// session's file and shell tools. Re-resolved like a CLI work root: a
+				// directory swapped for a symlink since create must not be followed.
+				if again, rootErr := resolveWorkRoot(cfg.WorkRoot, cfg.HostSettings.Directories); rootErr != nil || again != cfg.WorkRoot {
+					ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "The session work root changed or left the host's directories; create a new session", nil)
+					return prepareTurnResult{directive: runloop.Terminate}
+				}
+				host := *cfg.HostSettings
+				host.Directories = append([]string{cfg.WorkRoot}, withoutDir(cfg.HostSettings.Directories, cfg.WorkRoot)...)
 				agent.NativeHost = &host
 			}
 		}
@@ -2010,6 +2039,14 @@ func (s *chatServiceImpl) prepareTurn(
 			return prepareTurnResult{directive: runloop.Terminate}
 		}
 		sessionWorkspace = ws
+		if len(agent.DefinitionFiles) > 0 {
+			if plantErr := runtimeagent.PlantDefinitionFiles(ws, agent.DefinitionFiles); plantErr != nil {
+				slog.Error("prepareTurn: plant definition files", "session_id", sessionID, "err", plantErr)
+				ch <- chat.ErrorEvent(chat.ErrorCodeInternal, "The definition's reference files could not be planted", nil)
+				return prepareTurnResult{directive: runloop.Terminate}
+			}
+			agent.SystemPrompt += "\n\nYour session root is " + ws.Root + "."
+		}
 		// The session's file and shell tools work inside the host's directories
 		// and the workspace, as a CLI session does; nothing wider is implied.
 		if s.pathGrants != nil {
@@ -2416,4 +2453,15 @@ func (s *chatServiceImpl) prepareTurn(
 			harness:            harness,
 		},
 	}
+}
+
+// withoutDir returns dirs without the entry equal to drop.
+func withoutDir(dirs []string, drop string) []string {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if d != drop {
+			out = append(out, d)
+		}
+	}
+	return out
 }

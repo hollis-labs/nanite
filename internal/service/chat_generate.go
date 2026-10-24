@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
+	"github.com/hollis-labs/nanite/internal/llm/station"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -131,6 +132,11 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	// (CW-20260512-0002), not by a parent wall-clock deadline.
 
 	ctx, span := feotel.StartSpan(ctx, "nanite.service.generateResponse")
+	// Station gateway providers attribute every call to the session (the
+	// X-Station-Session header); the other adapters ignore the value. Turns,
+	// tool-loop iterations and retries all derive from this ctx, so the id is
+	// the same throughout.
+	ctx = station.WithSessionID(ctx, sessionID)
 	span.SetAttributes(
 		attribute.String("nanite.session.id", sessionID),
 		attribute.String("nanite.message.id", assistantMsgID),
@@ -1422,6 +1428,7 @@ const autoTitleSystemPrompt = "Generate a short conversation label (2-5 words, m
 
 // autoTitle generates a title for a session from the first user message.
 func (s *chatServiceImpl) autoTitle(ctx context.Context, sessionID, userContent string) {
+	ctx = station.WithSessionID(ctx, sessionID)
 	prov, ok := s.providers.Get(s.utilityProvider)
 	if !ok {
 		return
@@ -1595,6 +1602,7 @@ func truncateToRune(s string, max int) string {
 
 // autoTags generates tags for a session based on recent messages.
 func (s *chatServiceImpl) autoTags(ctx context.Context, sessionID string) {
+	ctx = station.WithSessionID(ctx, sessionID)
 	prov, ok := s.providers.Get(s.utilityProvider)
 	if !ok {
 		return

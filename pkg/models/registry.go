@@ -58,7 +58,36 @@ type Model struct {
 
 	// IsLegacy marks retired model IDs kept around for historical usage rows.
 	IsLegacy bool
+
+	// PriceUnknown marks a model whose price Nanite cannot know (a gateway
+	// alias). The price fields stay zero, and PriceKnown reports false so
+	// cost is shown as unknown rather than free.
+	PriceUnknown bool
+
+	// Wire pins which OpenAI endpoint a model is called on: WireChat
+	// (chat/completions), WireResponses (responses) or "" to let the OpenAI
+	// adapter choose by model name. A gateway alias cannot be recognized by
+	// name, so it carries its wire here.
+	Wire string
+
+	// LimitsUnknown marks a model whose ContextWindow and MaxOutput are
+	// conservative floors, not documented figures (a gateway alias).
+	LimitsUnknown bool
+
+	// ToolsUnknown marks a model whose tool-calling support is not documented
+	// or probed; Capabilities.SupportsToolCalling is then a guess.
+	ToolsUnknown bool
+
+	// LegacyMaxTokens marks a chat/completions model that takes max_tokens
+	// rather than max_completion_tokens.
+	LegacyMaxTokens bool
 }
+
+// Wire values for Model.Wire.
+const (
+	WireChat      = "chat"
+	WireResponses = "responses"
+)
 
 // Default-model and default-provider constants were removed from this
 // package in CW-20260526-0003 and the resolver that replaced them was

@@ -15,8 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -54,6 +56,11 @@ type Host struct {
 	Provider    string   `yaml:"provider"`
 	Model       string   `yaml:"model"`
 	Directories []string `yaml:"directories"`
+	// HarnessProfile and MCPServers are host knobs the stored host settings
+	// already carry. A cli host refuses them where its runtime cannot honor them
+	// (see service.AdmitCLIHost); the loader passes them through unjudged.
+	HarnessProfile string   `yaml:"harness_profile"`
+	MCPServers     []string `yaml:"mcp_servers"`
 }
 
 // Resource is a file the definition pins.
@@ -69,7 +76,8 @@ type Directory struct {
 	Parsed     *agentdef.Definition
 	Host       Host
 	Resources  []Resource
-	// Skills names the skill folders present. They are reported, not installed.
+	// Skills names the skill folders present. Those agent.md requests are packed
+	// into Resources (the pinned tree); the rest are reported and left alone.
 	Skills []string
 }
 
@@ -203,6 +211,17 @@ func readResources(root string, d *agentdef.Definition) ([]Resource, error) {
 	}
 	seen := map[string]bool{}
 	var out []Resource
+	for _, sk := range d.Requirements.Skills {
+		res, err := packSkill(root, sk)
+		if err != nil {
+			return nil, err
+		}
+		if seen[res.URI] {
+			return nil, fmt.Errorf("skill %q is requested twice", sk.Name)
+		}
+		seen[res.URI] = true
+		out = append(out, res)
+	}
 	for _, r := range refs {
 		if seen[r.URI] {
 			continue
@@ -235,4 +254,89 @@ func listSkills(root string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// packSkill reads skills/<name>/ and returns the canonical tree as the resource
+// the skill's pin must match. The pin covers every file in the folder.
+func packSkill(root string, sk agentdef.Skill) (Resource, error) {
+	if !skillNamePattern.MatchString(sk.Name) {
+		return Resource{}, fmt.Errorf("skill %q: use lowercase letters, digits and single hyphens", sk.Name)
+	}
+	want := "skills/" + sk.Name
+	if strings.TrimPrefix(sk.Content.URI, "file:") != want {
+		return Resource{}, fmt.Errorf("skill %q: content uri must be %q, got %q", sk.Name, "file:"+want, sk.Content.URI)
+	}
+	dir := filepath.Join(root, "skills", sk.Name)
+	files := map[string][]byte{}
+	total := 0
+	err := filepath.WalkDir(dir, func(p string, e fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if e.IsDir() {
+			return nil
+		}
+		if !e.Type().IsRegular() {
+			return fmt.Errorf("%s is not a regular file; a skill folder holds files and directories only", p)
+		}
+		rel, relErr := filepath.Rel(dir, p)
+		if relErr != nil {
+			return relErr
+		}
+		body, readErr := readFile(root, filepath.Join("skills", sk.Name, rel))
+		if readErr != nil {
+			return readErr
+		}
+		if total += len(body); total > agentpolicy.MaxSkillTreeBytes {
+			return fmt.Errorf("skill folder is larger than %d bytes", agentpolicy.MaxSkillTreeBytes)
+		}
+		files[filepath.ToSlash(rel)] = body
+		return nil
+	})
+	if err != nil {
+		return Resource{}, fmt.Errorf("skill %q: %w", sk.Name, err)
+	}
+	blob, err := agentpolicy.EncodeSkillTree(files)
+	if err != nil {
+		return Resource{}, fmt.Errorf("skill %q: %w", sk.Name, err)
+	}
+	if got := agentdef.ArtifactDigest(blob); got != sk.Content.Digest {
+		return Resource{}, fmt.Errorf("skill %q: content.digest is %s but the folder packs to %s; update agent.md", sk.Name, sk.Content.Digest, got)
+	}
+	return Resource{URI: sk.Content.URI, Content: blob}, nil
+}
+
+// CheckOwnDirectories refuses an agent directory that is inside, or contains, a
+// directory its own host.yaml lets the agent use. An agent that can write its own
+// agent.md could otherwise hand new text to the next reload. Paths are compared
+// after resolving symlinks in their existing part.
+func CheckOwnDirectories(agentDir string, directories []string) error {
+	root := resolveLoose(agentDir)
+	for _, dir := range directories {
+		d := resolveLoose(dir)
+		if within(d, root) || within(root, d) {
+			return fmt.Errorf("the agent directory %s overlaps %s, a directory host.yaml grants the agent: it could rewrite its own definition", agentDir, dir)
+		}
+	}
+	return nil
+}
+
+// resolveLoose evaluates symlinks in the deepest existing ancestor of p, so a
+// directory that does not exist yet still compares by where it would be.
+func resolveLoose(p string) string {
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
 }

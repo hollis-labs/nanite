@@ -58,6 +58,23 @@ type Model struct {
 
 	// IsLegacy marks retired model IDs kept around for historical usage rows.
 	IsLegacy bool
+
+	// PriceUnknown marks a model whose price Nanite cannot know (a gateway
+	// alias). The price fields stay zero, and PriceKnown reports false so
+	// cost is shown as unknown rather than free.
+	PriceUnknown bool
+
+	// LimitsUnknown marks a model whose ContextWindow and MaxOutput are
+	// conservative floors, not documented figures (a gateway alias).
+	LimitsUnknown bool
+
+	// ToolsUnknown marks a model whose tool-calling support is not documented
+	// or probed; Capabilities.SupportsToolCalling is then a guess.
+	ToolsUnknown bool
+
+	// LegacyMaxTokens marks a chat/completions model that takes max_tokens
+	// rather than max_completion_tokens.
+	LegacyMaxTokens bool
 }
 
 // Default-model and default-provider constants were removed from this

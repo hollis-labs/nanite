@@ -206,7 +206,9 @@ func (s *Store) LoadAgent(ctx context.Context, in AgentLoad) (AgentLoadResult, e
 	return res, tx.Commit()
 }
 
-func authorityToolNames(ctx context.Context, tx *sql.Tx, hostID, revision string) ([]string, error) {
+func authorityToolNames(ctx context.Context, tx interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, hostID, revision string) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT k.name FROM native_authorities a JOIN native_authority_tools t ON t.authority_id=a.id JOIN known_tools k ON k.id=t.tool_id WHERE a.host_settings_id=? AND a.host_settings_revision=? AND a.enabled=1 AND a.revoked_at IS NULL ORDER BY k.name`, hostID, revision)
 	if err != nil {
 		return nil, err

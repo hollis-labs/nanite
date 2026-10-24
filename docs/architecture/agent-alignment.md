@@ -243,8 +243,7 @@ host does exactly one of three things, and the choice follows one rule:
 
 Installing a definition and running it are separate decisions. Install accepts
 anything that parses, validates and has verifiable pins, because storing an
-artifact claims nothing about running it. (Today install refuses only
-`requirements.skills`; everything else is stored and refused at launch.) Launch
+artifact claims nothing about running it. (Install refuses nothing that parses and verifies, skills included.) Launch
 is where a field is applied, recorded or refused, per runtime.
 
 Requests are not grants. A definition may ask for tools and skills; the
@@ -253,28 +252,59 @@ operator approves, and the agent view shows each request as pending or granted.
 | Field | Target | Today (main, `agentpolicy.ValidateExecution`) |
 |---|---|---|
 | `behavior.purpose`, body, `instructions`, `sops`, `completion` | apply: rendered into the instruction content in order | accepted and applied |
-| `behavior.hooks` | apply where the runtime has hooks, otherwise refuse; an unknown name or a runtime without hooks refuses with the name | **refused at launch** (install stores it) |
-| `capabilities` | record: advertised services for discovery | **refused at launch** |
-| `requirements.requires` | apply as a check; an unmet entry refuses and names it | **refused at launch** |
-| `requirements.uses` | record; an unmet entry is shown, not refused | **refused at launch** |
-| `requirements.tools` | record as a request: shown as pending until the operator grants; never a grant | **refused at launch** (the operator grants tools at setup instead) |
-| `requirements.skills` | apply: pinned tree verified, requested skills granted at setup, tree delivered through the shared planting layer; a runtime with no skill location refuses with a cause | **refused at launch**, and install itself refuses it |
-| `requirements.resources` | apply: pinned files materialized into the boot root | **refused at launch** |
-| `harness_profile.steering` | apply: appended after the instructions, in order | **refused at launch** |
-| `harness_profile.context.sources` | apply: planted as reference files and listed in the instructions | **refused at launch** |
-| `harness_profile.context.policy` | record: an opaque pinned document | **refused at launch** |
+| `behavior.hooks` | apply where the runtime has hooks, otherwise refuse; an unknown name or a runtime without hooks refuses with the name | refused at launch, naming the hook: Nanite ships no hook registry, so every name is unknown |
+| `capabilities` | record: advertised services for discovery | recorded |
+| `requirements.requires` | apply as a check; an unmet entry refuses and names it | checked against the host vocabulary (`agentpolicy.HostCapabilities`, empty today), so any entry is refused and named |
+| `requirements.uses` | record; an unmet entry is shown, not refused | recorded; an unmet entry is reported as `unmet` |
+| `requirements.tools` | record as a request: shown as pending until the operator grants; never a grant | recorded; the agent view and the load response show each request as `pending` or `granted` against the revision's authority |
+| `requirements.skills` | apply: pinned tree verified, requested skills granted at setup, tree delivered through the shared planting layer; a runtime with no skill location refuses with a cause | install accepts it: the directory loader packs `skills/<name>/` into a canonical tree (`agentpolicy.EncodeSkillTree`) and the pin must equal that tree's digest, verified at install. Launch reports it `unmet` and does not deliver it: a definition's skill request has no grant yet (below) |
+| `requirements.resources` | apply: pinned files materialized into the boot root | applied: planted under `agent/` in the CLI boot root, or the API session workspace |
+| `harness_profile.steering` | apply: appended after the instructions, in order | applied, after the completion line, in order |
+| `harness_profile.context.sources` | apply: planted as reference files and listed in the instructions | applied: planted under `agent/` and listed |
+| recorded |
 | `harness_profile.permissions.profile` | apply `default` and `read-only`; refuse the rest. A CLI refuses `read-only` (it cannot enforce it) | `default` and `read-only` applied; any other profile refused. A CLI host refuses `read-only` with `read_only_unenforceable` |
 | `harness_profile.approvals`, `escalation` | refuse: ignoring them would silently weaken oversight | refused at launch |
 | `continuity.mode: ephemeral` | apply | applied |
 | `continuity.mode: durable` | refuse; the error points to durable-agent enrollment | refused at launch |
-| `continuity.memory_policy`, `recovery_strategy` | record on ephemeral, refuse on durable | **refused at launch** on any mode |
+| `continuity.memory_policy`, `recovery_strategy` | record on ephemeral, refuse on durable | recorded on ephemeral; durable is refused as a whole |
 | `extensions` (native-policy, reflex-policy) | apply; unknown optional extensions are kept and confer nothing; an unknown mandatory one refuses | applied |
 | `title`, `presentation`, `provenance` | record | recorded |
 
-Read the table as: the middle column is what the host *should* do once the
-proposal is built, the right column is what it does now. The gap between them
-is the work in the sequencing list; the "refused at launch" cells marked in bold
-are the ones that change.
+The middle column is the rule, the right column is what `main` does.
+`agentpolicy.ExecutionReport` returns the disposition of every field a
+definition declares (`applied`, `recorded`, `unmet`, `refused`), and a load
+prints it; `unmet` is a field the launch goes ahead without and says so.
+`ValidateExecution` fails exactly when the report has a `refused` entry.
+
+**Skills are the one `apply` row not yet delivered.** Nanite grants a skill to an
+agent through `agent_known_skills`, which only issuer-owned authority may write,
+and a native authority has no skill grants. Delivering a directory's skills
+therefore needs a decision on who may grant a skill to a definition's request and
+how the grant ties to the tree digest. Until it is made, the tree is stored and
+pinned, shown as a pending request, and not planted.
+
+**Contract for granting a requested skill (not built).** Skills are granted
+through Tachyon, operator-approved, like tool requests. Nanite will expose
+`PUT /api/native-authority/{authority_id}/skills/{skill}` with
+`{"digest": "sha256:...", "reason": "..."}` (and `DELETE` to revoke), modeled on
+the tool-grant route `PUT .../tools/{tool}`. It is admin class, the same scope rule as the tool-grant routes
+(`agents:manage` when CW-20261024-0025 lands), never an agent
+credential, and the granting credential is recorded from authentication, not the
+body. It succeeds only when the authority is live and current, the authority's
+definition requests a skill of that name, and the digest equals the pinned tree
+digest and the stored tree decodes; otherwise 422 (`skill_not_requested`,
+`skill_digest_mismatch`, `skill_tree_missing`) or 409 (revoked, stale, a different
+digest already granted). The grant belongs to the authority, so it is tied to one
+host revision and definition pin and is **not carried across revisions**; a
+re-approval is an explicit act. Each grant and revoke is an audit row in
+`native_authority_audit`. A repeat of the same grant is a no-op with
+`already_granted: true`. Until it exists, requested skills stay recorded and
+pending and none is delivered.
+
+Where the files go: `requirements.resources` and `harness_profile.context.sources`
+are planted under `agent/` in the session root, which is the boot root for a CLI
+runtime and `<workspace>/agent/` for an API session (the instructions then name
+the session root).
 
 Tool and skill approval at setup takes the same shape as tool approval: a list
 of names or `*`, with a recorded reason, in one transaction with the rest of

@@ -67,7 +67,12 @@ func TestChatDefinitionUnsupportedSemantics(t *testing.T) {
 	}
 	mutations := []func(*agentdef.Definition){
 		func(d *agentdef.Definition) { d.Behavior.Hooks = []string{"before-turn"} },
-		func(d *agentdef.Definition) { d.Requirements.Tools = []string{"write-anything"} },
+		// A tool request is recorded as pending, never refused or granted
+		// (CW-20261024-0009); an approval policy would silently weaken oversight.
+		func(d *agentdef.Definition) {
+			d.HarnessProfile.Approvals = []agentdef.Ref{{URI: "file:approvals.md", Digest: agentdef.ArtifactDigest([]byte("x"))}}
+		},
+		func(d *agentdef.Definition) { d.Requirements.Requires = []string{"unprovided-capability"} },
 		func(d *agentdef.Definition) { d.Continuity.Mode = agentdef.Durable },
 		func(d *agentdef.Definition) { d.HarnessProfile.Permissions.Profile = "yolo" },
 		func(d *agentdef.Definition) {
@@ -80,6 +85,11 @@ func TestChatDefinitionUnsupportedSemantics(t *testing.T) {
 		if _, mapErr := MapChatDefinition(VerifiedDefinition{Ref: base.Ref, Definition: &d}); !errors.Is(mapErr, ErrUnsupportedDefinition) {
 			t.Fatal("unsupported semantics applied", mapErr)
 		}
+	}
+	asked := *base.Definition
+	asked.Requirements.Tools = []string{"write-anything"}
+	if cfg, askErr := MapChatDefinition(VerifiedDefinition{Ref: base.Ref, Definition: &asked}); askErr != nil || cfg.Instructions == "" {
+		t.Fatal("a tool request must be recorded, not refused", askErr)
 	}
 	d := *base.Definition
 	d.HarnessProfile.Permissions.Profile = "read-only"

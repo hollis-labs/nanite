@@ -73,9 +73,6 @@ func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*def
 	if err != nil {
 		return &definitionInstall{}, err
 	}
-	if len(d.Requirements.Skills) != 0 {
-		return &definitionInstall{}, errors.New("skill installation requires a verified whole packaged tree")
-	}
 	digest, err := agentdef.Digest(d)
 	if err != nil {
 		return &definitionInstall{}, err
@@ -84,6 +81,14 @@ func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*def
 	refs := append([]agentdef.Ref{}, d.Behavior.Instructions...)
 	refs = append(refs, d.Behavior.SOPs...)
 	refs = append(refs, d.Requirements.Resources...)
+	// A skill pin covers its whole packaged tree: the resource under it is the
+	// canonical tree encoding (agentpolicy.EncodeSkillTree), digest-verified below
+	// like any other pinned document.
+	skillRefs := map[agentdef.Ref]bool{}
+	for _, sk := range d.Requirements.Skills {
+		refs = append(refs, sk.Content)
+		skillRefs[sk.Content] = true
+	}
 	refs = append(refs, d.HarnessProfile.Steering...)
 	refs = append(refs, d.HarnessProfile.Context.Sources...)
 	refs = append(refs, d.HarnessProfile.Approvals...)
@@ -132,6 +137,11 @@ func prepareDefinitionInstall(data []byte, resources []DefinitionResource) (*def
 			}
 		} else if agentdef.ArtifactDigest(body) != r.Digest {
 			return &definitionInstall{pin: pin}, fmt.Errorf("%w: resource %q", ErrDefinitionContent, r.URI)
+		}
+		if skillRefs[r] {
+			if _, treeErr := agentpolicy.DecodeSkillTree(body); treeErr != nil {
+				return &definitionInstall{pin: pin}, fmt.Errorf("%w: skill %q: %w", ErrDefinitionContent, r.URI, treeErr)
+			}
 		}
 	}
 	if len(used) != len(contents) {

@@ -1,0 +1,45 @@
+# fleet-deploy/v1 for Nanite (CW-20261024-0120). Ships inside every release tarball.
+# Proposal: docs/architecture/ci-binaries-0120.md section 5. The fleet-install tool
+# (tools/fleet-install) reads this; a target is chosen by --target or by the host.
+schema: fleet-deploy/v1
+app: nanite
+repo: hollis-labs/nanite
+artifact:
+  name: "nanite-{sha12}"
+  tarball: "nanite_{version}_{os}_{arch}.tar.gz"
+  sums: SHA256SUMS
+targets:
+  - id: agent-os-hub-nanite
+    when: {os: linux, arch: amd64}
+    hosts: [agent-os]
+    binary: nanite
+    install_root: /var/lib/fabric/releases/nanite
+    symlinks:
+      - path: /var/lib/fabric/bin/nanite
+    preflight:
+      - {kind: sql_zero, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db,
+         sql: "select count(*) from agent_runtime where state in ('launching','running')"}
+      - {kind: sqlite_backup, db: /var/lib/fabric/xdg/data/nanite/auth/auth.db, dest: "{backup_dir}/auth.pre-{version}.db"}
+      - {kind: sqlite_backup, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db, dest: "{backup_dir}/main.pre-{version}.db"}
+      - {kind: migration_check, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db}
+    restart:
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.hub-nanite.service}
+    health:
+      - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+  - id: mac-nanite
+    when: {os: darwin, arch: arm64}
+    hosts: [mac]
+    binary: nanite
+    install_root: ~/.local/share/nanite/releases
+    symlinks:
+      - path: ~/.local/share/nanite/current/nanite
+    preflight:
+      - {kind: sql_zero, db: ~/.local/share/nanite/workspaces/mesh-chat/main.db,
+         sql: "select count(*) from agent_runtime where state in ('launching','running')"}
+      - {kind: sqlite_backup, db: ~/.local/share/nanite/auth/auth.db, dest: "{backup_dir}/auth.pre-{version}.db"}
+      - {kind: sqlite_backup, db: ~/.local/share/nanite/workspaces/mesh-chat/main.db, dest: "{backup_dir}/main.pre-{version}.db"}
+      - {kind: migration_check, db: ~/.local/share/nanite/workspaces/mesh-chat/main.db}
+    restart:
+      - {via: cerberus, resource: nanite-api-service, verb: reload}
+    health:
+      - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}

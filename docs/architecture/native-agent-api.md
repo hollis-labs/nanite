@@ -40,8 +40,9 @@ view. An unknown revision returns 404.
 Definitions are the installed, immutable artifacts in the database; a view keeps
 its verified launch content and pin, and an edit never silently repins it.
 Discovery supplies the embedded default pin for clients that need a default.
-Nothing reads definitions from a directory yet. A proposal for doing so is in
-`agent-alignment.md`; treat it as a design, not as behavior.
+Definitions can also be loaded from an agent directory (`nanite agent load`,
+`POST /api/agent-reload`); `agent-alignment.md` describes that loader and what
+of it is built.
 
 The chat mapping applies Markdown body, purpose/completion instructions and
 permission posture. `default` binds to the native default gate; `read-only`
@@ -280,8 +281,10 @@ The host binds loopback only and authenticates every `/api/` route, including
 `/api/agent/v1/*`, with a scoped bearer credential (see
 [api-auth.md](api-auth.md)); `initialize` is the one public document. An
 embedded client such as the Tangent backend uses a `client` credential with the
-`read` and `operate` scopes (`nanite auth create --kind client --label tangent
---scope read,operate`). CLI JSON and event requests disable redirects and use
+`read`, `operate` and `tools` scopes (`nanite auth create --kind client --label
+tangent --scope read,operate,tools`). `operate` alone gives tool-free turns;
+tool offers and calls also need `tools` (see `native-authority.md`, "Decisions
+per call"). CLI JSON and event requests disable redirects and use
 the operator token file or `NANITE_AUTH_TOKEN`. The planted `nanite mcp`
 subprocess receives a short-lived `agent` credential bound to its session (tools
 scope only) in its environment and forwards it only to the loopback host

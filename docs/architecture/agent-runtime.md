@@ -209,9 +209,9 @@ table.
 
 | Runtime | Instructions | Kickoff | Native config | MCP | Skills (`<root>/<name>/SKILL.md`) |
 |---|---|---|---|---|---|
-| Claude | `CLAUDE.md` | `boot.md` | `.claude/settings.json` | `.mcp.json` (0600) | `.claude/skills` |
-| Codex | `AGENTS.md` | `boot.md` | `config.toml` (0600, holds `[mcp_servers.*]`) | `.mcp.json` (0600, not read by Codex) | `skills` |
-| OpenCode | `agents/<slug>.md` | `boot.md` | `opencode.json` (0600, holds `mcp`) | `.mcp.json` (0600, not read by OpenCode) | `skills`, and `.opencode/skills` |
+| Claude | `CLAUDE.md` | `boot.md` | `.claude/settings.json` (0600) | `.mcp.json` (0600) | `.claude/skills` |
+| Codex | `AGENTS.md` | `boot.md` | `config.toml` (0600, holds `[mcp_servers.*]`) | none (no `.mcp.json` mirror: Codex does not read it and it would be a second copy of the agent credential) | `skills` |
+| OpenCode | `agents/<slug>.md` | `boot.md` | `opencode.json` (0600, holds `mcp`) | none (no `.mcp.json` mirror, same reason) | `skills`, and `.opencode/skills` |
 | Antigravity | `AGENTS.md` | `boot.md` | `.agents/plugins/tether/plugin.json` | `.agents/plugins/tether/mcp_config.json` (0600) | `.agents/skills` |
 
 Differences from the table, all deliberate: Nanite also plants `.sandbox/*` and

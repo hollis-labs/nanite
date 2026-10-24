@@ -145,14 +145,10 @@ func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 		files[relPath] = content
 	}
 
-	mcp, err := mcpConfigBytes(params)
-	if err != nil {
-		return plant.PlantSpec{}, err
-	}
-
+	// No .mcp.json mirror: codex reads its MCP servers from config.toml, so a second
+	// copy of the agent credential in the boot dir is dropped (CW-20261024-0011).
 	return plant.PlantSpec{
 		Files:            files,
-		MCPConfig:        mcp,
 		ProviderSettings: map[string][]byte{"codex": []byte(configTOML)},
 	}, nil
 }

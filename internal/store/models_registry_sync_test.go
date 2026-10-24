@@ -103,8 +103,12 @@ func TestSyncModelsFromRegistry_StationAliases(t *testing.T) {
 		if provider != want.provider || tools != want.tools || window <= 0 || maxOut <= 0 {
 			t.Errorf("%s: provider %q tools %v window %d out %d", modelID, provider, tools, window, maxOut)
 		}
-		if pricing != `{"price_unknown":true}` {
-			t.Errorf("%s: pricing = %s, want unknown", modelID, pricing)
+		wantMeta := `{"limits_unknown":true,"price_unknown":true,"tools_unknown":true}`
+		if modelID == "go-glm" || modelID == "go-gpt" || modelID == "go-haiku" {
+			wantMeta = `{"limits_unknown":true,"price_unknown":true}`
+		}
+		if pricing != wantMeta {
+			t.Errorf("%s: pricing = %s, want %s", modelID, pricing, wantMeta)
 		}
 	}
 }

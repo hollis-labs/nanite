@@ -30,6 +30,10 @@ func TestStationAliasCatalog(t *testing.T) {
 		if PriceKnown(alias) {
 			t.Errorf("%s price must be unknown, not zero", alias)
 		}
+		// No limit is documented for any alias: all stay marked UNKNOWN.
+		if !m.LimitsUnknown || LimitsKnown(alias) {
+			t.Errorf("%s limits must be marked unknown", alias)
+		}
 		if !IsStationProvider(m.Provider) || !IsRealModel(alias) {
 			t.Errorf("%s is not a real station model", alias)
 		}
@@ -41,6 +45,16 @@ func TestStationAliasCatalog(t *testing.T) {
 	// Tool support is part of the record.
 	if seeded["local-light"].Capabilities.SupportsToolCalling || !seeded["go-glm"].Capabilities.SupportsToolCalling {
 		t.Error("tool support not as catalogued")
+	}
+	// Only the tool-call probes (go-glm, go-gpt, go-haiku) document tool support.
+	for alias := range want {
+		documented := alias == "go-glm" || alias == "go-gpt" || alias == "go-haiku"
+		if seeded[alias].ToolsUnknown == documented {
+			t.Errorf("%s ToolsUnknown = %v", alias, seeded[alias].ToolsUnknown)
+		}
+	}
+	if !LimitsKnown("claude-opus-5-5") || LimitsKnown("no-such-model") {
+		t.Error("LimitsKnown wrong for a documented or unregistered model")
 	}
 	// Existing models keep a known price.
 	if !PriceKnown("claude-opus-5-5") {

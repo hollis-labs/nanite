@@ -70,6 +70,14 @@ type Model struct {
 	// name, so it carries its wire here.
 	Wire string
 
+	// LimitsUnknown marks a model whose ContextWindow and MaxOutput are
+	// conservative floors, not documented figures (a gateway alias).
+	LimitsUnknown bool
+
+	// ToolsUnknown marks a model whose tool-calling support is not documented
+	// or probed; Capabilities.SupportsToolCalling is then a guess.
+	ToolsUnknown bool
+
 	// LegacyMaxTokens marks a chat/completions model that takes max_tokens
 	// rather than max_completion_tokens.
 	LegacyMaxTokens bool

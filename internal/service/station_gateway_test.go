@@ -105,6 +105,10 @@ func (g *fakeGateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.anthropic(w, body.Stream)
 		return
 	}
+	if strings.HasSuffix(r.URL.Path, "/responses") {
+		g.responses(w, body.Stream)
+		return
+	}
 	g.openai(w, body.Stream)
 }
 
@@ -122,6 +126,22 @@ func (g *fakeGateway) openai(w http.ResponseWriter, stream bool) {
 		`[DONE]`,
 	} {
 		_, _ = io.WriteString(w, "data: "+s+"\n\n")
+	}
+}
+
+func (g *fakeGateway) responses(w http.ResponseWriter, stream bool) {
+	const output = `[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"responses-wire answer","annotations":[]}]}]`
+	if !stream {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_1","object":"response","status":"completed","model":"go-gpt","output":`+output+`,"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, e := range [][2]string{
+		{"response.output_text.delta", `{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"responses-wire stream","sequence_number":1}`},
+		{"response.completed", `{"type":"response.completed","sequence_number":2,"response":{"id":"resp_1","object":"response","status":"completed","model":"go-gpt","output":` + output + `,"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}}`},
+	} {
+		_, _ = io.WriteString(w, "event: "+e[0]+"\ndata: "+e[1]+"\n\n")
 	}
 }
 
@@ -459,5 +479,60 @@ func TestStationSpecsNeedValidSettings(t *testing.T) {
 				t.Errorf("%s accepted settings %q", spec.Name, bad)
 			}
 		}
+	}
+}
+
+// go-gpt is served on /responses only. The registry pins its wire, so the
+// adapter must use Responses for it without a reasoning config or tools, and
+// must keep the chat aliases on chat/completions.
+func TestStationResponsesWire_CompleteAndStream(t *testing.T) {
+	g := newFakeGateway(t)
+	prov := stationProvider(t, "station-openai", g.openaiSettings(""), "tok-openai")
+	ctx := station.WithSessionID(context.Background(), "ses-1")
+
+	req := userTurn("go-gpt")
+	req.MaxTokens = 512
+	got, err := prov.Complete(ctx, req)
+	if err != nil || got != "responses-wire answer" {
+		t.Fatalf("Complete = %q, %v", got, err)
+	}
+	last := g.last()
+	if last.Path != gatewayRoot+"/v1/responses" {
+		t.Errorf("path = %s", last.Path)
+	}
+	if last.Header.Get("Authorization") != "Bearer tok-openai" || last.Header.Get(station.SessionHeader) != "ses-1" {
+		t.Errorf("headers = %v", last.Header)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(last.Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["max_output_tokens"] != float64(512) || body["store"] != false {
+		t.Errorf("responses body: max_output_tokens=%v store=%v", body["max_output_tokens"], body["store"])
+	}
+	if inc, _ := body["include"].([]any); len(inc) != 1 || inc[0] != "reasoning.encrypted_content" {
+		t.Errorf("include = %v", body["include"])
+	}
+	if _, ok := body["reasoning"].(map[string]any); !ok {
+		t.Errorf("reasoning param missing: %s", last.Body)
+	}
+
+	ch, err := prov.StreamChat(ctx, req)
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	if text := drainStation(t, ch); text != "responses-wire stream" {
+		t.Errorf("stream text = %q", text)
+	}
+	if g.last().Path != gatewayRoot+"/v1/responses" || g.last().Header.Get(station.SessionHeader) != "ses-1" {
+		t.Errorf("stream request: %s %v", g.last().Path, g.last().Header)
+	}
+
+	// A chat alias stays on chat/completions.
+	if _, err := prov.Complete(ctx, userTurn("go-glm")); err != nil {
+		t.Fatal(err)
+	}
+	if g.last().Path != gatewayRoot+"/v1/chat/completions" {
+		t.Errorf("go-glm path = %s", g.last().Path)
 	}
 }

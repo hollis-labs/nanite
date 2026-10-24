@@ -6,7 +6,7 @@ func TestStationAliasCatalog(t *testing.T) {
 	want := map[string]string{
 		"go-glm": ProviderStationOpenAI, "openai-mini": ProviderStationOpenAI, "gemini-flash": ProviderStationOpenAI,
 		"openrouter-auto": ProviderStationOpenAI, "hf-llama": ProviderStationOpenAI, "local-light": ProviderStationOpenAI,
-		"go-haiku": ProviderStationAnthropic, "anthropic-haiku": ProviderStationAnthropic,
+		"go-gpt": ProviderStationOpenAI, "go-haiku": ProviderStationAnthropic, "anthropic-haiku": ProviderStationAnthropic,
 	}
 	seeded := map[string]Model{}
 	for _, m := range AllSeeded() {
@@ -46,9 +46,9 @@ func TestStationAliasCatalog(t *testing.T) {
 	if seeded["local-light"].Capabilities.SupportsToolCalling || !seeded["go-glm"].Capabilities.SupportsToolCalling {
 		t.Error("tool support not as catalogued")
 	}
-	// Only the tool-call probes (go-glm, go-haiku) document tool support.
+	// Only the tool-call probes (go-glm, go-gpt, go-haiku) document tool support.
 	for alias := range want {
-		documented := alias == "go-glm" || alias == "go-haiku"
+		documented := alias == "go-glm" || alias == "go-gpt" || alias == "go-haiku"
 		if seeded[alias].ToolsUnknown == documented {
 			t.Errorf("%s ToolsUnknown = %v", alias, seeded[alias].ToolsUnknown)
 		}
@@ -72,6 +72,17 @@ func TestUsesLegacyMaxTokens(t *testing.T) {
 	for _, id := range []string{"openai-mini", "gpt-5.6", "no-such-model"} {
 		if UsesLegacyMaxTokens(id) {
 			t.Errorf("%s must keep max_completion_tokens", id)
+		}
+	}
+}
+
+func TestStationWire(t *testing.T) {
+	for id, want := range map[string]string{
+		"go-gpt": WireResponses, "go-glm": WireChat, "openai-mini": WireChat, "local-light": WireChat,
+		"gpt-5.6": "", "no-such-model": "",
+	} {
+		if got := WireFor(id); got != want {
+			t.Errorf("WireFor(%q) = %q, want %q", id, got, want)
 		}
 	}
 }

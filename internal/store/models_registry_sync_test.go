@@ -84,7 +84,7 @@ func TestSyncModelsFromRegistry_StationAliases(t *testing.T) {
 		provider string
 		tools    bool
 	}{
-		"go-glm": {"station-openai", true}, "openai-mini": {"station-openai", true},
+		"go-glm": {"station-openai", true}, "go-gpt": {"station-openai", true}, "openai-mini": {"station-openai", true},
 		"gemini-flash": {"station-openai", true}, "openrouter-auto": {"station-openai", true},
 		"hf-llama": {"station-openai", false}, "local-light": {"station-openai", false},
 		"go-haiku": {"station-anthropic", true}, "anthropic-haiku": {"station-anthropic", true},
@@ -104,7 +104,7 @@ func TestSyncModelsFromRegistry_StationAliases(t *testing.T) {
 			t.Errorf("%s: provider %q tools %v window %d out %d", modelID, provider, tools, window, maxOut)
 		}
 		wantMeta := `{"limits_unknown":true,"price_unknown":true,"tools_unknown":true}`
-		if modelID == "go-glm" || modelID == "go-haiku" {
+		if modelID == "go-glm" || modelID == "go-gpt" || modelID == "go-haiku" {
 			wantMeta = `{"limits_unknown":true,"price_unknown":true}`
 		}
 		if pricing != wantMeta {

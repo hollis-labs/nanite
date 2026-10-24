@@ -45,7 +45,7 @@ const (
 var stationModels = []Model{
 	// --- chat/completions aliases (station-openai) ---
 	{
-		ID: "station-go-glm", ModelID: "go-glm", DisplayName: "Station go-glm", Provider: ProviderStationOpenAI,
+		ID: "station-go-glm", ModelID: "go-glm", DisplayName: "Station go-glm", Provider: ProviderStationOpenAI, Wire: WireChat,
 		// Source: station adoption guide, route /chat/completions -> Go glm-5.3-flash. Context window and max output UNKNOWN (not published); values are floors. Tool calls: documented (smoke tool-call probe passed). Vision UNKNOWN.
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true, LimitsUnknown: true,
 		// go-glm takes max_tokens, not max_completion_tokens.
@@ -53,34 +53,45 @@ var stationModels = []Model{
 		Capabilities:    Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
-		ID: "station-openai-mini", ModelID: "openai-mini", DisplayName: "Station openai-mini", Provider: ProviderStationOpenAI,
+		ID: "station-openai-mini", ModelID: "openai-mini", DisplayName: "Station openai-mini", Provider: ProviderStationOpenAI, Wire: WireChat,
 		// Source: station adoption guide, route /chat/completions -> OpenAI gpt-5-mini. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
 		ContextWindow: 128000, MaxOutput: 16384, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},
 	{
-		ID: "station-gemini-flash", ModelID: "gemini-flash", DisplayName: "Station gemini-flash", Provider: ProviderStationOpenAI,
+		ID: "station-gemini-flash", ModelID: "gemini-flash", DisplayName: "Station gemini-flash", Provider: ProviderStationOpenAI, Wire: WireChat,
 		// Source: station adoption guide, route /chat/completions -> Gemini gemini-2.5-flash. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
-		ID: "station-openrouter-auto", ModelID: "openrouter-auto", DisplayName: "Station openrouter-auto", Provider: ProviderStationOpenAI,
+		ID: "station-openrouter-auto", ModelID: "openrouter-auto", DisplayName: "Station openrouter-auto", Provider: ProviderStationOpenAI, Wire: WireChat,
 		// Source: station adoption guide, route /chat/completions -> OpenRouter openrouter/auto (upstream varies). Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
-		ID: "station-hf-llama", ModelID: "hf-llama", DisplayName: "Station hf-llama", Provider: ProviderStationOpenAI,
+		ID: "station-hf-llama", ModelID: "hf-llama", DisplayName: "Station hf-llama", Provider: ProviderStationOpenAI, Wire: WireChat,
 		// Source: station adoption guide, route /chat/completions -> HF meta-llama/Llama-3.1-8B-Instruct. Context window and max output UNKNOWN (not published); values are floors. No-tools is an UNKNOWN conservative choice, not documented.
 		ContextWindow: 32768, MaxOutput: 4096, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsStreaming: true},
 	},
 	{
-		ID: "station-local-light", ModelID: "local-light", DisplayName: "Station local-light", Provider: ProviderStationOpenAI,
+		ID: "station-local-light", ModelID: "local-light", DisplayName: "Station local-light", Provider: ProviderStationOpenAI, Wire: WireChat,
 		// Source: station adoption guide, route /chat/completions -> Local qwen3-4b-instruct-2507. Context window and max output UNKNOWN (not published); values are floors. No-tools is an UNKNOWN conservative choice, not documented.
 		ContextWindow: 8192, MaxOutput: 2048, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsStreaming: true},
+	},
+
+	// --- responses-only alias (station-openai) ---
+	// go-gpt is served at /responses only; chat/completions answers 400
+	// model_not_available, so the wire is pinned here rather than inferred
+	// from the name (CW-20261024-0013).
+	{
+		ID: "station-go-gpt", ModelID: "go-gpt", DisplayName: "Station go-gpt", Provider: ProviderStationOpenAI, Wire: WireResponses,
+		// Source: station adoption guide, route /responses -> Go gpt-6-luna. Tool calls: documented (smoke "Go Responses tool call" probe passed); streaming probe passed. Context window and max output UNKNOWN (not published); values are floors. Vision UNKNOWN (not documented); value as catalogued is unverified.
+		ContextWindow: 128000, MaxOutput: 16384, PriceUnknown: true, LimitsUnknown: true,
+		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},
 
 	// --- messages aliases (station-anthropic) ---
@@ -121,6 +132,13 @@ func LimitsKnown(modelID string) bool {
 func PriceKnown(modelID string) bool {
 	m, ok := ByModelID(modelID)
 	return ok && !m.PriceUnknown
+}
+
+// WireFor returns the OpenAI endpoint pinned for a model (WireChat or
+// WireResponses), or "" when none is and the adapter chooses by name.
+func WireFor(modelID string) string {
+	m, _ := ByModelID(modelID)
+	return m.Wire
 }
 
 // UsesLegacyMaxTokens reports whether a model's chat/completions endpoint takes

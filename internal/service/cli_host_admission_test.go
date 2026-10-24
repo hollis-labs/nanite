@@ -123,6 +123,27 @@ func TestAdmitCLIHostAcceptsMCPServersOnClaude(t *testing.T) {
 	}
 }
 
+func TestAdmitCLIHostMCPServersAntigravityAcceptedCodexOpenCodeRefused(t *testing.T) {
+	with := func(provider string) store.NativeHostSettings {
+		return cliHost(func(h *store.NativeHostSettings) {
+			h.Provider = provider
+			h.Model = ""
+			h.MCPServers = []string{"tether"}
+		})
+	}
+	for _, p := range []string{"antigravity", "agy"} {
+		if _, err := admitCLIHost(with(p), "default", nil); err != nil {
+			t.Errorf("%s with mcp_servers: %v", p, err)
+		}
+	}
+	for _, p := range []string{"codex", "opencode"} {
+		_, err := admitCLIHost(with(p), "default", nil)
+		if CauseCode(err) != CauseCLIHostUnsupportedField {
+			t.Errorf("%s with mcp_servers: err = %v, want the unsupported-field refusal", p, err)
+		}
+	}
+}
+
 func TestCheckHostMCPServersRefusesWhatLaunchCannotProject(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)

@@ -88,15 +88,17 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
   strict-MCP flags and an allow rule); Codex reads it from `[mcp_servers.*]` in
   the planted `config.toml`; OpenCode reads it from the `mcp` key of the planted
   `opencode.json` (`type: local`, argv `command`, `environment`). agy discovers the plugin's `mcp_config.json`, but
-  its headless mode auto-denies a tool call that needs the `mcp` permission.
-  Nanite launches agy with `--dangerously-skip-permissions` only when the
+  its headless mode auto-denies a tool call that needs the `mcp` permission
+  (exit 0, empty response, a stderr hint). agy reads allow rules only from
+  `~/.gemini/antigravity-cli/settings.json` (and an admin file), never from the
+  workspace, so Nanite launches agy with its own **private HOME** and writes
+  the rules there; see "Antigravity private HOME" below. The Nanite server gets
+  the rule `mcp(tether_nanite/*)` (all of its tools, as Claude's
+  `mcp__nanite__*`: the server's tool list is set when agy connects, not at
+  plant time). `--dangerously-skip-permissions` is still added only when the
   permission engine's mode is yolo (the counterpart of Claude's developer
-  variant, with the same audit log line); otherwise the Nanite MCP tools are
-  unavailable to it, and the launch logs that. To use them without yolo, an
-  operator adds an allow-rule (`permissions.allow`) to agy's own
-  `~/.gemini/antigravity-cli/settings.json`; Nanite never writes that file, which
-  the Antigravity desktop app shares.
-- **Host `mcp_servers` (Claude only).** Names in the host settings' `mcp_servers`
+  variant, with the same audit log line).
+- **Host `mcp_servers` (Claude and Antigravity).** Names in the host settings' `mcp_servers`
   are registry servers (`/api/mcp-servers`) planted into the same `.mcp.json`.
   A CLI calls its servers itself, so Nanite's permission engine never sees the
   call; the grant is enforced by Claude's own headless gate instead. For each
@@ -128,15 +130,50 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
     server with the row's `env` as written. Those values land in the boot dir,
     which the agent can read: put credentials in a file the server reads.
   - Only enabled stdio servers are projected, and none may be named `nanite`.
-  Codex, OpenCode and Antigravity are refused (`cli_host_unsupported_field`)
-  because Nanite has no per-tool gate it can set on them. Admission checks the
+  Antigravity carries them with the same per-tool grants as
+  `mcp(tether_<server>/<tool>)` rules in its private settings (below); hooks
+  stay refused for it. Codex and OpenCode are refused
+  (`cli_host_unsupported_field`) because Nanite has no per-tool gate it can set
+  on them. Admission checks the
   servers exist; launch re-reads them and the grants, and fails the boot
   rather than plant a server without its gate.
-- **Antigravity.** The boot dir carries `AGENTS.md`, `boot.md` and a workspace
-  plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP server. agy
-  has no config-dir variable and shares its global config with the desktop app,
-  so nothing is written there and, unlike Claude, its global MCP servers still
-  load alongside the planted one.
+- **Antigravity private HOME.** The boot dir carries `AGENTS.md`, `boot.md` and
+  a workspace plugin `tether` whose `mcp_config.json` (0600) names the Nanite MCP
+  server and the projected host servers. agy honours `$HOME` for its config, so
+  `AmendEnv` sets `HOME=<bootDir>/agy-home`, a symlink farm of the real home's
+  entries minus `.gemini`, `.agents`, `.DS_Store`, `.CFUserTextEncoding` and
+  `.Trash` (so `~/.ssh`, `~/.gitconfig`, `~/.nanite` resolve as usual; the
+  operator's global agy plugins and skills do not load). `agy-home/.gemini` links
+  to a **private `.gemini`, persistent per agent** at
+  `~/.nanite/agy-gemini/<agent slug>/` (not per boot, so agy's first-run
+  consent answers and conversation history survive restarts; an agent with no
+  usable slug gets a per-boot dir in the boot dir). It holds symlinks to the
+  real auth files that exist (`oauth_creds.json`, `google_accounts.json`,
+  `jetski-standalone-oauth-token`, `installation_id`,
+  `antigravity-cli/antigravity-oauth-token`) and its own
+  `antigravity-cli/settings.json`. The real `~/.gemini` and `~/.agents` are never
+  written by Nanite (agy may write through an auth symlink when it refreshes a
+  token).
+  - **Rules.** `permissions.allow` gets `mcp(tether_nanite/*)` for the planted
+    server and `mcp(tether_<host server>/<tool>)` for each granted tool of each
+    projected host server. agy names a server `<plugin>_<server>` and the plugin
+    is always `tether`. Tool or server names containing space, comma, `*`, `(`,
+    `)` or `/` get no rule.
+  - **Regeneration.** Every launch merges into the existing private file: keys
+    and allow entries Nanite did not write are kept; the rules it wrote last
+    time (recorded in the sidecar `antigravity-cli/nanite-owned-rules.json`) are
+    replaced, so a revoked grant is gone at the next launch. Mode 0600, atomic
+    rename. An unparsable file is kept as `settings.json.bak-<time>`.
+  - **Not covered.** Other agy tools (`run_command`, file read/write, `read_url`)
+    keep being auto-denied headless: Nanite maps nothing for them. Hooks are
+    refused (an agy workspace hook's allow is advisory and does not approve).
+    Concurrent launches of one agent share the private dir and write the same
+    rules. macOS/Unix only (symlinks); coupled to agy 1.4.x's settings loader.
+  - Proposed follow-up (not built): map an explicit per-agent allowlist from
+    Nanite's tool policy to agy's `command(<prefix>)`, `read_file(<path>)`,
+    `write_file(<path>)` and `read_url(<domain>)` rules, default deny, no
+    wildcards.
+  See [the adoption guide](../guides/agy-per-agent-mcp-allowlist.md).
 - **Permissions.** The CLI runs under the boot dir's Claude permissions and the
   planted strict `.mcp.json`; Nanite's tools reach it only through the Nanite
   MCP server, so tool authorization is unchanged. The developer variant

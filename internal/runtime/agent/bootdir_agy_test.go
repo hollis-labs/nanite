@@ -57,7 +57,8 @@ func TestAgyLayoutPlantsTheWorkspacePlugin(t *testing.T) {
 	if got := layout.SpawnWorkdir(boot, "/project"); got != boot {
 		t.Errorf("SpawnWorkdir = %q, want the boot dir", got)
 	}
-	if env := layout.AmendEnv(map[string]string{"A": "b"}, boot); len(env) != 1 {
-		t.Errorf("AmendEnv changed the env: %v", env)
+	env := layout.AmendEnv(map[string]string{"A": "b"}, boot)
+	if len(env) != 2 || env["A"] != "b" || env["HOME"] != filepath.Join(boot, "agy-home") {
+		t.Errorf("AmendEnv = %v, want A kept and HOME=<boot>/agy-home", env)
 	}
 }

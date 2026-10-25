@@ -1078,6 +1078,16 @@ func cmdServeWithInitializers(
 		})
 	})
 	startBackgroundWorkers(daemonLifecycle, container, s)
+	// Finish pending Tether deregistrations of retired actors (bounded, backed
+	// off, a no-op without a Tether address); stops with the lifecycle.
+	if container.Enrollment != nil {
+		daemonLifecycle.Go("enrollment-deregister-retry", func(ctx context.Context) {
+			if stop := container.Enrollment.StartDeregisterRetry(ctx, service.RetryLoopOptions{}); stop != nil {
+				<-ctx.Done()
+				stop()
+			}
+		})
+	}
 
 	if err := serveAnnouncing(srv, hubLife); err != nil {
 		slog.Error("server error", "err", err)

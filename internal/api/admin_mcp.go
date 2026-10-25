@@ -191,7 +191,7 @@ func adminMCPServer(a *API, dispatch http.Handler, carrier *http.Request) *mcp.S
 			})
 	}
 	srv.AddTool(&mcp.Tool{Name: "host_settings_retire",
-		Description: "Disable an agent's host settings (enabled=false) so no new session starts from them. This is a disable-only write: it skips the model and definition re-validation that host_settings_update does, so it works even when the model is no longer allowed. It does NOT stop live sessions (use session_stop) or remove tool grants (use authority_revoke or tool_ungrant). If the agent is enrolled as a durable Tether actor, the actor is archived, its binding disabled and its Tether entry deregistered first (a Tether outage leaves the deregistration pending; repeat the retire to retry)." + adminCredentialNote,
+		Description: "Disable an agent's host settings (enabled=false) so no new session starts from them. This is a disable-only write: it skips the model and definition re-validation that host_settings_update does, so it works even when the model is no longer allowed. It does NOT stop live sessions (use session_stop) or remove tool grants (use authority_revoke or tool_ungrant). If the agent is enrolled as a durable Tether actor, the actor is archived, its binding disabled and its Tether entry deregistered first (a Tether outage leaves the deregistration pending; it is retried in the background and on the next retire). Retiring an ENROLLED agent changes Tether's registry and needs an admin credential; an agents:manage credential is refused for it." + adminCredentialNote,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"id": prop("string", "Host settings id."), "reason": reasonProp}, "required": []string{"id", "reason"}}},
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return a.retireHost(ctx, carrier, req.Params.Arguments)
@@ -294,6 +294,9 @@ func (a *API) retireHost(ctx context.Context, _ *http.Request, raw json.RawMessa
 		return mcpToolError("id is required and must be a single path segment"), nil
 	}
 	host, status, msg := a.retireHostSettings(ctx, args.ID, args.Reason, "mcp:host_settings_retire")
+	if status == http.StatusForbidden && msg == enrolledRetireMsg {
+		return mcpToolError(codeEnrolledRetireNeedsAdmin + ": " + msg), nil
+	}
 	if status != http.StatusOK {
 		return mcpToolError(fmt.Sprintf("HTTP %d: %s", status, msg)), nil
 	}
@@ -312,6 +315,16 @@ type retiredHost struct {
 // POST /api/agent-host-settings/{id}/retire. It returns the HTTP status and, on
 // failure, a message safe to show. The reason goes into the audit row: host
 // settings have no audit table of their own.
+// Stable codes for the typed refusals around enrolled hosts. Retiring an
+// enrolled host changes Tether's registry, so it needs an admin credential; a
+// host that was never enrolled is unchanged.
+const (
+	codeEnrolledRetireNeedsAdmin = "enrolled_retire_requires_admin"
+	codeEnrolledHostNoDelete     = "enrolled_host_cannot_be_deleted"
+	enrolledRetireMsg            = "this agent is enrolled as a Tether actor; retiring it changes Tether's registry and needs an admin credential"
+	enrolledDeleteMsg            = "this agent is enrolled as a Tether actor and its host settings cannot be deleted; retire it first (host_settings_retire)"
+)
+
 func (a *API) retireHostSettings(ctx context.Context, id, reason, auditPrefix string) (retiredHost, int, string) {
 	var host retiredHost
 	reason = strings.TrimSpace(reason)
@@ -327,8 +340,16 @@ func (a *API) retireHostSettings(ctx context.Context, id, reason, auditPrefix st
 	// An agent that was never enrolled is unaffected.
 	if a.Services.Enrollment != nil {
 		credential := "unknown"
-		if p, ok := apiauth.FromContext(ctx); ok && strings.TrimSpace(p.CredentialID) != "" {
+		p, havePrincipal := apiauth.FromContext(ctx)
+		if havePrincipal && strings.TrimSpace(p.CredentialID) != "" {
 			credential = p.CredentialID
+		}
+		if enrolled, eerr := a.Services.Enrollment.IsEnrolled(ctx, id); eerr != nil {
+			slog.Error("check agent enrollment failed", "host_settings_id", id, "error", eerr)
+			return host, http.StatusInternalServerError, "retiring host settings failed"
+		} else if enrolled && !(havePrincipal && canGrantTools(p)) {
+			adminMCPAudit(ctx, auditPrefix+" "+id+" reason="+reason, http.StatusForbidden)
+			return host, http.StatusForbidden, enrolledRetireMsg
 		}
 		res, rerr := a.Services.Enrollment.Retire(ctx, credential, id, reason)
 		if rerr != nil {

@@ -224,6 +224,10 @@ func (a *API) handleHostSettingsRetire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host, status, msg := a.retireHostSettings(r.Context(), r.PathValue("id"), req.Reason, "retire_host_settings")
+	if status == http.StatusForbidden && msg == enrolledRetireMsg {
+		a.jsonResp(w, status, map[string]string{"error": msg, "code": codeEnrolledRetireNeedsAdmin})
+		return
+	}
 	if status != http.StatusOK {
 		a.errorResp(w, status, msg)
 		return
@@ -242,6 +246,17 @@ func (a *API) handleHostSettingsDelete(w http.ResponseWriter, r *http.Request) {
 	if err := definitionRequest(w, r, &req); err != nil {
 		a.errorResp(w, http.StatusBadRequest, "invalid revision request")
 		return
+	}
+	// An enrolled agent's host settings back a Tether registry entry; retire
+	// first, which also deregisters it. Checked before the delete is attempted.
+	if a.Services.Enrollment != nil {
+		if enrolled, err := a.Services.Enrollment.IsEnrolled(r.Context(), r.PathValue("id")); err != nil {
+			a.errorResp(w, http.StatusInternalServerError, "checking agent enrollment failed")
+			return
+		} else if enrolled {
+			a.jsonResp(w, http.StatusConflict, map[string]string{"error": enrolledDeleteMsg, "code": codeEnrolledHostNoDelete})
+			return
+		}
 	}
 	if err := host.DeleteHost(r.Context(), r.PathValue("id"), req.Revision); err != nil {
 		a.definitionError(w, err)

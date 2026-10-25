@@ -282,8 +282,25 @@ is the ADR's "admin for the first version"):
 - Retire is the existing `host_settings_retire` (MCP) and
   `POST /api/agent-host-settings/{id}/retire`, extended: it retires the actor
   first, then disables the host. There is no separate `unenroll`, per the ADR.
-  Other ways to disable host settings (`PUT enabled=false`, delete) do not
-  deregister the actor.
+
+**Lifecycle rules (Architect decisions, CW-20261024-0017 follow-up).**
+
+1. *Retiring an enrolled host needs admin.* It changes Tether's registry, so
+   `agents:manage` and `maintain` credentials are refused for a host that has
+   an enrollment record in any state (HTTP `403` code
+   `enrolled_retire_requires_admin`; the MCP tool returns the same code).
+   Retiring a host that was never enrolled is unchanged. Nothing is written or
+   sent to Tether on a refusal.
+2. *Hard DELETE of an enrolled host is refused* (`409`, code
+   `enrolled_host_cannot_be_deleted`: retire first). This holds after the retire
+   too, so the enrollment record and its URN outlive the host row.
+3. *`PUT enabled=false` leaves the actor untouched.* It is the reversible
+   disable: the binding, instance and Tether entry stay as they are, and
+   `enabled=true` restores the host with the same URN. Only retire ends an actor.
+4. *Re-enrolling a retired agent stays `409` (`retired`).* A retired URN is never
+   reused. To give the same agent a new address, create a new host settings row
+   (a new id): its key `nanite/<install_id>/<new_host_settings_id>` is new, so
+   Tether mints a new URN.
 
 **Writer.** `store.ActorEnrollment` (`internal/store/enrollment.go`) is the
 only code that creates `agent_actor_bindings` and `actor_instances` rows. In
@@ -332,11 +349,22 @@ record becomes `retired`. If Tether is down or not configured the retire still
 succeeds locally, the record stays `deregister_pending` (the response carries
 `actor: {deregister_pending: true, deregister_error}`), and every later retire
 call, for this or any agent, retries all pending deregistrations; repeating the
-retire for the same host is idempotent and is the way to retry. There is no
-background timer. A record that never reached `enrolled` has no URN, so its key
+retire for the same host is idempotent. A small background retry also runs
+inside `nanite serve` (below). A record that never reached `enrolled` has no URN, so its key
 is looked up in Tether and deregistered if found (the crash window). Local
 retirement runs before the host is disabled because the schema refuses actor
 updates once the host is disabled.
+
+**Background retry of pending deregistrations.** `nanite serve` runs one pass
+about 5 seconds after startup (non-blocking, after the HTTP server is coming up)
+and then one every 15 minutes, until shutdown (the lifecycle context). A pass
+attempts at most 20 `deregister_pending` records, oldest first. Each record has
+its own capped exponential backoff, kept in memory: after the nth consecutive
+failure it waits 15m, 30m, 1h, then 2h at most (a restart starts again at
+once). Success marks it `retired`. It is not started when `NANITE_TETHER_ADDR`
+is unset, and a pass does nothing (logged once at info) while the registry token
+file is missing or insecure. Logs carry the host settings id and an error class,
+never a token, URL or response body. The retry-on-next-retire path stays.
 
 **Session start and stop.** Starting a session from an enrolled agent's host
 settings (`POST /api/agent/v1/sessions` with `host_settings`, which is also what

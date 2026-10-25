@@ -160,7 +160,7 @@ func TestEnrollMCPToolIsAdminOnlyAndRetireDeregisters(t *testing.T) {
 
 	// host_settings_retire retires the actor first, then disables the host.
 	fake.Drop()
-	text, isErr = adminMCPCall(t, g.mcp(g.secrets["manager"]), "host_settings_retire", args)
+	text, isErr = adminMCPCall(t, g.mcp(g.secrets["operator"]), "host_settings_retire", args)
 	if isErr || !strings.Contains(text, `"deregister_pending":true`) {
 		t.Fatalf("retire with Tether down = %q err=%v", text, isErr)
 	}
@@ -170,7 +170,7 @@ func TestEnrollMCPToolIsAdminOnlyAndRetireDeregisters(t *testing.T) {
 		t.Fatal("host settings were not disabled")
 	}
 	fake.Heal()
-	text, isErr = adminMCPCall(t, g.mcp(g.secrets["manager"]), "host_settings_retire", args)
+	text, isErr = adminMCPCall(t, g.mcp(g.secrets["operator"]), "host_settings_retire", args)
 	if isErr || strings.Contains(text, `"deregister_pending":true`) {
 		t.Fatalf("retire retry = %q err=%v", text, isErr)
 	}

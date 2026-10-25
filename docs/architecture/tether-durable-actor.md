@@ -246,16 +246,31 @@ against a live Tether by the Nanite enrollment change.
    and `tether.admin`). It is a separate credential from the bridge's
    `tether.messages`/`tether.read` token.
 
-**Deregistration** is `DELETE /registry/agents/{urn}` (URN path-escaped as one
-segment), which answers `200` with the profile at status `deprecated`; the MCP
-tool is `tether_registry_deregister`. **UNVERIFIED against a live Tether:** the
-shape was read from Tether's source on `main` (`internal/api/registry.go`,
-`handleRegistryDeregister`; `docs/mcp.md`) and is not in
-`docs/messaging-integration.md`, and Nanite has not called it live. The call is
-isolated in one function, `tetherregistry.Client.Deregister`; a `404` is treated
-as already done. Also assumed from source rather than observed: the register
-body may carry `display_name` (Nanite sends the host title; it only matters on
-the creating call), and lookup answers `{"agent": {"urn", "status"}}`.
+**Which listener accepts the registry token.** Found in the first live test: Tether's
+REMOTE listener (TCP, for example `127.0.0.1:8948`, and the public edge)
+authenticates paired device credentials only, so a registry service token sent
+there gets `401` by design. The service token (a principal such as
+`msg://service/nanite-registry/dev`) works only on Tether's LOCAL unix socket
+(for example `/var/lib/fabric/tether/run/tetherd.sock`, mode `srwxrwxr-x`, owned
+by the user Nanite runs as). On the socket scopes are attributed, not enforced
+(observe mode), so the token can touch ANY actor: keep its use bounded.
+
+Call shapes, HTTP over the unix socket, `Authorization: Bearer <token file
+contents>`, any Host (Nanite sends `localhost`):
+
+- lookup: `GET http://localhost/registry/agents?substrate=nanite&external_id=<install_id>%2F<host_settings_id>`
+  (`404 not_found` when absent; `200 {"agent": {"urn", "status"}}`)
+- register: `POST http://localhost/registry/agents`
+  `{"display_name", "substrate": "nanite", "external_id": "<install_id>/<host_settings_id>"}`
+  (`201` then `200` with the same URN)
+- deregister: `DELETE http://localhost/registry/agents/<url-escaped URN>` (`200`
+  with the profile at status `deprecated`; MCP tool `tether_registry_deregister`)
+
+`display_name` on register, the lookup shape and the `DELETE` are **confirmed by
+the Tether agent against build 49a3a6b2** and were read from Tether's source on
+`main` (`internal/api/registry.go`), but **have not yet been observed by Nanite
+against a live Tether**. The deregister call is isolated in
+`tetherregistry.Client.Deregister`; a `404` is treated as already done.
 
 **Live enrollment needs a scoped `tether.registry` credential (`registry.write`
 only) that the operator issues.** Nanite does not issue, rotate or hold one for
@@ -328,8 +343,16 @@ calling Tether. A retired actor is never re-enrolled (`409`); its URN is not
 reused.
 
 **Registry token.** `NANITE_TETHER_REGISTRY_TOKEN_FILE` names a 0600 file holding
-the `tether.registry` token; the Tether address is `NANITE_TETHER_ADDR` (shared
-with the bridge: an `http(s)` URL, or a unix socket path). The file is read on
+the `tether.registry` token. The registry client's address is
+`NANITE_TETHER_REGISTRY_ADDR`: `unix:///absolute/path/tetherd.sock` (a bare
+absolute path also works) or an `http(s)` URL; if unset it falls back to
+`NANITE_TETHER_ADDR`, which the delivery bridge keeps using on its own. A unix
+address must be absolute and clean; it is checked at call time, a missing path
+is `tether_unreachable` (retryable) and a path that is not a socket is
+`tether_address_invalid`, both before anything is written. Registry calls are
+configured when an address (either variable) and the token file are present.
+Use the socket: a service token sent to TCP/https on the remote listener gets
+401 by design. The file is read on
 every call, refused if any group or world permission bit is set, and the value is
 never logged, returned, stored in the database or accepted in a request. It is
 never the bridge's `NANITE_TETHER_TOKEN_FILE`; there is no fallback to it.
@@ -361,8 +384,8 @@ and then one every 15 minutes, until shutdown (the lifecycle context). A pass
 attempts at most 20 `deregister_pending` records, oldest first. Each record has
 its own capped exponential backoff, kept in memory: after the nth consecutive
 failure it waits 15m, 30m, 1h, then 2h at most (a restart starts again at
-once). Success marks it `retired`. It is not started when `NANITE_TETHER_ADDR`
-is unset, and a pass does nothing (logged once at info) while the registry token
+once). Success marks it `retired`. It is not started when neither `NANITE_TETHER_REGISTRY_ADDR`
+nor `NANITE_TETHER_ADDR` is set, and a pass does nothing (logged once at info) while the registry token
 file is missing or insecure. Logs carry the host settings id and an error class,
 never a token, URL or response body. The retry-on-next-retire path stays.
 
@@ -377,8 +400,9 @@ retire cannot clear the actor (the schema refuses the update); that failure is
 logged.
 
 **Not covered by the fake-Tether tests / unverified:** the live deregister call
-(above), `display_name` on register, the lookup response envelope, and the
-unix-socket transport. Verified by tests: register 201 then 200 with the same
+(above; `display_name`, the lookup shape and `DELETE` are confirmed by the Tether
+agent but not yet observed by Nanite live). The unix-socket transport is tested
+against a fake Tether on a real socket, not the real daemon. Verified by tests: register 201 then 200 with the same
 URN, lookup, deregister with an escaped path, 400/401/403/5xx/dropped
 connection/timeout mapping, the token file checks, the one-transaction rollback,
 crash recovery, concurrency, retire with Tether down then retried, route and MCP

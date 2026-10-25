@@ -458,3 +458,34 @@ func TestActorEnrollmentWriterHasOneConsumer(t *testing.T) {
 		t.Fatalf("scanned only %d Go files", checked)
 	}
 }
+
+func TestEnrollAndRetireOverAUnixSocketRegistry(t *testing.T) {
+	ctx := context.Background()
+	e := newEnrollEnv(t)
+	fake, sock := tetherregistrytest.NewUnix(t)
+	// The registry address is its own setting; the bridge variable is not consulted.
+	t.Setenv(tetherregistry.AddrEnv, "http://127.0.0.1:1")
+	t.Setenv(tetherregistry.RegistryAddrEnv, "unix://"+sock)
+	t.Setenv(tetherregistry.TokenFileEnv, e.token)
+	e.svc.Registrar = &tetherregistry.Client{}
+	res, err := e.svc.Enroll(ctx, "c", e.host.ID, "r", "")
+	if err != nil || len(fake.Entries()) != 1 {
+		t.Fatalf("enroll over the socket: %+v %v", res, err)
+	}
+	if out, err := e.svc.Retire(ctx, "c", e.host.ID, "r"); err != nil || out.DeregisterPending {
+		t.Fatalf("retire: %+v %v", out, err)
+	}
+	if fake.Entries()[0].Status != "deprecated" {
+		t.Fatal("not deregistered over the socket")
+	}
+	// A missing socket fails before anything is written.
+	e2 := newEnrollEnvOn(t, e.st, "sock-missing")
+	t.Setenv(tetherregistry.RegistryAddrEnv, "unix:///no/such/tetherd.sock")
+	e2.svc.Registrar = &tetherregistry.Client{}
+	if _, err = e2.svc.Enroll(ctx, "c", e2.host.ID, "r", ""); !errors.Is(err, tetherregistry.ErrUnreachable) {
+		t.Fatalf("missing socket: %v", err)
+	}
+	if _, err = e.st.ActorEnrollment().Get(ctx, e2.host.ID); !errors.Is(err, store.ErrEnrollmentNotFound) {
+		t.Fatal("a record was written although the socket is missing")
+	}
+}

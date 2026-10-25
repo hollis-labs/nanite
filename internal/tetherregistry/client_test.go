@@ -154,3 +154,112 @@ func TestFailureModesAreTyped(t *testing.T) {
 		t.Fatalf("wrong token: %v", err)
 	}
 }
+
+func TestUnixSocketTransport(t *testing.T) {
+	f, sock := tetherregistrytest.NewUnix(t)
+	tok := tetherregistrytest.TokenFile(t)
+	ctx := context.Background()
+	for _, addr := range []string{"unix://" + sock, sock} {
+		c := &tetherregistry.Client{Config: func() tetherregistry.Config { return tetherregistry.Config{Addr: addr, TokenFile: tok} }}
+		if err := c.Ready(); err != nil {
+			t.Fatalf("%s: %v", addr, err)
+		}
+	}
+	c := f.Registrar(tok)
+	if _, ok, err := c.Lookup(ctx, key); err != nil || ok {
+		t.Fatalf("lookup 404: %v %v", ok, err)
+	}
+	urn, created, err := c.Register(ctx, key, "Host One")
+	if err != nil || !created {
+		t.Fatalf("register: %q %v %v", urn, created, err)
+	}
+	if again, created, err := c.Register(ctx, key, "Host One"); err != nil || created || again != urn {
+		t.Fatalf("repeat: %q %v %v", again, created, err)
+	}
+	if got, ok, err := c.Lookup(ctx, key); err != nil || !ok || got != urn {
+		t.Fatalf("lookup 200: %q %v %v", got, ok, err)
+	}
+	if f.LastAuth != "Bearer "+tetherregistrytest.Token {
+		t.Fatal("Authorization header missing on the socket")
+	}
+	if f.LastHost != "localhost" {
+		t.Fatalf("Host = %q, want localhost", f.LastHost)
+	}
+	lookup := ""
+	for _, l := range f.Log {
+		if strings.HasPrefix(l, "GET ") {
+			lookup = l
+		}
+	}
+	if lookup != "GET /registry/agents" {
+		t.Fatalf("lookup path = %q", lookup)
+	}
+	if err = c.Deregister(ctx, urn); err != nil {
+		t.Fatal(err)
+	}
+	if last := f.Log[len(f.Log)-1]; !strings.HasPrefix(last, "DELETE /registry/agents/msg:%2F%2Fagent%2F") {
+		t.Fatalf("deregister = %q", last)
+	}
+	if es := f.Entries(); es[0].Status != "deprecated" {
+		t.Fatalf("entries = %+v", es)
+	}
+	// 401 maps as on TCP, and never echoes the token.
+	bad := filepath.Join(t.TempDir(), "bad")
+	_ = os.WriteFile(bad, []byte("wrong-fake-token"), 0o600)
+	var ref *tetherregistry.RefusedError
+	_, _, err = f.Registrar(bad).Register(ctx, key, "x")
+	if !errors.As(err, &ref) || ref.Status != 401 || strings.Contains(err.Error(), "wrong-fake-token") {
+		t.Fatalf("401: %v", err)
+	}
+}
+
+func TestRegistryAddressResolutionAndSocketErrors(t *testing.T) {
+	tok := tetherregistrytest.TokenFile(t)
+	_, sock := tetherregistrytest.NewUnix(t)
+	t.Setenv(tetherregistry.TokenFileEnv, tok)
+
+	// Neither set: not configured.
+	t.Setenv(tetherregistry.AddrEnv, "")
+	t.Setenv(tetherregistry.RegistryAddrEnv, "")
+	if err := (&tetherregistry.Client{}).Ready(); !errors.Is(err, tetherregistry.ErrNotConfigured) {
+		t.Fatalf("none: %v", err)
+	}
+	// Fallback to the bridge address.
+	t.Setenv(tetherregistry.AddrEnv, "unix://"+sock)
+	if cfg := tetherregistry.ConfigFromEnv(); cfg.Addr != "unix://"+sock {
+		t.Fatalf("fallback addr = %q", cfg.Addr)
+	}
+	if err := (&tetherregistry.Client{}).Ready(); err != nil {
+		t.Fatalf("fallback ready: %v", err)
+	}
+	// The registry address wins and leaves the bridge variable alone.
+	t.Setenv(tetherregistry.RegistryAddrEnv, "https://tether.example.test")
+	if cfg := tetherregistry.ConfigFromEnv(); cfg.Addr != "https://tether.example.test" {
+		t.Fatalf("registry addr = %q", cfg.Addr)
+	}
+	if os.Getenv(tetherregistry.AddrEnv) != "unix://"+sock {
+		t.Fatal("the bridge address was changed")
+	}
+
+	c := func(addr string) error {
+		return (&tetherregistry.Client{Config: func() tetherregistry.Config { return tetherregistry.Config{Addr: addr, TokenFile: tok} }}).Ready()
+	}
+	if err := c("unix://relative/tetherd.sock"); !errors.Is(err, tetherregistry.ErrAddrInvalid) {
+		t.Errorf("relative: %v", err)
+	}
+	if err := c("ftp://x/y"); !errors.Is(err, tetherregistry.ErrAddrInvalid) {
+		t.Errorf("scheme: %v", err)
+	}
+	if err := c("unix:///does/not/exist.sock"); !errors.Is(err, tetherregistry.ErrUnreachable) {
+		t.Errorf("missing socket: %v", err)
+	}
+	if err := c(tok); !errors.Is(err, tetherregistry.ErrAddrInvalid) { // a regular file, not a socket
+		t.Errorf("not a socket: %v", err)
+	}
+	if err := c("unix:///a/../b.sock"); !errors.Is(err, tetherregistry.ErrAddrInvalid) {
+		t.Errorf("unclean path: %v", err)
+	}
+	if err := c("http://127.0.0.1:1"); err != nil {
+		t.Errorf("http url: %v", err)
+	}
+}

@@ -138,13 +138,24 @@ It is a different credential from the delivery bridge's messages/read token
 (`NANITE_TETHER_TOKEN_FILE`) and is never read from it.
 
 ```sh
-export NANITE_TETHER_ADDR=http://127.0.0.1:PORT      # the Tether daemon (also enables the bridge)
+# The registry credential works only on Tether's LOCAL unix socket. Sending it to the
+# remote listener (TCP/https) returns 401 by design.
+export NANITE_TETHER_REGISTRY_ADDR=unix:///var/lib/fabric/tether/run/tetherd.sock
 install -m 600 /dev/null ~/.nanite/tether-registry-token
 pbpaste > ~/.nanite/tether-registry-token             # the token, from the clipboard; never an argument
 export NANITE_TETHER_REGISTRY_TOKEN_FILE=~/.nanite/tether-registry-token
 ```
 
-Set both variables in the environment of the process that enrolls: `nanite
+`NANITE_TETHER_REGISTRY_ADDR` is separate from `NANITE_TETHER_ADDR`, which the
+delivery bridge keeps using; if it is unset, enrollment falls back to
+`NANITE_TETHER_ADDR`. It takes `unix:///absolute/path.sock` or an `http(s)` URL.
+The socket must exist and be reachable by the user Nanite runs as (check its
+owner and mode with `ls -l`); a missing socket answers `tether_unreachable`,
+and a path that is not a socket `tether_address_invalid`, before anything is
+written. On the socket the token's scopes are attributed, not enforced, so it
+can touch any actor: issue it for this use only.
+
+Set the variables in the environment of the process that enrolls: `nanite
 serve` for the HTTP route and MCP tool, your shell for the CLI. The file must be
 mode 0600 (any group or world permission is refused), is read on each call and
 is never logged or stored in the database.

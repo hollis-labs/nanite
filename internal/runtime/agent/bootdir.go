@@ -129,7 +129,7 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		params.ActorURN = deps.ActorURN(sessID, profile.ID)
 	}
 	if deps != nil {
-		// No root offered to an agent (the work root, dev_tools_allowed_paths,
+		// No root offered to an agent (the work root, cli_writable_roots,
 		// path grants) may be, or sit inside, a control-plane directory
 		// (CW-20261001-0143). Codex also has the roots that contain one split
 		// around it, because its own sandbox, not Nanite's, enforces them.
@@ -155,9 +155,12 @@ func PathMentionLaunchRootsEnabled() bool {
 // effectiveCLIWritableRoots lists the directories a CLI agent may write
 // beyond its boot dir: the session's work root first (CW-20261001-0020 —
 // the boot dir stays the cwd, so without this the project is outside the
-// agent's sandbox), then the configured dev_tools_allowed_paths roots.
+// agent's sandbox), then the host's explicit `directories`, then the
+// configured cli_writable_roots (deps.CLIWritableRoots; dev_tools_allowed_paths
+// no longer feeds it unless NANITE_CLI_ROOTS_FROM_DEV_TOOLS=1).
 // Duplicates are dropped, and so is any root that is not an existing
-// directory. A nil deps still yields the work root.
+// directory or that the deny-list refuses (CLIRootDenyReason), whichever
+// source named it. A nil deps still yields the work root.
 //
 // Only configuration widens the roots. Path grants are minted from free
 // text in a turn, which any loopback client can supply (CW-20261001-0232),
@@ -166,6 +169,7 @@ func PathMentionLaunchRootsEnabled() bool {
 // behavior. Even then they are only grants that survived the mention
 // policy (permission.MentionPolicy).
 func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string, profileDirs ...string) []string {
+	realHome, _ := os.UserHomeDir()
 	seen := make(map[string]struct{})
 	var out []string
 	add := func(path string) {
@@ -186,6 +190,12 @@ func effectiveCLIWritableRoots(deps *Dependencies, sessionID, workRoot string, p
 		// command of the turn fail.
 		if info, err := os.Stat(clean); err != nil || !info.IsDir() {
 			slog.Debug("agent: dropping CLI writable root that is not an existing directory", "root", clean)
+			return
+		}
+		// The hard deny-list (cli_roots_policy.go) applies to every source,
+		// the work root and a host's directories included.
+		if reason := CLIRootDenyReason(clean, realHome); reason != "" {
+			slog.Debug("agent: dropping denied CLI writable root", "root", clean, "reason", reason)
 			return
 		}
 		out = append(out, clean)

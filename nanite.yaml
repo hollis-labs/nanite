@@ -10,6 +10,20 @@
 # schema — neither overrides the other and they are never merged, so there is
 # no precedence between them to work out.
 
+# Scope of the in-process dev_* tools ONLY (dev_read, dev_write, dev_bash, ...).
+# It no longer gives CLI agents (claude, codex, agy) any writable root.
+# dev_tools_allowed_paths:
+#   - ~/dev
+
+# Extra directories EVERY CLI-launched agent may write, besides its work root
+# and the host's own `directories`. Default empty. Prefer a host's
+# `directories` to give one host access. A hard deny-list (the real home and
+# parents, ~/.tether, ~/.ssh, ~/.config, ...) drops entries whatever they say.
+# An explicit `cli_writable_roots: []` silences the startup warning that fires
+# when dev_tools_allowed_paths is set and this key is not.
+# cli_writable_roots:
+#   - ~/dev/shared
+
 # Uncomment to point the server at the shipped Worker -> Reviewer -> Gate
 # example so agentworkflow.Registry loads it at startup. Left off by default:
 # a workflow catalog is opt-in, and the convention is "no catalog -> no

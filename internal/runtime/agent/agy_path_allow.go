@@ -18,7 +18,7 @@ import (
 //
 // Source: SetupParams.CLIWritableRoots, the same list codex and claude get
 // (effectiveCLIWritableRoots): the session work root, the host settings
-// `directories`, and the configured dev_tools_allowed_paths, each an existing
+// `directories`, and the configured cli_writable_roots, each an existing
 // directory and none inside a control-plane directory. A root yields
 // `read_file(<root>)` and `write_file(<root>)`, the work root first.
 //
@@ -30,9 +30,6 @@ import (
 // rule early, a newline or NUL breaks the line, `*` would read as a wildcard,
 // and whitespace has no documented quoting (fail closed: no rule).
 const agyPathRuleBreakers = "()*\n\r\x00 \t"
-
-// agySecretHomeDirs are real-home subdirectories no rule may cover or sit in.
-var agySecretHomeDirs = []string{".ssh", ".gnupg", ".aws", ".kube", ".docker", ".gemini", ".agents", ".nanite"}
 
 // agyPathAllowRules is the read and write rule set for roots. Roots that are
 // unsafe (see agySafeRoot) are skipped. Deterministic order: every read rule in
@@ -58,9 +55,8 @@ func agyPathAllowRules(roots []string, realHome string) []string {
 }
 
 // agySafeRoot reports whether root may become a rule: absolute and already
-// clean, free of rule-breaking characters, not `/`, not the real home or a
-// parent of it, and not a secrets directory of the home or inside one. Symlinks
-// are resolved for the home checks, so a link to the home does not slip by.
+// clean, free of rule-breaking characters, and not refused by the shared CLI
+// root deny-list (CLIRootDenyReason).
 func agySafeRoot(root, realHome string) bool {
 	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root || strings.ContainsAny(root, agyPathRuleBreakers) {
 		return false
@@ -68,31 +64,7 @@ func agySafeRoot(root, realHome string) bool {
 	if realHome == "" || !filepath.IsAbs(realHome) {
 		return false
 	}
-	homes := []string{filepath.Clean(realHome)}
-	if h, err := filepath.EvalSymlinks(realHome); err == nil {
-		homes = append(homes, h)
-	}
-	cands := []string{root}
-	if r, err := filepath.EvalSymlinks(root); err == nil {
-		cands = append(cands, r)
-	}
-	for _, c := range cands {
-		if c == string(filepath.Separator) {
-			return false
-		}
-		for _, h := range homes {
-			if c == h || strings.HasPrefix(h, c+string(filepath.Separator)) {
-				return false
-			}
-			for _, s := range agySecretHomeDirs {
-				sd := filepath.Join(h, s)
-				if c == sd || strings.HasPrefix(c, sd+string(filepath.Separator)) {
-					return false
-				}
-			}
-		}
-	}
-	return true
+	return CLIRootDenyReason(root, realHome) == ""
 }
 
 // agyAllowRules is every rule the launch's private settings carry.

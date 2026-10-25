@@ -141,13 +141,56 @@ coordination state to grant itself authority:
 session, and to its parent directory. The text of a turn is not proof that a
 person wrote it, since any local client of the loopback API can post one, so:
 such a grant never reaches an agent CLI's writable roots (those come from the
-work root, `dev_tools_allowed_paths` and your configuration), only a chat turn
+work root, the host's `directories` and `cli_writable_roots`), only a chat turn
 mints one, and it is refused when it would cover a sensitive path (`~/.ssh`,
 `~/.gnupg`, `~/.codex`, `~/.claude*`, `~/.local/bin`, the systemd user
 directory, Nanite's and its sibling apps' state) or anything outside `$HOME`
 and `dev_tools_allowed_paths` (CW-20261001-0232).
 `NANITE_PATH_MENTION_LAUNCH_ROOTS=1` restores the old behavior of folding
 these grants into launch roots; leave it off.
+
+### CLI writable roots
+
+The directories Nanite grants a launched agent CLI (Claude's
+`additionalDirectories` and `--add-dir`, Codex's `writable_roots`, Agy's
+`read_file`/`write_file` rules) come from three sources and nothing else:
+
+1. the session's work root;
+2. the host's own `directories` (set per host at `nanite agent setup`);
+3. the `cli_writable_roots` list in your config (default empty, so none).
+
+`dev_tools_allowed_paths` scopes only the in-process `dev_*` tools. It used to
+feed the CLI roots too, which handed every CLI agent whatever that list named.
+To give one host access to `~/dev`, add its absolute path to that host's
+`directories`; list a path in `cli_writable_roots` only to give every CLI host
+the same access.
+
+A hard deny-list is applied to every root whatever its source, so naming a
+denied directory in configuration, in a host's `directories` or as the work
+root does not make it writable. A root is dropped when it equals, is inside, or
+contains one of these, judged by real path (a symlink to a denied directory is
+denied):
+
+- `/`, your real home directory and every parent of it;
+- `~/.tether`, `~/.cerberus`, `~/.nanite`, `~/.ssh`, `~/.gnupg`, `~/.aws`,
+  `~/.kube`, `~/.docker`, `~/.gemini`, `~/.agents`, `~/.config`.
+
+A parent such as your home is dropped whole, not split. Dropped roots are
+logged at debug level with the reason. The list is `CLIRootDenyHomeDirs` in
+`internal/runtime/agent/cli_roots_policy.go`.
+
+Compatibility, for one release: at startup Nanite logs one warning when
+`dev_tools_allowed_paths` is set and `cli_writable_roots` is not (an explicit
+`cli_writable_roots: []` counts as set). The deprecated
+`NANITE_CLI_ROOTS_FROM_DEV_TOOLS=1` makes CLI launches also get
+`dev_tools_allowed_paths` as before, and logs a warning at every start. It is
+off by default and will be removed; the deny-list still applies under it.
+
+Limits. These roots bound what Nanite grants the CLIs through their own
+configuration. They are not OS-level isolation: a CLI runs as the same unix
+user as the service and can still read, and with its own tools often write,
+anything that user can reach. The Linux control-plane protection above is the
+only enforced boundary, and it covers Nanite's own directories only.
 
 Everything else stays as writable as your user can make it.
 `NANITE_SANDBOX_PROTECT=0` turns this protection off; `/api/health` warns

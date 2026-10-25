@@ -14,15 +14,13 @@ resources:
     owner: self
     admin: self
     config:
-      build_strategy:
-        kind: make_standard
-        rules:
-          output: nanite
       # The main chat instance runs on agent-os (hub-nanite). This is the Mac's own
-      # instance (workspace mesh-chat) for local agents and experiments. Deploy with
-      # scripts/mac-nanite/predeploy.sh then `cerberus resource deploy nanite-api-service --ack`.
+      # instance (workspace mesh-chat) for local agents and experiments. Nothing is built
+      # on this machine: the binary comes from CI and is installed by fleet-install, which
+      # flips the stable symlink below and reloads this resource (CW-20261024-0120):
+      #   fleet-install deploy nanite --target mac-nanite --repo hollis-labs/nanite --latest-green
       command:
-        - ./nanite
+        - ~/.local/share/nanite/current/nanite
         - serve
         - --port
         - "8090"
@@ -37,7 +35,7 @@ resources:
         PATH: /Users/chrispian/.local/share/mise/installs/go/1.25.3/bin:/Users/chrispian/.local/share/mise/installs/node/22.12.0/bin:/Users/chrispian/.local/bin:/Users/chrispian/.bun/bin:/Users/chrispian/go/bin:/Users/chrispian/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
       mode: os_service
       port: 8090
-      run_from: artifact
+      run_from: workspace
       supervisor: launchd
       url: http://127.0.0.1:8090
       auto_start: true

@@ -67,6 +67,16 @@ tool calls, so any of the three can be swapped or run standalone.
 installed and signature-verified, it shows up as ordinary tool calls inside
 any session, no core changes required.
 
+## Known gaps
+
+Things that are off or limited by design today, so they do not surprise you:
+
+- **Team runs are disabled.** Team workflow launch recovery and resume are held until verified-actor enrollment is wired in (CW-20261011-0042). The server logs `Team workflow reconciliation failed: verified actor binding is required` once per start; that is this hold, not a fault. Whether to lift it is a product decision.
+- **The default plugin catalog feed is dead.** `defaultCatalogURL` in `cmd/nanite/plugin_install_flow.go` points at a 404 (CW-20261024-0129). Plugin install from the default catalog fails until it is repointed; installing from an explicit source is unaffected.
+- **CLI agents are not OS-isolated.** `cli_writable_roots`, the deny-list and the Agy allow rules bound what Nanite grants; the CLI still runs as the same unix user as the service (see `SECURITY.md`; separate user or sandbox: CW-20261025-0052).
+- **Agents whose definition native execution refuses** (for example a `read-only` permission profile, as the Tachyon app-chat hosts use) are listed with `status: "unsupported"` and an `unsupported_semantics` reason and cannot be launched.
+- **Unverified:** production rollback on a real failed health check, Mac Cerberus autostart after a reboot, and Agy 1.4.0 / 1.4.6 workers.
+
 ## Roadmap
 
 - **Native secure execution.** A sandboxed Python execution path ("Code

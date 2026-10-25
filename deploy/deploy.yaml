@@ -26,6 +26,14 @@ targets:
       - {via: systemd-user, unit: com.hollis-labs.cerberus.hub-nanite.service}
     health:
       - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+      # Route smoke (post-deploy, automatic rollback on failure). A protected route
+      # must answer 401 unauthenticated: that proves the new binary is routing and the
+      # auth layer is up. It does NOT run the handler (an authenticated check would;
+      # none exists until a read-scoped credential is decided, see docs/guides/deploy-route-smoke.md).
+      - {url: "http://127.0.0.1:8090/api/agents", expect_status: [401], timeout: 20s}
+      - {url: "http://127.0.0.1:8090/api/start-surface/capabilities", expect_status: [401], timeout: 20s}
+      - {url: "http://127.0.0.1:8090/api/providers", expect_status: [401], timeout: 20s}
+      - {url: "http://127.0.0.1:8090/api/sessions", expect_status: [401], timeout: 20s}
   - id: mac-nanite
     when: {os: darwin, arch: arm64}
     hosts: [mac]
@@ -43,3 +51,11 @@ targets:
       - {via: cerberus, resource: nanite-api-service, verb: reload, run: true}
     health:
       - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+      # Route smoke (post-deploy, automatic rollback on failure). A protected route
+      # must answer 401 unauthenticated: that proves the new binary is routing and the
+      # auth layer is up. It does NOT run the handler (an authenticated check would;
+      # none exists until a read-scoped credential is decided, see docs/guides/deploy-route-smoke.md).
+      - {url: "http://127.0.0.1:8090/api/agents", expect_status: [401], timeout: 20s}
+      - {url: "http://127.0.0.1:8090/api/start-surface/capabilities", expect_status: [401], timeout: 20s}
+      - {url: "http://127.0.0.1:8090/api/providers", expect_status: [401], timeout: 20s}
+      - {url: "http://127.0.0.1:8090/api/sessions", expect_status: [401], timeout: 20s}

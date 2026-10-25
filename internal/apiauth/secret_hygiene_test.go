@@ -85,9 +85,13 @@ func TestSecretNeverReachesLogsAuditOrStorage(t *testing.T) {
 				t.Errorf("%s contains a credential secret", where)
 			}
 		}
-		// Also the random 43-character body of each secret, in case a prefix was cut.
+		// Also the random 43-character body of each secret, in case a prefix was cut. The body
+		// is base64url, whose alphabet includes "_", so it cannot be found by splitting on the last
+		// underscore (that sometimes left a few characters that match stored bytes by chance,
+		// CW-20261024-0128): take the last 43 characters.
+		const bodyLen = 43
 		for _, s := range secrets {
-			if i := strings.LastIndex(s, "_"); i >= 0 && strings.Contains(text, s[i+1:]) {
+			if len(s) > bodyLen && strings.Contains(text, s[len(s)-bodyLen:]) {
 				t.Errorf("%s contains a credential secret body", where)
 			}
 		}

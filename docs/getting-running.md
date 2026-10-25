@@ -234,6 +234,18 @@ turn or `DELETE /api/sessions/{id}`; an agent credential cannot reach them.
 | host settings create | `400 invalid host settings request` | the body has an unknown field (e.g. `source`); the server assigns it |
 | session create | `404 sql: no rows` | stale `host_settings.revision`; use the revision returned by create |
 
+## Cost of a CLI smoke turn
+
+Measured on agent-os (Nanite 0.3.0-beta.1-102, 2026-10-25), one session and one turn each ("Reply with the single word READY."), launched through the session API as the service user, no tools:
+
+| Runtime | Model | Tokens for the turn | Time |
+| --- | --- | --- | --- |
+| Claude | `haiku` | about 29.9k (cold start: nearly all of it is Claude Code's own system prompt and tool schema written to its cache; 4 output tokens) | about 2 s |
+| Codex | `gpt-6-luna` | about 16.5k (4.9k uncached input, 11.5k cache read) | about 4 s |
+| Agy | `gemini-3.8-flash-low` | about 8.4k | about 4 s |
+
+Plan about 30k tokens for any Claude turn, whatever the prompt, when budgeting a smoke. A CLI host needs an explicit provider and model (`CLI host settings require explicit provider and model`), and `POST /api/agent-setup` needs a non-empty `tools` list, so an agent with no tools is created with `POST /api/agent-host-settings` and then a session.
+
 ## Smoke test
 
 ```sh

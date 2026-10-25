@@ -263,3 +263,14 @@ func (s *EnrollmentService) DetachSession(ctx context.Context, sessionID string)
 		slog.Error("enrollment: detach actor session", "session_id", sessionID, "error", err)
 	}
 }
+
+// IsEnrolled reports whether the agent has an enrollment record in any state
+// (enrolling, enrolled, or retired). Such an agent's host settings are tied to
+// a Tether registry entry, which retire and delete must respect.
+func (s *EnrollmentService) IsEnrolled(ctx context.Context, hostSettingsID string) (bool, error) {
+	_, err := s.writer().Get(ctx, hostSettingsID)
+	if errors.Is(err, store.ErrEnrollmentNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}

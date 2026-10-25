@@ -165,10 +165,25 @@ actor's current session (the bridge then delivers its mail), and ending the
 session releases it.
 
 To retire the actor, retire the agent: `host_settings_retire` (MCP) or
-`POST /api/agent-host-settings/{id}/retire`. The actor is archived and made
-unroutable at once, then deregistered in Tether. If Tether is down the response
-shows `actor.deregister_pending: true`; repeat the retire later to retry. A
-retired address is never reused.
+`POST /api/agent-host-settings/{id}/retire`. For an enrolled agent this needs an
+**admin** credential (it changes Tether's registry); `agents:manage` and
+`maintain` are refused with `enrolled_retire_requires_admin`, and agents that
+were never enrolled retire as before. The actor is archived and made unroutable
+at once, then deregistered in Tether. If Tether is down the response shows
+`actor.deregister_pending: true`; `nanite serve` retries in the background
+(shortly after start, then every 15 minutes, backing off from 15 minutes to 2
+hours per agent) and the next retire call retries too.
+
+Rules to know:
+
+- A retired address is never reused. Enrolling a retired agent again answers
+  `409`; to give the agent a new address, create a new host settings row (a new
+  id), which gets a new key and URN.
+- Deleting an enrolled agent's host settings is refused (`409`,
+  `enrolled_host_cannot_be_deleted`): retire it first.
+- `PUT ... enabled=false` is a reversible disable that leaves the actor as it
+  is; setting `enabled=true` again restores the host with the same URN. Only
+  retire ends an actor.
 
 ## Work root, listing and stopping
 

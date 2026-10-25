@@ -399,10 +399,9 @@ unaffected. A session whose host settings were disabled by a path other than
 retire cannot clear the actor (the schema refuses the update); that failure is
 logged.
 
-**Not covered by the fake-Tether tests / unverified:** the live deregister call
-(above; `display_name`, the lookup shape and `DELETE` are confirmed by the Tether
-agent but not yet observed by Nanite live). The unix-socket transport is tested
-against a fake Tether on a real socket, not the real daemon. Verified by tests: register 201 then 200 with the same
+**Observed live (2026-10-25, agent-os, Tether build 49a3a6b2, one throwaway host, since retired):** over the local unix socket (`NANITE_TETHER_REGISTRY_ADDR=unix:///var/lib/fabric/tether/run/tetherd.sock`) with the registry token file: enroll created the actor (`already_enrolled: false`, URN minted, key `nanite/<install_id>/<host_settings_id>`); the repeat returned the same URN (`already_enrolled: true`); `GET /registry/agents?substrate=nanite&external_id=<install_id>%2F<host_settings_id>` returned 200 with `{"agent": {"urn", "kind": "agent", "owner": "nanite", "tether_instance_id", "display_name", "status", "field_metadata", ...}}` and the `display_name` Nanite sent (`display_name` is accepted on register); retire (admin) archived the instance and `DELETE /registry/agents/<escaped URN>` succeeded: the registry entry is NOT removed but set to `status: "deprecated"` (a tombstone; the URN is never reused), and a send to it was refused with `409 recipient_deprecated` (mail sent before the retire stayed stored). The remote listener and the public edge returned 401 "verified caller identity required" for the same token, as documented above. At startup the retry loop looked up a record that never registered (an earlier attempt that got 401), found nothing (404) and marked it `retired`.
+
+**Still not observed live:** the 400 conflict cases of the register route, behaviour with a rotated token, and the retry loop against a Tether that is actually down (tested with the fake only). Verified by tests: register 201 then 200 with the same
 URN, lookup, deregister with an escaped path, 400/401/403/5xx/dropped
 connection/timeout mapping, the token file checks, the one-transaction rollback,
 crash recovery, concurrency, retire with Tether down then retried, route and MCP

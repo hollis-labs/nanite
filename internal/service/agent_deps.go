@@ -60,9 +60,9 @@ type AgentDepsConfig struct {
 	// (codex / claude) may write to beyond its boot dir. Threaded onto
 	// Dependencies.CLIWritableRoots so the boot-dir layouts widen the
 	// planted provider config (codex [sandbox_workspace_write], claude
-	// permissions.additionalDirectories). Sourced from the same
-	// dev_tools_allowed_paths config setting that scopes the in-process
-	// dev_* tools (CW-20260518-0075).
+	// permissions.additionalDirectories). Sourced from the
+	// cli_writable_roots config setting, decoupled from the
+	// dev_tools_allowed_paths list that scopes the in-process dev_* tools.
 	CLIWritableRoots []string
 	// ControlPlane is runtimeagent.Dependencies.ControlPlane
 	// (CW-20261001-0143).

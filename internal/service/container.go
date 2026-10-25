@@ -484,6 +484,13 @@ type ContainerConfig struct {
 	// the "workspace allow-list" section out of the rendered summary.
 	DevToolsAllowedPaths []string
 
+	// CLIWritableRoots is the extra directories every CLI launch may write,
+	// from nanite.yaml `cli_writable_roots` (plus dev_tools_allowed_paths
+	// behind NANITE_CLI_ROOTS_FROM_DEV_TOOLS=1; see cmd/nanite
+	// resolveCLIWritableRoots). Independent of DevToolsAllowedPaths. The
+	// runtime's deny-list still applies to every entry.
+	CLIWritableRoots []string
+
 	// AgentControlPlane names Nanite's own directories that every launched
 	// agent is denied writes to (CW-20261001-0143). The zero value protects
 	// nothing; cmd/nanite fills it from the app layout.
@@ -1099,7 +1106,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		ProviderKeys:     providerKeys,
 		APIBaseURL:       cfg.APIBaseURL,
 		AgentCredential:  cfg.AgentCredential,
-		CLIWritableRoots: cfg.DevToolsAllowedPaths,
+		CLIWritableRoots: cfg.CLIWritableRoots,
 		ControlPlane:     cfg.AgentControlPlane,
 		Permissions:      permissions,
 		RuntimeFeed:      runtimeFeed,

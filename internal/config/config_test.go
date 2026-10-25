@@ -378,3 +378,57 @@ dev_tools_allowed_paths:
 			cfg.DevToolsAllowedPaths[0], "~/Projects-apps/scoped-project")
 	}
 }
+
+// cli_writable_roots: nil when unset (so the compatibility warning can tell
+// unset from an explicit empty list), tilde-expanded, empty entries dropped,
+// and a project file replaces the user file's list.
+func TestCLIWritableRoots_ParseResolveMerge(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+	if got := (&RuntimeConfig{}).ResolvedCLIWritableRoots(); got != nil {
+		t.Errorf("unset resolves to %v, want nil", got)
+	}
+	cfg := &RuntimeConfig{CLIWritableRoots: []string{"~/dev", "", "/opt/x"}}
+	if got, want := cfg.ResolvedCLIWritableRoots(), []string{filepath.Join(home, "dev"), "/opt/x"}; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("resolved = %v, want %v", got, want)
+	}
+
+	dir := t.TempDir()
+	user, project, empty := filepath.Join(dir, "u.yaml"), filepath.Join(dir, "p.yaml"), filepath.Join(dir, "e.yaml")
+	for p, body := range map[string]string{
+		user:    "cli_writable_roots:\n  - ~/dev\n  - ~/other\ndev_tools_allowed_paths:\n  - ~/dev\n",
+		project: "cli_writable_roots:\n  - ~/only\n",
+		empty:   "cli_writable_roots: []\n",
+	} {
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	merged, err := LoadFrom(user, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := merged.ResolvedCLIWritableRoots(); len(got) != 1 || got[0] != filepath.Join(home, "only") {
+		t.Errorf("project list should replace user list, got %v", got)
+	}
+	if len(merged.DevToolsAllowedPaths) != 1 {
+		t.Errorf("dev_tools_allowed_paths must be untouched, got %v", merged.DevToolsAllowedPaths)
+	}
+	merged, err = LoadFrom(user, empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.CLIWritableRoots == nil || len(merged.CLIWritableRoots) != 0 {
+		t.Errorf("explicit empty list must stay non-nil and empty, got %#v", merged.CLIWritableRoots)
+	}
+	merged, err = LoadFrom(empty, filepath.Join(dir, "missing.yaml"))
+	if err != nil || merged.CLIWritableRoots == nil {
+		t.Errorf("explicit [] without project file: %#v, %v", merged.CLIWritableRoots, err)
+	}
+	merged, err = LoadFrom(filepath.Join(dir, "missing.yaml"), filepath.Join(dir, "missing2.yaml"))
+	if err != nil || merged.CLIWritableRoots != nil {
+		t.Errorf("unset must be nil: %#v, %v", merged.CLIWritableRoots, err)
+	}
+}

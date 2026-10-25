@@ -167,10 +167,13 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
   - **File access.** The same private settings carry `read_file(<dir>)` and
     `write_file(<dir>)` for each of `SetupParams.CLIWritableRoots` (the list
     codex and claude get: the work root first, the host settings `directories`,
-    the configured `dev_tools_allowed_paths`; existing directories outside the
-    control plane). A root that is `/`, the real home or a parent of it, a
-    secrets directory of the home (`.ssh`, `.gnupg`, `.aws`, `.kube`, `.docker`,
-    `.gemini`, `.agents`, `.nanite`) or inside one, relative, not clean, or
+    the configured `cli_writable_roots`, not `dev_tools_allowed_paths`, which
+    only feeds them behind the deprecated `NANITE_CLI_ROOTS_FROM_DEV_TOOLS=1`;
+    existing directories outside the control plane). A root refused by the
+    shared deny-list (`CLIRootDenyReason`: `/`, the real home or a parent of
+    it, and `~/.tether`, `.cerberus`, `.nanite`, `.ssh`, `.gnupg`, `.aws`,
+    `.kube`, `.docker`, `.gemini`, `.agents`, `.config` or anything inside or
+    holding one; applied to claude, codex and agy alike), or one that is relative, not clean, or
     contains whitespace, `*`, `(`, `)` or a newline gets no rule. The sidecar
     tracks these rules together with the MCP ones, so a changed or revoked
     directory loses its rule at the next launch. Verified live (see the guide).

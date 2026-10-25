@@ -117,6 +117,14 @@ the database; use `--directories /absolute/work,/absolute/shared` to choose the
 work root and additional directories. Tools are explicitly granted by `--tools`;
 `all` means the available catalog, not a policy bypass.
 
+To give ONE CLI host access to a directory such as `~/dev`, add its absolute
+path to that host's `directories` (`--directories /abs/work,/home/you/dev`).
+`cli_writable_roots` in the config gives every CLI host a path, and
+`dev_tools_allowed_paths` no longer does: it scopes the in-process `dev_*`
+tools only. Your home, its parents and credential or control directories
+(`~/.tether`, `~/.ssh`, `~/.config`, ...) are refused wherever they are listed;
+see SECURITY.md, "CLI writable roots". These roots are not OS-level isolation.
+
 ## 7. Stop and resume
 
 Cancel a running turn with `POST /api/agent/v1/sessions/{id}/turns/{turnId}/cancel`;

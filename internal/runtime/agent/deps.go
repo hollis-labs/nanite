@@ -112,7 +112,9 @@ type Dependencies struct {
 	// CLIWritableRoots is the allow-list of directories a CLI-launch
 	// agent (codex / claude) may write to beyond its throwaway boot
 	// dir. The composition root populates it from the nanite
-	// dev_tools_allowed_paths config setting; composeBootdirParams
+	// cli_writable_roots config setting (not dev_tools_allowed_paths, which
+	// only reaches it behind NANITE_CLI_ROOTS_FROM_DEV_TOOLS=1);
+	// effectiveCLIWritableRoots then applies the deny-list, and composeBootdirParams
 	// copies it into SetupParams so the boot-dir layouts can thread it
 	// into the planted provider config (codex [sandbox_workspace_write]
 	// writable_roots, claude permissions.additionalDirectories).

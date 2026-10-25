@@ -566,6 +566,11 @@ func cmdServeWithInitializers(
 	}
 	defer func() { _ = serveAuthState.store.Close() }()
 
+	cliRoots, cliRootsWarnings := resolveCLIWritableRoots(cfg, runtimeagent.CLIRootsFromDevToolsEnabled())
+	for _, w := range cliRootsWarnings {
+		slog.Warn(w)
+	}
+
 	container, err := service.NewContainer(service.ContainerConfig{
 		HarnessProfiles:          harnessProfiles,
 		Store:                    s,
@@ -597,6 +602,7 @@ func cmdServeWithInitializers(
 		// (no drift between what the agent reads and what the gate
 		// enforces).
 		DevToolsAllowedPaths: resolveDevToolsAllowedPaths(cfg),
+		CLIWritableRoots:     cliRoots,
 		AgentControlPlane:    agentControlPlane(serveLayout, *dbPath, wtBaseDir),
 		// Durable-agent recipe catalog files/dirs merge with built-ins at
 		// startup through the app config seam used for product tunables.
@@ -1160,9 +1166,8 @@ func initProviders(keys *providerkeys.Manager) (*provider.Registry, *providercat
 }
 
 // resolveDevToolsAllowedPaths returns the effective directory allow-list.
-// It scopes the dev_* MCP tools AND, since CW-20260518-0075, the CLI-launch
-// boot dirs (codex [sandbox_workspace_write] writable_roots, claude
-// permissions.additionalDirectories) — both consume the value returned here.
+// It scopes the in-process dev_* MCP tools only. CLI launches take their extra
+// writable roots from cli_writable_roots (resolveCLIWritableRoots).
 //
 // Trust-agent redesign (CW-20260430-0009):
 //
@@ -1192,6 +1197,36 @@ func resolveDevToolsAllowedPaths(cfg *config.RuntimeConfig) []string {
 		}
 	}
 	return nil
+}
+
+// resolveCLIWritableRoots is the extra writable roots every CLI launch gets:
+// cli_writable_roots, plus (deprecated escape hatch, fromDevTools) the dev
+// tools list as before. The warnings are the startup WARN lines: one when
+// dev_tools_allowed_paths is set and cli_writable_roots is not (see
+// cliRootsCompatWarning), one while the escape hatch is on.
+func resolveCLIWritableRoots(cfg *config.RuntimeConfig, fromDevTools bool) (roots, warnings []string) {
+	if cfg == nil {
+		return nil, nil
+	}
+	roots = cfg.ResolvedCLIWritableRoots()
+	if w := cliRootsCompatWarning(cfg); w != "" {
+		warnings = append(warnings, w)
+	}
+	if fromDevTools {
+		roots = append(roots, resolveDevToolsAllowedPaths(cfg)...)
+		warnings = append(warnings, runtimeagent.CLIRootsFromDevToolsEnv+"=1 is deprecated: CLI launches also get dev_tools_allowed_paths as writable roots, as before cli_writable_roots existed; list the directories in cli_writable_roots or a host's directories instead, because this switch will be removed")
+	}
+	return roots, warnings
+}
+
+// cliRootsCompatWarning is the one-release compatibility notice: it returns
+// text only when dev_tools_allowed_paths is set (non-empty) and
+// cli_writable_roots is unset (nil; an explicit empty list counts as set).
+func cliRootsCompatWarning(cfg *config.RuntimeConfig) string {
+	if cfg == nil || len(cfg.DevToolsAllowedPaths) == 0 || cfg.CLIWritableRoots != nil {
+		return ""
+	}
+	return "dev_tools_allowed_paths is set but cli_writable_roots is not: CLI launches (claude, codex, agy) no longer inherit the dev tools list and get only their work root and the host's directories; set cli_writable_roots to grant more"
 }
 
 // resolveWorkflowDefinitionsPath resolves the configured workflow

@@ -30,15 +30,10 @@ type RuntimeConfig struct {
 	// that were cut alongside it).
 	Role string `yaml:"role"`
 	// DevToolsAllowedPaths is the user-configurable allow-list of filesystem
-	// roots agents may access. It governs two surfaces:
-	//
-	//   - the in-process dev_* MCP tools (dev_read, dev_glob, dev_grep,
-	//     dev_write, dev_edit, dev_bash) — the path-safety escape check;
-	//   - CLI-launch boot dirs (CW-20260518-0075) — threaded into the
-	//     planted provider config as codex's [sandbox_workspace_write]
-	//     writable_roots and claude's permissions.additionalDirectories,
-	//     so a codex/claude CLI agent can write beyond its throwaway boot
-	//     dir cwd.
+	// roots the in-process dev_* MCP tools (dev_read, dev_glob, dev_grep,
+	// dev_write, dev_edit, dev_bash) may access: the path-safety escape check.
+	// It does NOT scope CLI launches any more: their extra writable roots come
+	// from CLIWritableRoots (cli_writable_roots) and the host's `directories`.
 	//
 	// Entries support a leading ~/ for the user's home directory and are
 	// tilde-expanded at load time.
@@ -51,6 +46,14 @@ type RuntimeConfig struct {
 	// sourced; this knob only widens which roots qualify, it never disables
 	// traversal protection.
 	DevToolsAllowedPaths []string `yaml:"dev_tools_allowed_paths"`
+	// CLIWritableRoots lists extra directories every CLI-launched agent
+	// (claude, codex, agy) may write, beyond its session work root and the
+	// host's own `directories`. Default empty: none. Entries support a leading
+	// ~/. Nil means unset, which is not the same as `cli_writable_roots: []`
+	// (the compatibility warning fires only for unset). The runtime's hard
+	// deny-list (real home and parents, ~/.tether, ~/.ssh, ...) drops entries
+	// regardless. See SECURITY.md, "CLI writable roots".
+	CLIWritableRoots []string `yaml:"cli_writable_roots"`
 	// WorkflowDefinitionsPath is the on-disk directory internal/agentworkflow's
 	// registry loader reads at startup — one WorkflowDefinition per *.yaml
 	// file (CW-20260813-0014), keyed by the definition's Name field. The
@@ -204,6 +207,22 @@ func (c *RuntimeConfig) ResolvedDevToolsAllowedPaths() []string {
 	return out
 }
 
+// ResolvedCLIWritableRoots returns CLIWritableRoots with ~/ expanded and empty
+// entries dropped. Nil only when the field was never configured; an explicit
+// empty list returns a non-nil empty slice.
+func (c *RuntimeConfig) ResolvedCLIWritableRoots() []string {
+	if c.CLIWritableRoots == nil {
+		return nil
+	}
+	out := make([]string, 0, len(c.CLIWritableRoots))
+	for _, p := range c.CLIWritableRoots {
+		if expanded := expandHome(p); expanded != "" {
+			out = append(out, expanded)
+		}
+	}
+	return out
+}
+
 // readConfig reads a single YAML config file. Returns a zero RuntimeConfig if the
 // file does not exist.
 func readConfig(path string) (*RuntimeConfig, error) {
@@ -238,6 +257,9 @@ func merge(user, project *RuntimeConfig) *RuntimeConfig {
 	}
 	if project.DevToolsAllowedPaths != nil {
 		out.DevToolsAllowedPaths = project.DevToolsAllowedPaths
+	}
+	if project.CLIWritableRoots != nil {
+		out.CLIWritableRoots = project.CLIWritableRoots
 	}
 	if project.WorkflowDefinitionsPath != "" {
 		out.WorkflowDefinitionsPath = project.WorkflowDefinitionsPath

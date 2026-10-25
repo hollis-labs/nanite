@@ -8,6 +8,20 @@ lives in the git log.
 
 ### Added
 
+- **`cli_writable_roots`: CLI writable roots are decoupled from
+  `dev_tools_allowed_paths`, and a hard deny-list applies.** A launched CLI
+  agent (claude, codex, agy) now gets its work root, the host's `directories`
+  and the new `cli_writable_roots` list (default empty), not
+  `dev_tools_allowed_paths`, which scopes only the in-process `dev_*` tools.
+  Every root, whatever its source, is refused when it equals, is inside or
+  contains `/`, the real home (and parents), `~/.tether`, `~/.cerberus`,
+  `~/.nanite`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.docker`,
+  `~/.gemini`, `~/.agents` or `~/.config`. For one release a startup warning
+  fires when `dev_tools_allowed_paths` is set and `cli_writable_roots` is
+  not; the deprecated `NANITE_CLI_ROOTS_FROM_DEV_TOOLS=1` restores the old
+  inheritance and warns at every start. To give one host `~/dev`, add it to
+  that host's `directories`. See SECURITY.md, "CLI writable roots".
+
 - **Station LLM gateway providers** (`station-openai`, `station-anthropic`).
   Two seeded provider rows point the OpenAI- and Anthropic-wire adapters at a
   Station gateway: `base_url`, optional `headers`, `disable_anthropic_beta`,

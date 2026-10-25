@@ -12,31 +12,37 @@ Defined in the repository's `nanite.cerberus.yaml` (the file Cerberus has regist
 
 | Field | Value |
 | --- | --- |
-| id | `nanite-api-service` (kept: it already existed and owned the stale launchd agent and install directory) |
-| mode / supervisor / run_from | `os_service` / `launchd` / `artifact` |
-| command | `./nanite serve --port 8090 --bind-address 127.0.0.1`, in `~/dev/hollis-labs/apps/nanite` |
+| id | `nanite-api-service` |
+| mode / supervisor / run_from | `os_service` / `launchd` / `workspace` |
+| command | `~/.local/share/nanite/current/nanite serve --port 8090 --bind-address 127.0.0.1` (Cerberus expands `~`) |
 | env | `NANITE_WORKSPACE=mesh-chat` and an explicit `PATH`; nothing else, no `env_file`, nothing inherited from a shell |
 | lifecycle | `auto_start`, `auto_restart`, `restart_delay: 10s`, `max_restart_attempts: 5` |
-| build | `make_standard`, output `nanite` (`make build`) |
+| build | none: nothing is built on this machine |
 
-The installed copy Cerberus runs lives at `~/.cerberus/apps/nanite/nanite-api-service/bin/nanite-api-service`; logs are Cerberus's (`cerberus resource logs nanite-api-service`).
+`current/nanite` is a symlink that `fleet-install` flips between versioned binaries in `~/.local/share/nanite/releases/<version>/`. Logs are Cerberus's (`cerberus resource logs nanite-api-service`).
 
-## Deploy and rollback
+## Deploy and rollback (CW-20261024-0120)
+
+Binaries are built once in CI (`.github/workflows/build.yml`: tests on `ubuntu-latest`, build on the org runner `build-1`; artifact `nanite-<sha12>` with the `linux_amd64` and `darwin_arm64` tarballs, `SHA256SUMS` and `build-info.json`). A deploy installs a CI artifact with `fleet-install` (hollis-labs/tools, `fleet-install/`), driven by `deploy/deploy.yaml`, which ships inside the tarball:
 
 ```
-scripts/mac-nanite/predeploy.sh                      # refuses if an agent runtime is active; sqlite .backup of auth + workspace DBs with integrity check
-cerberus resource plan nanite-api-service deploy     # optional: shows what an approval would bind to
-cerberus resource deploy nanite-api-service --ack    # builds (make build) from the checkout and activates
-cerberus resource status nanite-api-service          # health / artifact state
+fleet-install deploy nanite --commit <sha> --repo hollis-labs/nanite --target mac-nanite --dry-run   # first: read-only
+fleet-install deploy nanite --commit <sha> --repo hollis-labs/nanite --target mac-nanite
+fleet-install status nanite --target mac-nanite
+fleet-install rollback nanite --target mac-nanite
 ```
 
-Deploy builds whatever is checked out in `~/dev/hollis-labs/apps/nanite`, so update that checkout (`git pull --ff-only`, clean tree) first, and run `npm ci` in `ui/` once on a fresh checkout. Other verbs: `reload` (restart only), `stop`, `sync`, `doctor`, `logs`.
+`--repo` is needed the first time; it is remembered afterwards. `--latest-green` takes the newest green build on `main`. What a deploy does: download the artifact with the machine's `gh` login and verify `SHA256SUMS`; refuse if an agent runtime is active; take a sqlite `.backup` of `auth.db` and the workspace `main.db` with an integrity check (under `~/.local/share/nanite/releases/.fleet-install/backups/`); stop unless the build's `migrations_max` equals the database's goose version or `--accept-migration` is given; install the versioned binary; flip the symlink atomically; `cerberus resource reload nanite-api-service --ack`; poll `/api/health` until it reports the new version; and on failure relink the previous version, reload and re-check. The last three versions are kept.
 
-Rollback: `cerberus resource stop nanite-api-service --ack`; if the failed build ran a migration, restore the two database copies printed by `predeploy.sh` over the live databases (delete `-wal`/`-shm`); check out the previous commit and deploy again. A migration is not safely reversible once the database has been written to, so the backup is the rollback for the data.
+A migration is not safely reversible once the database has been written to. When a build migrates, a binary rollback can leave an older binary on a newer schema; the rollback output prints the exact `cp` commands to restore the two database backups (service stopped, `-wal`/`-shm` removed).
+
+## agent-os (procedure for the owner's go, not yet used)
+
+agent-os `hub-nanite` stays `run_from: workspace` behind `/var/lib/fabric/bin/nanite -> /var/lib/fabric/releases/nanite/<version>/nanite`; restart is `systemctl --user restart` (see `deploy/deploy.yaml`, target `agent-os-hub-nanite`). The first pipeline deploy is a `--dry-run` followed by the owner's go.
 
 ## Verified and unverified
 
-Verified 2026-10-24: deploy through Cerberus, health, and crash recovery (`kill -9` of the service; launchd restarted it in about one second). **Unverified:** autostart across a reboot or logout. It rests on the generated launch agent (`RunAtLoad`, `KeepAlive`, in `~/Library/LaunchAgents`); no reboot or logout test was run, and none is planned unless the operator asks.
+Verified 2026-10-24 on the real Mac instance: first deploy and a second deploy from CI artifacts through `fleet-install` (the `cerberus resource reload` picks up the flipped symlink), `status`, manual rollback and roll-forward, and crash recovery (`kill -9` of the service; launchd restarted it within seconds). The forced-failure automatic rollback was exercised on a throwaway instance (port 18090), not on the real one. **Unverified:** autostart across a reboot or logout. It rests on the generated launch agent (`RunAtLoad`, `KeepAlive`, in `~/Library/LaunchAgents`); no reboot or logout test was run, and none is planned unless the operator asks.
 
 ## Things to know
 

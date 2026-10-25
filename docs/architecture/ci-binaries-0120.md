@@ -86,8 +86,10 @@ targets:
       - {kind: sqlite_backup, db: /var/lib/fabric/xdg/data/nanite/auth/auth.db,  dest: "{backup_dir}/auth.pre-{version}.db"}
       - {kind: sqlite_backup, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db, dest: "{backup_dir}/main.pre-{version}.db"}
       - {kind: migration_check, db: /var/lib/fabric/xdg/data/nanite/workspaces/default/main.db}
-    restart: {via: systemd-user, unit: com.hollis-labs.cerberus.hub-nanite.service}   # or {via: cerberus, resource: hub-nanite, approval: print}
-    health: {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+    restart:                                     # ordered list (a single mapping is also accepted)
+      - {via: systemd-user, unit: com.hollis-labs.cerberus.hub-nanite.service}   # or {via: cerberus, resource: hub-nanite} (prints the request)
+    health:                                      # ordered list (a single mapping is also accepted)
+      - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
   - id: mac-nanite
     when: {os: darwin, arch: arm64}
     hosts: [mac]
@@ -95,11 +97,15 @@ targets:
     install_root: ~/.local/share/nanite/releases
     symlinks: [{path: ~/.local/share/nanite/current/nanite}]
     preflight: [ ...same shape with the mesh-chat databases... ]
-    restart: {via: cerberus, resource: nanite-api-service, verb: apply}   # local user, --ack
-    health: {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
+    restart:
+      - {via: cerberus, resource: nanite-api-service, verb: reload, run: true}   # local user: runs `cerberus resource reload ... --ack`
+    health:
+      - {url: "http://127.0.0.1:8090/api/health", expect_status: [200], timeout: 60s, version_json: version}
 ```
 
-How the other apps' needs map (from the Cerberus doc, section 3): per-DB `sqlite_backup` entries (WAL ok); `health.expect_status: [401]` for mentat; station's two units are two `symlinks` entries plus one `unit_dropins` entry that resets `ExecStart=` and two `restart` steps (usage monitor first, ordered); fragments-engine and basalisk are one symlink each. Restarts of agent-os resources that need a Cerberus write use `via: cerberus, approval: print`, which prints the exact request for the Approve and Run click instead of running it.
+Implemented as `fleet-install/` in hollis-labs/tools (reference: its README.md). Differences from the first draft: `restart` and `health` are ordered lists (a single mapping still parses); the `cerberus` mode prints the request by default and runs it only with `run: true` for a local user (the draft's `approval: print` flag is gone, printing is the default), and its verb is limited to `reload`, `restart` or `apply`, never `deploy`; the `command` and `none` restart modes were added; `preflight` also has `file_backup`; `health` accepts `method`, `interval`, `expect_status` (default `[200]`) and `version_json` (dotted path); an optional `backup_dir` per target. Unknown fields are rejected.
+
+How the other apps' needs map (from the Cerberus doc, section 3): per-DB `sqlite_backup` entries (WAL ok); `health.expect_status: [401]` for mentat; station's two units are two `symlinks` entries plus one `unit_dropins` entry that resets `ExecStart=` and two `restart` steps (usage monitor first, ordered); fragments-engine and basalisk are one symlink each. Restarts of agent-os resources that need a Cerberus write use `via: cerberus` (the default prints, `run: true` executes locally), which prints the exact request for the Approve and Run click instead of running it.
 
 ## 6. Cerberus changes
 
@@ -122,7 +128,7 @@ Done when a green main commit yields both binaries, and any commit can be deploy
 2. Artifacts, **no tags and no rolling prerelease** (tags need the owner). Retention 30 days for `main`, 7 for PRs. Keep the deployed binaries on the targets for rollback.
 3. The build job runs on the org runner `[self-hosted, build-1]` (Go 1.27.3, Node 22; Cerberus owns upkeep), after a green test job; tests stay on `ubuntu-latest`. Include the fork-PR guard and `fetch-depth: 0` + tags. `go-test.yml` stays the PR gate; the reusable workflow's test job (same full test command) gates the build on `main`; the duplicate run on `main` is accepted for now. A binary exists only for a fully tested commit. Until `go-app-build.yml` (tools PR #9) merges, an equivalent local workflow file is used and replaced when it lands.
 4. Credential: the existing `gh` login now; a fine-grained read-only token or GitHub App is the owner's later decision (CW-20261015-0049). `--from-file` pull-and-copy mode is supported.
-5. `fleet-install` is a standalone static Go binary with its own `go.mod`, built for now inside this repo (`tools/fleet-install`) because other repos are outside the standing approval; moving it to `hollis-labs/tools` later is cheap. App-agnostic: all app specifics live in `deploy.yaml`.
+5. `fleet-install` is a standalone static Go binary with its own `go.mod`, developed here first and now lives in `hollis-labs/tools` (`fleet-install/`, hollis-labs/tools PR #10) with the owner's approval; this repo keeps only its own `deploy/deploy.yaml` and `build.yml`. App-agnostic: all app specifics live in `deploy.yaml`.
 6. agent-os restart: `systemctl --user restart` (the approved manual exception) behind a `restart` mode in `deploy.yaml`; a `cerberus` mode that prints the request for Approve and Run exists but is not the default until an actions credential exists. Never `cerberus resource apply/deploy` (it re-renders units and rebuilds from checkouts).
 7. `hub-nanite` stays `run_from: workspace` behind the symlink `/var/lib/fabric/bin/nanite -> /var/lib/fabric/releases/nanite/<version>/nanite`.
 8. Attestation: optional; verified when present, never required.

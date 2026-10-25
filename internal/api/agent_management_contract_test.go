@@ -183,7 +183,7 @@ func TestAgentV1CapabilitiesContract(t *testing.T) {
 // contract fails loudly here if one is renamed or dropped. Retire over MCP and
 // HTTP is the same write.
 func TestAdminMCPToolNamesAreTheContract(t *testing.T) {
-	want := []string{"agent_setup", "agent_list", "agent_get", "host_settings_list", "host_settings_create", "host_settings_update", "host_settings_retire",
+	want := []string{"agent_setup", "agent_list", "agent_get", "agent_enroll", "host_settings_list", "host_settings_create", "host_settings_update", "host_settings_retire",
 		"authority_list", "authority_get", "tool_grant", "tool_ungrant", "skill_grant", "skill_ungrant", "authority_revoke",
 		"session_start", "session_list", "session_get", "session_history", "session_stop", "turn_send", "turn_get", "turn_cancel"}
 	g := newGuarded(t)

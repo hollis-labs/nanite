@@ -223,6 +223,7 @@ an admin MCP tool of the same behavior except the turn event stream.
 |---|---|---|
 | Create or converge an agent | `POST /api/agent-setup` | `agent_setup` |
 | List / read agents | `GET /api/native-agents[/{id}]` (`limit`, `offset`) | `agent_list`, `agent_get` |
+| Enroll as a Tether actor (admin only) | `POST /api/native-agents/{id}/enroll` `{"reason", "revision"?}` | `agent_enroll` |
 | Host settings | `GET/POST /api/agent-host-settings`, `PUT .../{id}` | `host_settings_*` |
 | Retire (disable) | `POST /api/agent-host-settings/{id}/retire` `{"reason"}` | `host_settings_retire` |
 | Read authority and grantable tools | `GET /api/native-authority[/{id}]`, `GET /api/native-authority/tools` (`limit`, `offset`) | `authority_list`, `authority_get` |

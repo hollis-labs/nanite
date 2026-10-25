@@ -3,14 +3,18 @@
 Decision record (accepted). Nanite agents created with `agent_setup` have no stable
 Tether address, so Tether mail cannot reach them. This document decides which
 system owns the address, who owns the binding between an agent and that
-address, and how the binding is created, used and retired. It is design only;
-no code accompanies it.
+address, and how the binding is created, used and retired. The decision was
+design only; enrollment (E1/A2/A3) is now built (CW-20261024-0017), see
+"Tether API as shipped" and "Enrollment as built" below. Statements in
+"Context" describe the state at decision time and are marked where Tether has
+since changed.
 
 ## Context
 
 What is true today, from the code:
 
-- **No production code creates an actor.** `CreateDurableAgentInstance`
+- **No production code creates an actor** (at decision time; `ActorEnrollment`
+  in `internal/store/enrollment.go` is now the one writer, see below). `CreateDurableAgentInstance`
   (`internal/store/durable_agents.go`) and `durableAgentService.Create`
   (`internal/service/durable_agents.go`) return `ErrVerifiedActorRequired`
   ("no adopted issuer"). The only inserts into `actor_instances` and
@@ -39,8 +43,9 @@ What is true today, from the code:
   has an idempotent registration primitive keyed on `(substrate, external_id)`
   (`registry.Service.RegisterIdempotent`, with a storage-level transaction in
   `RegisterWithExternalKey`) that nothing in the HTTP layer or elsewhere in
-  production code calls; `POST /registry/{kind}` always goes through plain
-  `Register`, which mints a new URN on every call. `GET /registry/agents`
+  production code called at decision time; `POST /registry/{kind}` went through
+  plain `Register`, which mints a new URN on every call. **Since changed:**
+  Tether build 49a3a6b2 exposes it over HTTP (see "Tether API as shipped"). `GET /registry/agents`
   can look an entry up by `external_id` and `substrate`.
 - **One Tether gateway per install.** Migration 182 allows one enabled
   `mcp_servers` row that runs `tether ... --token-file`; it authenticates as a
@@ -54,9 +59,10 @@ What is true today, from the code:
   separate owner approval per enforcement point.
 - **Deregistration is a soft delete.** `DELETE /registry/{kind}/{urn}` sets
   status `deprecated` and returns the profile; child rows are untouched. The
-  message send path does not consult the registry for the recipient's status,
-  so a send to a deprecated URN is not refused by the registry and the mail is
-  addressed by URN string alone.
+  message send path did not consult the registry for the recipient's status at
+  decision time, so a send to a deprecated URN was not refused. **Since
+  changed:** build 49a3a6b2 refuses such sends with `409 recipient_deprecated`
+  (see "Tether API as shipped").
 
 Every Tether statement in this document was checked against Tether's `main`
 branch, not a working branch.
@@ -120,10 +126,10 @@ which grants).
 2. **Registration is idempotent on an external key.** Nanite registers with
    substrate `nanite` and an external id that is stable across retries and
    unique across installs (install identity plus host settings id).
-   Tether must expose its existing idempotent registration over HTTP (a
-   Tether-side change; see Tasks; on `main` nothing calls it). Until it does,
-   enrollment uses lookup by external id, then register, then attaching the
-   external id. Plain register does not store external ids, so the attach step
+   Tether had to expose its existing idempotent registration over HTTP (T0;
+   now shipped, so the interim lookup-register-attach scheme described next
+   is not used). The interim plan was lookup by external id, then register,
+   then attaching the external id. Plain register does not store external ids, so the attach step
    has no HTTP route either: the practical interim is to carry the external
    key in the display name or a registry field and look it up by that, which
    leaves a window for duplicate directory entries that deregistration cleans
@@ -211,6 +217,144 @@ Enrollment sequence, crash-safe:
   other purposes is untouched.
 - The A2A push notifier's `ErrVerifiedActorRequired` log noise remains until
   it is silenced separately; enrollment does not fix it.
+
+## Tether API as shipped
+
+Tether build `49a3a6b2` (Tether PRs #516 and #517), verified live by the Tether
+agent. Nanite's tests run against a fake of this surface
+(`internal/tetherregistry/tetherregistrytest`); nothing here was exercised
+against a live Tether by the Nanite enrollment change.
+
+1. **Idempotent register over HTTP** (#516): `POST /registry/agents` with JSON
+   `substrate` and `external_id`, or one `external_key` =
+   `<substrate>/<external_id>` split at the FIRST slash. The first call returns
+   `201` and creates the entry (minting `msg://agent/agent-mux/agt_<10>`); a
+   repeat returns `200` with the SAME URN and changes nothing (use `PATCH` to
+   update); concurrent calls agree on one URN; half a key, or a conflicting
+   `substrate`/`external_id`/`external_key` set, returns `400`.
+   `GET /registry/agents?substrate=nanite&external_id=...` finds the entry. The
+   MCP tool `tether_registry_register` takes the same fields and returns
+   `created` true or false. For Nanite: substrate `nanite`, external id
+   `<install_id>/<host_settings_id>`, so the key is
+   `nanite/<install_id>/<host_settings_id>`.
+2. **Sends to a deprecated agent URN are refused** (#517): `409
+   recipient_deprecated`, nothing stored. A registry lookup failure fails open
+   (the send proceeds). Mail queued before the deprecation stays readable. Not
+   covered: routed replies, federation sends, group posts.
+3. **Credential**: the registry write scope is `tether.registry`
+   (`registry.write`), held by tokens scoped for it (and by `tether.maintain`
+   and `tether.admin`). It is a separate credential from the bridge's
+   `tether.messages`/`tether.read` token.
+
+**Deregistration** is `DELETE /registry/agents/{urn}` (URN path-escaped as one
+segment), which answers `200` with the profile at status `deprecated`; the MCP
+tool is `tether_registry_deregister`. **UNVERIFIED against a live Tether:** the
+shape was read from Tether's source on `main` (`internal/api/registry.go`,
+`handleRegistryDeregister`; `docs/mcp.md`) and is not in
+`docs/messaging-integration.md`, and Nanite has not called it live. The call is
+isolated in one function, `tetherregistry.Client.Deregister`; a `404` is treated
+as already done. Also assumed from source rather than observed: the register
+body may carry `display_name` (Nanite sends the host title; it only matters on
+the creating call), and lookup answers `{"agent": {"urn", "status"}}`.
+
+**Live enrollment needs a scoped `tether.registry` credential (`registry.write`
+only) that the operator issues.** Nanite does not issue, rotate or hold one for
+itself; until the operator puts it in the token file below, `agent_enroll`
+fails with `registry_token_missing` and writes nothing.
+
+## Enrollment as built (CW-20261024-0017)
+
+**Surface** (admin; `agents:manage` alone is refused, as for tool grants, which
+is the ADR's "admin for the first version"):
+
+- HTTP `POST /api/native-agents/{host_settings_id}/enroll`, body
+  `{"reason": "...", "revision": "<optional host settings revision>"}`. Returns
+  `201` on the call that enrolls and `200` with `"already_enrolled": true` and
+  the same URN on a repeat: `{instance_id, urn, binding: {actor_uri, enabled},
+  status, already_enrolled, external_key}`.
+- MCP admin tool `agent_enroll` (`id`, `reason`, `revision`) on
+  `/api/admin/mcp`; it needs the `admin` scope inside the tool, like
+  `tool_grant`, so an `agents:manage` credential reaches the endpoint but is
+  refused here.
+- CLI `nanite agent enroll <host-settings-id> --reason R [--revision REV]`
+  (offline, writes the database like `agent setup`; the principal recorded is
+  `cli:agent-enroll`). The credential is never a flag.
+- Retire is the existing `host_settings_retire` (MCP) and
+  `POST /api/agent-host-settings/{id}/retire`, extended: it retires the actor
+  first, then disables the host. There is no separate `unenroll`, per the ADR.
+  Other ways to disable host settings (`PUT enabled=false`, delete) do not
+  deregister the actor.
+
+**Writer.** `store.ActorEnrollment` (`internal/store/enrollment.go`) is the
+only code that creates `agent_actor_bindings` and `actor_instances` rows. In
+one transaction it inserts the binding (the receipt records the authenticated
+credential id and the external key, never a request field), the instance
+(`sleeping`, empty `current_session_id`, `profile_id` = the URN), an
+`actor_instance_events` `created` row, an `event_log` audit row
+(`actor_enrolled`, category `audit`) and marks the enrollment record done; any
+failure rolls all of it back. `CreateDurableAgentInstance` and every other path
+still return `ErrVerifiedActorRequired`. Only `internal/service/enrollment.go`
+constructs the writer; `TestActorEnrollmentWriterHasOneConsumer` pins that.
+
+**Crash-safe record.** Migration 185 adds `agent_enrollments` (one row per host
+settings id: `external_key`, `status`, `urn`, `reason`, `principal`, `attempts`,
+`last_error`, timestamps; no credential). Sequence: refuse early, writing
+nothing, if Tether is not configured or the token file is unusable; commit the
+`enrolling` record; `POST /registry/agents` with the record's own key; then the
+one-transaction writer. If the process dies, or the writer fails, after Tether
+answered, the record stays `enrolling`; a repeat registers again, gets `200` and
+the same URN, and completes. The record keeps the key it was first written
+with, so regenerating the install id between attempts cannot fork an agent.
+Concurrent enrolls of one agent converge: one record, one binding, one instance,
+one Tether entry. An enrolled agent is answered from the local record without
+calling Tether. A retired actor is never re-enrolled (`409`); its URN is not
+reused.
+
+**Registry token.** `NANITE_TETHER_REGISTRY_TOKEN_FILE` names a 0600 file holding
+the `tether.registry` token; the Tether address is `NANITE_TETHER_ADDR` (shared
+with the bridge: an `http(s)` URL, or a unix socket path). The file is read on
+every call, refused if any group or world permission bit is set, and the value is
+never logged, returned, stored in the database or accepted in a request. It is
+never the bridge's `NANITE_TETHER_TOKEN_FILE`; there is no fallback to it.
+
+**Typed errors** (`tetherregistry`; HTTP `code`): Tether not configured
+(`tether_not_configured`, 503); token missing (`registry_token_missing`, 503);
+token file insecure (`registry_token_insecure`, 503); Tether unreachable,
+timed out or 5xx, retryable (`tether_unreachable`, 502); Tether refused with a
+4xx (`tether_refused`, 502, carrying Tether's status and error code only, never
+its message or any credential); already enrolled is success. Also `reason_required`
+(400), `not_found` (404), `stale_revision`, `host_disabled`, `retired` (409).
+
+**Retire.** In one transaction: instance `archived` and `current_session_id`
+cleared, binding `enabled=0` (nothing routes to it), record
+`deregister_pending`. Then `DELETE /registry/agents/{urn}`; on success the
+record becomes `retired`. If Tether is down or not configured the retire still
+succeeds locally, the record stays `deregister_pending` (the response carries
+`actor: {deregister_pending: true, deregister_error}`), and every later retire
+call, for this or any agent, retries all pending deregistrations; repeating the
+retire for the same host is idempotent and is the way to retry. There is no
+background timer. A record that never reached `enrolled` has no URN, so its key
+is looked up in Tether and deregistered if found (the crash window). Local
+retirement runs before the host is disabled because the schema refuses actor
+updates once the host is disabled.
+
+**Session start and stop.** Starting a session from an enrolled agent's host
+settings (`POST /api/agent/v1/sessions` with `host_settings`, which is also what
+`nanite agent run` uses) sets that actor's `current_session_id` and `status`
+`active`, so the bridge serves it. Ending the session (the session service's
+archive hook: `POST .../stop`, `DELETE /api/sessions/{id}`) clears it and returns
+the actor to `sleeping`; mail waits in Tether. Agents without an actor are
+unaffected. A session whose host settings were disabled by a path other than
+retire cannot clear the actor (the schema refuses the update); that failure is
+logged.
+
+**Not covered by the fake-Tether tests / unverified:** the live deregister call
+(above), `display_name` on register, the lookup response envelope, and the
+unix-socket transport. Verified by tests: register 201 then 200 with the same
+URN, lookup, deregister with an escaped path, 400/401/403/5xx/dropped
+connection/timeout mapping, the token file checks, the one-transaction rollback,
+crash recovery, concurrency, retire with Tether down then retried, route and MCP
+authorization, session attach and detach.
 
 ## Install identity
 

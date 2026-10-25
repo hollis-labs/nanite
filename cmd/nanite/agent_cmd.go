@@ -55,12 +55,13 @@ func cmdAgent(args []string) {
 }
 
 func agentUsage(w io.Writer) {
-	fmt.Fprintf(w, "usage: %s agent <author|validate|install|setup|load|run|list|stop> ...\n", brand.BinaryName)
+	fmt.Fprintf(w, "usage: %s agent <author|validate|install|setup|enroll|load|run|list|stop> ...\n", brand.BinaryName)
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  author [--role <role.md>] <definition.md>    flatten a role into an authored definition")
 	fmt.Fprintln(w, "  validate <definition.md>                     check schema and print id, revision, digest")
 	fmt.Fprintln(w, "  install [--resources <manifest.json>] <definition.md>   store a definition and print its pin")
 	fmt.Fprintln(w, "  setup <definition.md> --provider P --model M --tools all|a,b   install, configure, review and grant in one step")
+	fmt.Fprintln(w, "  enroll <host-settings-id> --reason R         give the agent a durable Tether actor (needs NANITE_TETHER_ADDR and NANITE_TETHER_REGISTRY_TOKEN_FILE)")
 	fmt.Fprintln(w, "  load [<dir>] [--dry-run] [--force] [--grant-same-as H]   publish an agent directory (agent.md + host.yaml) as a new revision")
 	fmt.Fprintln(w, "  run [<dir>] [-p prompt] [--session ID]   load the agent directory, start it in the current directory and attach (-p: one prompt, then exit)")
 	fmt.Fprintln(w, "  list [--all]                                 list agent sessions on the running server (--all includes ended)")

@@ -81,6 +81,9 @@ type Container struct {
 	// AgentLoad publishes an agent directory and reloads one; it backs
 	// `nanite agent load` and POST /api/agent-reload.
 	AgentLoad *AgentLoadService
+	// Enrollment enrolls agents as durable Tether actors and retires them
+	// (CW-20261024-0017); it backs POST /api/native-agents/{id}/enroll.
+	Enrollment *EnrollmentService
 	// NativeAuthority is the operator-only writer of native-view tool authority.
 	NativeAuthority *NativeAuthorityAdmin
 	// NativeGrants decides native-view tool authority per call; the credential
@@ -1188,8 +1191,14 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	// chatSvc.CloseAgentSession so closing a chat session releases the
 	// underlying long-lived runtime session immediately instead of waiting
 	// for the IdleKill=15min supervisor timeout. Best-effort, nil-safe.
+	enrollmentSvc := NewEnrollmentService(cfg.Store)
 	if sessImpl, ok := sessions.(*sessionServiceImpl); ok {
-		sessImpl.SetArchiveHook(chatSvcImpl.CloseAgentSession)
+		// CW-20261024-0017: an ended session also detaches the durable actor
+		// attached to it (current_session_id cleared; mail waits in Tether).
+		sessImpl.SetArchiveHook(func(ctx context.Context, sessionID string) {
+			chatSvcImpl.CloseAgentSession(ctx, sessionID)
+			enrollmentSvc.DetachSession(ctx, sessionID)
+		})
 	}
 
 	// Wire the recovery-broker replacement-session hook so the
@@ -1462,6 +1471,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 		AgentDefinitions:    &AgentDefinitions{Store: cfg.Store, Models: models},
 		AgentSetup:          &AgentSetupService{Store: cfg.Store, Keys: providerKeys, ConfineDirectories: true},
 		AgentLoad:           &AgentLoadService{Store: cfg.Store},
+		Enrollment:          enrollmentSvc,
 		NativeAuthority:     &NativeAuthorityAdmin{Writer: cfg.Store.LocalAuthority()},
 		NativeGrants:        nativeGrants,
 		Agents:              agents,

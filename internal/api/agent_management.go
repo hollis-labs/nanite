@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/apiauth"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/tetherregistry"
 )
 
 // Agent management over HTTP (CW-20261022-0001): make an agent launchable in
@@ -27,6 +29,7 @@ func (a *API) registerAgentManagementRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-reload", a.handleAgentReload)
 	mux.HandleFunc("GET /api/native-agents", a.handleNativeAgentList)
 	mux.HandleFunc("GET /api/native-agents/{id}", a.handleNativeAgentGet)
+	mux.HandleFunc("POST /api/native-agents/{id}/enroll", a.handleNativeAgentEnroll)
 }
 
 // agentManagementActor returns the granting credential, or has already answered.
@@ -262,4 +265,78 @@ func (a *API) handleAgentReload(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	a.jsonResp(w, status, res)
+}
+
+type agentEnrollBody struct {
+	Reason string `json:"reason"`
+	// Revision, when set, is the host settings revision the operator reviewed.
+	Revision string `json:"revision,omitempty"`
+}
+
+// handleNativeAgentEnroll enrolls the agent (host settings id) as a durable
+// Tether actor. Admin only, like tool grants: the new address can receive mail
+// from other agents. The principal recorded is the authenticated credential id.
+// Repeating the call for an enrolled agent returns the same URN with 200.
+func (a *API) handleNativeAgentEnroll(w http.ResponseWriter, r *http.Request) {
+	p, ok := apiauth.FromContext(r.Context())
+	if !ok {
+		a.errorResp(w, http.StatusUnauthorized, "authentication is required")
+		return
+	}
+	if !canGrantTools(p) {
+		a.errorResp(w, http.StatusForbidden, "enrolling an agent requires the admin scope")
+		return
+	}
+	var body agentEnrollBody
+	if err := definitionRequest(w, r, &body); err != nil {
+		a.errorResp(w, http.StatusBadRequest, "invalid enroll request")
+		return
+	}
+	res, status, code, msg := a.enrollAgent(r.Context(), p.CredentialID, r.PathValue("id"), body)
+	if msg != "" {
+		a.jsonResp(w, status, map[string]string{"error": msg, "code": code})
+		return
+	}
+	a.jsonResp(w, status, res)
+}
+
+// enrollAgent runs the enrollment and maps its typed errors to an HTTP status,
+// a stable code and a message that carries no secret. Shared by the route and
+// (through it) the agent_enroll MCP tool.
+func (a *API) enrollAgent(ctx context.Context, credentialID, hostID string, body agentEnrollBody) (service.EnrollResult, int, string, string) {
+	if a.Services == nil || a.Services.Enrollment == nil {
+		return service.EnrollResult{}, http.StatusServiceUnavailable, "enrollment_unavailable", "agent enrollment unavailable"
+	}
+	res, err := a.Services.Enrollment.Enroll(ctx, credentialID, hostID, body.Reason, body.Revision)
+	if err == nil {
+		if res.AlreadyEnrolled {
+			return res, http.StatusOK, "", ""
+		}
+		return res, http.StatusCreated, "", ""
+	}
+	var refused *tetherregistry.RefusedError
+	switch {
+	case errors.Is(err, service.ErrEnrollmentReasonRequired):
+		return res, http.StatusBadRequest, "reason_required", err.Error()
+	case errors.Is(err, sql.ErrNoRows):
+		return res, http.StatusNotFound, "not_found", "host settings not found"
+	case errors.Is(err, service.ErrEnrollmentStaleRevision):
+		return res, http.StatusConflict, "stale_revision", err.Error()
+	case errors.Is(err, store.ErrEnrollmentHostDisabled):
+		return res, http.StatusConflict, "host_disabled", err.Error()
+	case errors.Is(err, store.ErrEnrollmentRetired):
+		return res, http.StatusConflict, "retired", err.Error()
+	case errors.Is(err, tetherregistry.ErrNotConfigured):
+		return res, http.StatusServiceUnavailable, "tether_not_configured", err.Error()
+	case errors.Is(err, tetherregistry.ErrTokenMissing):
+		return res, http.StatusServiceUnavailable, "registry_token_missing", err.Error()
+	case errors.Is(err, tetherregistry.ErrTokenInsecure):
+		return res, http.StatusServiceUnavailable, "registry_token_insecure", err.Error()
+	case errors.Is(err, tetherregistry.ErrUnreachable):
+		return res, http.StatusBadGateway, "tether_unreachable", err.Error()
+	case errors.As(err, &refused):
+		return res, http.StatusBadGateway, "tether_refused", refused.Error()
+	}
+	slog.Error("agent enrollment failed", "error", err)
+	return res, http.StatusInternalServerError, "enrollment_failed", "agent enrollment failed; repeat it to resume"
 }

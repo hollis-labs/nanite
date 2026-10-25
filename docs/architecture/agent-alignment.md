@@ -286,7 +286,7 @@ operator approves, and the agent view shows each request as pending or granted.
 | `harness_profile.permissions.profile` | apply `default` and `read-only`; refuse the rest. A CLI refuses `read-only` (it cannot enforce it) | `default` and `read-only` applied; any other profile refused. A CLI host refuses `read-only` with `read_only_unenforceable` |
 | `harness_profile.approvals`, `escalation` | refuse: ignoring them would silently weaken oversight | refused at launch |
 | `continuity.mode: ephemeral` | apply | applied |
-| `continuity.mode: durable` | refuse; the error points to durable-agent enrollment | refused at launch |
+| `continuity.mode: durable` | refuse; the error points to durable-agent enrollment | refused at launch. A durable Tether address is not a continuity mode: it is explicit enrollment of an agent as a Tether actor (`nanite agent enroll`, `agent_enroll`), see `docs/architecture/tether-durable-actor.md` |
 | `continuity.memory_policy`, `recovery_strategy` | record on ephemeral, refuse on durable | recorded on ephemeral; durable is refused as a whole |
 | `extensions` (native-policy, reflex-policy) | apply; unknown optional extensions are kept and confer nothing; an unknown mandatory one refuses | applied |
 | `title`, `presentation`, `provenance` | record | recorded |

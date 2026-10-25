@@ -128,7 +128,8 @@ Ids must be a single path segment (`.`, `..` and `/` are refused).
 |---|---|
 | `agent_setup`, `agent_list`, `agent_get` | `POST /api/agent-setup`, `GET /api/native-agents[/{id}]` |
 | `host_settings_list`, `host_settings_create`, `host_settings_update` | `/api/agent-host-settings` |
-| `host_settings_retire` | not a route: a disable-only write (`enabled=false`, a required `reason`, no model/definition re-validation, retried on a moved revision). Live sessions and grants are untouched; use `session_stop` and `authority_revoke` |
+| `agent_enroll` | `POST /api/native-agents/{id}/enroll`. Admin only (an `agents:manage` credential is refused). Gives the agent a durable Tether address; see `docs/getting-running.md` |
+| `host_settings_retire` | not a route: a disable-only write (`enabled=false`, a required `reason`, no model/definition re-validation, retried on a moved revision). Live sessions and grants are untouched; use `session_stop` and `authority_revoke`. If the agent is enrolled as a Tether actor, the actor is archived and deregistered first |
 | `authority_list`, `authority_get`, `authority_revoke` | `/api/native-authority[/{id}[/revoke]]` |
 | `tool_grant`, `tool_ungrant` | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}` |
 | `session_start`, `session_list`, `session_get`, `session_history`, `session_stop` | `/api/agent/v1/sessions...` |

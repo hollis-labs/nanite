@@ -217,6 +217,8 @@ func enrollErrorCode2(err error) string {
 	switch {
 	case errors.Is(err, tetherregistry.ErrNotConfigured):
 		return "tether_not_configured"
+	case errors.Is(err, tetherregistry.ErrAddrInvalid):
+		return "tether_address_invalid"
 	case errors.Is(err, tetherregistry.ErrTokenMissing):
 		return "registry_token_missing"
 	case errors.Is(err, tetherregistry.ErrTokenInsecure):

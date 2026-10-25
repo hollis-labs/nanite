@@ -328,6 +328,8 @@ func (a *API) enrollAgent(ctx context.Context, credentialID, hostID string, body
 		return res, http.StatusConflict, "retired", err.Error()
 	case errors.Is(err, tetherregistry.ErrNotConfigured):
 		return res, http.StatusServiceUnavailable, "tether_not_configured", err.Error()
+	case errors.Is(err, tetherregistry.ErrAddrInvalid):
+		return res, http.StatusServiceUnavailable, "tether_address_invalid", err.Error()
 	case errors.Is(err, tetherregistry.ErrTokenMissing):
 		return res, http.StatusServiceUnavailable, "registry_token_missing", err.Error()
 	case errors.Is(err, tetherregistry.ErrTokenInsecure):

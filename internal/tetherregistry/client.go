@@ -21,14 +21,22 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
-	// AddrEnv is the Tether daemon address, shared with the delivery bridge
-	// (an http(s) URL, or a unix socket path).
+	// AddrEnv is the Tether daemon address of the delivery bridge (an http(s)
+	// URL, or a unix socket path). The registry client falls back to it when
+	// RegistryAddrEnv is unset.
 	AddrEnv = "NANITE_TETHER_ADDR"
+	// RegistryAddrEnv is the address the registry client uses, separate from
+	// the bridge's: unix:///abs/path/tetherd.sock (or a bare absolute path), or
+	// an http(s) URL. A registry service token authenticates only on Tether's
+	// local unix socket; the remote (TCP/https) listener accepts paired device
+	// credentials only and answers 401 by design.
+	RegistryAddrEnv = "NANITE_TETHER_REGISTRY_ADDR"
 	// TokenFileEnv names the 0600 file holding the registry token.
 	TokenFileEnv = "NANITE_TETHER_REGISTRY_TOKEN_FILE"
 	// Substrate is the registry substrate Nanite registers under.
@@ -42,7 +50,10 @@ const (
 var (
 	// ErrNotConfigured: no Tether address is set. Enrollment is optional and
 	// Nanite works without Tether.
-	ErrNotConfigured = errors.New("tether is not configured: set " + AddrEnv)
+	ErrNotConfigured = errors.New("tether is not configured: set " + RegistryAddrEnv + " (or " + AddrEnv + ")")
+	// ErrAddrInvalid: the configured address is neither an http(s) URL nor an
+	// absolute unix socket path, or the socket path is not a socket.
+	ErrAddrInvalid = errors.New("tether registry address is invalid: use unix:///absolute/path.sock or an http(s) URL")
 	// ErrTokenMissing: no registry token file is configured, or it is absent or empty.
 	ErrTokenMissing = errors.New("tether registry token is not configured: set " + TokenFileEnv + " to a 0600 file holding a tether.registry token")
 	// ErrTokenInsecure: the token file is readable by group or others.
@@ -98,7 +109,11 @@ type Config struct {
 
 // ConfigFromEnv reads the address and token file path now.
 func ConfigFromEnv() Config {
-	return Config{Addr: strings.TrimSpace(os.Getenv(AddrEnv)), TokenFile: strings.TrimSpace(os.Getenv(TokenFileEnv))}
+	addr := strings.TrimSpace(os.Getenv(RegistryAddrEnv))
+	if addr == "" {
+		addr = strings.TrimSpace(os.Getenv(AddrEnv))
+	}
+	return Config{Addr: addr, TokenFile: strings.TrimSpace(os.Getenv(TokenFileEnv))}
 }
 
 // Client implements Registrar over HTTP. A nil Config func reads the
@@ -180,19 +195,33 @@ func (c *Client) endpoint(addr string) (string, *http.Client, error) {
 		}
 		return strings.TrimRight(addr, "/"), hc, nil
 	}
-	// A unix socket path, optionally with a unix:// prefix.
+	// A unix socket: unix:///abs/path or a bare absolute path. Requests go over
+	// the socket with Host "localhost". The path is checked at call time.
 	sock := strings.TrimPrefix(addr, "unix://")
-	if !strings.HasPrefix(sock, "/") {
-		return "", nil, ErrNotConfigured
+	if strings.Contains(addr, "://") && !strings.HasPrefix(addr, "unix://") {
+		return "", nil, ErrAddrInvalid
 	}
-	hc := c.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: defaultTimeout, Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-			}}}
+	if !filepath.IsAbs(sock) || filepath.Clean(sock) != sock {
+		return "", nil, ErrAddrInvalid
 	}
-	return "http://tether", hc, nil
+	fi, err := os.Stat(sock)
+	if err != nil {
+		// Tether not running (or wrong path): retryable, and the path is not secret.
+		return "", nil, fmt.Errorf("%w: socket %s does not exist", ErrUnreachable, sock)
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return "", nil, ErrAddrInvalid
+	}
+	hc := &http.Client{Timeout: defaultTimeout}
+	if c.HTTP != nil {
+		hc.Timeout = c.HTTP.Timeout
+	}
+	hc.Transport = &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+		}}
+	return "http://localhost", hc, nil
 }
 
 // SplitKey splits an external key '<substrate>/<external_id>' at the FIRST

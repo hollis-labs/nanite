@@ -7,6 +7,7 @@ package tetherregistrytest
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,6 +32,8 @@ type Entry struct {
 // Fake is the fake Tether.
 type Fake struct {
 	Server *httptest.Server
+	// Addr is what a client is pointed at: the server URL, or unix://<socket>.
+	Addr string
 
 	mu       sync.Mutex
 	entries  map[string]*Entry // by URN
@@ -44,8 +47,8 @@ type Fake struct {
 	Registers, Lookups, Deregisters int
 	// Log is "METHOD escaped-path" per request, for path assertions.
 	Log []string
-	// LastAuth is the last Authorization header seen.
-	LastAuth string
+	// LastAuth and LastHost are the last Authorization and Host headers seen.
+	LastAuth, LastHost string
 }
 
 // New starts a fake Tether and registers its cleanup.
@@ -53,8 +56,32 @@ func New(t *testing.T) *Fake {
 	t.Helper()
 	f := &Fake{entries: map[string]*Entry{}, byKey: map[string]string{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
+	f.Addr = f.Server.URL
 	t.Cleanup(f.Server.Close)
 	return f
+}
+
+// NewUnix starts a fake Tether on a real unix socket (the local listener where
+// the registry service token works) and returns the socket path. The socket
+// lives in a short temp dir because unix socket paths are length-limited.
+func NewUnix(t *testing.T) (*Fake, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "trs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "tetherd.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &Fake{entries: map[string]*Entry{}, byKey: map[string]string{}, Addr: "unix://" + sock}
+	f.Server = httptest.NewUnstartedServer(http.HandlerFunc(f.serve))
+	f.Server.Listener = ln
+	f.Server.Start()
+	t.Cleanup(f.Server.Close)
+	return f, sock
 }
 
 // Registrar returns a real tetherregistry.Client pointed at the fake, with the
@@ -62,7 +89,7 @@ func New(t *testing.T) *Fake {
 func (f *Fake) Registrar(tokenFile string) *tetherregistry.Client {
 	return &tetherregistry.Client{
 		Config: func() tetherregistry.Config {
-			return tetherregistry.Config{Addr: f.Server.URL, TokenFile: tokenFile}
+			return tetherregistry.Config{Addr: f.Addr, TokenFile: tokenFile}
 		},
 		HTTP: &http.Client{Timeout: 2 * time.Second},
 	}
@@ -139,6 +166,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.Log = append(f.Log, r.Method+" "+r.URL.EscapedPath())
 	f.LastAuth = r.Header.Get("Authorization")
+	f.LastHost = r.Host
 	mode, code, body, delay := f.failMode, f.failCode, f.failBody, f.delay
 	f.mu.Unlock()
 

@@ -53,7 +53,7 @@ func TestAgentProfileDTOJSONKeys(t *testing.T) {
 	p := populatedAgentProfile(t)
 	got := mustJSON(t, agentProfileToDTO(&p))
 
-	meta := map[string]bool{"manage_class": true, "editable": true, "copy_to_managed": true, "revision": true, "persisted": true}
+	meta := map[string]bool{"manage_class": true, "editable": true, "copy_to_managed": true, "revision": true, "persisted": true, "unsupported_semantics": true}
 	want := make([]string, 0, len(agentProfileViewKeys))
 	for _, k := range agentProfileViewKeys {
 		if !meta[k] {

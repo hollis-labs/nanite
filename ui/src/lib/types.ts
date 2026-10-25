@@ -737,6 +737,10 @@ export interface AgentProfile {
   manage_class?: string;
   editable?: boolean;
   copy_to_managed?: boolean;
+  // unsupported_semantics: set (with status "unsupported") when the pinned
+  // definition declares semantics native execution does not apply (e.g. a
+  // read-only permission profile). The agent is listed but cannot be launched.
+  unsupported_semantics?: string;
   revision?: string;
 }
 

@@ -23,6 +23,13 @@ type AgentProfile struct {
 	// HostSettingsID is the host settings row a projected profile came from;
 	// empty for any other profile. It is a runtime projection, never persisted.
 	HostSettingsID string `json:"-"`
+
+	// UnsupportedSemantics is non-empty when this profile is a stub: the host
+	// row is real but its pinned definition declares semantics native
+	// execution does not apply (for example a read-only permission profile),
+	// so it cannot be projected or launched. It holds the refusal reason. Only
+	// ListAgents produces stubs; GetAgent still returns the refusal.
+	UnsupportedSemantics string `json:"-"`
 	// Revision is an opaque identity for the complete persisted profile and assignments.
 	Revision        string `json:"-"`
 	ID              string `json:"id"`
@@ -663,12 +670,31 @@ func (s *Store) ListAgents(ctx context.Context) ([]AgentProfile, error) {
 	out := make([]AgentProfile, 0, len(hs))
 	for _, h := range hs {
 		p, err := s.projectAgentHost(ctx, h)
+		if errors.Is(err, agentpolicy.ErrUnsupportedExecution) {
+			// One definition native execution refuses must not take the whole
+			// list down: list it, marked, and let GetAgent keep refusing it.
+			out = append(out, unsupportedAgentStub(h, err))
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *p)
 	}
 	return out, nil
+}
+
+// unsupportedAgentStub is the list entry for a host whose definition native
+// execution refuses. It carries identity and the refusal reason only.
+func unsupportedAgentStub(h AgentHostSettings, cause error) AgentProfile {
+	p := agentpolicy.NativePolicy{}.Defaults()
+	// A disabled host stays "disabled" so every existing disabled filter
+	// still hides it; an enabled one is "unsupported".
+	status := "unsupported"
+	if !h.Enabled {
+		status = "disabled"
+	}
+	return AgentProfile{ID: h.ID, Name: h.Title, Slug: h.Slug, Revision: h.Revision, Source: h.Source, PluginID: h.PluginID, Status: status, Class: p.Class, DefinitionPolicy: &p, NativeHost: &h.Settings, RuntimeKind: h.Settings.Runtime, Protocol: h.Settings.Protocol, Transport: h.Settings.Transport, DefaultProvider: h.Settings.Provider, DefaultModel: h.Settings.Model, Tools: "[]", Settings: "{}", Constraints: "{}", Tags: "[]", Directories: directoriesJSON(h.Settings.Directories), MCPServers: "[]", HostSettingsID: h.ID, UnsupportedSemantics: cause.Error()}
 }
 
 // ListAgentsBySource returns all agent profiles with the given source.

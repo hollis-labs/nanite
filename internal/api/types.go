@@ -271,6 +271,10 @@ type AgentProfileView struct {
 	// Persisted reports whether a real agent_profiles DB row backs this
 	// profile. Database list/get results are always persisted.
 	Persisted bool `json:"persisted"`
+	// UnsupportedSemantics is set (with status "unsupported") when the host's
+	// pinned definition declares semantics native execution does not apply,
+	// so the agent is listed but cannot be launched. It carries the reason.
+	UnsupportedSemantics string `json:"unsupported_semantics,omitempty"`
 }
 
 // agentViewMeta is the computed management metadata agentProfileToView
@@ -293,6 +297,8 @@ func agentProfileToView(p *store.AgentProfile, m agentViewMeta) AgentProfileView
 		CopyToManaged:   m.CopyToManaged,
 		Revision:        m.Revision,
 		Persisted:       m.Persisted,
+
+		UnsupportedSemantics: p.UnsupportedSemantics,
 	}
 }
 

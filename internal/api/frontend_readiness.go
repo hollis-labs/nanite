@@ -120,7 +120,7 @@ func (a *API) handleStartSurfaceCapabilities(w http.ResponseWriter, r *http.Requ
 	// person chooses an agent.
 	active := profiles[:0]
 	for _, p := range profiles {
-		if p.Status != "disabled" {
+		if p.Status != "disabled" && p.UnsupportedSemantics == "" {
 			active = append(active, p)
 		}
 	}

@@ -12,7 +12,7 @@ import (
 
 // agentProfileViewKeys is the wire contract of AgentProfileView: the keys
 // the embedded store.AgentProfile emitted before the view became an explicit
-// DTO, plus the five management keys. Adding a key here is a wire change;
+// DTO, plus the five management keys and the optional unsupported_semantics marker. Adding a key here is a wire change;
 // removing one can break the GUI (ui/src/lib/types.ts AgentProfile).
 var agentProfileViewKeys = []string{
 	"id", "name", "slug", "avatar", "system_prompt", "description", "modes",
@@ -26,6 +26,7 @@ var agentProfileViewKeys = []string{
 	"role_id", "model_id", "runtime_kind", "protocol", "transport", "plugin_id",
 	"tether_managed", "tether_urn",
 	"manage_class", "editable", "copy_to_managed", "revision", "persisted",
+	"unsupported_semantics",
 }
 
 // populatedAgentProfile sets every field of a store.AgentProfile to a
@@ -101,6 +102,7 @@ func TestAgentProfileViewJSONKeys(t *testing.T) {
 	meta := map[string]any{
 		"manage_class": "managed", "editable": true, "copy_to_managed": true,
 		"revision": "rev", "persisted": true,
+		"unsupported_semantics": p.UnsupportedSemantics,
 	}
 	for _, k := range agentProfileViewKeys {
 		want, isMeta := meta[k]

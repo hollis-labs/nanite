@@ -87,6 +87,8 @@ func TestForwardingServer_AdvertisesTodaysSetPerScope(t *testing.T) {
 			return name == "python_run" || name == "workflow_execute_tool_step"
 		})
 		got := listedSorted(t, NewForwarding("s1", nil, "", "http://127.0.0.1:1", ScopeStore, nil))
+		// The one deliberate addition: tether_send refuses a session with no enrolled actor.
+		got = slices.DeleteFunc(got, func(name string) bool { return name == "tether_send" })
 		if !slices.Equal(got, want) {
 			t.Errorf("store scope lists %v\nlocal bare-store server lists %v", got, want)
 		}

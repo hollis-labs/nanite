@@ -72,6 +72,15 @@ func newSelfToolProxy(apiURL, sessionID string, scope SelfToolScope) *selfToolPr
 	all = coreProxyCatalog(all)
 	if scope == ScopeStore {
 		p.catalog = coreProxyCatalog(selftools.BareStoreTools())
+		// tether_send stays visible in the store scope: its handler derives the
+		// sender from the session's enrolled actor and refuses a session with
+		// none, so offering it to a CLI agent started from an enrolled host
+		// (including a Tether wake) grants nothing beyond that (MVP push, CW-0006).
+		for _, t := range all {
+			if t.Name == "tether_send" && !slices.ContainsFunc(p.catalog, func(c condmcp.Tool) bool { return c.Name == t.Name }) {
+				p.catalog = append(p.catalog, t)
+			}
+		}
 		for _, t := range all {
 			if !slices.ContainsFunc(p.catalog, func(c condmcp.Tool) bool { return c.Name == t.Name }) {
 				p.hidden[t.Name] = struct{}{}

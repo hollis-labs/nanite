@@ -272,7 +272,7 @@ adoption is not implied by installing a definition or saving host settings.
 
 ## Session lifecycle
 
-`POST /api/agent/v1/sessions` accepts `work_root` for CLI hosts (absolute, inside
+`POST /api/agent/v1/sessions` accepts `work_root` for CLI and API hosts (absolute, inside
 a host directory). `POST /api/agent/v1/sessions/{id}/stop` ends a session and its
 runtime and is idempotent; `nanite agent list` and `nanite agent stop <session>`
 call the same routes. See `docs/getting-running.md`.

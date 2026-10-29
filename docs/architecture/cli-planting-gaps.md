@@ -129,3 +129,13 @@ and grants. No new config format.
 - `context-assembly.md` says `CLAUDE.md` is rewritten in a running CLI session on
   a prompt edit; the code returns `ArtifactRefreshUnavailable` for bound roots.
   The doc looks stale; not changed here.
+
+## 5. Closure status (MVP push, 2026-10-29)
+
+| Item | Status |
+|---|---|
+| C1 work-root instruction files | **Closed.** `workRootInstructions` (`internal/runtime/agent/workroot_instructions.go`) appends the work root's `AGENTS.md` (else `CLAUDE.md`) to `params.SystemPrompt` in `composeBootdirParams`, so all three CLIs plant it. 16 KiB cap, regular files only, skipped for roots `CLIRootDenyReason` refuses. |
+| C3 identity for host-started sessions | **Closed.** A host-started session's profile id is the host settings id while an enrolled actor's `profile_id` is its binding URI, so `DurableActorURNForSession` never matched. It now also matches through the enabled binding of that host settings id (`internal/store/durable_agents.go`). |
+| C2 Tether bridge for CLI agents | **Closed as a recipe**: `docs/guides/cli-tether-mcp.md`. For replies from an enrolled agent the MVP path is the Nanite-hosted `tether_send` tool instead, which needs no per-agent credential. |
+| C4 posture from the host profile | **No cheap content today.** Admission already refuses anything a CLI cannot enforce (for example a `read-only` profile), so every admitted CLI host has the one `default` posture the planters hard-code. A posture field becomes worth adding only when a second enforceable posture exists. Left as is on purpose. |
+| C5 skill digest friction | **Served by the existing error**: a digest mismatch already prints the packed digest (`agentdir.go`, "folder packs to ..."). Workflow: `agent load --dry-run`, copy the printed digest into `agent.md`. A dedicated dry-run listing was not built. |

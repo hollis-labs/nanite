@@ -206,12 +206,12 @@ Rules to know:
 
 ## Work root, listing and stopping
 
-A CLI session runs in the first host directory unless the create request names
+A CLI or API session works in the first host directory unless the create request names
 `"work_root": "/abs/path"`. The path must be absolute, exist, and sit inside one
 of the host's `directories`; otherwise create answers `422` with
-`error.cause` `work_root_invalid` (or `work_root_unsupported` when the host is
-not a CLI host). The work root is also the first directory the process is
-given.
+`error.cause` `work_root_invalid` (or `work_root_unsupported` when the session has no host settings). The work
+root is also the first directory a CLI process is given and the first root of
+an API session's file and shell tools.
 
 ```sh
 nanite agent list [--all]        # sessions on the running server (--all includes ended)
@@ -236,7 +236,7 @@ turn or `DELETE /api/sessions/{id}`; an agent credential cannot reach them.
 | session create, `runtime=cli` | `422`, `error.cause` `read_only_unenforceable` | the definition asks for a read-only permission profile, which a CLI process cannot enforce |
 | session create, `runtime=cli` | `422`, `error.cause` `provider_not_launchable` | no provider, or one Nanite cannot launch |
 | session create, `runtime=api` | `422`, `error.cause` `host_directory_invalid` | the host lists a relative directory |
-| session create | `422`, `error.cause` `work_root_invalid` / `work_root_unsupported` | `work_root` is relative, missing, not a directory, outside the host directories, or the host is not a CLI host |
+| session create | `422`, `error.cause` `work_root_invalid` / `work_root_unsupported` | `work_root` is relative, missing, not a directory, outside the host directories, or the session has no host settings |
 | turn | `409 invalid_state` | the session was stopped; create a new session |
 | turn, `runtime=cli` | `host_revision_changed` | the host settings were edited after the session was created; create a new session |
 | host settings create | `400 invalid host settings request` | the body has an unknown field (e.g. `source`); the server assigns it |

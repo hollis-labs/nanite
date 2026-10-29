@@ -102,7 +102,8 @@ added to, not instead of, `dev_tools_allowed_paths` and path mentions. They
 live in memory for the process and are rebuilt on each turn. Not yet done:
 planted context and skills still differ from a CLI session (CW-20261022-0007
 step 4). `work_root` is
-still refused for `api` hosts.
+accepted for `api` hosts as well as `cli` ones (PR #535): inside the host's
+`directories`, it leads the session's file and shell tools.
 
 ### Embedded view observations
 

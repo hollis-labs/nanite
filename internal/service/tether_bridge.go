@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/a2a"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tetherbridge"
+	"github.com/hollis-labs/nanite/internal/tethermail"
 )
 
 // tetherBridgeAddrEnv opts a Nanite process into Tether delivery (CW-20261022-0002).
@@ -180,7 +181,7 @@ func tetherEnvelopeText(env messaging.Envelope) (subject, body string) {
 // It returns a stop func that cancels the loop and waits for it to exit; a
 // nil stop means the bridge is off. A bad address is logged, not fatal: Tether
 // being unreachable must not stop Nanite from serving.
-func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatServiceImpl) (stop func()) {
+func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatServiceImpl, waker tetherbridge.Waker) (stop func()) {
 	addr := os.Getenv(tetherBridgeAddrEnv)
 	if addr == "" {
 		return nil
@@ -190,9 +191,22 @@ func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatService
 		slog.Error("tether bridge: client", "addr", redactAddr(addr), "err", strings.ReplaceAll(err.Error(), addr, redactAddr(addr)))
 		return nil
 	}
+	// Mail is read through the non-destructive list + watch client (never the
+	// destructive Inbox); the libs client still carries the claim/receipt calls.
+	var mailOpts []tethermail.Option
+	if tf := strings.TrimSpace(os.Getenv(tetherBridgeTokenFileEnv)); tf != "" {
+		mailOpts = append(mailOpts, tethermail.WithTokenFile(tf))
+	}
+	mail, err := tethermail.New(addr, mailOpts...)
+	if err != nil {
+		slog.Error("tether bridge: mail client", "addr", redactAddr(addr), "err", strings.ReplaceAll(err.Error(), addr, redactAddr(addr)))
+		return nil
+	}
 	loop := &tetherbridge.Loop{
 		Claimer:     client,
-		Mail:        client.AsStore(),
+		Mail:        tetherMailSource{mail},
+		Cursors:     st,
+		Waker:       waker,
 		Store:       st,
 		Actors:      st,
 		Ledger:      st,
@@ -229,4 +243,30 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// tetherMailSource adapts the tethermail client to the bridge's MailSource.
+type tetherMailSource struct{ c *tethermail.Client }
+
+func (m tetherMailSource) List(ctx context.Context, to string, unreadOnly bool, limit, offset int) ([]messaging.Envelope, int, error) {
+	return m.c.List(ctx, to, tethermail.ListOptions{UnreadOnly: unreadOnly, Limit: limit, Offset: offset})
+}
+
+func (m tetherMailSource) Watch(ctx context.Context, to string, afterSeq int64) (<-chan tetherbridge.Event, error) {
+	in, err := m.c.Watch(ctx, to, afterSeq, tethermail.WatchOptions{})
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan tetherbridge.Event)
+	go func() {
+		defer close(out)
+		for ev := range in {
+			select {
+			case out <- tetherbridge.Event{Kind: string(ev.Kind), Seq: ev.Seq, Env: ev.Env}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }

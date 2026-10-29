@@ -173,3 +173,67 @@ func (s *Store) ListOpenTetherDeliveries(ctx context.Context, limit int) ([]Teth
 	}
 	return out, rows.Err()
 }
+
+// GetTetherWatchCursor returns the persisted Tether watch cursor for an actor
+// (0 when none: the watch then starts from now and a list catch-up covers the gap).
+func (s *Store) GetTetherWatchCursor(ctx context.Context, actorURN string) (int64, error) {
+	var seq int64
+	err := s.DB.QueryRowContext(ctx, `SELECT after_seq FROM tether_watch_cursors WHERE actor_urn = ?`, actorURN).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get tether watch cursor: %w", err)
+	}
+	return seq, nil
+}
+
+// SetTetherWatchCursor stores the cursor. It only moves forward unless reset is
+// true (a Tether "gap" event resets it so the watch restarts from now).
+func (s *Store) SetTetherWatchCursor(ctx context.Context, actorURN string, seq int64, reset bool) error {
+	q := `INSERT INTO tether_watch_cursors(actor_urn, after_seq, updated_at) VALUES(?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+	      ON CONFLICT(actor_urn) DO UPDATE SET after_seq = CASE WHEN ? OR excluded.after_seq > after_seq THEN excluded.after_seq ELSE after_seq END,
+	      updated_at = excluded.updated_at`
+	if _, err := s.DB.ExecContext(ctx, q, actorURN, seq, reset); err != nil {
+		return fmt.Errorf("set tether watch cursor: %w", err)
+	}
+	return nil
+}
+
+// ListServedActorURNs lists the actors the Tether bridge should watch: every
+// live actor that is enrolled (an enabled binding) or already attached to a
+// session. Unenrolled, unattached instances carry Nanite-minted URNs Tether does
+// not know, so they are not watched.
+func (s *Store) ListServedActorURNs(ctx context.Context) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT urn FROM actor_instances
+		  WHERE status != 'archived' AND urn != ''
+		    AND (current_session_id != '' OR profile_id IN (SELECT actor_uri FROM agent_actor_bindings WHERE enabled = 1))
+		  ORDER BY urn`)
+	if err != nil {
+		return nil, fmt.Errorf("list served actors: %w", err)
+	}
+	defer closeRows(rows)
+	var out []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// HostSettingsIDForActor resolves the host settings an enrolled actor was
+// enrolled from (via its enabled binding). ("", nil) when the actor has none.
+func (s *Store) HostSettingsIDForActor(ctx context.Context, actorURN string) (string, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT b.host_settings_id FROM actor_instances i JOIN agent_actor_bindings b ON b.actor_uri = i.profile_id
+		  WHERE i.urn = ? AND b.enabled = 1 AND i.status != 'archived' LIMIT 1`, actorURN).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}

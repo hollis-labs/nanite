@@ -1258,7 +1258,7 @@ func NewContainer(cfg ContainerConfig) (*Container, error) {
 	messagingSvc.SetWakeReactor(&messagingWakeReactor{chat: chatSvcImpl})
 	// CW-20261022-0002: Tether mail for bound durable actors lands in the
 	// same mailbox the reactor above serves. Off unless NANITE_TETHER_ADDR.
-	stopTetherBridge := startTetherBridge(cfg.Store, messagingSvc, chatSvcImpl)
+	stopTetherBridge := startTetherBridge(cfg.Store, messagingSvc, chatSvcImpl, newTetherWaker(cfg.Store, cognitiveViews, enrollmentSvc))
 	defer func() {
 		if !containerCommitted && stopTetherBridge != nil {
 			stopTetherBridge()

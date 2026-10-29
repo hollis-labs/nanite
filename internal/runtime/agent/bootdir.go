@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/registry"
 	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
@@ -125,6 +126,12 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		Hooks: DefaultBootDirHooks,
 	}
 	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir, profileDirectories(profile)...)
+	if wr := workRootInstructions(opts.Workdir); wr != "" {
+		if strings.TrimSpace(params.SystemPrompt) != "" {
+			params.SystemPrompt += "\n\n"
+		}
+		params.SystemPrompt += wr
+	}
 	if deps != nil && deps.ActorURN != nil && profile != nil {
 		params.ActorURN = deps.ActorURN(sessID, profile.ID)
 	}

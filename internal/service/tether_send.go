@@ -23,6 +23,12 @@ import (
 // per-agent Tether credential is needed; whether Tether accepts that identity
 // sending as a substrate=nanite actor is a Tether contract question (observe
 // mode today). Every send carries an Idempotency-Key.
+//
+// NOT A CONTRACT (Tether agent, 2026-10-29): in observe mode a service token may
+// send with from = a substrate=nanite actor; it is recorded and attributed to the
+// bridge token, not enforced. When Tether enforces sender identity
+// (CW-20261024-0023), a shared token sending as many actors will need a scoped
+// send-as grant for nanite actors; Tether is adding that to 0023's requirements.
 type TetherSender struct {
 	st   *store.Store
 	mail *tethermail.Client

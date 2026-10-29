@@ -15,6 +15,7 @@ import (
 // absent from this table needs nothing beyond the store. Keep the two in
 // step; TestHideUnwired_MatchesHandlerGuards fails when they drift.
 var selfToolNeeds = map[string]func(*SelfToolsTransport) bool{
+	"tether_send":      func(st *SelfToolsTransport) bool { return st.TetherSend != nil },
 	"message_send":     hasMessaging,
 	"message_inbox":    hasMessaging,
 	"message_thread":   hasMessaging,

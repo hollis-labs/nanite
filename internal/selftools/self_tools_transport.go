@@ -45,11 +45,14 @@ type SelfToolsTransport struct {
 	// a hidden tool still answers with its handler's own error.
 	HideUnwired bool
 
-	Reads             ReadServices
-	Writes            WriteServices
-	BuilderRegistry   *builders.Registry
-	BuilderSessions   *builders.SessionManager
-	MessagingTools    *MessagingTools
+	Reads           ReadServices
+	Writes          WriteServices
+	BuilderRegistry *builders.Registry
+	BuilderSessions *builders.SessionManager
+	MessagingTools  *MessagingTools
+	// TetherSend sends Tether mail as the calling session's enrolled actor
+	// (the tether_send tool); nil-safe: the tool is hidden/unwired without it.
+	TetherSend        TetherSender
 	WorkTrackingTools *WorkTrackingTools
 	AgentProfileTools *AgentProfileTools
 	PresentationTools *PresentationTools
@@ -344,6 +347,8 @@ func (st *SelfToolsTransport) CallTool(ctx context.Context, name string, args ma
 		return st.callInstallProject(args)
 	case "install_diff":
 		return st.callInstallDiff(args)
+	case "tether_send":
+		return st.callTetherSend(ctx, args)
 	case "message_send":
 		return st.MessagingTools.callMessageSend(ctx, args)
 	case "message_inbox":

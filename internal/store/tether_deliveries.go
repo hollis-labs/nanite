@@ -237,3 +237,14 @@ func (s *Store) HostSettingsIDForActor(ctx context.Context, actorURN string) (st
 	}
 	return id, err
 }
+
+// ActorURNForSession returns the live actor attached to a session ("" if none).
+func (s *Store) ActorURNForSession(ctx context.Context, sessionID string) (string, error) {
+	var urn string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT urn FROM actor_instances WHERE current_session_id = ? AND status != 'archived' AND urn != '' LIMIT 1`, sessionID).Scan(&urn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return urn, err
+}

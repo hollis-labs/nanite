@@ -11,7 +11,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Build any ref without waiting for tests (MVP push 2026-10-29): gh workflow run build.yml -f ref=<branch|sha> -f skip_tests=true
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or sha to build (default is the ref the workflow was dispatched on)'
+        required: false
+        default: ''
+      skip_tests:
+        description: 'Skip the test job (the build still smoke-tests the linux binary)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,12 +33,15 @@ concurrency:
 jobs:
   # The same full suite as go-test.yml; gates the build on main (the duplicate run is accepted for now).
   test:
+    if: github.event_name != 'workflow_dispatch' || !inputs.skip_tests
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       GOWORK: 'off'
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -43,8 +56,8 @@ jobs:
 
   build:
     needs: test
-    # Fork PRs never run on the self-hosted runner.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Fork PRs never run on the self-hosted runner. A skipped test job (workflow_dispatch skip_tests) still builds.
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: [self-hosted, build-1]
     timeout-minutes: 30
     env:
@@ -53,6 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
           fetch-tags: true
       - name: Toolchain
@@ -76,7 +90,7 @@ jobs:
         run: cd dist && sha256sum -c SHA256SUMS
       - name: Artifact name
         id: name
-        run: echo "sha12=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: echo "sha12=$(git rev-parse HEAD | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: nanite-${{ steps.name.outputs.sha12 }}

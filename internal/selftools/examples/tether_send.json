@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Reply to a Tether message you received",
+    "args": {
+      "to": "msg://agent/agent-mux/agt_abc123",
+      "subject": "Re: status check",
+      "body": "All green: the build passed and the deploy is done.",
+      "in_reply_to": "01a18a2b-e18b-7654-a6d2-ade49b70aebc"
+    },
+    "notes": "The sender is always your own enrolled Tether address. Set in_reply_to to the id shown in the delivered message and to to its sender. A retry with the same idempotency_key does not send twice."
+  }
+]

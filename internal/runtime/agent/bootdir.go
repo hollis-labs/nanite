@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/registry"
 	plant "github.com/hollis-labs/libs/harness/core/agentlaunch/planting"
@@ -125,9 +126,17 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 		Hooks: DefaultBootDirHooks,
 	}
 	params.CLIWritableRoots = effectiveCLIWritableRoots(deps, sessID, opts.Workdir, profileDirectories(profile)...)
+	if wr := workRootInstructions(opts.Workdir); wr != "" {
+		if strings.TrimSpace(params.SystemPrompt) != "" {
+			params.SystemPrompt += "\n\n"
+		}
+		params.SystemPrompt += wr
+	}
 	if deps != nil && deps.ActorURN != nil && profile != nil {
 		params.ActorURN = deps.ActorURN(sessID, profile.ID)
 	}
+	// tether_send is offered to the launch's MCP only when it has an enrolled actor.
+	params.MCPConfig.TetherSend = params.ActorURN != ""
 	if deps != nil {
 		// No root offered to an agent (the work root, cli_writable_roots,
 		// path grants) may be, or sit inside, a control-plane directory

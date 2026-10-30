@@ -909,6 +909,9 @@ func cmdServeWithInitializers(
 	// replace the constructor's nil-safe instance once runtime services exist.
 	selfTools.MessagingTools = selftools.NewMessagingTools(container.Messaging, container.Elicitation)
 	selfTools.Subagent = container.Subagent
+	if container.TetherSender != nil {
+		selfTools.TetherSend = container.TetherSender
+	}
 	selfTools.SkillVendor = container.SkillVendor
 	selfTools.Background = container.Background
 	// Agent CRUD/source resolution keeps the store-backed local-MCP path,

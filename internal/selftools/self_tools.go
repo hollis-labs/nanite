@@ -527,6 +527,25 @@ func selfToolDefinitions() []mcp.Tool {
 			},
 		},
 		{
+			Name: "tether_send",
+			Description: "Send a Tether message from THIS agent's own Tether address to any Tether URN (another agent, or the operator).\n\n" +
+				"**When to use:** To reply to a Tether message you received (set in_reply_to to its id and to to its sender), or to start a Tether conversation. The sender is always your own enrolled actor; you cannot choose it.\n\n" +
+				"**Required context:** to (a msg://agent/... or msg://user/... URN) and body. Optional: subject, in_reply_to, thread_id, idempotency_key (a retry with the same key will not send twice).\n\n" +
+				"**Output shape:** The Tether message id.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"to":              map[string]any{"type": "string", "description": "Recipient Tether URN."},
+					"subject":         map[string]any{"type": "string"},
+					"body":            map[string]any{"type": "string"},
+					"in_reply_to":     map[string]any{"type": "string", "description": "Tether message id you are answering."},
+					"thread_id":       map[string]any{"type": "string"},
+					"idempotency_key": map[string]any{"type": "string"},
+				},
+				"required": []string{"to", "body"},
+			},
+		},
+		{
 			Name: "message_inbox",
 			Description: "Read the messaging inbox for a (session_id, agent_id) pair.\n\n" +
 				"**When to use:** To poll for new messages (unread), check async replies, or review alerts. Filter by status=unread to see only new messages.\n\n" +

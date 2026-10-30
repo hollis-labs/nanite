@@ -17,7 +17,50 @@ import (
 // to that service; verified definition/model/admission remain host-owned.
 type CognitiveTurns struct {
 	*agentservice.Turns[store.Message]
+
+	ctxMu    sync.Mutex
+	ctxUsed  map[string]int // turn id -> tokens in the context after the run (last call's input + output)
+	ctxOrder []string
 }
+
+// maxContextUsedEntries bounds the side map; an evicted turn falls back to the
+// run's total usage in the stream annotation.
+const maxContextUsedEntries = 4096
+
+// SetContextUsed records how many tokens the session context held after the
+// run's last model call (its input including cache, plus its output): the
+// number a context meter wants, which is smaller than the run total when a tool
+// loop made several calls.
+func (t *CognitiveTurns) SetContextUsed(turnID string, used int) {
+	if t == nil || turnID == "" || used <= 0 {
+		return
+	}
+	t.ctxMu.Lock()
+	defer t.ctxMu.Unlock()
+	if t.ctxUsed == nil {
+		t.ctxUsed = map[string]int{}
+	}
+	if _, seen := t.ctxUsed[turnID]; !seen {
+		t.ctxOrder = append(t.ctxOrder, turnID)
+		if len(t.ctxOrder) > maxContextUsedEntries {
+			delete(t.ctxUsed, t.ctxOrder[0])
+			t.ctxOrder = t.ctxOrder[1:]
+		}
+	}
+	t.ctxUsed[turnID] = used
+}
+
+// ContextUsed returns the value SetContextUsed recorded for a turn.
+func (t *CognitiveTurns) ContextUsed(turnID string) (int, bool) {
+	if t == nil {
+		return 0, false
+	}
+	t.ctxMu.Lock()
+	defer t.ctxMu.Unlock()
+	v, ok := t.ctxUsed[turnID]
+	return v, ok
+}
+
 type cognitiveRun struct {
 	*agentservice.Run[store.Message]
 	owner               *CognitiveTurns
@@ -33,7 +76,7 @@ func NewCognitiveTurns(backing ...*store.Store) *CognitiveTurns {
 	return newCognitiveTurns(port, nil)
 }
 func newCognitiveTurns(backing agentservice.SnapshotStore, hub *streamhub.Hub) *CognitiveTurns {
-	return &CognitiveTurns{agentservice.NewTurns[store.Message](backing, agentservice.Options{Hub: hub, StateActivityKind: "nanite.turn_state", ActivityPrefix: "nanite."})}
+	return &CognitiveTurns{Turns: agentservice.NewTurns[store.Message](backing, agentservice.Options{Hub: hub, StateActivityKind: "nanite.turn_state", ActivityPrefix: "nanite."})}
 }
 func (t *CognitiveTurns) create(viewID, id, provider, model string, mode chat.DeltaMode, effort string, load func() (*store.Message, error)) *cognitiveRun {
 	run := t.Create(viewID, id, provider, model, string(mode), effort, func() (agentservice.Committed[store.Message], error) {

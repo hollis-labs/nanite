@@ -502,3 +502,31 @@ Letters refer to the scoping list for this workstream.
 
 Items that do not follow from this decision: A4, A5, A6, A7, A9. Items that
 do: E1/A2, A3, A8, A10. A1 is this document.
+
+## Wake policy and sender trust (MVP push, 2026-10-30)
+
+**Mail wakes an enrolled actor by design.** A definition-bound session takes
+`message_wake_policy` from its pinned definition, and the embedded archetypes
+(`def:nanite/chat`, reviewer, researcher, backend, worker) pin `render_and_wait`
+explicitly, which the message-wake reactor reads as "do not wake". The bridge
+therefore wakes an enrolled actor itself whenever the reactor would not
+(`tetherInjector.wake`): an actor is enrolled precisely to receive mail. Decision
+(Architect, MVP): keep this; a mail-capable archetype that respects an explicit
+policy is later work. Unset policies resolve to `auto_summarize` and the reactor
+wakes them as before. A failed wake is returned, never swallowed: busy defers, an
+ended session is detached and re-woken, an unsupported view is dead-lettered with
+its reason.
+
+**Verified senders get the agent's tools; unverified senders do not.** The wake turn
+carries the enrolling credential (so the agent holds exactly the tools its host's
+native authority grants) only when Tether verified the sender. A sender on
+`NANITE_TETHER_TRUST_UNVERIFIED_FROM` (exact URNs, default empty) is accepted but its
+turn runs tool-free, because an unverified `from` is caller-asserted. The bridge tells
+the model it has no tools and that its plain-text answer will be sent for it; when the
+turn completes the bridge relays that answer back to the sender over Tether as the
+actor (`kind=response`, `in_reply_to` set, `Idempotency-Key` `nanite-relay-<delivery id>`).
+The relay is in memory: a restart mid-turn loses it with the turn.
+
+Note for testing: Tether verifies the sending *token*, so mail sent with `tether-remote`
+under any `--from` is "verified"; to produce an unverified message send with a service
+token (for example the bridge token over the local socket).

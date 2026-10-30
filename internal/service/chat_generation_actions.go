@@ -1873,6 +1873,7 @@ func (s *chatServiceImpl) finalizeRun(
 	// Stream end.
 	if isCognitiveTurn(ctx) {
 		s.streams.CognitiveTurns().SetUsage(assistantMsgID, canonicalRunUsage(run.usageCalls))
+		s.streams.CognitiveTurns().SetContextUsed(assistantMsgID, lastCallContextTokens(run.usageCalls))
 	}
 	streamUsage := run.finalUsage
 	if streamUsage != nil && *streamUsage == (chat.Usage{}) {

@@ -255,14 +255,18 @@ func (s *Store) CountInstancesSharingMailboxSlot(ctx context.Context, profileID,
 // slot is ambiguous. It is the outbound twin of the tetherbridge lookup: the
 // address an agent sends from must be the address the bridge delivers to, and
 // an ambiguous slot is refused there too, so no address is guessed here.
+// A host-started session's profile id is the host settings id, while an enrolled
+// actor's profile_id is its binding's actor URI, so the lookup also matches
+// through the enabled binding of that host settings id (MVP push, gap C3).
 func (s *Store) DurableActorURNForSession(ctx context.Context, sessionID, profileID string) (string, error) {
 	if sessionID == "" || profileID == "" {
 		return "", nil
 	}
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT urn FROM actor_instances
-		  WHERE profile_id = ? AND current_session_id = ? AND status != ? AND urn != '' LIMIT 2`,
-		profileID, sessionID, DurableAgentStatusArchived)
+		  WHERE (profile_id = ? OR profile_id IN (SELECT actor_uri FROM agent_actor_bindings WHERE host_settings_id = ? AND enabled = 1))
+		    AND current_session_id = ? AND status != ? AND urn != '' LIMIT 2`,
+		profileID, profileID, sessionID, DurableAgentStatusArchived)
 	if err != nil {
 		return "", fmt.Errorf("durable actor urn for session %s: %w", sessionID, err)
 	}

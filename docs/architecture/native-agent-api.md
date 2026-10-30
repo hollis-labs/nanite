@@ -102,7 +102,8 @@ added to, not instead of, `dev_tools_allowed_paths` and path mentions. They
 live in memory for the process and are rebuilt on each turn. Not yet done:
 planted context and skills still differ from a CLI session (CW-20261022-0007
 step 4). `work_root` is
-still refused for `api` hosts.
+accepted for `api` hosts as well as `cli` ones (PR #535): inside the host's
+`directories`, it leads the session's file and shell tools.
 
 ### Embedded view observations
 
@@ -212,6 +213,30 @@ default of 50. Request JSON rejects removed/unknown fields and trailing values.
 Errors use a typed private envelope; credentials and internal errors are not
 returned as raw diagnostic details.
 
+
+#### `workspace_items` (optional, v1)
+
+`client_context` may also carry `workspace_items`, a sibling of `view`, so a client
+can describe the workspace content it has open. Same rules as the rest of the
+descriptor: strict validation (unknown fields refused), untrusted observation,
+never authorization, never fetched or followed by Nanite, and the whole descriptor
+stays inside the 32 KiB budget (depth 16, 2,048 nodes).
+
+```json
+"workspace_items": [
+  {"name": "notes.md", "type": "text/markdown", "sha256": "<64 lowercase hex>", "size": 412, "text": "..."},
+  {"name": "report.pdf", "type": "application/pdf", "sha256": "<64 lowercase hex>", "size": 912345, "uri": "/files/report.pdf"}
+]
+```
+
+- At most 32 items. `name` (<= 256 bytes), `type` (<= 64, no whitespace), `sha256`
+  (64 lowercase hex) and `size` (bytes, >= 0) are required.
+- `text` is inline content, at most **8 KiB**; an item whose `size` is over 8 KiB is
+  pointer-only: it must carry `uri` and no `text`.
+- `uri` is an origin-relative path or an `http(s)` URL without credentials (<= 1 KiB).
+- Assume **32 KiB total, 8 KiB per inline text item**; an oversize descriptor is
+  refused, not truncated.
+
 ## Agent management contract (non-browser clients)
 
 What a client such as Tachyon can rely on to manage agents without the browser
@@ -260,7 +285,26 @@ returns `text/event-stream`, header `X-Chat-Encoding: chatstream/v1`, one JSON
 `message`, `retryable`), `run.abort` (`reason`), `message.start|end`,
 `part.start|delta|end`, `approval.request`, `activity` and `gap`. The terminal
 events are `run.finish`, `run.error` and `run.abort`; after one the server ends
-the stream. A turn queued behind another is silent apart from `: keepalive`
+the stream.
+
+**Context meter (`usage.used`, `usage.window`, `usage.model`).** Every `run.finish`
+event, and every `usage` event, carries these keys inside `usage` (added by Nanite;
+the existing counters are unchanged): `used`, the tokens the session context held
+after the run's last model call (its input including cache, plus its output and
+reasoning; the run's summed total when that is not recorded); `window`, the model's
+context window from the model catalog (Station alias overlay aware); `window_source`
+(`catalog`, or `default` when the model is not in the catalog and the system-wide
+default applies); and `model`, the model that answered. Clients should draw their
+context meter from `window` instead of a constant. A `run.finish` with no provider
+usage still gets `model` and `window` (no `used`).
+
+**Approvals.** The native loop already has an approval gate: when the permission
+engine answers "ask" for a tool call, the turn emits `approval.request` (`request_id`,
+`run_id`, `call_id`, `tool`, `input`, `reason`, `expires_at`, `supported_scopes`
+`["once"]`) and pauses until the client answers
+`POST /api/agent/v1/sessions/{id}/approvals/{requestId}/responses`
+(`{"decision":"allow"|"deny","scope":"once"}`) or the request expires. Only `once`
+scope is supported: "always in this chat" rules stay with the client for now. A turn queued behind another is silent apart from `: keepalive`
 comment lines every 15 seconds. Resume with `Last-Event-ID: <last seq>` (digits
 only; query parameters are refused with 400). A `gap` event (`reason`
 `retention`, `cursor_ahead`, `dropped_slow` or `ingest_overflow`, `from`, `to`) means events were lost: read

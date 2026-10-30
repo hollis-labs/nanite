@@ -92,6 +92,20 @@ func TestForwardingServer_AdvertisesTodaysSetPerScope(t *testing.T) {
 		}
 	})
 
+	t.Run("store scope adds tether_send only when the launch has an enrolled actor", func(t *testing.T) {
+		want := listedSorted(t, newAllowlistedTestServer(t, nil))
+		want = slices.DeleteFunc(want, func(name string) bool {
+			return name == "python_run" || name == "workflow_execute_tool_step"
+		})
+		t.Setenv(TetherSendEnv, "1")
+		got := listedSorted(t, NewForwarding("s1", nil, "", "http://127.0.0.1:1", ScopeStore, nil))
+		want = append(want, "tether_send")
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("store scope with the flag lists %v\nwant %v", got, want)
+		}
+	})
+
 	t.Run("harness scope lists the full catalog", func(t *testing.T) {
 		s, err := storetest.New(t, context.Background(), t.TempDir()+"/test.db")
 		if err != nil {

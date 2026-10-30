@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/provider"
 	"github.com/hollis-labs/libs/harness/core/agentlaunch"
@@ -122,6 +123,16 @@ func codexPlantSpec(params SetupParams) (plant.PlantSpec, error) {
 	configTOML, err := codexConfigTOMLContent(params.CLIWritableRoots, mcpServers...)
 	if err != nil {
 		return plant.PlantSpec{}, err
+	}
+	// Headless codex (approval_policy = "never") refuses every MCP tool call
+	// that "requires approval", so the agent saw Nanite's tools but could not
+	// call one (CW-20261024-0006, live 2026-10-29: "MCP tool call requires
+	// approval, but approval policy is never"). Approve calls to Nanite's OWN
+	// server only: it enforces authority itself (session credential + grants).
+	// Host-projected servers are not planted for codex at all.
+	for _, srv := range mcpServers {
+		hdr := "[mcp_servers." + srv.Name + "]\n"
+		configTOML = strings.Replace(configTOML, hdr, hdr+"default_tools_approval_mode = \"approve\"\n", 1)
 	}
 
 	files := map[string][]byte{

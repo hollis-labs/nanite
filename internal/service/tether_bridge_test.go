@@ -203,3 +203,12 @@ func TestTetherBridgeClientAcceptsServiceTokenFile(t *testing.T) {
 		t.Fatalf("a service-token-length file must be accepted: %v", err)
 	}
 }
+
+func TestTurnPlainText(t *testing.T) {
+	if got := turnPlainText(`{"v":1,"text":"hello"}`); got != "hello" {
+		t.Fatalf("structured: %q", got)
+	}
+	if got := turnPlainText("plain answer"); got != "plain answer" {
+		t.Fatalf("plain: %q", got)
+	}
+}

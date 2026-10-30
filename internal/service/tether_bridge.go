@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	messaging "github.com/hollis-labs/libs/mesh/core/messaging"
 	mailbox "github.com/hollis-labs/libs/mesh/core/messaging/mailbox"
@@ -57,9 +58,10 @@ const tetherBridgeSenderSession = "tether"
 // is what makes a crash or ledger failure between the mailbox write and the
 // ledger write harmless.
 type tetherInjector struct {
-	db   *sql.DB
-	msgs *mailbox.Service
-	chat *chatServiceImpl
+	db     *sql.DB
+	msgs   *mailbox.Service
+	chat   *chatServiceImpl
+	sender *TetherSender // relays a tool-free turn's plain answer back to the sender; nil: no relay
 }
 
 func (i *tetherInjector) Busy(sessionID string) bool { return i.chat.IsGenerating(sessionID) }
@@ -68,7 +70,7 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 	verified := env.Metadata["from_verification"] == "verified"
 	facts := i.sessionFacts(ctx, route.SessionID)
 	if !verified {
-		note := "this sender is NOT verified by Tether, so your tools are disabled for this turn: answer in plain text and do not claim to have sent a Tether message"
+		note := "this sender is NOT verified by Tether, so you have no tools in this turn. Answer in plain text only: Nanite sends your plain-text answer back to the sender for you as a Tether reply, so do not say you sent anything and do not try to call a tool"
 		if facts == "" {
 			facts = note
 		} else {
@@ -114,10 +116,82 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 	default:
 		return "", fmt.Errorf("tether injector: look up existing delivery: %w", err)
 	}
-	if werr := i.wake(ctx, route, m, verified); werr != nil {
+	turnID, werr := i.wake(ctx, route, m, verified)
+	if werr != nil {
 		return "", werr
 	}
+	if turnID != "" && !verified {
+		i.relayAnswer(route.SessionID, turnID, env)
+	}
 	return m.ID, nil
+}
+
+// relayTimeout bounds how long the relay waits for a tool-free turn to finish.
+const relayTimeout = 10 * time.Minute
+
+// relayAnswer sends the final plain-text answer of a tool-free wake turn back to
+// the sender over Tether as the actor (kind=response, in_reply_to set). A turn for
+// an unverified sender runs without tools, so the model cannot reply itself; the
+// bridge does it. The send carries an Idempotency-Key derived from the delivery
+// id, so a retried delivery cannot reply twice. Best-effort: the relay lives in
+// memory, so a restart mid-turn loses it (the turn is lost with it); failures are
+// logged, never retried into a loop.
+func (i *tetherInjector) relayAnswer(sessionID, turnID string, env messaging.Envelope) {
+	if i.sender == nil || i.chat == nil || i.chat.streams == nil {
+		return
+	}
+	subject, _ := tetherEnvelopeText(env)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
+		defer cancel()
+		var text string
+		for {
+			snap, err := i.chat.streams.CognitiveTurns().Get(sessionID, turnID)
+			if err == nil {
+				switch snap.State {
+				case "completed":
+					text = turnPlainText(snap.Content)
+				case "failed", "canceled":
+					slog.Warn("tether relay: turn did not complete; nothing sent", "session_id", sessionID, "turn_id", turnID, "state", snap.State)
+					return
+				}
+				if text != "" || snap.State == "completed" {
+					break
+				}
+			}
+			select {
+			case <-ctx.Done():
+				slog.Warn("tether relay: gave up waiting for the turn", "session_id", sessionID, "turn_id", turnID)
+				return
+			case <-time.After(500 * time.Millisecond):
+				continue
+			}
+		}
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		reSubject := subject
+		if reSubject != "" && !strings.HasPrefix(strings.ToLower(reSubject), "re:") {
+			reSubject = "Re: " + reSubject
+		}
+		if _, err := i.sender.SendAsSessionActor(ctx, sessionID, env.From.URN(), reSubject, text, env.ID, env.ThreadID, "nanite-relay-"+env.ID); err != nil {
+			slog.Warn("tether relay: send failed", "session_id", sessionID, "to", oneLine(env.From.URN()), "in_reply_to", env.ID, "err", err)
+			return
+		}
+		slog.Info("tether relay: sent the tool-free turn's answer", "session_id", sessionID, "to", oneLine(env.From.URN()), "in_reply_to", env.ID)
+	}()
+}
+
+// turnPlainText returns the answer text of a finished turn: the content itself,
+// or the "text" of a structured {"v":1,"text":...} message.
+func turnPlainText(content string) string {
+	var structured struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal([]byte(content), &structured) == nil && structured.Text != "" {
+		return structured.Text
+	}
+	return content
 }
 
 // wake turns a delivered mailbox row into a turn when the wake reactor will not.
@@ -127,9 +201,9 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 // wakes it. A failed wake is RETURNED (never swallowed) so the delivery stays open:
 // busy retries shortly, an ended session is detached so the next attempt re-wakes
 // a fresh one, an unsupported view is dead-lettered with its reason.
-func (i *tetherInjector) wake(ctx context.Context, route tetherbridge.ActorRoute, m *mailbox.Message, verified bool) error {
+func (i *tetherInjector) wake(ctx context.Context, route tetherbridge.ActorRoute, m *mailbox.Message, verified bool) (string, error) {
 	if i.chat == nil || i.chat.resolveMessageWakePolicy(ctx, route.SessionID) == chat.SubagentPolicyAutoSummarize {
-		return nil
+		return "", nil
 	}
 	// A native turn offers tools only to a submitting credential with standing
 	// (R1, re-checked on every dispatch). The turn is submitted on behalf of the
@@ -146,19 +220,19 @@ func (i *tetherInjector) wake(ctx context.Context, route tetherbridge.ActorRoute
 			wakeCtx = WithSubmittedBy(ctx, principal)
 		}
 	}
-	_, werr := i.chat.TriggerMessageWake(wakeCtx, route.SessionID, m)
+	turnID, werr := i.chat.TriggerMessageWake(wakeCtx, route.SessionID, m)
 	switch {
 	case werr == nil:
-		return nil
+		return turnID, nil
 	case errors.Is(werr, ErrSessionBusy):
-		return fmt.Errorf("%w: %v", tetherbridge.ErrBusy, werr)
+		return "", fmt.Errorf("%w: %v", tetherbridge.ErrBusy, werr)
 	case errors.Is(werr, ErrSessionEnded):
 		i.detach(ctx, route.SessionID)
-		return fmt.Errorf("tether wake: session ended, actor detached so the next attempt wakes a fresh one: %w", werr)
+		return "", fmt.Errorf("tether wake: session ended, actor detached so the next attempt wakes a fresh one: %w", werr)
 	case errors.Is(werr, ErrUnsupportedDefinition), errors.Is(werr, ErrUnsupportedModel):
-		return fmt.Errorf("%w: %v", tetherbridge.ErrUndeliverable, werr)
+		return "", fmt.Errorf("%w: %v", tetherbridge.ErrUndeliverable, werr)
 	default:
-		return werr
+		return "", werr
 	}
 }
 
@@ -309,7 +383,7 @@ func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatService
 		Store:       st,
 		Actors:      st,
 		Ledger:      st,
-		Injector:    &tetherInjector{db: st.DB, msgs: msgs, chat: chat},
+		Injector:    &tetherInjector{db: st.DB, msgs: msgs, chat: chat, sender: newTetherSender(st)},
 		AllowSender: tetherSenderPolicyWith(splitList(os.Getenv(tetherBridgeAllowEnv)), splitList(os.Getenv(tetherBridgeTrustUnverifiedEnv))),
 	}
 	ctx, cancel := context.WithCancel(context.Background())

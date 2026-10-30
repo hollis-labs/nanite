@@ -140,7 +140,17 @@ func plantAgyHome(bootDir string, params SetupParams) error {
 			return fmt.Errorf("agent: agy home: link %s: %w", rel, err)
 		}
 	}
-	return writeAgySettings(gem, agyAllowRules(params))
+	rules := agyAllowRules(params)
+	// agy writes each MCP tool's descriptor under its own antigravity-cli/mcp and
+	// reads it back with read_file before the first call. Headless, that read is
+	// denied unless allowed, and the turn ends with an empty answer (CW-20261030-0031).
+	// The directory is Nanite's own (under ~/.nanite, which the shared root deny-list
+	// refuses for work roots), so only the rule syntax is checked. Only that
+	// subdirectory: the oauth token and settings sit beside it, not in it.
+	if mcpDir := filepath.Join(gem, "antigravity-cli", "mcp"); agyHasMCPRule(rules) && filepath.IsAbs(mcpDir) && !strings.ContainsAny(mcpDir, agyPathRuleBreakers) {
+		rules = append(rules, "read_file("+mcpDir+")")
+	}
+	return writeAgySettings(gem, rules)
 }
 
 // writeAgySettings merges rules into <gem>/antigravity-cli/settings.json: every
@@ -225,4 +235,14 @@ func agyHomePath(bootDir string) string {
 		return ""
 	}
 	return filepath.Join(bootDir, agyHomeDirName)
+}
+
+// agyHasMCPRule reports whether rules allow any MCP tool.
+func agyHasMCPRule(rules []string) bool {
+	for _, r := range rules {
+		if strings.HasPrefix(r, "mcp(") {
+			return true
+		}
+	}
+	return false
 }

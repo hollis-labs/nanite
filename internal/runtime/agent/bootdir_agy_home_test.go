@@ -126,7 +126,7 @@ func TestAgyHomeSettingsFromGrants(t *testing.T) {
 	boot := agySetup(t, agySetupParams())
 	gem, _ := os.Readlink(filepath.Join(boot, "agy-home", ".gemini"))
 	got := allowList(readAgySettings(t, gem))
-	want := []string{"mcp(tether_nanite/*)", "mcp(tether_tether/agent_list)", "mcp(tether_tether/tether_message_send)"}
+	want := []string{"mcp(tether_nanite/*)", "mcp(tether_tether/agent_list)", "mcp(tether_tether/tether_message_send)", "read_file(" + filepath.Join(gem, "antigravity-cli", "mcp") + ")"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("allow = %v, want %v", got, want)
 	}
@@ -142,7 +142,7 @@ func TestAgyHomeSettingsNoGrantMeansNoHostRule(t *testing.T) {
 	params.HostMCP.Tools = nil
 	boot := agySetup(t, params)
 	gem, _ := os.Readlink(filepath.Join(boot, "agy-home", ".gemini"))
-	if got := allowList(readAgySettings(t, gem)); !slices.Equal(got, []string{"mcp(tether_nanite/*)"}) {
+	if got := allowList(readAgySettings(t, gem)); !slices.Equal(got, []string{"mcp(tether_nanite/*)", "read_file(" + filepath.Join(gem, "antigravity-cli", "mcp") + ")"}) {
 		t.Fatalf("allow = %v; an ungranted host server must have no rule", got)
 	}
 	// No MCP planting, no host: no rules at all.
@@ -177,7 +177,7 @@ func TestAgyHomeSettingsMergeKeepsForeignAndDropsStale(t *testing.T) {
 
 	m = readAgySettings(t, gem)
 	got := allowList(m)
-	want := []string{"read_url(example.com)", "mcp(tether_nanite/*)", "mcp(tether_tether/agent_list)"}
+	want := []string{"read_url(example.com)", "mcp(tether_nanite/*)", "mcp(tether_tether/agent_list)", "read_file(" + filepath.Join(gem, "antigravity-cli", "mcp") + ")"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("allow = %v, want %v (foreign kept, revoked rule gone)", got, want)
 	}
@@ -199,7 +199,7 @@ func TestAgyHomeCorruptSettingsAreKeptAside(t *testing.T) {
 		t.Fatal(err)
 	}
 	agySetup(t, params)
-	if len(allowList(readAgySettings(t, gem))) != 3 {
+	if len(allowList(readAgySettings(t, gem))) != 4 {
 		t.Error("settings not regenerated")
 	}
 	baks, _ := filepath.Glob(sp + ".bak-*")

@@ -42,7 +42,7 @@ import (
 // is the smallest honest form of that. (Deliberately NOT hidden from the
 // misspell gate by string concatenation or a //nolint — an evaded finding and
 // a fixed one are not the same thing.)
-const legacyStatus = "cancelled"
+const legacyStatus = "cancelled" //nolint:misspell // the legacy spelling is the test input
 
 // TestSessionTaskValidationAcceptsV04CompatibilityStatus pins the released
 // v0.4.x read contract while proving the enum still rejects unknown values.

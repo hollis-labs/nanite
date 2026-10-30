@@ -148,7 +148,7 @@ type RetryLoopOptions struct {
 }
 
 // StartDeregisterRetry runs the retry in the background until ctx is
-// cancelled: one pass shortly after start, then one per interval. It is not
+// canceled: one pass shortly after start, then one per interval. It is not
 // started (returns nil) when no Tether address is configured. The returned
 // func stops the loop and waits for it.
 func (s *EnrollmentService) StartDeregisterRetry(ctx context.Context, opts RetryLoopOptions) (stop func()) {

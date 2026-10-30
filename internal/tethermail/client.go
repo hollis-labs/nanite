@@ -223,7 +223,7 @@ func (c *Client) List(ctx context.Context, to string, o ListOptions) ([]messagin
 		return nil, 0, err
 	}
 	defer cancel()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, 0, apiError(resp)
 	}
@@ -246,7 +246,7 @@ func (c *Client) Consume(ctx context.Context, messageID, as string) error {
 		return err
 	}
 	defer cancel()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		return apiError(resp)
 	}
@@ -263,7 +263,7 @@ func (c *Client) MarkRead(ctx context.Context, messageID, as string) error {
 		return err
 	}
 	defer cancel()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		return apiError(resp)
 	}
@@ -289,7 +289,7 @@ func (c *Client) Send(ctx context.Context, env messaging.Envelope, idempotencyKe
 		return messaging.Envelope{}, err
 	}
 	defer cancel()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return messaging.Envelope{}, apiError(resp)
 	}
@@ -353,13 +353,13 @@ func (c *Client) Watch(ctx context.Context, to string, afterSeq int64, o WatchOp
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		return nil, apiError(resp)
 	}
 	ch := make(chan Event, 16)
 	go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		parseSSE(ctx, resp.Body, ch)
 	}()
 	return ch, nil

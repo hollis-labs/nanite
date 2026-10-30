@@ -203,7 +203,7 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 	args := map[string]any{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
-			return mcpToolError("arguments must be a JSON object"), nil
+			return mcpToolError("arguments must be a JSON object"), nil //nolint:nilerr // a bad argument is a tool error result, not a transport error
 		}
 	}
 	if args == nil {
@@ -291,7 +291,7 @@ func (a *API) retireHost(ctx context.Context, _ *http.Request, raw json.RawMessa
 		Reason string `json:"reason"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil || !adminMCPSafeID(args.ID) {
-		return mcpToolError("id is required and must be a single path segment"), nil
+		return mcpToolError("id is required and must be a single path segment"), nil //nolint:nilerr // a bad argument is a tool error result, not a transport error
 	}
 	host, status, msg := a.retireHostSettings(ctx, args.ID, args.Reason, "mcp:host_settings_retire")
 	if status == http.StatusForbidden && msg == enrolledRetireMsg {

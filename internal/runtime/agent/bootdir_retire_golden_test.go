@@ -435,7 +435,7 @@ type root struct{ dir, prefix string }
 func goldenReadTree(r root, snap goldenSnapshot, boot string, env goldenEnv, skipManifest bool) {
 	_ = filepath.WalkDir(r.dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || p == r.dir {
-			return nil
+			return nil //nolint:nilerr // a walk error skips the entry, it does not fail the walk
 		}
 		rel, _ := filepath.Rel(r.dir, p)
 		rel = filepath.ToSlash(rel)
@@ -447,7 +447,7 @@ func goldenReadTree(r root, snap goldenSnapshot, boot string, env goldenEnv, ski
 		}
 		info, lerr := os.Lstat(p)
 		if lerr != nil {
-			return nil
+			return nil //nolint:nilerr // a walk error skips the entry, it does not fail the walk
 		}
 		switch {
 		case info.Mode()&os.ModeSymlink != 0:

@@ -16,7 +16,7 @@ const workRootInstructionsMax = 16 * 1024
 // a CLI session, which runs in the boot dir, still sees the repo's rules (gap
 // C1, docs/architecture/cli-planting-gaps.md). It returns "" when the root is
 // unset, is a root the CLI deny-list refuses (home, ~/.tether, ...), or has no
-// such regular file. The text is data appended under a labelled heading; it
+// such regular file. The text is data appended under a labeled heading; it
 // carries no authority.
 func workRootInstructions(root string) string {
 	if root == "" || !filepath.IsAbs(root) {
@@ -37,7 +37,7 @@ func workRootInstructions(root string) string {
 			continue
 		}
 		raw, _ := io.ReadAll(io.LimitReader(f, workRootInstructionsMax+1))
-		f.Close()
+		_ = f.Close()
 		truncated := len(raw) > workRootInstructionsMax
 		if truncated {
 			raw = raw[:workRootInstructionsMax]

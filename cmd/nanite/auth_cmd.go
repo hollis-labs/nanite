@@ -228,9 +228,9 @@ func authIssue(out io.Writer, method, path string, body any, output string, forc
 		// The secret was never stored; do not leave a credential nobody holds.
 		if id != "" && method == http.MethodPost && strings.HasSuffix(path, "/api/auth/credentials") {
 			_, _, _ = authDo(http.MethodDelete, "/api/auth/credentials/"+id, nil)
-			return fmt.Errorf("could not write %s (%v); the new credential %s was revoked", output, err, id)
+			return fmt.Errorf("could not write %s (%w); the new credential %s was revoked", output, err, id)
 		}
-		return fmt.Errorf("could not write %s (%v); the credential %s was issued but its secret was not saved: rotate it again", output, err, id)
+		return fmt.Errorf("could not write %s (%w); the credential %s was issued but its secret was not saved: rotate it again", output, err, id)
 	}
 	view["written_to"] = output
 	pretty, err := json.MarshalIndent(view, "", "  ")

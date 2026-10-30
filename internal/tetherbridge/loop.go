@@ -222,7 +222,7 @@ func (l *Loop) Handle(ctx context.Context, actorURN string, env messaging.Envelo
 			break
 		}
 		if i+1 >= recordAttempts || ctx.Err() != nil {
-			return fmt.Errorf("%w: %s (message may be lost to this stream): %v", errRecord, env.ID, err)
+			return fmt.Errorf("%w: %s (message may be lost to this stream): %w", errRecord, env.ID, err)
 		}
 		select {
 		case <-ctx.Done():

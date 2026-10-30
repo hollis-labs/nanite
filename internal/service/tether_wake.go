@@ -19,9 +19,9 @@ import (
 // message-wake reactor turns into a turn. Concurrent wakes of one actor
 // collapse into one session.
 type tetherWaker struct {
-	st    *store.Store
-	views *CognitiveViews
-	enrol *EnrollmentService
+	st     *store.Store
+	views  *CognitiveViews
+	enroll *EnrollmentService
 
 	mu     sync.Mutex
 	flight map[string]*wakeCall
@@ -33,8 +33,8 @@ type wakeCall struct {
 	err  error
 }
 
-func newTetherWaker(st *store.Store, views *CognitiveViews, enrol *EnrollmentService) *tetherWaker {
-	return &tetherWaker{st: st, views: views, enrol: enrol, flight: map[string]*wakeCall{}}
+func newTetherWaker(st *store.Store, views *CognitiveViews, enroll *EnrollmentService) *tetherWaker {
+	return &tetherWaker{st: st, views: views, enroll: enroll, flight: map[string]*wakeCall{}}
 }
 
 // Wake returns the actor's session id, starting one when there is none.
@@ -97,10 +97,10 @@ func (w *tetherWaker) wake(ctx context.Context, actorURN string) (string, error)
 	// The attach must succeed: an unattached actor would make every later mail
 	// start another session. Retry briefly, then fail the wake (the mail stays
 	// open and retries) and end the orphan session.
-	if w.enrol != nil {
+	if w.enroll != nil {
 		var attachErr error
 		for n := 0; n < 3; n++ {
-			if attachErr = w.enrol.AttachSessionChecked(ctx, host.ID, sess.ID); attachErr == nil {
+			if attachErr = w.enroll.AttachSessionChecked(ctx, host.ID, sess.ID); attachErr == nil {
 				break
 			}
 			select {

@@ -225,12 +225,12 @@ func (i *tetherInjector) wake(ctx context.Context, route tetherbridge.ActorRoute
 	case werr == nil:
 		return turnID, nil
 	case errors.Is(werr, ErrSessionBusy):
-		return "", fmt.Errorf("%w: %v", tetherbridge.ErrBusy, werr)
+		return "", fmt.Errorf("%w: %w", tetherbridge.ErrBusy, werr)
 	case errors.Is(werr, ErrSessionEnded):
 		i.detach(ctx, route.SessionID)
 		return "", fmt.Errorf("tether wake: session ended, actor detached so the next attempt wakes a fresh one: %w", werr)
 	case errors.Is(werr, ErrUnsupportedDefinition), errors.Is(werr, ErrUnsupportedModel):
-		return "", fmt.Errorf("%w: %v", tetherbridge.ErrUndeliverable, werr)
+		return "", fmt.Errorf("%w: %w", tetherbridge.ErrUndeliverable, werr)
 	default:
 		return "", werr
 	}
@@ -435,7 +435,7 @@ func (m tetherMailSource) MarkRead(ctx context.Context, to, messageID string) er
 func mapTetherErr(err error) error {
 	var ae *tethermail.APIError
 	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
-		return fmt.Errorf("%w: %v", tetherbridge.ErrActorUnknownToTether, err)
+		return fmt.Errorf("%w: %w", tetherbridge.ErrActorUnknownToTether, err)
 	}
 	return err
 }

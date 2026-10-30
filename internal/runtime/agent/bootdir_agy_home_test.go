@@ -215,7 +215,7 @@ func TestAgyHomeNeverWritesTheRealGemini(t *testing.T) {
 		for _, root := range []string{".gemini", ".agents"} {
 			_ = filepath.WalkDir(filepath.Join(home, root), func(p string, d os.DirEntry, err error) error {
 				if err != nil {
-					return nil
+					return nil //nolint:nilerr // a walk error skips the entry, it does not fail the walk
 				}
 				info, _ := d.Info()
 				b, _ := os.ReadFile(p)

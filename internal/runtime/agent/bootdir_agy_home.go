@@ -17,7 +17,7 @@ import (
 // the MCP allow rules without touching the operator's ~/.gemini
 // (CW-20261024-0109).
 //
-// agy honours $HOME for its config and reads settings from
+// agy honors $HOME for its config and reads settings from
 // $HOME/.gemini/antigravity-cli/settings.json only (plus an admin file). So a
 // launch gets:
 //
@@ -98,7 +98,7 @@ func agyPrivateGeminiDir(bootDir string, params SetupParams) string {
 func plantAgyHome(bootDir string, params SetupParams) error {
 	realHome, err := os.UserHomeDir()
 	if err != nil || realHome == "" {
-		return fmt.Errorf("agent: agy home: cannot resolve the home directory: %v", err)
+		return fmt.Errorf("agent: agy home: cannot resolve the home directory: %w", err)
 	}
 	farm := filepath.Join(bootDir, agyHomeDirName)
 	if err := os.MkdirAll(farm, 0o700); err != nil {

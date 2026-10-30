@@ -47,7 +47,7 @@ func TestResolveCLIWritableRoots(t *testing.T) {
 		t.Errorf("unset: roots=%v warns=%v", roots, warns)
 	}
 
-	// Escape hatch: old behaviour plus a deprecation warning.
+	// Escape hatch: old behavior plus a deprecation warning.
 	roots, warns = resolveCLIWritableRoots(cfg, true)
 	if !slices.Equal(roots, []string{"/cli", "/dev-tools"}) {
 		t.Errorf("escape hatch roots = %v", roots)

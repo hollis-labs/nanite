@@ -265,7 +265,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (int, []
 	if err != nil {
 		// The transport error can carry the URL; report the class, not the text.
 		if ctx.Err() != nil {
-			return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, ctx.Err())
+			return 0, nil, fmt.Errorf("%w: %w", ErrUnreachable, ctx.Err())
 		}
 		return 0, nil, ErrUnreachable
 	}

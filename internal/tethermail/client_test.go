@@ -2,6 +2,7 @@ package tethermail_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -215,7 +216,8 @@ func TestTokenFileReReadPerRequest(t *testing.T) {
 	}
 	s.SetToken("tok-two")
 	_, _, err := c.List(ctx(t), me.URN(), tethermail.ListOptions{})
-	if ae, ok := err.(*tethermail.APIError); !ok || ae.Status != 401 {
+	var ae *tethermail.APIError
+	if !errors.As(err, &ae) || ae.Status != 401 {
 		t.Fatalf("want 401, got %v", err)
 	}
 	if err := os.WriteFile(tokPath, []byte("tok-two\n"), 0o600); err != nil {

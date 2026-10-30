@@ -106,7 +106,20 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 	// an enrolled actor would sit unread. Mail for an actor is meant to be acted
 	// on, so when the reactor will not wake the session the bridge does it.
 	if i.chat.resolveMessageWakePolicy(ctx, route.SessionID) != chat.SubagentPolicyAutoSummarize {
-		if _, werr := i.chat.TriggerMessageWake(ctx, route.SessionID, m); werr != nil {
+		// A native turn offers tools only to a submitting credential with standing
+		// (R1, re-checked on every dispatch). The bridge turn is submitted on behalf of
+		// the actor, so the credential that enrolled it is the principal; the tools are
+		// still only those the host's native authority grants. No enrollment, no
+		// principal: the turn runs tool-free, as any turn without a credential does.
+		wakeCtx := ctx
+		var principal string
+		if qerr := i.db.QueryRowContext(ctx,
+			`SELECT e.principal FROM agent_actor_bindings b
+			   JOIN agent_enrollments e ON e.host_settings_id = b.host_settings_id
+			  WHERE b.actor_uri = ? AND b.enabled = 1 AND e.status = 'enrolled' LIMIT 1`, route.ProfileID).Scan(&principal); qerr == nil && principal != "" {
+			wakeCtx = WithSubmittedBy(ctx, principal)
+		}
+		if _, werr := i.chat.TriggerMessageWake(wakeCtx, route.SessionID, m); werr != nil {
 			slog.Warn("tether bridge: wake turn for delivered message failed", "session_id", route.SessionID, "message_id", m.ID, "err", werr)
 		}
 	}

@@ -10,4 +10,4 @@ A CLI-runtime agent (Claude, agy) can use Tether's own MCP gateway besides Nanit
 
 ## Replying without a per-agent credential
 
-An enrolled agent can reply with Nanite's own `tether_send` tool (grant it like any tool). The sender is always the session's enrolled actor, taken from the MCP session context, sent with the bridge service identity and an Idempotency-Key. This is the MVP path; per-actor tokens are the model for later (Tether sender-identity enforcement, CW-20261024-0023, will need a scoped send-as grant for the bridge identity).
+An enrolled agent can reply with Nanite's own `tether_send` tool (grant it like any tool; it exists only when the Tether bridge is on, that is `NANITE_TETHER_ADDR` is set on the Nanite process, as the local unix socket form). The sender is always the session's enrolled actor, taken from the MCP session context, sent with the bridge service identity and an Idempotency-Key. This is the MVP path; per-actor tokens are the model for later (Tether sender-identity enforcement, CW-20261024-0023, will need a scoped send-as grant for the bridge identity).

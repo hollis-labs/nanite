@@ -1,6 +1,6 @@
 # CI-built binaries installed from GitHub (CW-20261024-0120): design proposal
 
-Status: APPROVED with the decisions in section 8; P1/P2 in progress. Owner direction (2026-10-24): binaries are built once in CI and installed from GitHub; nothing is built on a target machine; local repo copies are going away. Constraint: no tag is created without the owner's approval; releases (v0.4.0 and so on) stay separate. Cerberus (Local Dev) is a participant; its contract is `ci-build-deploy-workflow-v1`, and its drafts for basalisk, station, mentat and fragments-engine are in `~/dev/workspaces/sysadmin/docs/phaseB-drafts-20261024.md`. This design aims to be one contract for all of them.
+Status: APPROVED with the decisions in section 8; P1 to P3 are built and used on the Mac. **As built (read this first):** the workflow is `.github/workflows/build.yml` (not `build-binaries.yml`) and inlines its steps (it does not call the reusable `go-app-build.yml`); the build script is `scripts/ci/build-binaries.sh`; the config that ships in the tarball is `deploy/deploy.yaml` (repo path), `fleet-install` lives in `hollis-labs/tools`. `workflow_dispatch` takes `ref` (branch, tag or sha to build) and `skip_tests` (boolean, skips the test job; the linux binary is still smoke-tested): `gh workflow run build.yml -f ref=<branch|sha> -f skip_tests=true`. Where the sections below say otherwise, this note and sections 4 and 5's "Implemented as" paragraph win. Owner direction (2026-10-24): binaries are built once in CI and installed from GitHub; nothing is built on a target machine; local repo copies are going away. Constraint: no tag is created without the owner's approval; releases (v0.4.0 and so on) stay separate. Cerberus (Local Dev) is a participant; its contract is `ci-build-deploy-workflow-v1`, and its drafts for basalisk, station, mentat and fragments-engine are in `~/dev/workspaces/sysadmin/docs/phaseB-drafts-20261024.md`. This design aims to be one contract for all of them.
 
 ## 1. CI workflow
 
@@ -60,7 +60,7 @@ Flow, each step logged and fatal on failure:
 ### build-info.json (proposed format; Cerberus asked for it to add to `go-app-build`)
 
 ```json
-{"schema": "fleet-build-info/v1", "app": "nanite", "commit": "<full sha>", "sha12": "<12>", "version": "0.3.0-beta.1-71-g6fb83f29", "go_version": "go1.27.3", "built_at": "<RFC3339>", "targets": ["linux/amd64", "darwin/arm64"], "migrations_max": 184}
+{"schema": "fleet-build-info/v1", "app": "nanite", "commit": "<full sha>", "sha12": "<12>", "version": "0.3.0-beta.1-71-g6fb83f29", "go_version": "go1.27.3", "built_at": "<RFC3339>", "targets": ["linux/amd64", "darwin/arm64"], "migrations_max": 186}
 ```
 `migrations_max` is optional and app-specific: the highest numbered file in the app's migration directory (for Nanite `internal/store/migrations/*.sql`, goose numbering). The reusable workflow can take it from an input (`migrations_glob`) and omit the field when unset; `fleet-install` compares it with the live database's goose version and stops unless `--accept-migration`.
 
@@ -140,4 +140,4 @@ Phasing: P1 workflow PR and P2 `fleet-install` + `deploy.yaml` (tested on the Ma
 
 ## 9. Not verified
 
-No workflow has been run, no `fleet-install` exists, and the Cerberus apply-from-symlink behaviour is read from code and docs, not tested. `migrations_max` extraction and `actions/attest-build-provenance` availability for this repo are assumptions to check in P1.
+At the time of writing the workflow had not been run; it now has (artifacts `nanite-<sha12>` per commit), and `fleet-install` deploys have been run on the Mac Nanite (see `docs/guides/mac-nanite-supervision.md`). Still unverified: any `fleet-install` deploy to agent-os (the first is a dry run plus the owner's go), the attestation step (not implemented), and rollback from a real failed health check in production.

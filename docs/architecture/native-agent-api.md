@@ -250,7 +250,7 @@ an admin MCP tool of the same behavior except the turn event stream.
 | List / read agents | `GET /api/native-agents[/{id}]` (`limit`, `offset`) | `agent_list`, `agent_get` |
 | Enroll as a Tether actor (admin only) | `POST /api/native-agents/{id}/enroll` `{"reason", "revision"?}` | `agent_enroll` |
 | Host settings | `GET/POST /api/agent-host-settings`, `PUT .../{id}` | `host_settings_*` |
-| Retire (disable) | `POST /api/agent-host-settings/{id}/retire` `{"reason"}` | `host_settings_retire` |
+| Retire (disable) | `POST /api/agent-host-settings/{id}/retire` `{"reason"}` (an enrolled Tether actor needs an admin credential: `403 enrolled_retire_requires_admin`) | `host_settings_retire` |
 | Read authority and grantable tools | `GET /api/native-authority[/{id}]`, `GET /api/native-authority/tools` (`limit`, `offset`) | `authority_list`, `authority_get` |
 | Grant or withdraw (admin only) | `PUT`/`DELETE /api/native-authority/{id}/tools/{tool}`, `POST .../{id}/revoke` | `tool_grant`, `tool_ungrant`, `authority_revoke` |
 | Run | `/api/agent/v1/sessions...` | `session_*`, `turn_*` |
@@ -263,7 +263,7 @@ characters that is written to the auth audit. It does not stop live sessions
 (stop them with the session routes) or withdraw grants (admin). `DELETE
 /api/agent-host-settings/{id}` is a real hard delete of the row, guarded by the
 `revision` in the body (409 on a stale one); it leaves definitions and
-authorities alone. A client that wants an agent gone but auditable retires it.
+authorities alone. A client that wants an agent gone but auditable retires it. Delete of an enrolled agent's host settings is refused (`409 enrolled_host_cannot_be_deleted`): retire it first.
 
 **Reading what an agent can do and its status.** `GET /api/agent/v1/capabilities`
 is global (operations, stream transports, event verbs, turn states, queue

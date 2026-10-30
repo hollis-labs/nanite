@@ -116,4 +116,6 @@ there first; this repo adds the React component under
 
 `go build` writes `./nanite` in the working tree; it does not replace the
 binary a running `nanite serve` is executing. Restart the server on the new
-binary before treating a change as live.
+binary before treating a change as live. Fleet hosts (agent-os, the Mac) do not
+build: they install the CI artifact `nanite-<sha12>` with `fleet-install`, driven
+by `deploy/deploy.yaml` (see `docs/guides/mac-nanite-supervision.md`).

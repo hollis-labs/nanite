@@ -268,8 +268,8 @@ contents>`, any Host (Nanite sends `localhost`):
 
 `display_name` on register, the lookup shape and the `DELETE` are **confirmed by
 the Tether agent against build 49a3a6b2** and were read from Tether's source on
-`main` (`internal/api/registry.go`), but **have not yet been observed by Nanite
-against a live Tether**. The deregister call is isolated in
+`main` (`internal/api/registry.go`); Nanite has since observed them against a live
+Tether (see "Observed live" below). The deregister call is isolated in
 `tetherregistry.Client.Deregister`; a `404` is treated as already done.
 
 **Live enrollment needs a scoped `tether.registry` credential (`registry.write`
@@ -409,7 +409,7 @@ authorization, session attach and detach.
 
 ## Install identity
 
-Nanite has no stable install id today. Searched: the config layout, the brand
+Nanite had no stable install id at decision time (the `install_identity` table, migration 184, now provides one; the text below is the design it implements). Searched: the config layout, the brand
 package, `user_settings` (a single settings row with no id column of this
 kind), host settings, scheduler identity tables, the server and whoami
 surfaces. Only per-row UUIDs exist: `agent_host_settings.id` is globally
@@ -455,9 +455,10 @@ the row keeps the previous id and the time of the last change.
    found and refuses to proceed silently if one exists with a non-Tether
    authority; it never rewrites an actor key.
 3. Rollout: enroll one test agent on a non-production Tether, verify mail
-   reaches it, then enable the bridge (`NANITE_TETHER_ADDR`) on the hub only
-   after the non-destructive catch-up work lands, so the lossy sweep is not
-   exposed.
+   reaches it, then enable the bridge (`NANITE_TETHER_ADDR`, the local
+   unix socket form) on the hub. The bridge now reads mail with the
+   non-destructive list and watch calls, so the earlier lossy inbox sweep no
+   longer applies.
 4. Rollback: disable the binding and retire the instance; deregister in
    Tether. No data migration to undo.
 

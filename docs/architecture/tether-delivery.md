@@ -2,7 +2,8 @@
 
 Mail addressed through Tether to a durable Nanite actor reaches the actor's
 session as one turn. The bridge is off unless `NANITE_TETHER_ADDR` names a
-Tether daemon (credentials: `NANITE_TETHER_TOKEN_FILE`, a 0600 file holding the bridge's
+Tether daemon, as the local unix socket form (`unix:/var/lib/fabric/tether/run/tetherd.sock`; the
+`/messages` routes the bridge uses are not served on the remote edge URL) (credentials: `NANITE_TETHER_TOKEN_FILE`, a 0600 file holding the bridge's
 service token, else `TETHER_TOKEN`, else the client's default operator token file, which
 the bridge must not run on). Run it with its own Tether service identity and a scoped token,
 not an operator credential.
@@ -10,7 +11,10 @@ not an operator credential.
 ## Flow
 
 `internal/tetherbridge/loop.go` serves every non-archived durable instance
-that has a URN and a current session. For each envelope:
+that has a URN and a current session. It keeps one `/messages/watch` stream per
+actor (resumable by sequence), plus a non-destructive `/messages/list` catch-up
+on every (re)connect and every 5 minutes. A 30-second sweep only refreshes the
+set of served actors and resumes due ledger rows; it reads no mail. For each envelope:
 
 1. The envelope is recorded in `tether_deliveries`, keyed on the Tether
    message id, before the route is resolved or anything is claimed.
@@ -50,20 +54,22 @@ used as an agent slug. The real sender, Tether's verified principal and the
 message id are in metadata. The body frames the message with two
 bridge-written lines and quotes every line of sender text with `> `.
 
-A sender must carry Tether's `from_verification: verified`. Set
+A sender must carry Tether's `from_verification: verified`, unless its exact URN is
+listed in `NANITE_TETHER_TRUST_UNVERIFIED_FROM` (comma-separated, exact match only, default
+empty; for the operator's own address, whose mail Tether does not verify; a listed URN can be
+spoofed by anything that can send unverified mail on the local Tether, so list only addresses
+whose spoofing you accept). Set
 `NANITE_TETHER_ALLOW_FROM` (comma-separated URNs or prefixes ending in `*`,
 matched against the sender URN or verified principal) to restrict further.
 A refused sender is dead-lettered and never wakes the actor.
 
 ## Known gaps
 
-The pinned Tether client (`mesh/core` v0.8.0) has no `/messages/list` or
-`/messages/watch` call. The live path is `/messages/subscribe` and the
-catch-up sweep uses `/messages/inbox`, which marks mail delivered on read. The
-ledger row is written immediately after the read, with a short retry; a process
-crash, or a database that stays unwritable, between the read and that write
-still loses the sweep's copy. Moving the sweep to the non-destructive list
-call and the stream to the resumable watch needs a client release.
+Mail is read with the non-destructive list and watch calls (`internal/tethermail`), never
+the destructive inbox read, so a crash between the read and the ledger write does not lose
+mail: Tether still holds it unread and the next catch-up lists it again. The catch-up window
+is 5 pages of 100 unread messages per actor; older unread mail is reached once handled mail
+is marked read.
 
 Tether sends carry no idempotency key, so a caller retrying a timed-out send
 must check the sent list first. Unbound actors are not resumed on delivery.

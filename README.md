@@ -7,8 +7,10 @@ hot-loaded, Ed25519-signed subprocess MCP plugins. It ships as a single
 binary — `nanite serve` — and runs as a single-user desktop application, not
 a multi-tenant service.
 
-> **Pre-release.** Nanite is unreleased, not deployed, and has no outside
-> consumers. It's being built in the open: the code, the docs, and this
+> **Pre-1.0 (0.4.0).** Nanite runs on its author's own machines (an agent-os
+> service and a Mac instance, installed from CI-built binaries with
+> `fleet-install`, see `docs/guides/mac-nanite-supervision.md`) and has no
+> outside consumers. It's being built in the open: the code, the docs, and this
 > README describe what exists today, not a pitch for what's planned.
 > Interfaces and behavior change without notice, and there are no
 > compatibility guarantees yet.

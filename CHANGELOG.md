@@ -4,9 +4,81 @@ All notable user-facing changes land here. This file starts with the
 2026-05-01 release notes for the pre-release sprint; earlier history
 lives in the git log.
 
-## Unreleased
+## 0.4.0 - 2026-10-30
+
+Headline: Nanite agents can be enrolled as durable Tether actors, and mail
+sent to them is delivered, answered and woken automatically.
 
 ### Added
+
+- **Enroll an agent as a durable Tether actor.** `nanite agent enroll
+  <host-settings-id> --reason R [--revision REV]`, the `agent_enroll` admin MCP
+  tool and `POST /api/native-agents/{id}/enroll` register the agent with
+  Tether under the key `nanite/<install_id>/<host_settings_id>` and bind the
+  returned URN to it (migration 185, `agent_enrollments`). Retries and crash
+  recovery are safe: an enrolling record is committed before the Tether call.
+  Registration uses the registry token in its own 0600 file
+  (`NANITE_TETHER_REGISTRY_TOKEN_FILE`) against `NANITE_TETHER_REGISTRY_ADDR`
+  (a `unix:///abs/path.sock` or http(s) URL; the token authenticates only on
+  Tether's local unix socket; falls back to `NANITE_TETHER_ADDR`). Retiring an
+  enrolled host needs `admin`, archives the actor and deregisters it in Tether;
+  `nanite serve` retries pending deregistrations in the background. A hard
+  `DELETE` of an enrolled host is refused. `nanite install-identity
+  show|regen [--force]` manages the per-install id (migration 184,
+  `install_identity`); `regen` refuses once any binding or actor exists.
+
+- **Tether auto-delivery for enrolled agents.** The bridge now reads mail with
+  a non-destructive list+watch (SSE) instead of sweeping the inbox, persists
+  its `after_seq` cursor per actor (migration 186, `tether_watch_cursors`),
+  reconnects with a 5s to 5min backoff, and marks handled mail read in Tether.
+  When mail arrives for an enrolled agent with no live session, Nanite starts a
+  session from the host's settings, attaches it and runs the wake turn; a
+  failed wake is retried, not lost. The delivery text states the session's
+  real provider and model. The wake turn carries the enrolling credential so
+  the agent's granted tools are offered.
+
+- **`tether_send` tool.** An agent replies as its enrolled actor; the sender is
+  taken from the session, never from an argument, and calls carry an
+  `Idempotency-Key`. It is offered only to launches that have an enrolled actor
+  (including CLI agents through the `store` scope). Whether Tether accepts the
+  bridge identity sending as the actor is subject to its own send-as policy.
+
+- **Unverified-sender trust list and answer relay.**
+  `NANITE_TETHER_TRUST_UNVERIFIED_FROM` (exact URNs, default empty) lets named
+  senders whose mail carries no Tether verification, such as the operator
+  address, pass the sender policy. Their mail runs a tool-free turn, and the
+  agent's plain answer is relayed back to the sender as the actor
+  (`kind=response`, `in_reply_to`). Only list addresses whose spoofing you
+  accept, and pair it with `NANITE_TETHER_ALLOW_FROM`.
+
+- **`agents:manage` scope.** A client credential can manage agents (agent
+  setup, native agents, host-settings writes, native-authority reads, the
+  admin MCP endpoint) without `admin`; `admin` includes it. Tool grants and
+  ungrants, authority create/revoke, `/api/auth` and `/api/providers` stay
+  `admin`. Also `POST /api/agent-host-settings/{id}/retire` and `limit`/`offset`
+  on `native-authority/tools`.
+
+- **Show-once credentials.** `nanite auth create|rotate --output FILE` writes
+  the secret only to FILE (mode 0600) and never prints it. An existing file is
+  refused before issuing unless `--force`; a failed write revokes the new
+  credential.
+
+- **Skill grants for native authorities.** `PUT|DELETE
+  /api/native-authority/{id}/skills/{skill}` and the `skill_grant` /
+  `skill_ungrant` MCP tools (admin class; `agents:manage` alone is refused;
+  migration 183, `native_authority_skills`). A grant is tied to the pinned skill
+  digest, shows as granted or pending in the agent view, and the skill is
+  delivered at session create to API agents and all four CLI runtimes.
+
+- **Agent definitions: more fields applied at launch, live and pinned modes.**
+  Steering, context sources, resources, capabilities, tool requests and
+  memory/recovery policy are applied or recorded; hooks and an unmet `requires`
+  are refused naming the field; a load reports each field as applied, recorded,
+  unmet or refused. A host has a `mode` (live or pinned) and `agent_dir`; the
+  default follows `NANITE_AGENT_MODE`, then `NANITE_RESOURCE_ENV` and
+  `NANITE_RESOURCE_ADMIN`, else pinned. `POST /api/agent-reload` re-reads a
+  host's directory. API sessions fail a later turn with `host_revision_changed`
+  when the host revision moved, as CLI sessions do.
 
 - **`cli_writable_roots`: CLI writable roots are decoupled from
   `dev_tools_allowed_paths`, and a hard deny-list applies.** A launched CLI
@@ -29,15 +101,72 @@ lives in the git log.
   live in the row's settings. Every call carries `X-Station-Session`, taken
   from the Nanite session id. The providers stay unregistered until a key
   resolves. The gateway's `session_required`, `invalid_session` and
-  `model_not_available` refusals surface as typed errors.
+  `model_not_available` refusals surface as typed errors. The gateway's chat
+  aliases are seeded into the model picker (price recorded as unknown, context
+  limits conservative and unverified), and `go-gpt` uses the Responses wire.
+
+- **Agy per-agent MCP allowlist.** An agy launch runs with a private `HOME`
+  and a persistent per-agent `~/.nanite/agy-gemini/<slug>` whose
+  `settings.json` (0600) allows only the MCP tools the agent is granted, and
+  `read_file`/`write_file` under the launch's writable roots. Host
+  `mcp_servers` are now admitted for agy; hooks, codex and opencode stay refused.
+  See `docs/guides/agy-per-agent-mcp-allowlist.md`.
+
+- **Agent v1 API.** `client_context.workspace_items` (optional, at most 32
+  items; inline text up to 8 KiB, otherwise a `uri` only; counted in the 32 KiB
+  descriptor budget). `run.finish` and `usage` events now carry `usage.used`,
+  `usage.window`, `usage.window_source` and `usage.model`.
+
+- **CI-built binaries.** `.github/workflows/build.yml` runs the tests, then
+  builds linux/amd64 and darwin/arm64 binaries per commit on build-1 as workflow
+  artifacts (`workflow_dispatch` accepts `ref` and `skip_tests`).
+  `deploy/deploy.yaml` describes how to install them, including a post-deploy
+  route smoke (401 on protected routes) with automatic rollback. The installer
+  itself, `fleet-install`, lives in `hollis-labs/tools`, not in this repo.
 
 ### Changed
+
+- **A Codex chat now resumes across Nanite restarts** (CW-20261024-0034).
+  A long-lived session's Codex `sessions/` tree is kept under
+  `~/.nanite/codex-sessions/<session id>` instead of the per-boot directory, so
+  after a restart the next turn resumes the stored thread instead of starting a
+  fresh one.
+  This supersedes "A thread does not survive a restart" in the 0.3.0-beta.1
+  entry below.
+
+- **`GET /api/agents` no longer returns 500 when a host's definition is
+  refused by native execution** (for example `permissions.profile: read-only`).
+  Such a host is listed with status `unsupported` and an `unsupported_semantics`
+  reason; `GetAgent` still refuses it. The chat picker and start surface hide it.
+
+- **CLI hardening.** A launched Claude's `settings.json` and OpenCode's
+  `opencode.json` are 0600, and Codex and OpenCode boot dirs no longer carry a
+  `.mcp.json` credential mirror. Headless Codex auto-approves MCP calls to
+  Nanite's own server (`default_tools_approval_mode = "approve"` on that server
+  only), so `tether_send` works. The work root's `AGENTS.md` (or `CLAUDE.md`),
+  capped at 16 KiB and skipped for deny-listed roots, is inlined into the CLI
+  instruction files. Host-started sessions now resolve their enrolled actor.
+
+- **The Mac Nanite runs under Cerberus** as `nanite-api-service` in
+  `nanite.cerberus.yaml`, from the installed `~/.local/share/nanite/current`
+  symlink, with no build on the machine.
+
+- **`go.mod` repointed** from the deleted `plugins-catalog` and `plugin-sdk`
+  repositories to `github.com/hollis-labs/plugins/plugin-catalog`. No behaviour
+  change.
 
 - **Product version now derives from the git tag.** `nanite version` reports
   the nearest repo-level `v*` tag (`git describe --tags --match 'v*'`), injected
   by the Makefile (`build`, `build-dev`, `install`, `package-release`). A plain
   `go build` reports `dev`. `pkg/pluginapi/vN` tags version the plugin API
-  module only and are not the product version. Baseline: `v0.3.0-beta.1`.
+  module only and are not the product version.
+
+### Fixed
+
+- A restart no longer logs `DB Closed` from the shutdown tasks snapshot
+  (CW-20261011-0082).
+
+## 0.3.0-beta.1 and earlier
 
 ### Security
 

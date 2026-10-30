@@ -161,9 +161,34 @@ func oneLine(s string) string {
 // also match an entry (exact URN, or a prefix ending in "*") by sender URN or
 // verified principal.
 func tetherSenderPolicy(allow []string) func(messaging.Envelope) error {
+	return tetherSenderPolicyWith(allow, nil)
+}
+
+// tetherBridgeTrustUnverifiedEnv names exact sender URNs the bridge accepts even
+// though Tether did not verify them (comma-separated, exact match only, empty by
+// default). It exists for the operator's own address: the agent-mux operator UI
+// (msg://user/agent-mux/operator) sends mail Tether marks with no verification.
+// RISK: until Tether enforces sender identity, an unverified `from` is whatever
+// the sender claimed, so a listed URN can be spoofed by anything able to send
+// unverified mail on the local Tether. List only addresses whose spoofing you
+// accept, and still pair it with NANITE_TETHER_ALLOW_FROM.
+const tetherBridgeTrustUnverifiedEnv = "NANITE_TETHER_TRUST_UNVERIFIED_FROM"
+
+// tetherSenderPolicyWith is tetherSenderPolicy plus the unverified-trust list.
+func tetherSenderPolicyWith(allow, trustUnverified []string) func(messaging.Envelope) error {
 	return func(env messaging.Envelope) error {
 		if env.Metadata["from_verification"] != "verified" {
-			return fmt.Errorf("%w: sender %s is not verified by Tether", tetherbridge.ErrSenderRejected, oneLine(env.From.URN()))
+			trusted := false
+			for _, u := range trustUnverified {
+				if env.From.URN() == u {
+					trusted = true
+					break
+				}
+			}
+			if !trusted {
+				return fmt.Errorf("%w: sender %s is not verified by Tether", tetherbridge.ErrSenderRejected, oneLine(env.From.URN()))
+			}
+			slog.Info("tether bridge: accepting an unverified sender from the trust list", "from", oneLine(env.From.URN()), "message_id", env.ID)
 		}
 		if len(allow) == 0 {
 			return nil
@@ -235,7 +260,7 @@ func startTetherBridge(st *store.Store, msgs *mailbox.Service, chat *chatService
 		Actors:      st,
 		Ledger:      st,
 		Injector:    &tetherInjector{db: st.DB, msgs: msgs, chat: chat},
-		AllowSender: tetherSenderPolicy(splitList(os.Getenv(tetherBridgeAllowEnv))),
+		AllowSender: tetherSenderPolicyWith(splitList(os.Getenv(tetherBridgeAllowEnv)), splitList(os.Getenv(tetherBridgeTrustUnverifiedEnv))),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

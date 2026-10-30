@@ -35,11 +35,34 @@ const (
 	MaxCommands         = 16
 	MaxCommandNameBytes = 128
 	MaxSchemaBytes      = 2048
+
+	// workspace_items (optional, v1): pointers to the client's workspace content.
+	// The whole descriptor stays inside MaxBytes.
+	MaxWorkspaceItems = 32
+	MaxItemNameBytes  = 256
+	MaxItemTypeBytes  = 64
+	MaxItemTextBytes  = 8 * 1024 // inline text limit; larger items are pointer-only
+	MaxItemURIBytes   = 1024
 )
 
 type Descriptor struct {
 	Version int  `json:"version"`
 	View    View `json:"view"`
+	// WorkspaceItems optionally describes the client's workspace content: each item
+	// is a name, type, content hash and size, with the text inline when it is at most
+	// MaxItemTextBytes, otherwise only a pointer (URI, no text). Like the rest of the
+	// descriptor it is an untrusted observation, never authorization.
+	WorkspaceItems []WorkspaceItem `json:"workspace_items,omitempty"`
+}
+
+// WorkspaceItem is one workspace item the client chose to describe.
+type WorkspaceItem struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+	Text   string `json:"text,omitempty"`
+	URI    string `json:"uri,omitempty"`
 }
 
 type View struct {
@@ -151,7 +174,7 @@ func exactFields(value any, kind string) bool {
 	allowed := map[string]string{}
 	switch kind {
 	case "root":
-		allowed = map[string]string{"version": "", "view": "view"}
+		allowed = map[string]string{"version": "", "view": "view", "workspace_items": "items"}
 	case "view":
 		allowed = map[string]string{"route": "", "active_filters": "filters", "search": "", "selected_ids": "", "visible_rows": "rows", "available_commands": "commands"}
 	case "filter":
@@ -160,6 +183,8 @@ func exactFields(value any, kind string) bool {
 		allowed = map[string]string{"id": "", "summary": ""}
 	case "command":
 		allowed = map[string]string{"name": "", "scope": "", "input_schema": ""}
+	case "item":
+		allowed = map[string]string{"name": "", "type": "", "sha256": "", "size": "", "text": "", "uri": ""}
 	}
 	for key, child := range object {
 		nested, present := allowed[key]
@@ -169,7 +194,7 @@ func exactFields(value any, kind string) bool {
 		if nested == "view" && !exactFields(child, nested) {
 			return false
 		}
-		if nested == "filters" || nested == "rows" || nested == "commands" {
+		if nested == "filters" || nested == "rows" || nested == "commands" || nested == "items" {
 			items, isArray := child.([]any)
 			if !isArray {
 				return false
@@ -378,6 +403,68 @@ func validate(value Descriptor) error {
 		if schemaErr != nil || len(schema) > MaxSchemaBytes || len(command.InputSchema) == 0 || bytes.TrimSpace(command.InputSchema)[0] != '{' {
 			return invalid(path+".input_schema", "bounded JSON object required")
 		}
+	}
+	if err = validateWorkspaceItems(value.WorkspaceItems); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateWorkspaceItems(items []WorkspaceItem) error {
+	if len(items) > MaxWorkspaceItems {
+		return invalid("workspace_items", "item count limit exceeded")
+	}
+	for i, it := range items {
+		path := fmt.Sprintf("workspace_items[%d]", i)
+		if err := text(path+".name", it.Name, MaxItemNameBytes, true); err != nil {
+			return err
+		}
+		if err := identifier(path+".type", it.Type, MaxItemTypeBytes); err != nil {
+			return err
+		}
+		if len(it.SHA256) != 64 {
+			return invalid(path+".sha256", "64 lowercase hex characters required")
+		}
+		for _, r := range it.SHA256 {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+				return invalid(path+".sha256", "64 lowercase hex characters required")
+			}
+		}
+		if it.Size < 0 {
+			return invalid(path+".size", "non-negative size required")
+		}
+		if it.Text != "" {
+			if err := text(path+".text", it.Text, MaxItemTextBytes, false); err != nil {
+				return err
+			}
+			if it.Size > MaxItemTextBytes {
+				return invalid(path+".text", "items larger than 8 KiB are pointer-only: send a uri, not text")
+			}
+		}
+		if it.Size > MaxItemTextBytes && it.URI == "" {
+			return invalid(path+".uri", "items larger than 8 KiB need a uri")
+		}
+		if it.URI != "" {
+			if err := validateItemURI(path+".uri", it.URI); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateItemURI accepts an origin-relative path or an http(s) URL without
+// credentials. It is data for the model, never fetched or followed by Nanite.
+func validateItemURI(path, raw string) error {
+	if err := text(path, raw, MaxItemURIBytes, true); err != nil {
+		return err
+	}
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") && !strings.Contains(raw, "\\") {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return invalid(path, "origin-relative path or http(s) URL without credentials required")
 	}
 	return nil
 }

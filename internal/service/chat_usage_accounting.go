@@ -118,3 +118,17 @@ func canonicalRunUsage(rows []ledger.Row) *chatstream.Usage {
 	}
 	return u
 }
+
+// lastCallContextTokens is the context size after the run's last model call:
+// that call's input (uncached, cache read and cache write) plus its output and
+// reasoning. 0 when the provider did not report it.
+func lastCallContextTokens(rows []ledger.Row) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	u := rows[len(rows)-1].Usage
+	if u.UncachedInputTokens.Provenance == ledger.ProvenanceUnknown || u.OutputTokens.Provenance == ledger.ProvenanceUnknown {
+		return 0
+	}
+	return int(u.UncachedInputTokens.Tokens + u.CacheReadTokens.Tokens + u.CacheWriteTokens.Tokens + u.OutputTokens.Tokens + u.ReasoningTokens.Tokens)
+}

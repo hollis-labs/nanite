@@ -100,5 +100,12 @@ func (a *API) handleAgentV1TurnEvents(w http.ResponseWriter, r *http.Request) {
 		a.agentV1Error(w, 503, "native event log unavailable")
 		return
 	}
+	model := ""
+	if sess, serr := a.Services.Sessions.Get(r.Context(), snapshot.SessionViewID); serr == nil && sess != nil {
+		model = sess.Model
+	}
+	turns := a.Services.Streams.CognitiveTurns()
+	turnID := snapshot.TurnID
+	w = newUsageAnnotator(w, model, func() (int, bool) { return turns.ContextUsed(turnID) })
 	_ = httpstream.Write(w, r, sub, httpstream.State{RunID: snapshot.RunID, After: after, Checkpoint: snapshot.EventCheckpoint}, expired)
 }

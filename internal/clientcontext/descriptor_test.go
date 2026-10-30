@@ -186,3 +186,44 @@ func TestDescriptorNormalizedByteDepthAndNodeBudgets(t *testing.T) {
 		t.Fatal("excessive schema nodes admitted")
 	}
 }
+
+func TestDecode_WorkspaceItems(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	base := func(items string) []byte {
+		return []byte(`{"version":1,"view":{"route":"/chat"},"workspace_items":` + items + `}`)
+	}
+	ok := []string{
+		`[]`,
+		`[{"name":"notes.md","type":"text/markdown","sha256":"` + hash + `","size":12,"text":"hello world!"}]`,
+		`[{"name":"big.pdf","type":"application/pdf","sha256":"` + hash + `","size":900000,"uri":"/files/big.pdf"}]`,
+		`[{"name":"x.png","type":"image/png","sha256":"` + hash + `","size":10,"uri":"https://example.com/x.png"}]`,
+	}
+	for _, items := range ok {
+		if _, err := Decode(base(items)); err != nil {
+			t.Errorf("want ok for %s: %v", items, err)
+		}
+	}
+	bad := map[string]string{
+		"big text":          `[{"name":"a","type":"t","sha256":"` + hash + `","size":9000,"text":"` + strings.Repeat("x", 9000) + `"}]`,
+		"big without uri":   `[{"name":"a","type":"t","sha256":"` + hash + `","size":9000}]`,
+		"big with text":     `[{"name":"a","type":"t","sha256":"` + hash + `","size":9000,"text":"x","uri":"/f"}]`,
+		"bad hash":          `[{"name":"a","type":"t","sha256":"ABC","size":1}]`,
+		"unknown field":     `[{"name":"a","type":"t","sha256":"` + hash + `","size":1,"extra":1}]`,
+		"negative size":     `[{"name":"a","type":"t","sha256":"` + hash + `","size":-1}]`,
+		"creds in uri":      `[{"name":"a","type":"t","sha256":"` + hash + `","size":9000,"uri":"https://u:p@h/x"}]`,
+		"file scheme":       `[{"name":"a","type":"t","sha256":"` + hash + `","size":9000,"uri":"file:///etc/passwd"}]`,
+		"protocol-relative": `[{"name":"a","type":"t","sha256":"` + hash + `","size":9000,"uri":"//evil/x"}]`,
+	}
+	for name, items := range bad {
+		if _, err := Decode(base(items)); err == nil {
+			t.Errorf("%s: want a refusal", name)
+		}
+	}
+	var many []string
+	for i := 0; i < 33; i++ {
+		many = append(many, `{"name":"a","type":"t","sha256":"`+hash+`","size":1}`)
+	}
+	if _, err := Decode(base("[" + strings.Join(many, ",") + "]")); err == nil {
+		t.Error("33 items must be refused")
+	}
+}

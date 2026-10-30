@@ -93,7 +93,7 @@ func codexThreadResumable(sessionID, threadID string) bool {
 	found := errors.New("found")
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // a walk error skips the entry, it does not fail the walk
 		}
 		if !d.IsDir() && strings.HasPrefix(d.Name(), "rollout-") && strings.HasSuffix(d.Name(), "-"+threadID+".jsonl") {
 			return found

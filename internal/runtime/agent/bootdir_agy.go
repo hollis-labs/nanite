@@ -142,7 +142,7 @@ func (agyLayout) RegenerateSystemPromptSlot(bootDir string, params SetupParams) 
 }
 
 // AmendEnv points HOME at the launch's private home farm (bootdir_agy_home.go):
-// agy has no config-dir variable, but it honours $HOME, and the farm's private
+// agy has no config-dir variable, but it honors $HOME, and the farm's private
 // .gemini is the only place Nanite can put the MCP allow rules without writing
 // the operator's real one. Everything else of the real home resolves through
 // the farm's links; NANITE_* and the rest of the env are untouched.

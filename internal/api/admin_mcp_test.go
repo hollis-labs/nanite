@@ -435,7 +435,7 @@ func TestAdminMCPListToolsPageByDefault(t *testing.T) {
 	}
 }
 
-// The list routes honour limit and offset before rendering.
+// The list routes honor limit and offset before rendering.
 func TestListRoutesPage(t *testing.T) {
 	a, mux := newTestAPI(t)
 	host := nativeAuthorityHost(t, a)

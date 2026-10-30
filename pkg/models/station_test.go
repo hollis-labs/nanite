@@ -44,7 +44,7 @@ func TestStationAliasCatalog(t *testing.T) {
 	}
 	// Tool support is part of the record.
 	if seeded["local-light"].Capabilities.SupportsToolCalling || !seeded["go-glm"].Capabilities.SupportsToolCalling {
-		t.Error("tool support not as catalogued")
+		t.Error("tool support not as cataloged")
 	}
 	// Only the tool-call probes (go-glm, go-gpt, go-haiku) document tool support.
 	for alias := range want {

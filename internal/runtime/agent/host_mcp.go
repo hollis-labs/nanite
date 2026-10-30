@@ -34,7 +34,7 @@ import (
 // `mcp(<ServerName>/<tool>)` in settings.json. agy reads settings only from
 // the user's ~/.gemini and an admin file, so the rules go into a private
 // ~/.gemini under a per-launch HOME (bootdir_agy_home.go, agy_mcp_allow.go),
-// never the operator's real one. Same grants, same fail-closed behaviour.
+// never the operator's real one. Same grants, same fail-closed behavior.
 //
 // Other runtimes are refused rather than planted without a gate: Codex and
 // OpenCode run MCP tools with no per-tool allow Nanite can set.

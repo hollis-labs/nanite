@@ -54,19 +54,19 @@ var stationModels = []Model{
 	},
 	{
 		ID: "station-openai-mini", ModelID: "openai-mini", DisplayName: "Station openai-mini", Provider: ProviderStationOpenAI, Wire: WireChat,
-		// Source: station adoption guide, route /chat/completions -> OpenAI gpt-5-mini. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
+		// Source: station adoption guide, route /chat/completions -> OpenAI gpt-5-mini. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as cataloged is unverified.
 		ContextWindow: 128000, MaxOutput: 16384, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},
 	{
 		ID: "station-gemini-flash", ModelID: "gemini-flash", DisplayName: "Station gemini-flash", Provider: ProviderStationOpenAI, Wire: WireChat,
-		// Source: station adoption guide, route /chat/completions -> Gemini gemini-2.5-flash. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
+		// Source: station adoption guide, route /chat/completions -> Gemini gemini-2.5-flash. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as cataloged is unverified.
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
 	{
 		ID: "station-openrouter-auto", ModelID: "openrouter-auto", DisplayName: "Station openrouter-auto", Provider: ProviderStationOpenAI, Wire: WireChat,
-		// Source: station adoption guide, route /chat/completions -> OpenRouter openrouter/auto (upstream varies). Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
+		// Source: station adoption guide, route /chat/completions -> OpenRouter openrouter/auto (upstream varies). Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as cataloged is unverified.
 		ContextWindow: 128000, MaxOutput: 8192, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true},
 	},
@@ -89,7 +89,7 @@ var stationModels = []Model{
 	// from the name (CW-20261024-0013).
 	{
 		ID: "station-go-gpt", ModelID: "go-gpt", DisplayName: "Station go-gpt", Provider: ProviderStationOpenAI, Wire: WireResponses,
-		// Source: station adoption guide, route /responses -> Go gpt-6-luna. Tool calls: documented (smoke "Go Responses tool call" probe passed); streaming probe passed. Context window and max output UNKNOWN (not published); values are floors. Vision UNKNOWN (not documented); value as catalogued is unverified.
+		// Source: station adoption guide, route /responses -> Go gpt-6-luna. Tool calls: documented (smoke "Go Responses tool call" probe passed); streaming probe passed. Context window and max output UNKNOWN (not published); values are floors. Vision UNKNOWN (not documented); value as cataloged is unverified.
 		ContextWindow: 128000, MaxOutput: 16384, PriceUnknown: true, LimitsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},
@@ -103,7 +103,7 @@ var stationModels = []Model{
 	},
 	{
 		ID: "station-anthropic-haiku", ModelID: "anthropic-haiku", DisplayName: "Station anthropic-haiku", Provider: ProviderStationAnthropic,
-		// Source: station adoption guide, route /messages -> Anthropic claude-haiku-5-5. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as catalogued is unverified.
+		// Source: station adoption guide, route /messages -> Anthropic claude-haiku-5-5. Context window and max output UNKNOWN (not published); values are floors. Tool support, vision UNKNOWN (no probe, not documented); value as cataloged is unverified.
 		ContextWindow: 200000, MaxOutput: 8192, PriceUnknown: true, LimitsUnknown: true, ToolsUnknown: true,
 		Capabilities: Capabilities{SupportsToolCalling: true, SupportsStreaming: true, SupportsVision: true},
 	},

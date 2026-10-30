@@ -19,7 +19,7 @@ import (
 // not the same thing. The occurrences inside the SQL below are single-quoted,
 // which misspell's word-boundary rule does not flag, so this constant is the
 // only one the gate sees in this file.)
-const legacyStatus = "cancelled"
+const legacyStatus = "cancelled" //nolint:misspell // the legacy spelling is the test input
 
 // canceledBackfillColumn names one column migration 148 rewrites, together
 // with every statement this test needs against it.

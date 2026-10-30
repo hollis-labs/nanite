@@ -41,7 +41,7 @@ const agyRuleBreakers = " \t\n,*()/"
 // SelfToolsScopeEnv, and forwarded to the live harness), so an explicit per-tool
 // list would have to duplicate and track that surface. The rule therefore names
 // the server with a wildcard tool, the equivalent of claudeMCPAllowRule, and
-// widens nothing beyond the server Nanite itself plants. agy honours the
+// widens nothing beyond the server Nanite itself plants. agy honors the
 // `mcp(<server>/*)` wildcard (checked live 2026-10-24: a stub server's tool ran
 // under it, while a sibling server's ungranted tool stayed denied).
 func agyOwnServerRule(cfg MCPConfig) string {

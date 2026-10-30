@@ -38,7 +38,7 @@ const (
 	// credentials only and answers 401 by design.
 	RegistryAddrEnv = "NANITE_TETHER_REGISTRY_ADDR"
 	// TokenFileEnv names the 0600 file holding the registry token.
-	TokenFileEnv = "NANITE_TETHER_REGISTRY_TOKEN_FILE"
+	TokenFileEnv = "NANITE_TETHER_REGISTRY_TOKEN_FILE" // #nosec G101 -- env var name, not a credential
 	// Substrate is the registry substrate Nanite registers under.
 	Substrate = "nanite"
 
@@ -265,7 +265,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (int, []
 	if err != nil {
 		// The transport error can carry the URL; report the class, not the text.
 		if ctx.Err() != nil {
-			return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, ctx.Err())
+			return 0, nil, fmt.Errorf("%w: %w", ErrUnreachable, ctx.Err())
 		}
 		return 0, nil, ErrUnreachable
 	}

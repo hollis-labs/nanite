@@ -55,11 +55,11 @@ type adminMCPTool struct {
 
 func prop(typ, desc string) map[string]any { return map[string]any{"type": typ, "description": desc} }
 
-const adminCredentialNote = " Needs a credential with the agents:manage scope (or the operator token); agent credentials are refused."
+const adminCredentialNote = " Needs a credential with the agents:manage scope (or the operator token); agent credentials are refused." // #nosec G101 -- help text, not a credential
 
-const grantCredentialNote = " Needs an admin credential (the operator token): an agents:manage credential is refused."
+const grantCredentialNote = " Needs an admin credential (the operator token): an agents:manage credential is refused." // #nosec G101 -- help text, not a credential
 
-const sessionCredentialNote = " Needs agents:manage and operate (or the operator token); agent credentials are refused."
+const sessionCredentialNote = " Needs agents:manage and operate (or the operator token); agent credentials are refused." // #nosec G101 -- help text, not a credential
 
 var reasonProp = prop("string", "Why this change is made (required, at most 500 characters); recorded with the change.")
 
@@ -203,7 +203,7 @@ func (t adminMCPTool) call(ctx context.Context, h http.Handler, carrier *http.Re
 	args := map[string]any{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
-			return mcpToolError("arguments must be a JSON object"), nil
+			return mcpToolError("arguments must be a JSON object"), nil //nolint:nilerr // a bad argument is a tool error result, not a transport error
 		}
 	}
 	if args == nil {
@@ -291,7 +291,7 @@ func (a *API) retireHost(ctx context.Context, _ *http.Request, raw json.RawMessa
 		Reason string `json:"reason"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil || !adminMCPSafeID(args.ID) {
-		return mcpToolError("id is required and must be a single path segment"), nil
+		return mcpToolError("id is required and must be a single path segment"), nil //nolint:nilerr // a bad argument is a tool error result, not a transport error
 	}
 	host, status, msg := a.retireHostSettings(ctx, args.ID, args.Reason, "mcp:host_settings_retire")
 	if status == http.StatusForbidden && msg == enrolledRetireMsg {

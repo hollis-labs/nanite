@@ -213,6 +213,10 @@ func TestMCPServe_APIModeRunsWithReadOnlyDBDir(t *testing.T) {
 						got = append(got, tool.Name)
 					}
 					slices.Sort(got)
+					if launch.scope == mcpserver.ScopeStore {
+						// tether_send is the one deliberate addition to the store scope: it refuses a session with no enrolled actor.
+						got = slices.DeleteFunc(got, func(n string) bool { return n == "tether_send" })
+					}
 					if want := wantFor[launch.scope]; !slices.Equal(got, want) {
 						t.Errorf("listed %v\nwant %v", got, want)
 					}

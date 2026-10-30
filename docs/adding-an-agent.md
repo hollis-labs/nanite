@@ -353,3 +353,12 @@ again to pick the change up; the server is not restarted and running sessions
 keep their revision. A fresh revision has no tool grants, so `run` prints the
 `agent load --grant-same-as` command to give it the previous row's tools.
 Starts the server if it is not running, unless `--no-autostart`.
+
+## Broad access for a CLI Claude agent
+
+For a sysadmin-style agent, an admin sets `"access": "broad"` in the host
+settings (`PUT /api/agent-host-settings/{id}` with the full body; the setting is
+admin-only and Claude CLI only). Its launches then run without the permission
+gate (see `architecture/agent-runtime.md`, Broad access). Changing host settings
+makes a new revision with no authority, so create the authority and re-grant as
+for any settings change.

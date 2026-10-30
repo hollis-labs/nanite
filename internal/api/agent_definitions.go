@@ -172,6 +172,9 @@ func (a *API) handleHostSettingsCreate(w http.ResponseWriter, r *http.Request) {
 		a.errorResp(w, http.StatusBadRequest, "invalid host settings request")
 		return
 	}
+	if !a.hostAccessAllowed(w, r, "", req.Settings.Access) {
+		return
+	}
 	h, err := host.CreateHost(r.Context(), store.AgentHostSettings{Slug: req.Slug, Title: req.Title, DefinitionRef: req.DefinitionRef, Settings: req.Settings, Enabled: req.Enabled})
 	if err != nil {
 		a.definitionError(w, err)
@@ -192,6 +195,9 @@ func (a *API) handleHostSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	h, err := host.GetHost(r.Context(), r.PathValue("id"))
 	if err != nil {
 		a.definitionError(w, err)
+		return
+	}
+	if !a.hostAccessAllowed(w, r, h.Settings.Access, req.Settings.Access) {
 		return
 	}
 	h.Slug = req.Slug
@@ -263,4 +269,19 @@ func (a *API) handleHostSettingsDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// hostAccessAllowed enforces that raising a host to broad access is an admin act
+// (the same bar as granting tools): agents:manage and maintain callers may keep
+// or clear it, never set it. It writes the refusal and reports false.
+func (a *API) hostAccessAllowed(w http.ResponseWriter, r *http.Request, current, requested string) bool {
+	if requested != store.HostAccessBroad || current == requested {
+		return true
+	}
+	p, ok := apiauth.FromContext(r.Context())
+	if !ok || !canGrantTools(p) {
+		a.errorResp(w, http.StatusForbidden, "setting host access to broad requires the admin scope")
+		return false
+	}
+	return true
 }

@@ -787,6 +787,7 @@ func cliLaunchExtra(profile *store.AgentProfile, bootParams SetupParams, isACP b
 	}
 	x.Model = profile.DefaultModel
 	x.AddDirs = bootParams.CLIWritableRoots
+	x.Broad = profile.NativeHost.Broad()
 	if bootParams.HostMCP != nil {
 		x.HostMCPGated = true
 		x.HostMCPAllow = bootParams.HostMCP.AllowRules

@@ -259,3 +259,38 @@ func TestValidateHostMCPServer_RejectsNamesThatBreakARule(t *testing.T) {
 		}
 	}
 }
+
+// A host with access=broad runs the developer variant for its own launch only,
+// whatever the global mode, and keeps its mcp_servers planted (there is no gate
+// for the allow rules to feed, so nothing is refused).
+func TestBroadHost_RunsWithoutTheGateAndKeepsItsServers(t *testing.T) {
+	src := &fakeHostMCP{rows: map[string]*store.MCPServerConfig{"tether": tetherRow()}, granted: []string{"tether_message_send"}}
+	broad := hostProfile("tether")
+	broad.NativeHost.Access = store.HostAccessBroad
+
+	// yolo mode no longer refuses a broad host's servers; a plain host still is.
+	params := SetupParams{MCPConfig: MCPConfig{BinaryPath: "/bin/nanite", DBPath: "/db"}}
+	applyHostMCP(context.Background(), hostMCPDeps(src, permissionlib.ModeYolo), Options{Provider: "claude"}, broad, &params)
+	if params.HostMCPErr != nil || params.HostMCP == nil || len(params.HostMCP.Servers) != 1 {
+		t.Fatalf("broad host in yolo: %+v %v", params.HostMCP, params.HostMCPErr)
+	}
+
+	// The launch extra marks it, and the argv carries the developer flag in the
+	// default global mode; a non-broad gated launch does not.
+	extra := cliLaunchExtra(broad, SetupParams{HostMCP: params.HostMCP}, false)
+	if !extra.Broad {
+		t.Fatalf("extra = %+v", extra)
+	}
+	deps := hostMCPDeps(nil, permissionlib.ModeDefault)
+	if argv := claudeArgv(t, deps, extra); !slices.Contains(argv, "--dangerously-skip-permissions") {
+		t.Fatalf("broad launch lacks the developer flag: %q", argv)
+	}
+	if argv := claudeArgv(t, deps, launchExtra{HostMCPGated: true}); slices.Contains(argv, "--dangerously-skip-permissions") {
+		t.Fatalf("a gated, non-broad launch must keep the gate: %q", argv)
+	}
+	// And the global yolo guard is lifted for it alone.
+	yolo := hostMCPDeps(nil, permissionlib.ModeYolo)
+	if _, err := selectAdapter(yolo, RuntimeSelection{Runtime: runtimes.Claude, Mode: runtimes.ModeStreamingStdio}, t.TempDir(), t.TempDir(), launchExtra{HostMCPGated: true, Broad: true}); err != nil {
+		t.Fatalf("broad host under yolo: %v", err)
+	}
+}

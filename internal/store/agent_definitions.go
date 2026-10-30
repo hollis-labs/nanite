@@ -231,7 +231,12 @@ type NativeHostSettings struct {
 	RecallTimeoutMS *int64               `json:"recall_timeout_ms,omitempty"`
 	Directories     []string             `json:"directories,omitempty"`
 	MCPServers      []string             `json:"mcp_servers,omitempty"`
-	Debug           bool                 `json:"debug,omitempty"`
+	// Access widens what a CLI Claude launch may do: "" is today's gated
+	// behavior, "broad" runs that host's launches without the permission gate
+	// (the developer variant), like a sysadmin agent. It is host execution input,
+	// set by an admin only (internal/api), and applies per host, not per server.
+	Access string `json:"access,omitempty"`
+	Debug  bool   `json:"debug,omitempty"`
 	// Mode is how edits to the agent directory reach new sessions: "live" or
 	// "pinned". Empty means the default rule decides, evaluated when the
 	// directory is loaded (service.ResolveAgentMode), so it is never frozen here.
@@ -242,12 +247,25 @@ type NativeHostSettings struct {
 	AgentDir string `json:"agent_dir,omitempty"`
 }
 
+// HostAccessBroad is the NativeHostSettings.Access value that runs a CLI Claude
+// host's launches without the permission gate.
+const HostAccessBroad = "broad"
+
+// Broad reports whether the host runs with broad access.
+func (h *NativeHostSettings) Broad() bool { return h != nil && h.Access == HostAccessBroad }
+
 func (h NativeHostSettings) Validate() error {
 	if h.Version != "1" || (h.Runtime != "api" && h.Runtime != "cli") {
 		return errors.New("host settings require version 1 and runtime api or cli")
 	}
 	if err := ValidateAgentACPFields(h.Protocol, h.Transport); err != nil {
 		return err
+	}
+	if h.Access != "" && h.Access != HostAccessBroad {
+		return fmt.Errorf("host settings access %q is not supported; use broad or leave it empty", h.Access)
+	}
+	if h.Access == HostAccessBroad && (h.Runtime != "cli" || h.Provider != "claude") {
+		return errors.New("host settings access broad is only supported for runtime cli with provider claude")
 	}
 	if h.Mode != "" && h.Mode != "live" && h.Mode != "pinned" {
 		return fmt.Errorf("host settings mode %q is not supported; use live or pinned", h.Mode)

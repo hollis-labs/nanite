@@ -94,7 +94,7 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 		ToSessionID:   route.SessionID,
 		ToAgentID:     route.ProfileID,
 		Subject:       "Tether message from " + from,
-		Body:          renderTetherBody(env),
+		Body:          renderTetherBody(env, i.sessionFacts(ctx, route.SessionID)),
 		Metadata:      string(meta),
 	})
 	if err != nil {
@@ -129,7 +129,7 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 // renderTetherBody frames the message. The two framing lines are the bridge's;
 // every line of the sender's text is prefixed "> " so a body that imitates the
 // header still reads as quoted sender content.
-func renderTetherBody(env messaging.Envelope) string {
+func renderTetherBody(env messaging.Envelope, facts string) string {
 	subject, body := tetherEnvelopeText(env)
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Tether message %s from %s]\n", oneLine(env.ID), oneLine(env.From.URN()))
@@ -139,6 +139,11 @@ func renderTetherBody(env messaging.Envelope) string {
 	b.WriteString(quoteLines(body))
 	fmt.Fprintf(&b, "[end of sender text. Reply with a Tether message to %s, in_reply_to=%s]",
 		oneLine(env.From.URN()), oneLine(env.ID))
+	if facts != "" {
+		// Bridge-written facts: a model cannot know its own deployment, and a sender
+		// may ask which runtime or model answered.
+		fmt.Fprintf(&b, "\n[Nanite facts about this session: %s. Use these, not your own guess, if asked what you run on.]", facts)
+	}
 	return b.String()
 }
 
@@ -318,4 +323,17 @@ func (m tetherMailSource) Watch(ctx context.Context, to string, afterSeq int64) 
 		}
 	}()
 	return out, nil
+}
+
+// sessionFacts states the session's actual provider and model (and the host's
+// runtime), from Nanite's own records, for the delivery framing.
+func (i *tetherInjector) sessionFacts(ctx context.Context, sessionID string) string {
+	var provider, model string
+	if err := i.db.QueryRowContext(ctx, `SELECT COALESCE(provider,''), COALESCE(model,'') FROM sessions WHERE id = ?`, sessionID).Scan(&provider, &model); err != nil {
+		return ""
+	}
+	if provider == "" && model == "" {
+		return ""
+	}
+	return fmt.Sprintf("provider=%s, model=%s", oneLine(provider), oneLine(model))
 }

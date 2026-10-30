@@ -93,7 +93,11 @@ func TestAgyHomeNoRootsNoPathRules(t *testing.T) {
 	agyFakeHome(t)
 	params := agySetupParams()
 	boot := agySetup(t, params)
-	for _, r := range allowList(readAgySettings(t, agyPrivateGeminiDir(boot, params))) {
+	gem := agyPrivateGeminiDir(boot, params)
+	for _, r := range allowList(readAgySettings(t, gem)) {
+		if r == "read_file("+filepath.Join(gem, "antigravity-cli", "mcp")+")" {
+			continue // agy's own MCP tool-descriptor directory, not a work root
+		}
 		if len(r) > 5 && (r[:5] == "read_" || r[:5] == "write" || r[:5] == "comma") {
 			t.Errorf("unexpected non-MCP rule %q", r)
 		}

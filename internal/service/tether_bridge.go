@@ -16,6 +16,7 @@ import (
 	tether "github.com/hollis-labs/libs/mesh/core/tetherclient"
 
 	"github.com/hollis-labs/nanite/internal/a2a"
+	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tetherbridge"
 	"github.com/hollis-labs/nanite/internal/tethermail"
@@ -98,6 +99,16 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 	})
 	if err != nil {
 		return "", err
+	}
+	// The wake reactor only turns a mailbox row into a turn when the session's
+	// message-wake policy is auto_summarize. A definition-bound session takes that
+	// policy from its pinned definition, which does not opt in, so Tether mail for
+	// an enrolled actor would sit unread. Mail for an actor is meant to be acted
+	// on, so when the reactor will not wake the session the bridge does it.
+	if i.chat.resolveMessageWakePolicy(ctx, route.SessionID) != chat.SubagentPolicyAutoSummarize {
+		if _, werr := i.chat.TriggerMessageWake(ctx, route.SessionID, m); werr != nil {
+			slog.Warn("tether bridge: wake turn for delivered message failed", "session_id", route.SessionID, "message_id", m.ID, "err", werr)
+		}
 	}
 	return m.ID, nil
 }

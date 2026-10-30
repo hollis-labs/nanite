@@ -23,6 +23,10 @@ import (
 	"github.com/hollis-labs/nanite/internal/toolclient"
 )
 
+// TetherSendEnv, set to "1", makes a ScopeStore proxy advertise tether_send. Keep in
+// step with the agent package's TetherSendEnv (the planter sets it).
+const TetherSendEnv = "NANITE_MCP_TETHER_SEND"
+
 // selfToolProxy is a toolTransport that forwards self-tool calls to a live
 // nanite API server (POST /api/tools/call) instead of dispatching them
 // locally.
@@ -72,13 +76,14 @@ func newSelfToolProxy(apiURL, sessionID string, scope SelfToolScope) *selfToolPr
 	all = coreProxyCatalog(all)
 	if scope == ScopeStore {
 		p.catalog = coreProxyCatalog(selftools.BareStoreTools())
-		// tether_send stays visible in the store scope: its handler derives the
-		// sender from the session's enrolled actor and refuses a session with
-		// none, so offering it to a CLI agent started from an enrolled host
-		// (including a Tether wake) grants nothing beyond that (MVP push, CW-0006).
-		for _, t := range all {
-			if t.Name == "tether_send" && !slices.ContainsFunc(p.catalog, func(c condmcp.Tool) bool { return c.Name == t.Name }) {
-				p.catalog = append(p.catalog, t)
+		// tether_send is advertised in the store scope only for a launch whose
+		// session has an enrolled Tether actor (the planter sets TetherSendEnv);
+		// its handler still refuses a session with none.
+		if os.Getenv(TetherSendEnv) == "1" {
+			for _, t := range all {
+				if t.Name == "tether_send" && !slices.ContainsFunc(p.catalog, func(c condmcp.Tool) bool { return c.Name == t.Name }) {
+					p.catalog = append(p.catalog, t)
+				}
 			}
 		}
 		for _, t := range all {

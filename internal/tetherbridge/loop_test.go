@@ -3,6 +3,7 @@ package tetherbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -424,6 +425,14 @@ type fakeMail struct {
 	watches int
 	afters  []int64
 	listErr error
+	read    []string
+}
+
+func (f *fakeMail) MarkRead(_ context.Context, _ string, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.read = append(f.read, id)
+	return nil
 }
 
 func (f *fakeMail) List(_ context.Context, to string, _ bool, _, _ int) ([]messaging.Envelope, int, error) {
@@ -656,5 +665,83 @@ func TestHandle_WakesUnboundActorThenDelivers(t *testing.T) {
 	}
 	if w.calls != 1 || inj.written() != 1 || led.rows["w1"].State != store.TetherDeliveryConsumed {
 		t.Fatalf("wake calls=%d written=%d state=%s", w.calls, inj.written(), led.rows["w1"].State)
+	}
+}
+
+// A busy session (Inject returns ErrBusy) is deferred, never counted as a failure.
+func TestHandle_InjectBusyDefersWithoutFailing(t *testing.T) {
+	l, c, led, inj, _ := newTestLoop(true)
+	inj.err = ErrBusy
+	if err := l.Handle(context.Background(), testActor, testEnv("b1")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if led.rows["b1"].Terminal() || led.rows["b1"].Attempts != 0 || len(c.nacks) != 1 || !c.nacks[0].Retryable {
+		t.Fatalf("busy must defer without an attempt: row=%+v nacks=%+v", led.rows["b1"], c.nacks)
+	}
+}
+
+// An undeliverable inject (a view that cannot take a wake turn) is dead-lettered with
+// its reason and never reported consumed.
+func TestHandle_UndeliverableIsDeadLettered(t *testing.T) {
+	l, c, led, inj, _ := newTestLoop(true)
+	mail := &fakeMail{inbox: map[string][]messaging.Envelope{}}
+	l.Mail = mail
+	inj.err = fmt.Errorf("%w: cli view", ErrUndeliverable)
+	if err := l.Handle(context.Background(), testActor, testEnv("u1")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if led.rows["u1"].State != store.TetherDeliveryFailed || len(c.nacks) != 1 || c.nacks[0].Retryable {
+		t.Fatalf("want failed + non-retryable nack: row=%+v nacks=%+v", led.rows["u1"], c.nacks)
+	}
+	if len(mail.read) != 1 {
+		t.Fatalf("a dead-lettered message must be marked read, got %v", mail.read)
+	}
+}
+
+// A consumed delivery is marked read so it leaves the unread catch-up window.
+func TestHandle_ConsumedIsMarkedRead(t *testing.T) {
+	l, _, _, _, _ := newTestLoop(true)
+	mail := &fakeMail{inbox: map[string][]messaging.Envelope{}}
+	l.Mail = mail
+	if err := l.Handle(context.Background(), testActor, testEnv("m1")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(mail.read) != 1 || mail.read[0] != "m1" {
+		t.Fatalf("mark read = %v", mail.read)
+	}
+}
+
+// Tether answering 404 for an actor stops the watch instead of retrying forever.
+func TestCatchUp_UnknownActorIsDropped(t *testing.T) {
+	l, mail, _, _ := newSweepLoop(t)
+	mail.listErr = fmt.Errorf("%w: 404", ErrActorUnknownToTether)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	l.Sweep(ctx)
+	for i := 0; i < 200 && !l.isUnknown(testActor); i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !l.isUnknown(testActor) {
+		t.Fatal("actor not marked unknown after a 404")
+	}
+	before := mail.watches
+	l.Sweep(ctx) // inside the quiet period: no new watch
+	time.Sleep(30 * time.Millisecond)
+	if mail.watches != before {
+		t.Fatalf("watch restarted inside the 404 quiet period: %d -> %d", before, mail.watches)
+	}
+	l.Close()
+}
+
+func TestWatchBackoffGrowsAndCaps(t *testing.T) {
+	l := &Loop{Config: LoopConfig{ResubscribeWait: 5 * time.Second}}
+	if d := l.watchBackoff(1); d != 5*time.Second {
+		t.Fatalf("first = %v", d)
+	}
+	if d := l.watchBackoff(3); d != 20*time.Second {
+		t.Fatalf("third = %v", d)
+	}
+	if d := l.watchBackoff(50); d != 5*time.Minute {
+		t.Fatalf("cap = %v", d)
 	}
 }

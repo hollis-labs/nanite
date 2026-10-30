@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 // workRootInstructionsMax caps the inlined text so a huge AGENTS.md cannot
@@ -34,15 +36,22 @@ func workRootInstructions(root string) string {
 		if err != nil {
 			continue
 		}
-		buf := make([]byte, workRootInstructionsMax+1)
-		n, _ := f.Read(buf)
+		raw, _ := io.ReadAll(io.LimitReader(f, workRootInstructionsMax+1))
 		f.Close()
-		text := strings.TrimSpace(string(buf[:n]))
+		truncated := len(raw) > workRootInstructionsMax
+		if truncated {
+			raw = raw[:workRootInstructionsMax]
+			// Cut on a rune boundary so a multi-byte character is not split.
+			for len(raw) > 0 && !utf8.Valid(raw) {
+				raw = raw[:len(raw)-1]
+			}
+		}
+		text := strings.TrimSpace(string(raw))
 		if text == "" {
 			continue
 		}
-		if n > workRootInstructionsMax {
-			text = strings.TrimSpace(string(buf[:workRootInstructionsMax])) + "\n\n[truncated at 16 KiB]"
+		if truncated {
+			text += "\n\n[truncated: " + name + " is longer than 16 KiB; the rest is not shown here]"
 		}
 		return "## Instructions from the work root (" + name + ")\n\n" + text
 	}

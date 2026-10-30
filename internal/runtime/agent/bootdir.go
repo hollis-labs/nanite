@@ -135,6 +135,8 @@ func composeBootdirParams(deps *Dependencies, opts Options, profile *store.Agent
 	if deps != nil && deps.ActorURN != nil && profile != nil {
 		params.ActorURN = deps.ActorURN(sessID, profile.ID)
 	}
+	// tether_send is offered to the launch's MCP only when it has an enrolled actor.
+	params.MCPConfig.TetherSend = params.ActorURN != ""
 	if deps != nil {
 		// No root offered to an agent (the work root, cli_writable_roots,
 		// path grants) may be, or sit inside, a control-plane directory

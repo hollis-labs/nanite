@@ -259,6 +259,20 @@ func (s *EnrollmentService) AttachSession(ctx context.Context, hostSettingsID, s
 	}
 }
 
+// AttachSessionChecked is AttachSession for callers that must know it worked
+// (the Tether Waker): it reports a store error, or that no enrolled actor was
+// attached, instead of only logging.
+func (s *EnrollmentService) AttachSessionChecked(ctx context.Context, hostSettingsID, sessionID string) error {
+	ok, err := s.Store.AttachActorSession(ctx, hostSettingsID, sessionID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("no enrolled actor to attach for these host settings")
+	}
+	return nil
+}
+
 // DetachSession clears the actor's current session when that session ends.
 func (s *EnrollmentService) DetachSession(ctx context.Context, sessionID string) {
 	if _, err := s.Store.DetachActorSession(ctx, sessionID); err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -84,7 +85,13 @@ func (t *TetherSender) SendAsSessionActor(ctx context.Context, sessionID, to, su
 		kind = messaging.Kind("response")
 	}
 	if idemKey == "" {
-		h := sha256.Sum256([]byte(strings.Join([]string{sessionID, to, inReplyTo, subject, body}, "\x00")))
+		// No key from the model: every call is its own send. A content-only key
+		// would silently drop a repeated "ack" to the same recipient while the tool
+		// said "sent". The key still protects the HTTP retry of THIS call (it is
+		// fixed before Send), and a model that wants cross-call dedupe passes its own.
+		var nonce [8]byte
+		_, _ = rand.Read(nonce[:])
+		h := sha256.Sum256([]byte(strings.Join([]string{sessionID, to, string(kind), threadID, inReplyTo, subject, body, hex.EncodeToString(nonce[:])}, "\x00")))
 		idemKey = "nanite-" + hex.EncodeToString(h[:16])
 	}
 	out, err := t.mail.Send(ctx, messaging.Envelope{Kind: kind, From: fromAddr, To: toAddr, ThreadID: threadID, InReplyTo: inReplyTo, Payload: payload}, idemKey)

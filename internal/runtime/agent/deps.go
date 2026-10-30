@@ -337,6 +337,11 @@ type MCPConfig struct {
 	// (CW-20261011-0036). The credential expires on its own, slides while the
 	// session is live, and is refused once the session ends.
 	AgentCredential func(sessionID string) (string, error)
+
+	// TetherSend is true for a launch whose session has an enrolled Tether actor:
+	// it plants NANITE_MCP_TETHER_SEND=1 so a store-scope `nanite mcp` advertises
+	// tether_send. Without an actor the tool is hidden (it would only refuse).
+	TetherSend bool
 }
 
 // Telemetry is the observability sink. The production composition root

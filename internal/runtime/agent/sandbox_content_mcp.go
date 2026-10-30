@@ -12,6 +12,10 @@ import (
 // launches (CW-20261001-0188).
 const SelfToolsScopeEnv = "NANITE_MCP_SELF_TOOLS"
 
+// TetherSendEnv, set to "1" in a launch's MCP env, makes a store-scope `nanite mcp`
+// advertise tether_send. Keep in step with mcpserver.TetherSendEnv.
+const TetherSendEnv = "NANITE_MCP_TETHER_SEND"
+
 // SelfToolsScopeStore is SelfToolsScopeEnv's value for the bare-store set.
 const SelfToolsScopeStore = "store"
 
@@ -99,6 +103,9 @@ func naniteMCPEntry(cfg MCPConfig, sessionID string, storeScope bool) (id, comma
 		env["NANITE_API_URL"] = cfg.APIBaseURL
 		if storeScope {
 			env[SelfToolsScopeEnv] = SelfToolsScopeStore
+		}
+		if cfg.TetherSend {
+			env[TetherSendEnv] = "1"
 		}
 		if cfg.AgentCredential != nil && sessionID != "" {
 			token, tokErr := cfg.AgentCredential(sessionID)

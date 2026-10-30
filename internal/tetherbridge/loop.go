@@ -42,6 +42,15 @@ import (
 // errRecord marks a failed ledger write; the stream cursor must not pass it.
 var errRecord = errors.New("tetherbridge: record delivery")
 
+// ErrUndeliverable marks an Inject failure that retrying cannot fix (for example
+// a session whose runtime cannot take a wake turn). The delivery is dead-lettered
+// with the reason, not retried and never reported consumed.
+var ErrUndeliverable = errors.New("tetherbridge: undeliverable")
+
+// ErrActorUnknownToTether means Tether has no mailbox for the actor (a 404): a
+// Nanite-minted URN that was never registered. The loop stops watching it.
+var ErrActorUnknownToTether = errors.New("tetherbridge: actor unknown to Tether")
+
 // ErrBusy is returned by an Injector that declines because the session has a
 // turn in flight. The delivery is nacked retryable; nothing is injected.
 var ErrBusy = errors.New("tetherbridge: session busy")
@@ -93,6 +102,9 @@ type Event struct {
 type MailSource interface {
 	List(ctx context.Context, to string, unreadOnly bool, limit, offset int) ([]messaging.Envelope, int, error)
 	Watch(ctx context.Context, to string, afterSeq int64) (<-chan Event, error)
+	// MarkRead is presentation only: it keeps a finished message out of the
+	// unread_only list, so handled and rejected mail cannot fill the catch-up window.
+	MarkRead(ctx context.Context, to, messageID string) error
 }
 
 // Cursors persists the watch cursor (after_seq) per actor.
@@ -166,6 +178,7 @@ type Loop struct {
 	mu       sync.Mutex
 	inflight map[string]struct{}
 	subs     map[string]context.CancelFunc
+	unknown  map[string]time.Time // actors Tether answered 404 for, until when
 	wg       sync.WaitGroup
 }
 
@@ -219,6 +232,7 @@ func (l *Loop) Handle(ctx context.Context, actorURN string, env messaging.Envelo
 	}
 	if row.Terminal() {
 		slog.Debug("tetherbridge: duplicate of finished delivery, ignored", "message_id", env.ID, "state", row.State)
+		l.markRead(ctx, actorURN, env.ID) // self-heals mail finished before mark-read existed
 		return nil
 	}
 	if row.NextAttemptAt.After(l.clock()) {
@@ -304,6 +318,7 @@ func (l *Loop) drive(ctx context.Context, route ActorRoute, env messaging.Envelo
 				return aerr
 			}
 			slog.Warn("tetherbridge: sender rejected", "message_id", env.ID, "from", env.From.URN(), "err", serr)
+			l.markRead(ctx, env.To.URN(), env.ID) // dead-lettered: keep it out of the unread window
 			return nil
 		}
 	}
@@ -323,6 +338,9 @@ func (l *Loop) drive(ctx context.Context, route ActorRoute, env messaging.Envelo
 			return l.busy(ctx, env, claim, row)
 		}
 		localID, err = l.Injector.Inject(ctx, route, env)
+		if errors.Is(err, ErrBusy) {
+			return l.busy(ctx, env, claim, row)
+		}
 		if err != nil {
 			return l.injectFailed(ctx, env, claim, row, err)
 		}
@@ -345,7 +363,21 @@ func (l *Loop) drive(ctx context.Context, route ActorRoute, env messaging.Envelo
 		return l.softFail(ctx, row, err)
 	}
 	_, err = l.Ledger.AdvanceTetherDelivery(ctx, env.ID, store.TetherDeliveryConsumed, "", "")
+	if err == nil {
+		l.markRead(ctx, env.To.URN(), env.ID)
+	}
 	return err
+}
+
+// markRead is best-effort presentation: a failure only means the message shows
+// up in the next unread list again, where the ledger makes it a no-op.
+func (l *Loop) markRead(ctx context.Context, actorURN, id string) {
+	if actorURN == "" || l.Mail == nil {
+		return
+	}
+	if err := l.Mail.MarkRead(ctx, actorURN, id); err != nil {
+		slog.Debug("tetherbridge: mark read", "actor", actorURN, "message_id", id, "err", err)
+	}
 }
 
 // busy releases the lease with a retryable nack and defers the row by
@@ -366,15 +398,18 @@ func (l *Loop) busy(ctx context.Context, env messaging.Envelope, claim Claim, ro
 func (l *Loop) injectFailed(ctx context.Context, env messaging.Envelope, claim Claim, row *store.TetherDelivery, cause error) error {
 	cfg := l.Config
 	attempts := row.Attempts + 1
-	retryable := attempts < cfg.MaxAttempts
+	retryable := attempts < cfg.MaxAttempts && !errors.Is(cause, ErrUndeliverable)
 	wait := l.backoff(attempts)
 	_, ferr := FailDelivery(ctx, l.Claimer, env.ID, env.To, claim, NackOptions{
 		Retryable: retryable, Reason: cause.Error(), NextAttemptSeconds: int(wait / time.Second),
 	})
 	if retryable {
 		l.postpone(ctx, row, wait, cause.Error(), true)
-	} else if _, err := l.Ledger.AdvanceTetherDelivery(ctx, env.ID, store.TetherDeliveryFailed, "", cause.Error()); err != nil {
-		return err
+	} else {
+		if _, err := l.Ledger.AdvanceTetherDelivery(ctx, env.ID, store.TetherDeliveryFailed, "", cause.Error()); err != nil {
+			return err
+		}
+		l.markRead(ctx, env.To.URN(), env.ID)
 	}
 	if ferr != nil && !errors.Is(ferr, ErrDeadLettered) {
 		return ferr
@@ -445,6 +480,9 @@ func (l *Loop) Sweep(ctx context.Context) {
 	live := map[string]bool{}
 	for _, urn := range urns {
 		live[urn] = true
+		if l.isUnknown(urn) {
+			continue
+		}
 		l.ensureWatch(ctx, urn)
 	}
 	l.dropStale(live)
@@ -490,6 +528,9 @@ func (l *Loop) catchUp(ctx context.Context, urn string) {
 	for p := 0; p < maxPages && ctx.Err() == nil; p++ {
 		envs, _, err := l.Mail.List(ctx, urn, true, page, p*page)
 		if err != nil {
+			if errors.Is(err, ErrActorUnknownToTether) {
+				l.markUnknown(urn)
+			}
 			slog.Debug("tetherbridge: list catch-up", "actor", urn, "err", err)
 			return
 		}
@@ -501,7 +542,44 @@ func (l *Loop) catchUp(ctx context.Context, urn string) {
 		if len(envs) < page {
 			return
 		}
+		if p == maxPages-1 {
+			slog.Warn("tetherbridge: unread window full; older unread mail is not reached until handled mail is marked read", "actor", urn, "window", page*maxPages)
+		}
 	}
+}
+
+// unknownRetry is how long an actor Tether answered 404 for is left alone.
+const unknownRetry = 10 * time.Minute
+
+func (l *Loop) markUnknown(urn string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.unknown == nil {
+		l.unknown = map[string]time.Time{}
+	}
+	if _, seen := l.unknown[urn]; !seen {
+		slog.Warn("tetherbridge: Tether has no mailbox for this actor (404); not watching it for a while", "actor", urn, "retry_in", unknownRetry)
+	}
+	l.unknown[urn] = l.clock().Add(unknownRetry)
+	if cancel, ok := l.subs[urn]; ok {
+		cancel()
+		delete(l.subs, urn)
+	}
+}
+
+// isUnknown reports whether urn is inside its 404 quiet period.
+func (l *Loop) isUnknown(urn string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	until, ok := l.unknown[urn]
+	if !ok {
+		return false
+	}
+	if l.clock().After(until) {
+		delete(l.unknown, urn)
+		return false
+	}
+	return true
 }
 
 // watch serves one actor until ctx ends: catch up by list, then follow the SSE
@@ -512,24 +590,55 @@ func (l *Loop) watch(ctx context.Context, urn string) {
 	l.Config.defaults()
 	catchUpTick := time.NewTicker(l.Config.CatchUpEvery)
 	defer catchUpTick.Stop()
+	failures := 0
 	for ctx.Err() == nil {
 		l.catchUp(ctx, urn)
+		if ctx.Err() != nil || l.isUnknown(urn) {
+			return
+		}
 		var after int64
 		if l.Cursors != nil {
 			after, _ = l.Cursors.GetTetherWatchCursor(ctx, urn)
 		}
+		started := l.clock()
 		ch, err := l.Mail.Watch(ctx, urn, after)
 		if err != nil {
-			slog.Debug("tetherbridge: watch", "actor", urn, "err", err)
+			failures++
+			if errors.Is(err, ErrActorUnknownToTether) {
+				l.markUnknown(urn)
+				return
+			}
+			if failures == 3 || failures%20 == 0 {
+				slog.Warn("tetherbridge: watch keeps failing", "actor", urn, "failures", failures, "err", err)
+			} else {
+				slog.Debug("tetherbridge: watch", "actor", urn, "err", err)
+			}
 		} else {
 			l.follow(ctx, urn, ch, catchUpTick.C)
+			if l.clock().Sub(started) > 30*time.Second {
+				failures = 0 // a stream that lived is a healthy one
+			} else {
+				failures++
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(l.Config.ResubscribeWait):
+		case <-time.After(l.watchBackoff(failures)):
 		}
 	}
+}
+
+// watchBackoff is ResubscribeWait doubling per consecutive failure up to 5 min.
+func (l *Loop) watchBackoff(failures int) time.Duration {
+	d := l.Config.ResubscribeWait
+	for i := 1; i < failures && d < 5*time.Minute; i++ {
+		d *= 2
+	}
+	if d > 5*time.Minute {
+		d = 5 * time.Minute
+	}
+	return d
 }
 
 func (l *Loop) follow(ctx context.Context, urn string, ch <-chan Event, tick <-chan time.Time) {

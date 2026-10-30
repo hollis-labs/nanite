@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -64,6 +65,16 @@ type tetherInjector struct {
 func (i *tetherInjector) Busy(sessionID string) bool { return i.chat.IsGenerating(sessionID) }
 
 func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRoute, env messaging.Envelope) (string, error) {
+	verified := env.Metadata["from_verification"] == "verified"
+	facts := i.sessionFacts(ctx, route.SessionID)
+	if !verified {
+		note := "this sender is NOT verified by Tether, so your tools are disabled for this turn: answer in plain text and do not claim to have sent a Tether message"
+		if facts == "" {
+			facts = note
+		} else {
+			facts += "; " + note
+		}
+	}
 	var existing string
 	err := i.db.QueryRowContext(ctx,
 		`SELECT id FROM agent_messages
@@ -71,47 +82,62 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 		    AND json_extract(metadata, '$.tether_message_id') = ?
 		  LIMIT 1`,
 		route.SessionID, route.ProfileID, a2a.TetherSentinel, env.ID).Scan(&existing)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	var m *mailbox.Message
+	switch {
+	case err == nil:
+		// Already written (a retry): the wake below still runs, because a failed
+		// wake leaves the delivery open and the row must not be reported consumed.
+		m = &mailbox.Message{ID: existing, FromAgentID: a2a.TetherSentinel, FromSessionID: tetherBridgeSenderSession, Body: renderTetherBody(env, facts)}
+	case errors.Is(err, sql.ErrNoRows):
+		from := oneLine(env.From.URN())
+		meta, _ := json.Marshal(map[string]string{
+			"source":             "tether",
+			"tether_message_id":  env.ID,
+			"tether_from":        from,
+			"tether_principal":   oneLine(env.Metadata["from_principal"]),
+			"tether_verified":    oneLine(env.Metadata["from_verification"]),
+			"tether_in_reply_to": env.InReplyTo,
+			"tether_thread_id":   env.ThreadID,
+		})
+		m, err = i.msgs.SendMessage(ctx, mailbox.SendInput{
+			FromSessionID: tetherBridgeSenderSession,
+			FromAgentID:   a2a.TetherSentinel,
+			ToSessionID:   route.SessionID,
+			ToAgentID:     route.ProfileID,
+			Subject:       "Tether message from " + from,
+			Body:          renderTetherBody(env, facts),
+			Metadata:      string(meta),
+		})
+		if err != nil {
+			return "", err
+		}
+	default:
 		return "", fmt.Errorf("tether injector: look up existing delivery: %w", err)
 	}
-
-	from := oneLine(env.From.URN())
-	meta, _ := json.Marshal(map[string]string{
-		"source":             "tether",
-		"tether_message_id":  env.ID,
-		"tether_from":        from,
-		"tether_principal":   oneLine(env.Metadata["from_principal"]),
-		"tether_verified":    oneLine(env.Metadata["from_verification"]),
-		"tether_in_reply_to": env.InReplyTo,
-		"tether_thread_id":   env.ThreadID,
-	})
-	m, err := i.msgs.SendMessage(ctx, mailbox.SendInput{
-		FromSessionID: tetherBridgeSenderSession,
-		FromAgentID:   a2a.TetherSentinel,
-		ToSessionID:   route.SessionID,
-		ToAgentID:     route.ProfileID,
-		Subject:       "Tether message from " + from,
-		Body:          renderTetherBody(env, i.sessionFacts(ctx, route.SessionID)),
-		Metadata:      string(meta),
-	})
-	if err != nil {
-		return "", err
+	if werr := i.wake(ctx, route, m, verified); werr != nil {
+		return "", werr
 	}
-	// The wake reactor only turns a mailbox row into a turn when the session's
-	// message-wake policy is auto_summarize. A definition-bound session takes that
-	// policy from its pinned definition, which does not opt in, so Tether mail for
-	// an enrolled actor would sit unread. Mail for an actor is meant to be acted
-	// on, so when the reactor will not wake the session the bridge does it.
-	if i.chat != nil && i.chat.resolveMessageWakePolicy(ctx, route.SessionID) != chat.SubagentPolicyAutoSummarize {
-		// A native turn offers tools only to a submitting credential with standing
-		// (R1, re-checked on every dispatch). The bridge turn is submitted on behalf of
-		// the actor, so the credential that enrolled it is the principal; the tools are
-		// still only those the host's native authority grants. No enrollment, no
-		// principal: the turn runs tool-free, as any turn without a credential does.
-		wakeCtx := ctx
+	return m.ID, nil
+}
+
+// wake turns a delivered mailbox row into a turn when the wake reactor will not.
+// The reactor only wakes a session whose message-wake policy is auto_summarize;
+// the embedded chat archetype pins render_and_wait, so Tether mail for an enrolled
+// actor would sit unread. Mail for an actor is meant to be acted on, so the bridge
+// wakes it. A failed wake is RETURNED (never swallowed) so the delivery stays open:
+// busy retries shortly, an ended session is detached so the next attempt re-wakes
+// a fresh one, an unsupported view is dead-lettered with its reason.
+func (i *tetherInjector) wake(ctx context.Context, route tetherbridge.ActorRoute, m *mailbox.Message, verified bool) error {
+	if i.chat == nil || i.chat.resolveMessageWakePolicy(ctx, route.SessionID) == chat.SubagentPolicyAutoSummarize {
+		return nil
+	}
+	// A native turn offers tools only to a submitting credential with standing
+	// (R1, re-checked on every dispatch). The turn is submitted on behalf of the
+	// actor, so the credential that enrolled it is the principal, and ONLY for a
+	// sender Tether verified: a trust-listed unverified sender (spoofable) gets a
+	// tool-free turn. The tools are still only those the host's native authority grants.
+	wakeCtx := ctx
+	if verified {
 		var principal string
 		if qerr := i.db.QueryRowContext(ctx,
 			`SELECT e.principal FROM agent_actor_bindings b
@@ -119,11 +145,30 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 			  WHERE b.actor_uri = ? AND b.enabled = 1 AND e.status = 'enrolled' LIMIT 1`, route.ProfileID).Scan(&principal); qerr == nil && principal != "" {
 			wakeCtx = WithSubmittedBy(ctx, principal)
 		}
-		if _, werr := i.chat.TriggerMessageWake(wakeCtx, route.SessionID, m); werr != nil {
-			slog.Warn("tether bridge: wake turn for delivered message failed", "session_id", route.SessionID, "message_id", m.ID, "err", werr)
-		}
 	}
-	return m.ID, nil
+	_, werr := i.chat.TriggerMessageWake(wakeCtx, route.SessionID, m)
+	switch {
+	case werr == nil:
+		return nil
+	case errors.Is(werr, ErrSessionBusy):
+		return fmt.Errorf("%w: %v", tetherbridge.ErrBusy, werr)
+	case errors.Is(werr, ErrSessionEnded):
+		i.detach(ctx, route.SessionID)
+		return fmt.Errorf("tether wake: session ended, actor detached so the next attempt wakes a fresh one: %w", werr)
+	case errors.Is(werr, ErrUnsupportedDefinition), errors.Is(werr, ErrUnsupportedModel):
+		return fmt.Errorf("%w: %v", tetherbridge.ErrUndeliverable, werr)
+	default:
+		return werr
+	}
+}
+
+// detach clears the actor attached to an ended session (the archive hook does the
+// same; this covers a session that ended between route resolution and the wake).
+func (i *tetherInjector) detach(ctx context.Context, sessionID string) {
+	if _, err := i.db.ExecContext(ctx,
+		`UPDATE actor_instances SET current_session_id = '', status = 'sleeping' WHERE current_session_id = ? AND status != 'archived'`, sessionID); err != nil {
+		slog.Warn("tether bridge: detach after ended session", "session_id", sessionID, "err", err)
+	}
 }
 
 // renderTetherBody frames the message. The two framing lines are the bridge's;
@@ -303,13 +348,28 @@ func splitList(s string) []string {
 type tetherMailSource struct{ c *tethermail.Client }
 
 func (m tetherMailSource) List(ctx context.Context, to string, unreadOnly bool, limit, offset int) ([]messaging.Envelope, int, error) {
-	return m.c.List(ctx, to, tethermail.ListOptions{UnreadOnly: unreadOnly, Limit: limit, Offset: offset})
+	envs, total, err := m.c.List(ctx, to, tethermail.ListOptions{UnreadOnly: unreadOnly, Limit: limit, Offset: offset})
+	return envs, total, mapTetherErr(err)
+}
+
+func (m tetherMailSource) MarkRead(ctx context.Context, to, messageID string) error {
+	return m.c.MarkRead(ctx, messageID, to)
+}
+
+// mapTetherErr turns a Tether 404 (no mailbox for the actor) into the sentinel
+// the loop uses to stop watching Nanite-minted URNs Tether does not know.
+func mapTetherErr(err error) error {
+	var ae *tethermail.APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+		return fmt.Errorf("%w: %v", tetherbridge.ErrActorUnknownToTether, err)
+	}
+	return err
 }
 
 func (m tetherMailSource) Watch(ctx context.Context, to string, afterSeq int64) (<-chan tetherbridge.Event, error) {
 	in, err := m.c.Watch(ctx, to, afterSeq, tethermail.WatchOptions{})
 	if err != nil {
-		return nil, err
+		return nil, mapTetherErr(err)
 	}
 	out := make(chan tetherbridge.Event)
 	go func() {

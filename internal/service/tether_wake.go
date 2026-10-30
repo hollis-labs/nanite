@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -93,8 +94,30 @@ func (w *tetherWaker) wake(ctx context.Context, actorURN string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("tether wake: create session: %w", err)
 	}
+	// The attach must succeed: an unattached actor would make every later mail
+	// start another session. Retry briefly, then fail the wake (the mail stays
+	// open and retries) and end the orphan session.
 	if w.enrol != nil {
-		w.enrol.AttachSession(ctx, host.ID, sess.ID)
+		var attachErr error
+		for n := 0; n < 3; n++ {
+			if attachErr = w.enrol.AttachSessionChecked(ctx, host.ID, sess.ID); attachErr == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				attachErr = ctx.Err()
+			case <-time.After(time.Duration(n+1) * 150 * time.Millisecond):
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		if attachErr != nil {
+			if aerr := w.st.ArchiveSession(context.WithoutCancel(ctx), sess.ID); aerr != nil {
+				slog.Warn("tether wake: archive orphan session", "session_id", sess.ID, "err", aerr)
+			}
+			return "", fmt.Errorf("tether wake: attach actor to session: %w", attachErr)
+		}
 	}
 	slog.Info("tether wake: started session for enrolled actor", "actor", actorURN, "session_id", sess.ID, "host", host.Slug)
 	return sess.ID, nil

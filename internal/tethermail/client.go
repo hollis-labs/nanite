@@ -253,6 +253,23 @@ func (c *Client) Consume(ctx context.Context, messageID, as string) error {
 	return nil
 }
 
+// MarkRead marks a message read for recipient `as` (presentation only: it keeps
+// handled mail out of unread_only lists; it is not an acknowledgement of work).
+func (c *Client) MarkRead(ctx context.Context, messageID, as string) error {
+	q := url.Values{}
+	q.Set("as", as)
+	resp, cancel, err := c.do(ctx, http.MethodPost, "/messages/"+url.PathEscape(messageID)+"/read", q, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return apiError(resp)
+	}
+	return nil
+}
+
 // Send posts an envelope. A non-empty idempotencyKey is sent as the
 // Idempotency-Key header; the same key from the same sender returns the
 // earlier message.

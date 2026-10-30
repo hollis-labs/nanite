@@ -22,13 +22,6 @@ const CookieName = "nanite_session"
 // session cookie.
 const CSRFHeader = "X-Nanite-CSRF"
 
-const (
-	// agentTTL is an agent credential's sliding lifetime; agentCap bounds the
-	// total life of one credential however busy the session is.
-	agentTTL = time.Hour
-	agentCap = 24 * time.Hour
-)
-
 // Guard is the authentication and authorization middleware.
 type Guard struct {
 	Store *Store
@@ -179,6 +172,8 @@ func (g *Guard) authenticate(w http.ResponseWriter, r *http.Request) (Principal,
 				writeUnauthorized(w, r)
 				return Principal{}, time.Time{}, false
 			}
+			// Sliding lifetime and absolute cap are settings-driven (agent_ttl.go).
+			agentTTL, agentCap := agentCredentialTTLs()
 			if next, err := g.Store.Slide(ctx, c, agentTTL, agentCap); err == nil {
 				expires = next
 			}

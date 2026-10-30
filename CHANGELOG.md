@@ -4,6 +4,16 @@ All notable user-facing changes land here. This file starts with the
 2026-05-01 release notes for the pre-release sprint; earlier history
 lives in the git log.
 
+## Unreleased
+
+### Fixed
+
+- **Tether mail to an enrolled agy-backed agent ended with an empty answer.**
+  Headless agy denied its own read of an MCP tool descriptor; Nanite now allows
+  `read_file` on agy's private `antigravity-cli/mcp` directory when MCP tools are
+  allowed. Mail to enrolled claude, codex and agy agents is delivered and
+  answered with no polling (see `docs/guides/cli-tether-mcp.md`).
+
 ## 0.4.0 - 2026-10-30
 
 Headline: Nanite agents can be enrolled as durable Tether actors, and mail

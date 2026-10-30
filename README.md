@@ -92,9 +92,10 @@ Things that are off or limited by design today, so they do not surprise you:
   ongoing work, not a gate — see [`AGENTS.md`](AGENTS.md) for how that's
   sequenced.
 - **macOS packaging.** `make package-release` builds darwin/amd64 and
-  darwin/arm64 archives and a `.github/workflows/release.yml` cuts the
-  GitHub release on a tag push; a `hollis-labs/homebrew-tap` formula
-  (`brew install nanite`) lands with the first tagged release.
+  darwin/arm64 archives and `.github/workflows/release.yml` cuts the GitHub
+  release on a tag push (v0.4.0 is the first); the
+  `hollis-labs/homebrew-tap` formula installs from those archives. Linux
+  archives are not published yet.
 
 ## License & Branding
 
@@ -110,6 +111,20 @@ Nanite, you are encouraged to use attribution such as:
 - "Powered by Nanite"
 
 See [TRADEMARK.md](./TRADEMARK.md) for details.
+
+## Install
+
+macOS (arm64 and amd64), from the tagged release:
+
+```bash
+brew install hollis-labs/tap/nanite
+nanite version
+```
+
+Linux has no release archive. It runs from the binaries CI builds on every
+push to `main`, installed with `fleet-install` (from `hollis-labs/tools`); see
+`docs/guides/mac-nanite-supervision.md` for the same flow on a Mac instance and
+`deploy/deploy.yaml` for the targets.
 
 ## Quick Start
 

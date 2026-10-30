@@ -69,7 +69,7 @@ func (s *Server) ListenUnix(path string) {
 	if err != nil {
 		s.t.Fatalf("tethermailtest: listen unix: %v", err)
 	}
-	srv := &http.Server{Handler: s.handler}
+	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(l) }()
 	s.t.Cleanup(func() { s.DropWatchers(); _ = srv.Close() })
 }

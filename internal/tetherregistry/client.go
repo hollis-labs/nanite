@@ -38,7 +38,7 @@ const (
 	// credentials only and answers 401 by design.
 	RegistryAddrEnv = "NANITE_TETHER_REGISTRY_ADDR"
 	// TokenFileEnv names the 0600 file holding the registry token.
-	TokenFileEnv = "NANITE_TETHER_REGISTRY_TOKEN_FILE"
+	TokenFileEnv = "NANITE_TETHER_REGISTRY_TOKEN_FILE" // #nosec G101 -- env var name, not a credential
 	// Substrate is the registry substrate Nanite registers under.
 	Substrate = "nanite"
 

@@ -55,11 +55,11 @@ type adminMCPTool struct {
 
 func prop(typ, desc string) map[string]any { return map[string]any{"type": typ, "description": desc} }
 
-const adminCredentialNote = " Needs a credential with the agents:manage scope (or the operator token); agent credentials are refused."
+const adminCredentialNote = " Needs a credential with the agents:manage scope (or the operator token); agent credentials are refused." // #nosec G101 -- help text, not a credential
 
-const grantCredentialNote = " Needs an admin credential (the operator token): an agents:manage credential is refused."
+const grantCredentialNote = " Needs an admin credential (the operator token): an agents:manage credential is refused." // #nosec G101 -- help text, not a credential
 
-const sessionCredentialNote = " Needs agents:manage and operate (or the operator token); agent credentials are refused."
+const sessionCredentialNote = " Needs agents:manage and operate (or the operator token); agent credentials are refused." // #nosec G101 -- help text, not a credential
 
 var reasonProp = prop("string", "Why this change is made (required, at most 500 characters); recorded with the change.")
 

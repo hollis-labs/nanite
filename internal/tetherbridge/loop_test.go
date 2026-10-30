@@ -342,7 +342,7 @@ func TestHandle_RouteErrorKeepsMessageInLedger(t *testing.T) {
 	l.Store = &fakeStore{inst: &store.DurableAgentInstance{ID: "i", ProfileID: "p", CurrentSessionID: "sess-1"}, slotCount: 1}
 	clk.Advance(time.Hour)
 	l.Config.defaults()
-	l.Mail = &fakeMail{inbox: map[string][]messaging.Envelope{}, stream: make(chan messaging.Envelope)}
+	l.Mail = &fakeMail{inbox: map[string][]messaging.Envelope{}, stream: make(chan Event)}
 	l.Actors = &fakeActors{}
 	l.Sweep(ctx) // no live actors: only the ledger resume path runs
 	if inj.written() != 1 || c.stages[len(c.stages)-1] != delivery.StageConsumed {
@@ -410,49 +410,47 @@ func TestHandle_RejectedSenderIsDeadLetteredNotInjected(t *testing.T) {
 	}
 }
 
-// --- Sweep, subscribe, Run and shutdown ---
+// --- Sweep, watch, Run and shutdown ---
 
-type fakeActors struct{ insts []store.DurableAgentInstance }
+type fakeActors struct{ urns []string }
 
-func (f *fakeActors) ListDurableAgentInstances(context.Context, bool) ([]store.DurableAgentInstance, error) {
-	return f.insts, nil
-}
+func (f *fakeActors) ListServedActorURNs(context.Context) ([]string, error) { return f.urns, nil }
 
-// fakeMail implements only the two messaging.Store methods the loop uses.
+// fakeMail is the non-destructive MailSource: List never marks anything read.
 type fakeMail struct {
-	messaging.Store
-	mu       sync.Mutex
-	inbox    map[string][]messaging.Envelope
-	stream   chan messaging.Envelope
-	subs     int
-	inboxErr error
+	mu      sync.Mutex
+	inbox   map[string][]messaging.Envelope
+	stream  chan Event
+	watches int
+	afters  []int64
+	listErr error
 }
 
-func (f *fakeMail) Inbox(_ context.Context, to messaging.Address, _ messaging.Filter) ([]messaging.Envelope, error) {
+func (f *fakeMail) List(_ context.Context, to string, _ bool, _, _ int) ([]messaging.Envelope, int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.inboxErr != nil {
-		return nil, f.inboxErr
+	if f.listErr != nil {
+		return nil, 0, f.listErr
 	}
-	out := f.inbox[to.URN()]
-	delete(f.inbox, to.URN()) // like Tether: a read marks delivered
-	return out, nil
+	out := f.inbox[to]
+	return out, len(out), nil
 }
 
-func (f *fakeMail) Subscribe(ctx context.Context, _ messaging.Address, _ messaging.Filter) (<-chan messaging.Envelope, error) {
+func (f *fakeMail) Watch(ctx context.Context, _ string, after int64) (<-chan Event, error) {
 	f.mu.Lock()
-	f.subs++
+	f.watches++
+	f.afters = append(f.afters, after)
 	f.mu.Unlock()
-	out := make(chan messaging.Envelope)
+	out := make(chan Event)
 	go func() {
 		defer close(out)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case env := <-f.stream:
+			case ev := <-f.stream:
 				select {
-				case out <- env:
+				case out <- ev:
 				case <-ctx.Done():
 					return
 				}
@@ -462,54 +460,79 @@ func (f *fakeMail) Subscribe(ctx context.Context, _ messaging.Address, _ messagi
 	return out, nil
 }
 
+type memCursors struct {
+	mu sync.Mutex
+	m  map[string]int64
+}
+
+func (c *memCursors) GetTetherWatchCursor(_ context.Context, urn string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.m[urn], nil
+}
+
+func (c *memCursors) SetTetherWatchCursor(_ context.Context, urn string, seq int64, reset bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]int64{}
+	}
+	if reset || seq > c.m[urn] {
+		c.m[urn] = seq
+	}
+	return nil
+}
+
 func newSweepLoop(t *testing.T) (*Loop, *fakeMail, *memLedger, *fakeInjector) {
 	t.Helper()
 	l, _, led, inj, _ := newTestLoop(true)
-	mail := &fakeMail{inbox: map[string][]messaging.Envelope{}, stream: make(chan messaging.Envelope, 4)}
+	mail := &fakeMail{inbox: map[string][]messaging.Envelope{}, stream: make(chan Event, 4)}
 	l.Mail = mail
-	l.Actors = &fakeActors{insts: []store.DurableAgentInstance{
-		{ID: "i", URN: testActor, ProfileID: "p", CurrentSessionID: "sess-1"},
-		{ID: "u", URN: "msg://agent/nanite/agt_unbound", ProfileID: "p2"},
-	}}
+	l.Cursors = &memCursors{}
+	l.Actors = &fakeActors{urns: []string{testActor}}
 	l.Config.ResubscribeWait = time.Millisecond
 	return l, mail, led, inj
 }
 
-func TestSweep_DrainsInboxOncePerMessageAndSkipsUnbound(t *testing.T) {
+func waitWatching(mail *fakeMail) {
+	for i := 0; i < 400; i++ {
+		mail.mu.Lock()
+		n := mail.watches
+		mail.mu.Unlock()
+		if n > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestSweep_CatchUpListsOncePerMessage(t *testing.T) {
 	l, mail, led, inj := newSweepLoop(t)
 	mail.inbox[testActor] = []messaging.Envelope{testEnv("a"), testEnv("b")}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	l.Sweep(ctx)
 	l.Sweep(ctx)
-	for i := 0; i < 400; i++ { // let the subscription goroutine connect
-		mail.mu.Lock()
-		n := mail.subs
-		mail.mu.Unlock()
-		if n > 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitWatching(mail)
 	l.Close()
 	if inj.written() != 2 || led.rows["a"].State != store.TetherDeliveryConsumed {
 		t.Fatalf("written=%d", inj.written())
 	}
-	if mail.subs != 1 {
-		t.Fatalf("subscriptions = %d, want 1 (bound actor only, once)", mail.subs)
+	if mail.watches != 1 {
+		t.Fatalf("watches = %d, want 1 (one per actor, once)", mail.watches)
 	}
 }
 
-// Inbox marks delivered; a failure after that read must not lose the message.
-func TestSweep_InboxReadFollowedByFailureIsRecoveredFromLedger(t *testing.T) {
+// List is non-destructive, so a failure after reading never loses the message,
+// and the ledger resumes it on a later sweep.
+func TestSweep_FailureAfterListIsRecoveredFromLedger(t *testing.T) {
 	l, mail, led, inj := newSweepLoop(t)
 	mail.inbox[testActor] = []messaging.Envelope{testEnv("a")}
 	inj.err = errors.New("mailbox down")
 	ctx := context.Background()
 	l.Sweep(ctx)
-	if len(mail.inbox[testActor]) != 0 {
-		t.Fatal("test setup: inbox should be drained")
-	}
+	waitWatching(mail)
+	l.Close()
 	if row := led.rows["a"]; row == nil || row.Terminal() {
 		t.Fatalf("message lost: %+v", row)
 	}
@@ -517,6 +540,7 @@ func TestSweep_InboxReadFollowedByFailureIsRecoveredFromLedger(t *testing.T) {
 	led.mu.Lock()
 	led.rows["a"].NextAttemptAt = time.Time{}
 	led.mu.Unlock()
+	mail.inbox[testActor] = nil
 	l.Sweep(ctx)
 	l.Close()
 	if inj.written() != 1 {
@@ -524,24 +548,25 @@ func TestSweep_InboxReadFollowedByFailureIsRecoveredFromLedger(t *testing.T) {
 	}
 }
 
-func TestSubscribe_StreamDeliveryAndDuplicateWithSweep(t *testing.T) {
+func TestWatch_StreamDeliveryDuplicateAndCursor(t *testing.T) {
 	l, mail, led, inj := newSweepLoop(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	l.Sweep(ctx) // starts the subscription
-	mail.stream <- testEnv("s1")
-	mail.stream <- testEnv("s1") // the same message arriving twice
+	l.Sweep(ctx) // starts the watch
+	mail.stream <- Event{Kind: EventMessage, Seq: 7, Env: testEnv("s1")}
+	mail.stream <- Event{Kind: EventMessage, Seq: 8, Env: testEnv("s1")} // the same message again
 	deadline := time.After(2 * time.Second)
 	for {
 		led.mu.Lock()
 		r := led.rows["s1"]
 		done := r != nil && r.State == store.TetherDeliveryConsumed
 		led.mu.Unlock()
-		if done {
+		cur, _ := l.Cursors.GetTetherWatchCursor(ctx, testActor)
+		if done && cur == 8 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatal("stream delivery never completed")
+			t.Fatal("stream delivery or cursor never completed")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
@@ -552,7 +577,52 @@ func TestSubscribe_StreamDeliveryAndDuplicateWithSweep(t *testing.T) {
 	}
 }
 
-func TestRun_StopsAndWaitsForSubscriptions(t *testing.T) {
+func TestWatch_GapResetsCursorAndReconnects(t *testing.T) {
+	l, mail, _, _ := newSweepLoop(t)
+	cur := l.Cursors.(*memCursors)
+	_ = cur.SetTetherWatchCursor(context.Background(), testActor, 50, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	l.Sweep(ctx)
+	waitWatching(mail)
+	mail.stream <- Event{Kind: EventGap}
+	deadline := time.After(2 * time.Second)
+	for {
+		mail.mu.Lock()
+		n := mail.watches
+		last := int64(-1)
+		if n > 0 {
+			last = mail.afters[n-1]
+		}
+		mail.mu.Unlock()
+		if n >= 2 {
+			if mail.afters[0] != 50 || last != 0 {
+				t.Fatalf("afters = %v, want first 50 then 0 after the gap", mail.afters)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("no reconnect after gap")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	l.Close()
+}
+
+type fakeWaker struct {
+	calls int
+	st    *fakeStore
+}
+
+func (w *fakeWaker) Wake(_ context.Context, urn string) (string, error) {
+	w.calls++
+	w.st.bind("sess-woken")
+	return "sess-woken", nil
+}
+
+func TestRun_StopsAndWaitsForWatches(t *testing.T) {
 	l, _, _, _ := newSweepLoop(t)
 	l.Config.SweepEvery = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
@@ -569,6 +639,22 @@ func TestRun_StopsAndWaitsForSubscriptions(t *testing.T) {
 	n := len(l.subs)
 	l.mu.Unlock()
 	if n != 0 {
-		t.Fatalf("subscriptions left after shutdown: %d", n)
+		t.Fatalf("watches left after shutdown: %d", n)
+	}
+}
+
+func (f *fakeStore) bind(sessionID string) { f.inst.CurrentSessionID = sessionID }
+
+// Mail for an enrolled actor with no session starts one (the Waker) and is then
+// delivered into it, in the same Handle call.
+func TestHandle_WakesUnboundActorThenDelivers(t *testing.T) {
+	l, _, led, inj, _ := newTestLoop(false)
+	w := &fakeWaker{st: l.Store.(*fakeStore)}
+	l.Waker = w
+	if err := l.Handle(context.Background(), testActor, testEnv("w1")); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if w.calls != 1 || inj.written() != 1 || led.rows["w1"].State != store.TetherDeliveryConsumed {
+		t.Fatalf("wake calls=%d written=%d state=%s", w.calls, inj.written(), led.rows["w1"].State)
 	}
 }

@@ -145,6 +145,10 @@ type launchExtra struct {
 	// HostMCPGated marks a launch whose host projects mcp_servers: the allow
 	// rules must be the only permission source (see selectAdapter).
 	HostMCPGated bool
+	// Broad marks a launch whose host has access=broad: it runs the developer
+	// variant for this launch only and the host's mcp_servers are planted
+	// without allow rules (no gate to feed).
+	Broad bool
 }
 
 // selectAdapter builds the wrapper adapter for sel through launch.Select.
@@ -165,7 +169,7 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 	if sel.Mode == runtimes.ModePTY {
 		return nil, errTerminalLaunchUnsupported
 	}
-	if x.HostMCPGated && (sel.Runtime == runtimes.Claude || sel.Runtime == runtimes.Antigravity) && deps.yoloMode() {
+	if x.HostMCPGated && !x.Broad && (sel.Runtime == runtimes.Claude || sel.Runtime == runtimes.Antigravity) && deps.yoloMode() {
 		// The mode can change between boot params and launch; the developer
 		// variant below would drop the gate the allow rules feed.
 		return nil, errHostMCPNoGate
@@ -191,6 +195,10 @@ func selectAdapter(deps *Dependencies, sel RuntimeSelection, workRoot, bootDir s
 			agyPermissionArgs(deps, sel.Runtime),
 			addDirArgs(string(sel.Runtime), workRoot, x.AddDirs),
 		),
+	}
+	if x.Broad && sel.Runtime == runtimes.Claude {
+		selection.DeveloperMode = true
+		slog.Warn("AUDIT agent launch: Claude developer variant (--dangerously-skip-permissions) because the host has access=broad")
 	}
 	if deps.NativeCLIAdapter != nil {
 		if cli := deps.NativeCLIAdapter(sel.Runtime); cli != nil {

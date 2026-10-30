@@ -187,6 +187,16 @@ native API agent. Claude, Codex, OpenCode and Antigravity (`agy`) run this way.
     mapped to `command(<prefix>)` and `read_url(<domain>)`, validated by an
     allowlist grammar, default deny, no wildcards.
   See [the adoption guide](../guides/agy-per-agent-mcp-allowlist.md).
+- **Broad access (host setting `access: "broad"`).** Claude CLI hosts only. That
+  host's launches use the developer variant (`--dangerously-skip-permissions`)
+  for that launch alone, whatever the server's permission mode, so the agent
+  works like a sysadmin agent: shell, files anywhere the Nanite user can reach, and
+  every tool of its planted `mcp_servers` (grants no longer gate them; the
+  servers are still planted in the strict `.mcp.json`). Setting it is an admin
+  act (`403` for `agents:manage`/`maintain`; clearing or keeping it is not), it is
+  host execution input so an enrolled agent can change it without a definition
+  rebind, and each launch logs `AUDIT agent launch: Claude developer variant ...
+  access=broad`. Short-term measure until the security work lands.
 - **Permissions.** The CLI runs under the boot dir's Claude permissions and the
   planted strict `.mcp.json`; Nanite's tools reach it only through the Nanite
   MCP server, so tool authorization is unchanged. The developer variant

@@ -137,7 +137,7 @@ func applyHostMCP(ctx context.Context, deps *Dependencies, opts Options, profile
 	if profile == nil || profile.NativeHost == nil || len(profile.NativeHost.MCPServers) == 0 {
 		return
 	}
-	if deps.yoloMode() {
+	if deps.yoloMode() && !profile.NativeHost.Broad() {
 		params.HostMCPErr = errHostMCPNoGate
 		return
 	}

@@ -105,7 +105,7 @@ func (i *tetherInjector) Inject(ctx context.Context, route tetherbridge.ActorRou
 	// policy from its pinned definition, which does not opt in, so Tether mail for
 	// an enrolled actor would sit unread. Mail for an actor is meant to be acted
 	// on, so when the reactor will not wake the session the bridge does it.
-	if i.chat.resolveMessageWakePolicy(ctx, route.SessionID) != chat.SubagentPolicyAutoSummarize {
+	if i.chat != nil && i.chat.resolveMessageWakePolicy(ctx, route.SessionID) != chat.SubagentPolicyAutoSummarize {
 		// A native turn offers tools only to a submitting credential with standing
 		// (R1, re-checked on every dispatch). The bridge turn is submitted on behalf of
 		// the actor, so the credential that enrolled it is the principal; the tools are

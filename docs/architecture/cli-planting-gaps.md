@@ -116,8 +116,8 @@ and grants. No new config format.
 
 ## 4. Could not determine
 
-- Whether `ActorURN` is bound for sessions created by `agent run` (C3); read only
-  the planter side, not the enrollment wiring.
+- Whether `ActorURN` is bound for sessions created by `agent run` (C3). Answered in
+  section 5: closed for host-started sessions with an enrolled actor.
 - Whether API hosts honor `host.yaml mcp_servers` (the loader comment implies only
   CLI hosts refuse them); not traced through the native registry.
 - Tether's exact per-launch file set for agents launched by `agent-boot` (the

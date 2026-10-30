@@ -155,7 +155,9 @@ export NANITE_TETHER_REGISTRY_TOKEN_FILE=~/.nanite/tether-registry-token
 ```
 
 `NANITE_TETHER_REGISTRY_ADDR` is separate from `NANITE_TETHER_ADDR`, which the
-delivery bridge keeps using; if it is unset, enrollment falls back to
+delivery bridge keeps using (as the local unix socket form, for example
+`unix:/var/lib/fabric/tether/run/tetherd.sock`; the bridge's `/messages` routes are
+not served on the edge URL); if it is unset, enrollment falls back to
 `NANITE_TETHER_ADDR`. It takes `unix:///absolute/path.sock` or an `http(s)` URL.
 The socket must exist and be reachable by the user Nanite runs as (check its
 owner and mode with `ls -l`); a missing socket answers `tether_unreachable`,
@@ -203,6 +205,33 @@ Rules to know:
 - `PUT ... enabled=false` is a reversible disable that leaves the actor as it
   is; setting `enabled=true` again restores the host with the same URN. Only
   retire ends an actor.
+
+## Tether bridge settings on agent-os: the systemd drop-in
+
+The systemd drop-in is the permanent place for host-specific Tether bridge settings on
+agent-os. Put them in
+`~/.config/systemd/user/com.hollis-labs.cerberus.hub-nanite.service.d/tether-bridge.conf`
+(the unit `fleet-install` restarts; the drop-in survives deploys and Cerberus re-renders of the
+unit file). It holds two settings:
+
+```ini
+[Service]
+Environment=NANITE_TETHER_ADDR=unix:/var/lib/fabric/tether/run/tetherd.sock
+Environment=NANITE_TETHER_TRUST_UNVERIFIED_FROM=<exact URN>[,<exact URN>...]
+```
+
+`NANITE_TETHER_ADDR` must be the local unix socket form: the `/messages` routes the bridge
+uses are not served on the edge URL. `NANITE_TETHER_TRUST_UNVERIFIED_FROM` lists the exact
+sender URNs (no prefixes) accepted although Tether does not verify them, normally only the
+operator's own address; those turns run tool-free. Registry enrollment credentials
+(`NANITE_TETHER_REGISTRY_ADDR`, `NANITE_TETHER_REGISTRY_TOKEN_FILE`) are only added to the
+drop-in while enrolling or retiring an agent through `nanite serve`, and removed afterwards;
+the bridge's own token file (`NANITE_TETHER_TOKEN_FILE`) is separate and never holds the
+registry token. Never put a token value in the drop-in, only file paths. After editing:
+
+```sh
+systemctl --user daemon-reload && systemctl --user restart com.hollis-labs.cerberus.hub-nanite.service
+```
 
 ## Work root, listing and stopping
 

@@ -6,6 +6,14 @@ lives in the git log.
 
 ## Unreleased
 
+### Added
+
+- **Tether service tokens are accepted on the API.** Set `NANITE_TETHER_ISSUER`
+  (or `NANITE_TETHER_JWKS_URL` / `NANITE_TETHER_BOOTSTRAP_KEY_FILE`) and a valid,
+  unrevoked Tether service token with audience `nanite` (override with
+  `NANITE_TETHER_AUDIENCE`) authenticates as a client with read, operate and tools
+  scopes. Unset, behaviour is unchanged.
+
 ### Fixed
 
 - **Tether mail to an enrolled agy-backed agent ended with an empty answer.**

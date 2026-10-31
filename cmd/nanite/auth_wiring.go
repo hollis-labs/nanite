@@ -104,6 +104,15 @@ func initServeAuth(ctx context.Context, dbFlag string, main *store.Store, insecu
 	}
 	g := apiauth.NewGuard(st)
 	g.Insecure = insecure
+	tv, err := apiauth.NewTetherVerifier(ctx, apiauth.TetherConfigFromEnv())
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("tether service-token verifier: %w", err)
+	}
+	if tv != nil {
+		g.ServiceTokens = tv
+		slog.Info("accepting Tether service tokens", "audience", "nanite")
+	}
 	g.SessionLive = func(ctx context.Context, sessionID string) bool {
 		sess, err := main.GetSession(ctx, sessionID)
 		return err == nil && sess != nil && sess.Status != "archived"

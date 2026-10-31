@@ -69,6 +69,8 @@ github.com/hollis-labs/libs/mesh/core v0.9.1 h1:W1Z7G/OI4Ty9UaLXRQ/TY6Z1aDRtCrUf
 github.com/hollis-labs/libs/mesh/core v0.9.1/go.mod h1:4MIXuPovKfdlaHGpI2Va9nINuNKmfsed4XX53UxeoSk=
 github.com/hollis-labs/libs/mesh/eventbus v0.2.0 h1:9mstpH3GWQWRqnNkgzFiNo2e1/sg20enIs/gHePLcRw=
 github.com/hollis-labs/libs/mesh/eventbus v0.2.0/go.mod h1:KKQBH8hpxgkuoMlowUnqn809z3BDMQqkLHteAIcpkZU=
+github.com/hollis-labs/libs/security/auth v0.2.1 h1:EPRHtZ7LwPPnz9BMXbunYFbhndySyr8SeZa13UIqzu4=
+github.com/hollis-labs/libs/security/auth v0.2.1/go.mod h1:GGJqJuSZwR57ygyml3kPt6Aw2rwPqAzTV2M9CXjTjo8=
 github.com/hollis-labs/libs/security/policy v0.1.0 h1:XsksYYhpJ315wlr9QmWwxUKRfyDAJSSRiekBh7jpI70=
 github.com/hollis-labs/libs/security/policy v0.1.0/go.mod h1:vFJQekM6tI5OV+2rqK+mx/imNUSSJ26PkvAvgMmdQBo=
 github.com/hollis-labs/libs/security/redact v0.1.0 h1:Tz6KMduh5cUJyWTsiEpWMOPErjGcW0FRDxNuyqqTEd8=

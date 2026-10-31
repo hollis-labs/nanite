@@ -31,6 +31,7 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hollis-labs/libs/core/panics v0.1.0 // indirect
+	github.com/hollis-labs/libs/security/auth v0.2.1 // indirect
 	github.com/hollis-labs/libs/security/redact v0.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect

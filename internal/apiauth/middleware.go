@@ -37,6 +37,10 @@ type Guard struct {
 	// Insecure turns enforcement off for local development (the explicit
 	// --insecure-no-auth flag). Requests then run as a synthetic operator.
 	Insecure bool
+	// ServiceTokens, when set, additionally accepts a valid Tether service
+	// token from a calling app. Nil (no Tether issuer configured) leaves
+	// authentication exactly as it was.
+	ServiceTokens ServiceTokenVerifier
 
 	reg     *registry
 	denials atomic.Int64
@@ -160,6 +164,14 @@ func (g *Guard) authenticate(w http.ResponseWriter, r *http.Request) (Principal,
 			return Principal{}, time.Time{}, false
 		}
 		c, err := g.Store.Authenticate(ctx, secret)
+		if err != nil && g.ServiceTokens != nil && strings.Count(secret, ".") == 2 {
+			if p, verr := g.ServiceTokens.VerifyServiceToken(ctx, secret); verr == nil {
+				return p, time.Time{}, true
+			}
+			g.deny(r, "bad-service-token")
+			writeUnauthorized(w, r)
+			return Principal{}, time.Time{}, false
+		}
 		if err != nil {
 			g.deny(r, "bad-credential")
 			writeUnauthorized(w, r)

@@ -15,6 +15,7 @@ import (
 // none of them set the verifier is off and authentication is unchanged.
 const (
 	EnvTetherIssuer       = "NANITE_TETHER_ISSUER"             // Tether base URL; derives the JWKS and deny-list URLs
+	EnvTetherIssuerClaim  = "NANITE_TETHER_ISSUER_CLAIM"       // required iss claim (default "tether")
 	EnvTetherJWKSURL      = "NANITE_TETHER_JWKS_URL"           // override of <issuer>/.well-known/jwks.json
 	EnvTetherDenyList     = "NANITE_TETHER_DENYLIST_URL"       // override of <issuer>/auth/denylist
 	EnvTetherBootstrap    = "NANITE_TETHER_BOOTSTRAP_KEY_FILE" // JWKS JSON or PEM public key used until the first fetch
@@ -31,14 +32,16 @@ type ServiceTokenVerifier interface {
 
 // TetherConfig configures the Tether service-token verifier.
 type TetherConfig struct {
-	Issuer, JWKSURL, DenyListURL, BootstrapKeyFile, Audience string
+	// Issuer is the Tether base URL; IssuerClaim is the required "iss" claim
+	// (Tether stamps "tether", which is the default).
+	Issuer, IssuerClaim, JWKSURL, DenyListURL, BootstrapKeyFile, Audience string
 }
 
 // TetherConfigFromEnv reads the NANITE_TETHER_* verifier settings.
 func TetherConfigFromEnv() TetherConfig {
 	g := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
 	return TetherConfig{
-		Issuer: g(EnvTetherIssuer), JWKSURL: g(EnvTetherJWKSURL), DenyListURL: g(EnvTetherDenyList),
+		Issuer: g(EnvTetherIssuer), IssuerClaim: g(EnvTetherIssuerClaim), JWKSURL: g(EnvTetherJWKSURL), DenyListURL: g(EnvTetherDenyList),
 		BootstrapKeyFile: g(EnvTetherBootstrap), Audience: g(EnvTetherAudience),
 	}
 }
@@ -80,10 +83,11 @@ func NewTetherVerifier(ctx context.Context, cfg TetherConfig) (*TetherVerifier, 
 	if denyURL == "" && issuer != "" {
 		denyURL = issuer + "/auth/denylist"
 	}
-	jc := auth.JWTConfig{Audience: aud, JWKSURL: jwks, BootstrapKeyFile: cfg.BootstrapKeyFile}
-	if cfg.Issuer != "" {
-		jc.Issuer = cfg.Issuer
+	claim := cfg.IssuerClaim
+	if claim == "" {
+		claim = "tether"
 	}
+	jc := auth.JWTConfig{Issuer: claim, Audience: aud, JWKSURL: jwks, BootstrapKeyFile: cfg.BootstrapKeyFile}
 	var dl *auth.DenyList
 	if denyURL != "" {
 		dl = auth.NewDenyList()

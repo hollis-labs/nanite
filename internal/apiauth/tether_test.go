@@ -102,7 +102,6 @@ func TestTetherVerifierDenyList(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := claims("nanite", time.Now().Add(time.Hour))
-	c["iss"] = srv.URL
 	if _, err := v.VerifyServiceToken(ctx, mintJWT(t, priv, "k1", c)); err != nil {
 		t.Fatalf("valid token: %v", err)
 	}

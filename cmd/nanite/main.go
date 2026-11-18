@@ -1,5 +1,4 @@
-// Command nanite is a class 2 tool built on Substrate. The shell (config, logging, health, CLI skeleton)
-// comes from the manifest; this package and internal/ are the tool.
+// Command nanite runs a single authored agent from its directory.
 package main
 
 import (
@@ -7,20 +6,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
-	"github.com/spf13/cobra"
-
+	"github.com/hollis-labs/libs/agent/agentdir"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
-
 	"github.com/hollis-labs/substrate/boot"
 	"github.com/hollis-labs/substrate/module"
-	"github.com/hollis-labs/substrate/modules/cli"
 	"github.com/hollis-labs/substrate/modules/policy"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "nanite:", err)
@@ -35,34 +32,70 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer restore()
-	started, err := start(ctx)
+	dir, args, err := extractDir(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	// Init and the Substrate commands do not require an agent database.
+	dataDir := ""
+	if requiresAgent(args) {
+		if _, err := agentdir.Load(dir); err != nil {
+			return fmt.Errorf("load agent directory: %w", err)
+		}
+		dataDir = filepath.Join(dir, ".nanite")
+	}
+	started, err := start(ctx, dataDir)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = started.Stop(context.Background()) }()
-	return newRoot(ctx, started.App).ExecuteContext(ctx)
+	root := newRoot(started.App, dir)
+	root.SetArgs(args)
+	return root.ExecuteContext(ctx)
 }
 
-// newRoot is the command tree over the started app: Substrate supplies version, config and health.
-func newRoot(ctx context.Context, app *module.App) *cobra.Command {
-	root := cli.Root(app)
-	root.AddCommand(&cobra.Command{
-		Use:   "hello",
-		Short: "Say hello (replace with the tool's commands)",
-		Args:  cobra.NoArgs,
-		Run:   func(c *cobra.Command, _ []string) { _, _ = fmt.Fprintln(c.OutOrStdout(), "hello") },
+func requiresAgent(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "init", "validate", "version", "config", "health", "help", "completion", "-h", "--help":
+			return false
+		default:
+			return true
+		}
+	}
+	return true
+}
+
+type localBoundary struct{}
+
+func (localBoundary) Evaluate(context.Context, libpolicy.Request) (libpolicy.Decision, error) {
+	return libpolicy.Decision{Effect: libpolicy.Allow, Reason: "delegate to authored agent tool rules"}, nil
+}
+
+func start(ctx context.Context, dataDir string) (*boot.Running, error) {
+	policy.UsePDP(localBoundary{})
+	return boot.StartWith(ctx, substrateApp, substrateModules, substrateConfigJSON, boot.Options{
+		AfterConfig: func(_ context.Context, app *module.App) error {
+			path := ":memory:"
+			if dataDir != "" {
+				if err := os.MkdirAll(dataDir, 0700); err != nil {
+					return err
+				}
+				path = filepath.Join(dataDir, "nanite.db")
+			}
+			db, _ := app.Config["database"].(map[string]any)
+			if db == nil {
+				db = make(map[string]any)
+				app.Config["database"] = db
+			}
+			sqlite, _ := db["sqlite"].(map[string]any)
+			if sqlite == nil {
+				sqlite = make(map[string]any)
+				db["sqlite"] = sqlite
+			}
+			db["driver"] = "sqlite"
+			sqlite["path"] = path
+			return nil
+		},
 	})
-	return root
-}
-
-// scaffoldPDP denies authorization while the CLI is only a command scaffold.
-type scaffoldPDP struct{}
-
-func (scaffoldPDP) Evaluate(context.Context, libpolicy.Request) (libpolicy.Decision, error) {
-	return libpolicy.Decision{Effect: libpolicy.Deny, Reason: "Nanite tool policy is not configured"}, nil
-}
-
-func start(ctx context.Context) (*boot.Running, error) {
-	policy.UsePDP(scaffoldPDP{})
-	return boot.Start(ctx, substrateApp, substrateModules, substrateConfigJSON)
 }

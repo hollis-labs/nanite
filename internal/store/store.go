@@ -121,7 +121,7 @@ func (s *Store) Conversations(ctx context.Context) ([]Conversation, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Conversation
+	out := []Conversation{}
 	for rows.Next() {
 		c, err := scanConversation(rows)
 		if err != nil {

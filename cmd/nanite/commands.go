@@ -1,0 +1,191 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/hollis-labs/libs/agent/agentdir"
+	libpolicy "github.com/hollis-labs/libs/security/policy"
+	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/repl"
+	"github.com/hollis-labs/substrate/module"
+	"github.com/hollis-labs/substrate/modules/cli"
+	"github.com/hollis-labs/substrate/modules/database"
+	"github.com/hollis-labs/substrate/modules/logging"
+	"github.com/hollis-labs/substrate/modules/policy"
+	"github.com/hollis-labs/substrate/modules/secrets"
+	"github.com/spf13/cobra"
+)
+
+func extractDir(args []string) (string, []string, error) {
+	dir := "."
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			out = append(out, args[i:]...)
+			break
+		}
+		switch {
+		case arg == "--dir" || arg == "-C":
+			i++
+			if i == len(args) || args[i] == "" {
+				return "", nil, fmt.Errorf("%s requires a directory", arg)
+			}
+			dir = args[i]
+		case strings.HasPrefix(arg, "--dir="):
+			dir = strings.TrimPrefix(arg, "--dir=")
+		case strings.HasPrefix(arg, "-C="):
+			dir = strings.TrimPrefix(arg, "-C=")
+		case arg == "--prompt" || arg == "-p" || arg == "--resume" || arg == "--output":
+			out = append(out, arg)
+			if i+1 < len(args) {
+				i++
+				out = append(out, args[i])
+			}
+		default:
+			out = append(out, arg)
+		}
+	}
+	abs, err := filepath.Abs(dir)
+	return abs, out, err
+}
+
+type appPDP struct{ authorizer *policy.Authorizer }
+
+func (p appPDP) Evaluate(ctx context.Context, req libpolicy.Request) (libpolicy.Decision, error) {
+	result, err := p.authorizer.Evaluate(ctx, req)
+	return result.Decision, err
+}
+
+func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate) (*agent.Agent, error) {
+	top, _ := app.Config["nanite"].(map[string]any)
+	settings, _ := top["gateway"].(map[string]any)
+	base, _ := settings["url"].(string)
+	if base == "" {
+		base, _ = settings["base_url"].(string)
+	}
+	ref, _ := settings["key_ref"].(string)
+	auth, _ := settings["auth"].(string)
+	headers := make(map[string]string)
+	if values, ok := settings["headers"].(map[string]any); ok {
+		for k, v := range values {
+			value, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("gateway header %q must be a string", k)
+			}
+			headers[k] = value
+		}
+	}
+	if value := os.Getenv("NANITE_GATEWAY_URL"); value != "" {
+		base = value
+	}
+	if value := os.Getenv("NANITE_GATEWAY_KEY_REF"); value != "" {
+		ref = value
+	}
+	value, _ := app.Value(logging.Key)
+	logger, _ := value.(*slog.Logger)
+	return agent.Open(cmd.Context(), agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger,
+		Secrets: secrets.Resolver(app), PDP: appPDP{policy.From(app)}, Gateway: agent.Gateway{BaseURL: base, Headers: headers, KeyRef: ref, Auth: auth},
+	})
+}
+
+func newRoot(app *module.App, dir string) *cobra.Command {
+	root := cli.Root(app)
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	var prompt, output, resume string
+	var latest bool
+	root.Flags().StringVarP(&prompt, "prompt", "p", "", "Run one prompt")
+	root.Flags().StringVar(&output, "output", "text", "Output format for -p: text, json or stream-json")
+	root.Flags().BoolVar(&latest, "continue", false, "Continue the latest conversation")
+	root.Flags().StringVar(&resume, "resume", "", "Open a specific conversation ID")
+	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory")
+	root.Args = cobra.NoArgs
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		nonInteractive := cmd.Flags().Changed("prompt")
+		var gate agent.Gate
+		var terminal repl.Terminal
+		if !nonInteractive {
+			terminal = repl.NewTerminal(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
+			gate = terminal
+		}
+		a, err := openAgent(cmd, app, dir, gate)
+		if err != nil {
+			return err
+		}
+		defer a.Close()
+		conversation, err := selectConversation(cmd.Context(), a, resume, latest)
+		if err != nil {
+			return err
+		}
+		if nonInteractive {
+			return repl.One(cmd.Context(), conversation, prompt, output, cmd.OutOrStdout())
+		}
+		return terminal.Chat(cmd.Context(), func(ctx context.Context) (repl.Sender, error) {
+			return a.NewConversation(ctx)
+		}, conversation)
+	}
+	root.AddCommand(
+		&cobra.Command{Use: "init [dir]", Short: "Create a starter agent directory", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				return initAgent(args[0])
+			}
+			return initAgent(dir)
+		}},
+		&cobra.Command{Use: "validate [dir]", Short: "Validate authored agent files", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			path := dir
+			if len(args) == 1 {
+				path = args[0]
+			}
+			info, err := agentdir.Load(path)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name)
+			return err
+		}},
+		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			a, err := openAgent(cmd, app, dir, nil)
+			if err != nil {
+				return err
+			}
+			defer a.Close()
+			conversations, err := a.Conversations(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(conversations)
+		}},
+		&cobra.Command{Use: "rebuild-index", Short: "Rebuild the conversation index from JSONL transcripts", Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				a, err := openAgent(cmd, app, dir, nil)
+				if err != nil {
+					return err
+				}
+				defer a.Close()
+				return a.RebuildIndex(cmd.Context())
+			},
+		},
+	)
+	return root
+}
+
+func selectConversation(ctx context.Context, a *agent.Agent, resume string, latest bool) (*agent.Conversation, error) {
+	if resume != "" {
+		return a.Conversation(ctx, resume)
+	}
+	if latest {
+		c, err := a.Latest(ctx)
+		if !errors.Is(err, agent.ErrNoConversation) {
+			return c, err
+		}
+	}
+	return a.NewConversation(ctx)
+}

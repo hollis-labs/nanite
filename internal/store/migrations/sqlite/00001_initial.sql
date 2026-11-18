@@ -74,7 +74,9 @@ CREATE TABLE tool_results (
  scope TEXT NOT NULL,
  id TEXT NOT NULL,
  tool_name TEXT NOT NULL,
- body TEXT NOT NULL,
+ tool_call_id TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ body TEXT,
  byte_size INTEGER NOT NULL,
  expires_at TEXT,
  PRIMARY KEY(scope,id)

@@ -143,6 +143,10 @@ func (s *Store) replayConversation(ctx context.Context, id string) error {
 }
 
 func (s *Store) project(ctx context.Context, conversation string, entry transcript.Entry) error {
+	return s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error { return projectEntry(ctx, tx, conversation, entry) })
+}
+
+func projectEntry(ctx context.Context, tx core.Tx, conversation string, entry transcript.Entry) error {
 	var record struct {
 		Type, Subtype, UUID, SessionID string
 		Timestamp                      time.Time
@@ -158,43 +162,41 @@ func (s *Store) project(ctx context.Context, conversation string, entry transcri
 	if err != nil {
 		return err
 	}
-	return s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error {
-		switch record.Subtype {
-		case "nanite.conversation":
-			var c Conversation
-			if err := json.Unmarshal(record.Payload, &c); err != nil {
-				return err
-			}
-			if c.ID != conversation {
-				return fmt.Errorf("conversation metadata ID mismatch")
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(id,parent_id,role,title,status,created_at,updated_at)
+	switch record.Subtype {
+	case "nanite.conversation":
+		var c Conversation
+		if err := json.Unmarshal(record.Payload, &c); err != nil {
+			return err
+		}
+		if c.ID != conversation {
+			return fmt.Errorf("conversation metadata ID mismatch")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(id,parent_id,role,title,status,created_at,updated_at)
     VALUES(?,NULLIF(?,''),?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
-				c.ID, c.ParentID, c.Role, c.Title, c.Status, format(c.CreatedAt), format(c.UpdatedAt)); err != nil {
-				return err
-			}
-		case "nanite.turn.start", "nanite.turn.finish":
-			var turn Turn
-			if err := json.Unmarshal(record.Payload, &turn); err != nil {
-				return err
-			}
-			if err := projectTurn(ctx, tx, conversation, turn, record.Subtype, record.Timestamp); err != nil {
-				return err
-			}
+			c.ID, c.ParentID, c.Role, c.Title, c.Status, format(c.CreatedAt), format(c.UpdatedAt)); err != nil {
+			return err
 		}
-		if record.Type == "user" || record.Type == "assistant" {
-			var body messageBody
-			if err := json.Unmarshal(record.Message, &body); err != nil {
-				return err
-			}
-			if err := projectMessage(ctx, tx, conversation, record.UUID, record.Timestamp, body, string(cursor)); err != nil {
-				return err
-			}
+	case "nanite.turn.start", "nanite.turn.finish":
+		var turn Turn
+		if err := json.Unmarshal(record.Payload, &turn); err != nil {
+			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO transcript_cursors(conversation_id,cursor) VALUES(?,?)
+		if err := projectTurn(ctx, tx, conversation, turn, record.Subtype, record.Timestamp); err != nil {
+			return err
+		}
+	}
+	if record.Type == "user" || record.Type == "assistant" {
+		var body messageBody
+		if err := json.Unmarshal(record.Message, &body); err != nil {
+			return err
+		}
+		if err := projectMessage(ctx, tx, conversation, record.UUID, record.Timestamp, body, string(cursor)); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO transcript_cursors(conversation_id,cursor) VALUES(?,?)
    ON CONFLICT(conversation_id) DO UPDATE SET cursor=excluded.cursor`, conversation, string(cursor))
-		return err
-	})
+	return err
 }
 
 func projectTurn(ctx context.Context, tx core.Tx, conversation string, turn Turn, subtype string, at time.Time) error {
@@ -254,4 +256,12 @@ func (s *Store) History(ctx context.Context, id string) ([]Message, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (j *Journal) RecordPermission(id string, at time.Time, details any) error {
+	return j.sideband("nanite.permission", id, at, details)
+}
+
+func (j *Journal) RecordCompaction(id string, at time.Time, details any) error {
+	return j.sideband("nanite.compaction", id, at, details)
 }

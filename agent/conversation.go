@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -20,10 +21,7 @@ type Conversation struct {
 }
 
 // Input supplies a user message and turn-scoped slot updates.
-type Input struct {
-	Text  string
-	Slots []SlotUpdate
-}
+type Input = engine.Input
 
 // Message is one persisted user, assistant or tool message.
 type Message = store.Message
@@ -70,7 +68,9 @@ func (a *Agent) Conversations(ctx context.Context) ([]ConversationInfo, error) {
 func (c *Conversation) ID() string { return c.id }
 
 // Send begins a turn.
-func (c *Conversation) Send(context.Context, Input) (*Run, error) { return nil, ErrNotImplemented }
+func (c *Conversation) Send(ctx context.Context, in Input) (*Run, error) {
+	return c.agent.engine.Send(ctx, c.id, in)
+}
 
 // Interrupted reports the turn left unfinished by the previous process.
 func (c *Conversation) Interrupted() *InterruptedTurn { return nil }

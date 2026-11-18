@@ -1,154 +1,69 @@
 package agent
 
 import (
-	"context"
-	"encoding/json"
-	"time"
-
-	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	"github.com/hollis-labs/nanite/internal/engine"
+	"github.com/hollis-labs/nanite/internal/events"
 )
 
-// EventSink receives normalized runtime events.
-type EventSink = runtimeevents.Sink
-
 // Run is an active conversation turn.
-type Run struct {
-	id     string
-	events <-chan Event
-	cancel context.CancelFunc
-}
+type Run = engine.Run
 
-// ID returns the turn's run identifier.
-func (r *Run) ID() string { return r.id }
+// EventSink receives normalized runtime events.
+type EventSink = events.Sink
 
-// Events returns the stream of turn events.
-func (r *Run) Events() <-chan Event { return r.events }
+// Answer is part of the run event contract.
+type Answer = events.Answer
 
-// Wait waits for the terminal event and returns the turn result.
-func (r *Run) Wait() (Result, error) { return Result{}, ErrNotImplemented }
+// Event is part of the run event contract.
+type Event = events.Event
 
-// Answer responds to a question emitted by this run.
-func (r *Run) Answer(string, Answer) error { return ErrNotImplemented }
+// EventMeta is part of the run event contract.
+type EventMeta = events.EventMeta
 
-// Cancel requests cancellation.
-func (r *Run) Cancel() {
-	if r.cancel != nil {
-		r.cancel()
-	}
-}
+// Result is part of the run event contract.
+type Result = events.Result
 
-// Answer contains a host's answer to a question.
-type Answer struct{ Value json.RawMessage }
+// RunStarted is part of the run event contract.
+type RunStarted = events.RunStarted
 
-// Event is an event emitted by a run.
-type Event interface{ event() }
+// SlotsAssembled is part of the run event contract.
+type SlotsAssembled = events.SlotsAssembled
 
-// EventMeta identifies and orders events within a run.
-type EventMeta struct {
-	RunID string
-	Seq   uint64
-}
+// TextDelta is part of the run event contract.
+type TextDelta = events.TextDelta
 
-func (EventMeta) event() {}
+// Thinking is part of the run event contract.
+type Thinking = events.Thinking
 
-// Result is the final output of a turn.
-type Result struct {
-	Text, StopReason string
-	Usage            Usage
-	Steps            int
-}
+// ToolCallStarted is part of the run event contract.
+type ToolCallStarted = events.ToolCallStarted
 
-// RunStarted marks the beginning of a run.
-type RunStarted struct{ EventMeta }
+// PermissionAsked is part of the run event contract.
+type PermissionAsked = events.PermissionAsked
 
-// SlotsAssembled contains the slot assembly report.
-type SlotsAssembled struct {
-	EventMeta
-	Report SlotReport
-}
+// PermissionResolved is part of the run event contract.
+type PermissionResolved = events.PermissionResolved
 
-// TextDelta contains newly generated assistant text.
-type TextDelta struct {
-	EventMeta
-	Text string
-}
+// ToolCallFinished is part of the run event contract.
+type ToolCallFinished = events.ToolCallFinished
 
-// Thinking contains newly generated reasoning text.
-type Thinking struct {
-	EventMeta
-	Text string
-}
+// Question is part of the run event contract.
+type Question = events.Question
 
-// ToolCallStarted describes a requested tool call.
-type ToolCallStarted struct {
-	EventMeta
-	CallID, Name string
-	Input        json.RawMessage
-}
+// SubagentStarted is part of the run event contract.
+type SubagentStarted = events.SubagentStarted
 
-// PermissionAsked records a tool call requiring human approval.
-type PermissionAsked struct {
-	EventMeta
-	Request PermissionRequest
-}
+// SubagentFinished is part of the run event contract.
+type SubagentFinished = events.SubagentFinished
 
-// PermissionResolved reports the tool permission decision.
-type PermissionResolved struct {
-	EventMeta
-	ID       string
-	Decision PermissionDecision
-}
+// Compacted is part of the run event contract.
+type Compacted = events.Compacted
 
-// ToolCallFinished reports the outcome of a tool call.
-type ToolCallFinished struct {
-	EventMeta
-	CallID   string
-	Result   ToolResult
-	IsError  bool
-	Duration time.Duration
-}
+// Usage is part of the run event contract.
+type Usage = events.Usage
 
-// Question requests a typed answer from the host.
-type Question struct {
-	EventMeta
-	ID, Prompt string
-	Schema     json.RawMessage
-}
+// RunFinished is part of the run event contract.
+type RunFinished = events.RunFinished
 
-// SubagentStarted reports the launch of a child conversation.
-type SubagentStarted struct {
-	EventMeta
-	ID, Role string
-}
-
-// SubagentFinished reports the outcome of a child conversation.
-type SubagentFinished struct {
-	EventMeta
-	ID     string
-	Result Result
-	Err    error
-}
-
-// Compacted reports the change in token usage after context compaction.
-type Compacted struct {
-	EventMeta
-	Before, After int
-}
-
-// Usage reports model token use.
-type Usage struct {
-	EventMeta
-	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int
-}
-
-// RunFinished marks successful termination.
-type RunFinished struct {
-	EventMeta
-	Result Result
-}
-
-// RunFailed marks unsuccessful termination.
-type RunFailed struct {
-	EventMeta
-	Err error
-}
+// RunFailed is part of the run event contract.
+type RunFailed = events.RunFailed

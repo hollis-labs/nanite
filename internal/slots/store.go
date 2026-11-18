@@ -168,3 +168,15 @@ func (s Snapshot) Entries(slot Name) []Entry {
 }
 
 func (s Snapshot) Version() uint64 { return s.version }
+
+// Copy creates an independent store from a snapshot for turn-scoped changes.
+func (s Snapshot) Copy() *Store {
+	out := NewStore()
+	out.version = s.version
+	for name, entries := range s.entries {
+		for _, e := range entries {
+			out.bucket(name)[ownerKey{e.Owner, e.Key}] = e
+		}
+	}
+	return out
+}

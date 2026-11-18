@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 
@@ -15,13 +16,16 @@ import (
 	"github.com/hollis-labs/libs/core/store"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/policy"
+	"github.com/hollis-labs/libs/security/secrets"
+	"github.com/hollis-labs/nanite/internal/engine"
+	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/slots"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
 
 var (
 	// ErrBusy means a run is already active in the conversation.
-	ErrBusy = errors.New("nanite: conversation is busy")
+	ErrBusy = engine.ErrBusy
 	// ErrNoConversation means the requested conversation does not exist.
 	ErrNoConversation = nanitestore.ErrNoConversation
 	// ErrNotImplemented means the engine does not yet implement the operation.
@@ -40,18 +44,15 @@ type Options struct {
 	PDP                           policy.PDP
 	SlotSources                   []SlotSource
 	SlotSelector                  SlotSelector
+	Secrets                       *secrets.Resolver
 }
 
 // Gateway configures the model gateway.
-type Gateway struct {
-	BaseURL string
-	Headers map[string]string
-	KeyRef  string
-	Auth    string
-}
+type Gateway = provider.Gateway
 
 // Agent owns one authored agent directory and its mutable host contributions.
 type Agent struct {
+	engine    *engine.Engine
 	dir       string
 	lock      *os.File
 	closeOnce sync.Once
@@ -104,12 +105,29 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	return &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}, notices: make(chan Notice)}, nil
+	a := &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}, notices: make(chan Notice)}
+	roots := []string{def.Directory}
+	if cwd, err := os.Getwd(); err == nil && cwd != def.Directory {
+		roots = append([]string{cwd}, roots...)
+	}
+	a.engine, err = engine.New(engine.Config{
+		Logger: opts.Logger, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
+		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets},
+		Slots:          a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
+		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots,
+	})
+	if err != nil {
+		_ = db.Close()
+		_ = lock.Close()
+		return nil, err
+	}
+	return a, nil
 }
 
 // Close releases this agent's resources and directory lock.
 func (a *Agent) Close() error {
 	a.closeOnce.Do(func() {
+		a.engine.Close()
 		close(a.notices)
 		a.closeErr = errors.Join(a.store.Close(), a.lock.Close())
 	})
@@ -139,3 +157,8 @@ func (a *Agent) Skills() *SkillSet { return &a.skills }
 
 // Notices returns asynchronous job and subagent notices.
 func (a *Agent) Notices() <-chan Notice { return a.notices }
+
+// RebuildIndex reconstructs the SQLite conversation projection from transcripts.
+func (a *Agent) RebuildIndex(ctx context.Context) error {
+	return a.engine.Maintain(ctx, a.store.RebuildIndex)
+}

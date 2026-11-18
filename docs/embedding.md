@@ -30,13 +30,15 @@ authored directory and retain its conversations.
 `SlotsAssembled` reports each slot's estimated token count, whether its content
 changed since the previous turn, and each entry's disposition. A changed slot
 with zero tokens was cleared. The example also prints the names it observes
-in the provider request, including Nanite's built-ins. The permissions token
-count varies with the lengths of the workspace paths.
+in the provider request, including Nanite's built-ins. The system and permissions token
+counts vary with the lengths of the workspace paths.
 
 ```text
 Turn 1 slots:
   universal: 20 tokens, changed yes
     engine/rules: ship
+  system: 72 tokens, changed yes
+    engine/environment: ship
   agent: 19 tokens, changed yes
     file/instructions: ship
   permissions: 79 tokens, changed yes
@@ -51,6 +53,8 @@ The notes mention a planning meeting.
 Turn 2 slots:
   universal: 20 tokens, changed no
     engine/rules: ship
+  system: 72 tokens, changed no
+    engine/environment: ship
   agent: 19 tokens, changed no
     file/instructions: ship
   permissions: 79 tokens, changed no
@@ -65,6 +69,8 @@ The workspace contains agenda.md.
 Turn 3 slots:
   universal: 20 tokens, changed no
     engine/rules: ship
+  system: 72 tokens, changed no
+    engine/environment: ship
   agent: 19 tokens, changed no
     file/instructions: ship
   permissions: 79 tokens, changed no

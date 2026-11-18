@@ -14,12 +14,14 @@ func Example() {
 		return
 	}
 	// The actual count depends on the lengths of the two workspace paths.
-	permissionTokens := regexp.MustCompile(`(?m)^  permissions: [0-9]+ tokens`)
-	fmt.Print(permissionTokens.ReplaceAllString(out.String(), "  permissions: <varies> tokens"))
+	permissionTokens := regexp.MustCompile(`(?m)^  (permissions|system): [0-9]+ tokens`)
+	fmt.Print(permissionTokens.ReplaceAllString(out.String(), "  $1: <varies> tokens"))
 	// Output:
 	// Turn 1 slots:
 	//   universal: 20 tokens, changed yes
 	//     engine/rules: ship
+	//   system: <varies> tokens, changed yes
+	//     engine/environment: ship
 	//   agent: 19 tokens, changed yes
 	//     file/instructions: ship
 	//   permissions: <varies> tokens, changed yes
@@ -34,6 +36,8 @@ func Example() {
 	// Turn 2 slots:
 	//   universal: 20 tokens, changed no
 	//     engine/rules: ship
+	//   system: <varies> tokens, changed no
+	//     engine/environment: ship
 	//   agent: 19 tokens, changed no
 	//     file/instructions: ship
 	//   permissions: <varies> tokens, changed no
@@ -48,6 +52,8 @@ func Example() {
 	// Turn 3 slots:
 	//   universal: 20 tokens, changed no
 	//     engine/rules: ship
+	//   system: <varies> tokens, changed no
+	//     engine/environment: ship
 	//   agent: 19 tokens, changed no
 	//     file/instructions: ship
 	//   permissions: <varies> tokens, changed no

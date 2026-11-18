@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -177,7 +178,12 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		permissions += " Workspace roots: " + strings.Join(e.cfg.WorkspaceRoots, ", ") + "."
 	}
 	permissions += " Approved Bash commands run with the user’s privileges and can access paths outside those roots."
+	environment := "Model: " + def.Runtime.Model + ". Platform: " + runtime.GOOS + "/" + runtime.GOARCH + ". Today's date: " + time.Now().Format("2006-01-02") + "."
+	if len(e.cfg.WorkspaceRoots) > 0 {
+		environment = "Working directory: " + e.cfg.WorkspaceRoots[0] + ". Relative paths resolve there. Agent directory: " + e.cfg.Dir + ". " + environment
+	}
 	updates := []slots.Update{
+		{Slot: slots.System, Entry: slots.Entry{Owner: "engine", Key: "environment", Content: environment}},
 		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: "Use the available tools when needed. Respect the workspace and tool permissions."}},
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: permissions}},

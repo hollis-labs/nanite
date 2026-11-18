@@ -275,7 +275,7 @@ func (x *execution) generate(ctx context.Context) error {
 			if !got.emitted {
 				return step{}, x.retry(ctx, err, &retries, &runErr)
 			}
-			allText.WriteString(got.text)
+			appendStepText(&allText, got.text)
 			if len(got.blocks) > 0 {
 				saveErr := x.message("assistant", got.blocks)
 				if len(got.calls) > 0 && saveErr == nil {
@@ -290,7 +290,7 @@ func (x *execution) generate(ctx context.Context) error {
 		return got, runloop.Proceed
 	}
 	settle := func(ctx context.Context, got step) runloop.Directive {
-		allText.WriteString(got.text)
+		appendStepText(&allText, got.text)
 		x.result.Steps++
 		x.repairArgs(ctx, &got)
 		if len(got.blocks) > 0 {
@@ -526,4 +526,16 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			})
 		}
 	}
+}
+
+// appendStepText adds one model step's text to the turn's reply, separating
+// steps so text written before and after tool calls does not run together.
+func appendStepText(all *strings.Builder, text string) {
+	if text == "" {
+		return
+	}
+	if all.Len() > 0 {
+		all.WriteString("\n\n")
+	}
+	all.WriteString(text)
 }

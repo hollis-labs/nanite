@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -13,35 +14,47 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
+	"github.com/hollis-labs/libs/agent/core/tooluse"
 	mcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/client"
 	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/processenv"
 	"github.com/hollis-labs/nanite/internal/tools"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const maxResponseBytes = 1 << 20
+const discoveryConcurrency = 4
 
 type Client struct {
-	mu       sync.Mutex
-	pool     *mcp.Pool
-	servers  map[string]*registration
-	sequence uint64
-	dir      string
-	resolver *secrets.Resolver
-	scope    *redact.Scope
-	logger   *slog.Logger
+	mu        sync.Mutex
+	pool      *mcp.Pool
+	servers   map[string]*registration
+	sequence  uint64
+	byKey     sync.Map
+	discovery chan struct{}
+	dir       string
+	resolver  *secrets.Resolver
+	scope     *redact.Scope
+	logger    *slog.Logger
 }
 
 type registration struct {
-	name, key string
-	digest    [32]byte
-	users     int
-	current   bool
+	name, key        string
+	legacySSE        bool
+	digest           [32]byte
+	users            int
+	current          bool
+	generation       atomic.Uint64
+	listing          chan struct{}
+	listed           bool
+	listedGeneration uint64
+	specs            []*sdk.Tool
 }
 
 type Lease struct {
@@ -54,12 +67,17 @@ func New(dir string, resolver *secrets.Resolver, scope *redact.Scope, logger *sl
 	if resolver == nil {
 		resolver = secrets.New()
 	}
-	return &Client{
-		dir: dir, resolver: resolver, scope: scope, logger: logger, servers: make(map[string]*registration),
-		pool: mcp.NewPool(mcp.WithIdentity("nanite", "0.5.0"), mcp.WithRetries(1),
-			mcp.WithCommandEnv(commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes),
-			mcp.WithDefaultCallTimeouts(map[string]time.Duration{"stdio": 60 * time.Second, "http": 60 * time.Second, "sse": 60 * time.Second})),
-	}
+	c := &Client{dir: dir, resolver: resolver, scope: scope, logger: logger, servers: make(map[string]*registration),
+		discovery: make(chan struct{}, discoveryConcurrency)}
+	c.pool = mcp.NewPool(mcp.WithIdentity("nanite", "0.5.0"), mcp.WithRetries(1),
+		mcp.WithCommandEnv(commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes), mcp.WithHTTPClient(httpClient),
+		mcp.WithDefaultCallTimeouts(map[string]time.Duration{"stdio": 60 * time.Second, "http": 60 * time.Second, "sse": 60 * time.Second}),
+		mcp.WithToolListChangedHandler(func(_ context.Context, key string) {
+			if value, ok := c.byKey.Load(key); ok {
+				value.(*registration).generation.Add(1)
+			}
+		}))
+	return c
 }
 
 // Reconcile issues a turn lease over the authored server set. A replaced
@@ -104,7 +122,8 @@ func (c *Client) Reconcile(ctx context.Context, cfg agentdir.MCPConfig) (*Lease,
 				warnings = append(warnings, fmt.Sprintf("MCP server %q registration failed: %v", name, err))
 				continue
 			}
-			reg = &registration{name: name, key: key, digest: entry.digest, current: true}
+			reg = &registration{name: name, key: key, digest: entry.digest, legacySSE: entry.config.Transport == "sse", current: true, listing: make(chan struct{}, 1)}
+			c.byKey.Store(key, reg)
 			c.servers[name] = reg
 		}
 		reg.users++
@@ -115,6 +134,7 @@ func (c *Client) Reconcile(ctx context.Context, cfg agentdir.MCPConfig) (*Lease,
 
 func (c *Client) releaseIfInactive(reg *registration) {
 	if !reg.current && reg.users == 0 {
+		c.byKey.Delete(reg.key)
 		if err := c.pool.Deregister(reg.key); err != nil {
 			c.logger.Warn("MCP server close failed", "server", reg.name)
 		}
@@ -139,10 +159,18 @@ func (l *Lease) Tools(ctx context.Context) ([]tools.Tool, []string) {
 	var out []tools.Tool
 	var warnings []string
 	seen := make(map[string]bool)
-	for _, reg := range l.servers {
-		listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		specs, err := l.list(listCtx, reg)
-		cancel()
+	type discoveryResult struct {
+		specs []*sdk.Tool
+		err   error
+	}
+	discovered := make([]discoveryResult, len(l.servers))
+	tooluse.RunBounded(ctx, len(l.servers), discoveryConcurrency, func(i int) {
+		listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		discovered[i].specs, discovered[i].err = l.cachedList(listCtx, l.servers[i])
+	}, func(i int) { discovered[i].err = ctx.Err() })
+	for i, reg := range l.servers {
+		specs, err := discovered[i].specs, discovered[i].err
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("MCP server %q tools unavailable: %v", reg.name, err))
 			continue
@@ -161,11 +189,39 @@ func (l *Lease) Tools(ctx context.Context) ([]tools.Tool, []string) {
 			out = append(out, tool)
 		}
 	}
+	if len(out) > 100 {
+		l.client.logger.WarnContext(ctx, "MCP tool definitions may crowd the context", "tool_count", len(out))
+	}
 	return out, warnings
 }
 
+func (l *Lease) cachedList(ctx context.Context, reg *registration) ([]*sdk.Tool, error) {
+	select {
+	case reg.listing <- struct{}{}:
+		defer func() { <-reg.listing }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	version := reg.generation.Load()
+	if reg.listed && reg.listedGeneration == version {
+		return reg.specs, nil
+	}
+	select {
+	case l.client.discovery <- struct{}{}:
+		defer func() { <-l.client.discovery }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	specs, err := l.list(ctx, reg)
+	if err != nil {
+		return nil, err
+	}
+	reg.specs, reg.listedGeneration, reg.listed = specs, version, true
+	return specs, nil
+}
+
 func (l *Lease) list(ctx context.Context, reg *registration) ([]*sdk.Tool, error) {
-	page, err := l.client.pool.ListTools(ctx, reg.key)
+	page, err := l.client.pool.ListTools(reg.transportContext(ctx), reg.key)
 	if err != nil {
 		return nil, err
 	}
@@ -207,13 +263,26 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 			if err := json.Unmarshal(call.Input, &args); err != nil {
 				return tools.Result{}, err
 			}
-			result, _, err := l.client.pool.CallTool(ctx, reg.key, spec.Name, args, mcp.WithCallRetry(mcp.RetryIfUnsent))
+			result, _, err := l.client.pool.CallTool(reg.transportContext(ctx), reg.key, spec.Name, args, mcp.WithCallRetry(mcp.RetryIfUnsent))
 			if err != nil {
+				if isUnknownTool(err) {
+					reg.generation.Add(1)
+				}
 				return tools.Result{}, err
 			}
 			return toolResult(result)
 		},
 	}, nil
+}
+
+func isUnknownTool(err error) bool {
+	var wire *jsonrpc.Error
+	if !errors.As(err, &wire) {
+		return false
+	}
+	message := strings.ToLower(wire.Message)
+	return strings.Contains(message, "unknown tool") || strings.Contains(message, "tool not found") ||
+		(wire.Code == jsonrpc.CodeInvalidParams && strings.HasPrefix(message, "tool ") && strings.HasSuffix(message, " not found"))
 }
 
 func modelName(name string) string {

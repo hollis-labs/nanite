@@ -23,7 +23,9 @@ migrations.
 
 Nanite reads `.mcp.json` at the start of each turn. It supports stdio,
 streamable HTTP, and SSE. An unchanged server connection is reused. A replaced
-connection closes when turns already using it finish. Discovery failures appear
+connection closes when turns already using it finish. Tool discovery runs
+concurrently and caches successful lists until the server announces an update
+or reports an unknown tool. Discovery failures appear
 as warnings in the session slot and logs.
 
 The skills slot contains names and descriptions. The read-only `skill_get`
@@ -43,3 +45,9 @@ The provider adapters carry failure classification in the stream event's
 `Content` field because `llm/core`'s `StreamEvent` has no typed error field.
 The engine uses the classification to distinguish retryable failures, context
 overflow, and terminal errors.
+
+Each turn sends every discovered MCP tool definition to the model. A large
+catalog consumes context, and Nanite logs a warning above 100 MCP tools.
+Default-mode approvals use the server's `readOnlyHint`. An explicit deny or
+ask rule in `permissions.yaml`, such as `tool: mcp__myserver__*`, overrides
+that hint.

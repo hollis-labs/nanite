@@ -3,19 +3,19 @@
 Use the Go version in `go.mod`. Build the CLI from a standalone checkout
 with `GOWORK=off go install ./cmd/nanite`.
 
-## Agent directory dependency
+## Pinned dependencies
 
-Nanite currently pins a pseudo-version from the open
-[libs agentdir PR](https://github.com/hollis-labs/libs/pull/152). Before a
-Nanite release, move Substrate from the [BOM PR revision](https://github.com/hollis-labs/substrate/pull/66)
-to the merged commit or next release tag with `agent/agentdir/v0.1.0` in
-`app_libs`. Set `SUBSTRATE_VERSION` to that Substrate version.
+Nanite pins `github.com/hollis-labs/libs/agent/agentdir` at `v0.1.0` and a
+Substrate revision whose BOM lists it under `app_libs`. Move both together
+and let the pin check confirm they agree:
 
 ```sh
-GOWORK=off go get "github.com/hollis-labs/substrate@${SUBSTRATE_VERSION}" \
-  github.com/hollis-labs/libs/agent/agentdir@v0.1.0
+GOWORK=off go get "github.com/hollis-labs/substrate@${SUBSTRATE_VERSION}"
 GOWORK=off go mod tidy
+GOWORK=off go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
 ```
+
+Keep the `substrate` version in `project.yaml` equal to the one in `go.mod`.
 
 ## Checks
 
@@ -86,12 +86,18 @@ The embedding API golden test runs as part of the suite. For an intentional
 API change, regenerate it with
 `go test ./agent -run '^TestAPIGolden$' -update-agent-api` and review the diff.
 
-## Live gateway test
+## Live model test
 
 The default run skips the live test. Set `NANITE_GATEWAY_URL` and
 `NANITE_GATEWAY_KEY_REF` for your gateway, then run the test below. To use
 OpenAI, set `NANITE_LIVE_PROVIDER=openai` and set
 `NANITE_DEFAULT_MODEL` to a compatible model.
+
+For local testing without a gateway, set `NANITE_PROVIDER_KEY_ENV=1` and
+`ANTHROPIC_API_KEY` instead. The switch is off by default; a key in the
+environment is never read without it. A key that is not scoped to a
+workspace also needs
+`ANTHROPIC_CUSTOM_HEADERS='anthropic-workspace-id: <workspace id>'`.
 
 ```sh
 NANITE_LIVE_TEST=1 go test ./cmd/nanite -run '^TestLiveGatewayToolTurn$' -count=1 -v

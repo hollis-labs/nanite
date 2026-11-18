@@ -13,4 +13,4 @@ interfaces:
   - type: cli
     name: nanite
     auth: none
-substrate: { variant: cli, profile: minimal, version: v0.1.1-0.20261118040605-4306cdbae7a9 }
+substrate: { variant: cli, profile: minimal, version: v0.1.1-0.20261118135305-7a7dcd08b3ec }

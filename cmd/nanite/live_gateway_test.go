@@ -15,8 +15,10 @@ func TestLiveGatewayToolTurn(t *testing.T) {
 	if os.Getenv("NANITE_LIVE_TEST") != "1" {
 		t.Skip("set NANITE_LIVE_TEST=1 to use a configured live gateway")
 	}
-	if os.Getenv("NANITE_GATEWAY_URL") == "" || os.Getenv("NANITE_GATEWAY_KEY_REF") == "" {
-		t.Fatal("set NANITE_GATEWAY_URL and NANITE_GATEWAY_KEY_REF")
+	// A direct provider key is for local testing only and needs its explicit switch.
+	direct := os.Getenv("NANITE_PROVIDER_KEY_ENV") == "1"
+	if !direct && (os.Getenv("NANITE_GATEWAY_URL") == "" || os.Getenv("NANITE_GATEWAY_KEY_REF") == "") {
+		t.Fatal("set NANITE_GATEWAY_URL and NANITE_GATEWAY_KEY_REF, or NANITE_PROVIDER_KEY_ENV=1 with a provider key")
 	}
 	restoreConfig, err := useConfigFile(false)
 	if err != nil {

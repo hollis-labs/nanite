@@ -39,7 +39,7 @@ func TestRootHasCommands(t *testing.T) {
 	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out.String()) != "local-agent" {
+	if strings.TrimSpace(out.String()) != "assistant" {
 		t.Fatalf("validate output %q", out.String())
 	}
 }

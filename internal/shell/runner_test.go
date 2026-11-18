@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,8 +30,44 @@ func TestPlainRunnerEnvironmentAndOutput(t *testing.T) {
 
 func TestPlainRunnerTimeout(t *testing.T) {
 	start := time.Now()
-	_, err := (Plain{}).Run(t.Context(), Command{Script: "sleep 30 & wait", Dir: t.TempDir(), Timeout: 50 * time.Millisecond})
+	_, err := (Plain{}).Run(t.Context(), Command{Script: "trap '' TERM; sleep 30 & wait", Dir: t.TempDir(), Timeout: 50 * time.Millisecond})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
 		t.Fatalf("timeout returned %v after %s", err, time.Since(start))
+	}
+}
+
+func TestPlainRunnerGivesTerminationHandlerTime(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	dir := t.TempDir()
+	cleaned := filepath.Join(dir, "cleaned")
+	done := make(chan error, 1)
+	go func() {
+		_, err := (Plain{}).Run(ctx, Command{Dir: dir, Timeout: 5 * time.Second,
+			Script: `trap 'printf cleaned > cleaned; exit 0' TERM; printf ready > ready; while true; do sleep 1; done`,
+		})
+		done <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "ready")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shell did not install its handler")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancel returned %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shell stayed active after cancellation")
+	}
+	if content, err := os.ReadFile(cleaned); err != nil || string(content) != "cleaned" {
+		t.Fatalf("cleanup marker = %q, %v", content, err)
 	}
 }

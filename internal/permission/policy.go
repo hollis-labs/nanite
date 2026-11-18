@@ -38,7 +38,9 @@ func (p rulePDP) Evaluate(ctx context.Context, req policy.Request) (policy.Decis
 	return policy.Decision{Effect: effect, Reason: check.Reason}, nil
 }
 
-func Rules(mode string, data []byte) (policy.PDP, error) {
+func (p rulePDP) Mode() string { return string(p.engine.Mode()) }
+
+func Rules(mode string, data []byte) (*rulePDP, error) {
 	var file rules.PermissionsFile
 	if len(bytes.TrimSpace(data)) > 0 {
 		decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -60,7 +62,7 @@ func Rules(mode string, data []byte) (policy.PDP, error) {
 	if mode == "" {
 		mode = string(rules.ModeDefault)
 	}
-	return rulePDP{rules.NewEngine(rules.Mode(mode), &file.Permissions, rules.WithFileEditTools("write_file", "edit_file"))}, nil
+	return &rulePDP{rules.NewEngine(rules.Mode(mode), &file.Permissions, rules.WithFileEditTools("write_file", "edit_file"))}, nil
 }
 
 func Evaluate(ctx context.Context, logger *slog.Logger, outer, local policy.PDP, principal, role string, req PermissionRequest, args map[string]any) (policy.Decision, error) {

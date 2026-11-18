@@ -1,0 +1,255 @@
+type Agent struct
+  (*Agent) Close() error
+  (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
+  (*Agent) Conversations(ctx context.Context) ([]ConversationInfo, error)
+  (*Agent) Info(ctx context.Context) (Info, error)
+  (*Agent) Latest(ctx context.Context) (*Conversation, error)
+  (*Agent) NewConversation(ctx context.Context, options ...ConversationOption) (*Conversation, error)
+  (*Agent) Notices() <-chan Notice
+  (*Agent) RebuildIndex(ctx context.Context) error
+  (*Agent) Skills() *SkillSet
+  (*Agent) Slots() *Slots
+  (*Agent) Tools() *ToolSet
+var AllowGate github.com/hollis-labs/nanite/internal/permission.Gate
+type Answer = github.com/hollis-labs/nanite/internal/events.Answer struct
+  field Value encoding/json.RawMessage
+type Compacted = github.com/hollis-labs/nanite/internal/events.Compacted struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Before int
+  field After int
+type Conversation struct
+  (*Conversation) History(ctx context.Context) ([]Message, error)
+  (*Conversation) ID() string
+  (*Conversation) Interrupted() *InterruptedTurn
+  (*Conversation) Resume(ctx context.Context) (*Run, error)
+  (*Conversation) Send(ctx context.Context, in Input) (*Run, error)
+type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
+  field ID string
+  field ParentID string
+  field Role string
+  field Title string
+  field Status string
+  field CreatedAt time.Time
+  field UpdatedAt time.Time
+type ConversationOption func(*ConversationInfo)
+var DenyGate github.com/hollis-labs/nanite/internal/permission.Gate
+var ErrBusy error
+var ErrNoConversation error
+type Event = github.com/hollis-labs/nanite/internal/events.Event interface
+type EventMeta = github.com/hollis-labs/nanite/internal/events.EventMeta struct
+  field RunID string
+  field Seq uint64
+type EventSink = github.com/hollis-labs/nanite/internal/events.Sink interface
+  (EventSink) Write(ctx context.Context, ev github.com/hollis-labs/libs/harness/core/adapters/runtimeevents.Event) error
+type Gate = github.com/hollis-labs/nanite/internal/permission.Gate interface
+  (Gate) Decide(context.Context, github.com/hollis-labs/nanite/internal/permission.PermissionRequest) (github.com/hollis-labs/nanite/internal/permission.PermissionDecision, error)
+type Gateway = github.com/hollis-labs/nanite/internal/provider.Gateway struct
+  field BaseURL string
+  field Headers map[string]string
+  field KeyRef string
+  field Auth string
+type Info struct
+  field Dir string
+  field Definition github.com/hollis-labs/libs/agent/agentdir.Snapshot
+type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
+  field Text string
+  field Slots []github.com/hollis-labs/nanite/internal/slots.Update
+type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
+  field ID string
+  field UserMessageID string
+type Message = github.com/hollis-labs/nanite/internal/store.Message struct
+  field ID string
+  field TurnID string
+  field Role string
+  field Blocks []github.com/hollis-labs/libs/llm/core/llmtypes.ContentBlock
+  field CreatedAt time.Time
+type Notice = github.com/hollis-labs/nanite/internal/store.Notice struct
+  field ID string
+  field ConversationID string
+  field Kind string
+  field Body string
+func Open(ctx context.Context, opts Options) (*Agent, error)
+type Options struct
+  field Dir string
+  field DataDir string
+  field GlobalSkillsDir string
+  field Provider github.com/hollis-labs/libs/llm/core/llmcontracts.Provider
+  field Gateway Gateway
+  field Store *github.com/hollis-labs/libs/core/store.Store
+  field Logger *log/slog.Logger
+  field Events EventSink
+  field Gate Gate
+  field PDP github.com/hollis-labs/libs/security/policy.PDP
+  field SlotSources []SlotSource
+  field SlotSelector SlotSelector
+  field Secrets *github.com/hollis-labs/libs/security/secrets.Resolver
+type PermissionAsked = github.com/hollis-labs/nanite/internal/events.PermissionAsked struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Request github.com/hollis-labs/nanite/internal/permission.PermissionRequest
+type PermissionDecision = github.com/hollis-labs/nanite/internal/permission.PermissionDecision struct
+  field Allow bool
+  field Scope github.com/hollis-labs/nanite/internal/permission.PermissionScope
+  field Reason string
+type PermissionRequest = github.com/hollis-labs/nanite/internal/permission.PermissionRequest struct
+  field ID string
+  field ConversationID string
+  field TurnID string
+  field Tool string
+  field Input encoding/json.RawMessage
+  field ReadOnly bool
+  field Destructive bool
+  field Reason string
+type PermissionResolved = github.com/hollis-labs/nanite/internal/events.PermissionResolved struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field ID string
+  field Decision github.com/hollis-labs/nanite/internal/permission.PermissionDecision
+type PermissionScope = github.com/hollis-labs/nanite/internal/permission.PermissionScope uint8
+type Question = github.com/hollis-labs/nanite/internal/events.Question struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field ID string
+  field Prompt string
+  field Schema encoding/json.RawMessage
+type Result = github.com/hollis-labs/nanite/internal/events.Result struct
+  field Text string
+  field StopReason string
+  field Usage github.com/hollis-labs/nanite/internal/events.Usage
+  field Steps int
+type Run = github.com/hollis-labs/nanite/internal/engine.Run struct
+  (*Run) Answer(id string, answer github.com/hollis-labs/nanite/internal/events.Answer) error
+  (*Run) Cancel()
+  (*Run) Events() <-chan github.com/hollis-labs/nanite/internal/events.Event
+  (*Run) ID() string
+  (*Run) Wait() (github.com/hollis-labs/nanite/internal/events.Result, error)
+type RunFailed = github.com/hollis-labs/nanite/internal/events.RunFailed struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Err error
+type RunFinished = github.com/hollis-labs/nanite/internal/events.RunFinished struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Result github.com/hollis-labs/nanite/internal/events.Result
+type RunStarted = github.com/hollis-labs/nanite/internal/events.RunStarted struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+const ScopeConversation github.com/hollis-labs/nanite/internal/permission.PermissionScope
+const ScopeOnce github.com/hollis-labs/nanite/internal/permission.PermissionScope
+type Skill = github.com/hollis-labs/nanite/internal/skills.Skill struct
+  field Name string
+  field Description string
+  field Body string
+type SkillSet struct
+  (*SkillSet) RemoveGroup(group string)
+  (*SkillSet) SetGroup(group string, specs ...Skill) error
+const SlotAgent github.com/hollis-labs/nanite/internal/slots.Name
+const SlotContext github.com/hollis-labs/nanite/internal/slots.Name
+const SlotConversation github.com/hollis-labs/nanite/internal/slots.Name
+type SlotDecision = github.com/hollis-labs/nanite/internal/slots.Decision struct
+  field Owner string
+  field Key string
+  field Disposition github.com/hollis-labs/nanite/internal/slots.Disposition
+  field Reason string
+type SlotDetail = github.com/hollis-labs/nanite/internal/slots.SlotReport struct
+  field Tokens int
+  field Changed bool
+  field Decisions []github.com/hollis-labs/nanite/internal/slots.Decision
+type SlotDisposition = github.com/hollis-labs/nanite/internal/slots.Disposition uint8
+type SlotEntry = github.com/hollis-labs/nanite/internal/slots.Entry struct
+  field Owner string
+  field Key string
+  field Content string
+  field Pointer string
+  field Priority int
+  field Labels map[string]string
+const SlotHandoff github.com/hollis-labs/nanite/internal/slots.Name
+const SlotMemory github.com/hollis-labs/nanite/internal/slots.Name
+const SlotMode github.com/hollis-labs/nanite/internal/slots.Name
+type SlotName = github.com/hollis-labs/nanite/internal/slots.Name string
+func SlotNames() []SlotName
+const SlotPermissions github.com/hollis-labs/nanite/internal/slots.Name
+type SlotPlan = github.com/hollis-labs/nanite/internal/slots.Plan struct
+  field Decisions map[github.com/hollis-labs/nanite/internal/slots.Name][]github.com/hollis-labs/nanite/internal/slots.Decision
+const SlotPointer github.com/hollis-labs/nanite/internal/slots.Disposition
+type SlotReport = github.com/hollis-labs/nanite/internal/slots.Report map[github.com/hollis-labs/nanite/internal/slots.Name]github.com/hollis-labs/nanite/internal/slots.SlotReport
+const SlotRules github.com/hollis-labs/nanite/internal/slots.Name
+type SlotSelector = github.com/hollis-labs/nanite/internal/slots.Selector interface
+  (SlotSelector) Select(ctx context.Context, turn github.com/hollis-labs/nanite/internal/slots.TurnInfo, in github.com/hollis-labs/nanite/internal/slots.Snapshot, budgets map[github.com/hollis-labs/nanite/internal/slots.Name]int) (github.com/hollis-labs/nanite/internal/slots.Plan, error)
+const SlotSession github.com/hollis-labs/nanite/internal/slots.Name
+const SlotShip github.com/hollis-labs/nanite/internal/slots.Disposition
+const SlotSkills github.com/hollis-labs/nanite/internal/slots.Name
+const SlotSkip github.com/hollis-labs/nanite/internal/slots.Disposition
+type SlotSnapshot = github.com/hollis-labs/nanite/internal/slots.Snapshot struct
+  (SlotSnapshot) Entries(slot github.com/hollis-labs/nanite/internal/slots.Name) []github.com/hollis-labs/nanite/internal/slots.Entry
+  (SlotSnapshot) Version() uint64
+  (SlotSnapshot) With(updates ...github.com/hollis-labs/nanite/internal/slots.Update) (github.com/hollis-labs/nanite/internal/slots.Snapshot, error)
+type SlotSource = github.com/hollis-labs/nanite/internal/slots.Source interface
+  (SlotSource) Name() string
+  (SlotSource) Slots(ctx context.Context, turn github.com/hollis-labs/nanite/internal/slots.TurnInfo) ([]github.com/hollis-labs/nanite/internal/slots.Update, error)
+const SlotSystem github.com/hollis-labs/nanite/internal/slots.Name
+const SlotTools github.com/hollis-labs/nanite/internal/slots.Name
+type SlotTurnInfo = github.com/hollis-labs/nanite/internal/slots.TurnInfo struct
+  field ConversationID string
+  field TurnID string
+  field UserText string
+  field Role string
+const SlotUniversal github.com/hollis-labs/nanite/internal/slots.Name
+type SlotUpdate = github.com/hollis-labs/nanite/internal/slots.Update struct
+  field Slot github.com/hollis-labs/nanite/internal/slots.Name
+  field Entry github.com/hollis-labs/nanite/internal/slots.Entry
+const SlotUserContext github.com/hollis-labs/nanite/internal/slots.Name
+const SlotWorkspace github.com/hollis-labs/nanite/internal/slots.Name
+type SlotWriter struct
+  (*SlotWriter) Clear()
+  (*SlotWriter) Put(slot SlotName, e SlotEntry) error
+  (*SlotWriter) Remove(slot SlotName, key string)
+  (*SlotWriter) Replace(slot SlotName, entries ...SlotEntry) error
+type Slots struct
+  (*Slots) Owner(name string) *SlotWriter
+type SlotsAssembled = github.com/hollis-labs/nanite/internal/events.SlotsAssembled struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Report github.com/hollis-labs/nanite/internal/slots.Report
+type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFinished struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field ID string
+  field Result github.com/hollis-labs/nanite/internal/events.Result
+  field Err error
+type SubagentStarted = github.com/hollis-labs/nanite/internal/events.SubagentStarted struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field ID string
+  field Role string
+type TextDelta = github.com/hollis-labs/nanite/internal/events.TextDelta struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Text string
+type Thinking = github.com/hollis-labs/nanite/internal/events.Thinking struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Text string
+type Tool = github.com/hollis-labs/nanite/internal/tools.Tool struct
+  field Name string
+  field Description string
+  field InputSchema encoding/json.RawMessage
+  field ReadOnly bool
+  field Destructive bool
+  field Handler func(context.Context, github.com/hollis-labs/nanite/internal/tools.Call) (github.com/hollis-labs/nanite/internal/tools.Result, error)
+type ToolCall = github.com/hollis-labs/nanite/internal/tools.Call struct
+  field ID string
+  field Name string
+  field Input encoding/json.RawMessage
+type ToolCallFinished = github.com/hollis-labs/nanite/internal/events.ToolCallFinished struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field CallID string
+  field Result github.com/hollis-labs/nanite/internal/tools.Result
+  field IsError bool
+  field Duration time.Duration
+type ToolCallStarted = github.com/hollis-labs/nanite/internal/events.ToolCallStarted struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field CallID string
+  field Name string
+  field Input encoding/json.RawMessage
+type ToolResult = github.com/hollis-labs/nanite/internal/tools.Result struct
+  field Text string
+  field IsError bool
+type ToolSet struct
+  (*ToolSet) RemoveGroup(group string)
+  (*ToolSet) SetGroup(group string, specs ...Tool) error
+type Usage = github.com/hollis-labs/nanite/internal/events.Usage struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field InputTokens int
+  field OutputTokens int
+  field CacheReadTokens int
+  field CacheWriteTokens int

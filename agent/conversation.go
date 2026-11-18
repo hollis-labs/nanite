@@ -8,7 +8,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
-// ConversationInfo describes a persisted conversation.
+// ConversationInfo identifies a stored chat or subagent, its optional
+// parent, its current status, and its creation and update times.
 type ConversationInfo = store.Conversation
 
 // ConversationOption configures a new conversation.
@@ -20,13 +21,15 @@ type Conversation struct {
 	agent *Agent
 }
 
-// Input supplies a user message and turn-scoped slot updates.
+// Input gives the user text and optional slot entries applied only to this
+// turn. The entries are discarded when the turn ends.
 type Input = engine.Input
 
-// Message is one persisted user, assistant or tool message.
+// Message is a timestamped transcript entry. Role identifies the author,
+// TurnID links it to a turn, and Blocks retain the original content order.
 type Message = store.Message
 
-// InterruptedTurn identifies a turn that can be resumed.
+// InterruptedTurn identifies the unfinished turn and its stored user message.
 type InterruptedTurn = store.InterruptedTurn
 
 // NewConversation creates a conversation.

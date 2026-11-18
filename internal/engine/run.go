@@ -8,6 +8,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 )
 
+// Run streams the events and tracks the outcome of an active turn.
 type Run struct {
 	observe    func(context.Context, events.Event)
 	id         string
@@ -22,9 +23,15 @@ type Run struct {
 	err        error
 }
 
-func (r *Run) ID() string                  { return r.id }
+// ID returns the turn identifier shared by its events.
+func (r *Run) ID() string { return r.id }
+
+// Events returns the ordered event stream, which closes when the run finishes.
 func (r *Run) Events() <-chan events.Event { return r.events }
 
+// Wait returns the final result and error. It drains unread events and
+// submits a null answer to questions it encounters. Consume Events first
+// when you need to observe events or answer questions.
 func (r *Run) Wait() (events.Result, error) {
 	for {
 		select {
@@ -44,6 +51,7 @@ func (r *Run) Wait() (events.Result, error) {
 	}
 }
 
+// Cancel requests cancellation of the active turn.
 func (r *Run) Cancel() { r.cancel() }
 
 func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Event) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,15 +171,16 @@ func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, err
 	return provider.New(cfg)
 }
 
-func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing string, warnings []string, pending []store.Notice) (slots.Assembled, error) {
-	mode := def.Snapshot.Profile.Permissions.Mode
-	if mode == "" {
-		mode = "default"
+func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing, mode string, warnings []string, pending []store.Notice) (slots.Assembled, error) {
+	permissions := "Permission mode: " + mode + ". File tools are confined to the workspace roots."
+	if len(e.cfg.WorkspaceRoots) > 0 {
+		permissions += " Workspace roots: " + strings.Join(e.cfg.WorkspaceRoots, ", ") + "."
 	}
+	permissions += " Approved Bash commands run with the user’s privileges and can access paths outside those roots."
 	updates := []slots.Update{
 		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: "Use the available tools when needed. Respect the workspace and tool permissions."}},
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
-		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: "Permission mode: " + mode + ". File tools are confined to the workspace roots. Approved Bash commands run with the user’s privileges and can access paths outside those roots."}},
+		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: permissions}},
 		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},
 	}
 

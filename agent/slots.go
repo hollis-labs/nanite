@@ -54,10 +54,12 @@ type SlotEntry = slots.Entry
 // SlotUpdate supplies a slot entry for one turn.
 type SlotUpdate = slots.Update
 
-// SlotSource supplies slot entries at the beginning of a turn.
+// SlotSource supplies host-writable slot entries at the beginning of a turn.
+// The source name becomes the owner of its entries.
 type SlotSource = slots.Source
 
-// SlotSelector decides what fits into the context.
+// SlotSelector uses the available entries and per-slot budgets to build a
+// SlotPlan for the current turn.
 type SlotSelector = slots.Selector
 
 // SlotSnapshot is an immutable view of available entries.
@@ -72,7 +74,8 @@ type SlotReport = slots.Report
 // SlotDetail describes one assembled slot.
 type SlotDetail = slots.SlotReport
 
-// SlotPlan contains selector decisions.
+// SlotPlan contains the selector decisions by slot. Entries omitted from the
+// plan are skipped, except for the authored agent instructions.
 type SlotPlan = slots.Plan
 
 // SlotDecision determines how a slot entry is presented.

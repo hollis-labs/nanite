@@ -28,8 +28,6 @@ var (
 	ErrBusy = engine.ErrBusy
 	// ErrNoConversation means the requested conversation does not exist.
 	ErrNoConversation = nanitestore.ErrNoConversation
-	// ErrNotImplemented means the engine does not yet implement the operation.
-	ErrNotImplemented = errors.New("nanite: not implemented")
 )
 
 // Options configures an embedded agent.
@@ -80,11 +78,14 @@ type Agent struct {
 
 // Info describes the current definition loaded from disk.
 type Info struct {
-	Dir        string
+	// Dir is the absolute path to the authored agent directory.
+	Dir string
+	// Definition contains the authored agent files as of the last Info call.
 	Definition agentdir.Snapshot
 }
 
-// Notice reports an asynchronous completion.
+// Notice describes a completed job. ID identifies the notification, ConversationID
+// selects the recipient, Kind identifies the job type, and Body is the display text.
 type Notice = nanitestore.Notice
 
 // Open validates the authored agent directory and takes its exclusive lock.

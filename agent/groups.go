@@ -5,16 +5,19 @@ import (
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
-// Tool is a host tool spec and handler.
+// Tool describes a model-visible operation. InputSchema is a JSON Schema
+// object. Handler receives approved calls. ReadOnly and Destructive inform policy.
 type Tool = tools.Tool
 
-// ToolCall is a model's request to execute a tool.
+// ToolCall contains the provider's call ID, tool name, and approved JSON input.
 type ToolCall = tools.Call
 
-// ToolResult is a tool handler's response.
+// ToolResult carries the text returned to the model and whether the tool
+// reports failure. A handler may also return a Go error.
 type ToolResult = tools.Result
 
-// Skill contains a host skill's listing metadata and body.
+// Skill contains a name and description for the skills slot and instructions
+// that are returned on demand by the skill_get tool.
 type Skill = skills.Skill
 
 // ToolSet holds named groups of host tools.

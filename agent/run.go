@@ -15,56 +15,64 @@ type EventSink = events.Sink
 // Answer carries a JSON value for a pending question. Use JSON null to decline.
 type Answer = events.Answer
 
-// Event is part of the run event contract.
+// Event is a sealed union of run lifecycle, content, tool, and interaction events.
+// Use a type switch over the values read from Run.Events.
 type Event = events.Event
 
-// EventMeta is part of the run event contract.
+// EventMeta identifies the originating run. Seq increases within one run stream.
 type EventMeta = events.EventMeta
 
-// Result is part of the run event contract.
+// Result contains the assistant text, stop reason, accumulated token usage, and
+// number of completed model steps.
 type Result = events.Result
 
-// RunStarted is part of the run event contract.
+// RunStarted is emitted when the engine begins processing the turn.
 type RunStarted = events.RunStarted
 
-// SlotsAssembled is part of the run event contract.
+// SlotsAssembled reports the slot selection, token counts, and changes from the
+// preceding turn before the model request.
 type SlotsAssembled = events.SlotsAssembled
 
-// TextDelta is part of the run event contract.
+// TextDelta carries the next fragment of visible assistant text.
 type TextDelta = events.TextDelta
 
-// Thinking is part of the run event contract.
+// Thinking carries a completed reasoning fragment when the provider exposes one.
 type Thinking = events.Thinking
 
-// ToolCallStarted is part of the run event contract.
+// ToolCallStarted reports the model call ID, tool name, and redacted JSON arguments
+// before authorization or execution.
 type ToolCallStarted = events.ToolCallStarted
 
-// PermissionAsked is part of the run event contract.
+// PermissionAsked is emitted before Gate.Decide for a tool that needs approval.
 type PermissionAsked = events.PermissionAsked
 
-// PermissionResolved is part of the run event contract.
+// PermissionResolved reports whether the tool may run and the decision reason.
+// ID matches the original tool call.
 type PermissionResolved = events.PermissionResolved
 
-// ToolCallFinished is part of the run event contract.
+// ToolCallFinished reports the redacted result, error flag, and elapsed handler
+// time. It can also report an unavailable or denied call.
 type ToolCallFinished = events.ToolCallFinished
 
-// Question is part of the run event contract.
+// Question is emitted when a tool pauses for user input. Use ID with Run.Answer
+// and validate the response against the JSON Schema.
 type Question = events.Question
 
-// SubagentStarted is part of the run event contract.
+// SubagentStarted identifies the child conversation and its assigned role.
 type SubagentStarted = events.SubagentStarted
 
-// SubagentFinished is part of the run event contract.
+// SubagentFinished reports the result or error of a foreground child.
 type SubagentFinished = events.SubagentFinished
 
-// Compacted is part of the run event contract.
+// Compacted reports the token estimate before and after history compaction.
 type Compacted = events.Compacted
 
-// Usage is part of the run event contract.
+// Usage reports a provider usage increment, including cache reads and writes.
 type Usage = events.Usage
 
-// RunFinished is part of the run event contract.
+// RunFinished is the last event of a successful run and carries its final result.
 type RunFinished = events.RunFinished
 
-// RunFailed is part of the run event contract.
+// RunFailed is the terminal event for a failed or cancelled run and carries
+// the corresponding error.
 type RunFailed = events.RunFailed

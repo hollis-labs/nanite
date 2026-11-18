@@ -1,0 +1,5 @@
+kind: embedded
+lifetime: application
+application_id: embed-host-demo
+runtime:
+  provider: anthropic

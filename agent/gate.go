@@ -2,16 +2,19 @@ package agent
 
 import "github.com/hollis-labs/nanite/internal/permission"
 
-// Gate is defined by the tool permission boundary.
+// Gate decides whether an otherwise permitted tool call may proceed when the
+// policy asks for approval. The context bounds the time available to decide.
 type Gate = permission.Gate
 
-// PermissionRequest is defined by the tool permission boundary.
+// PermissionRequest identifies the tool and its JSON arguments, along with
+// conversation and turn IDs, side-effect metadata, and the reason for asking.
 type PermissionRequest = permission.PermissionRequest
 
-// PermissionScope is defined by the tool permission boundary.
+// PermissionScope determines how long an approval can satisfy later asks.
 type PermissionScope = permission.PermissionScope
 
-// PermissionDecision is defined by the tool permission boundary.
+// PermissionDecision records the allow or deny result, optional approval
+// scope, and reason shown to the host.
 type PermissionDecision = permission.PermissionDecision
 
 const (

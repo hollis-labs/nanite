@@ -55,6 +55,7 @@ func (r *Run) ask(ctx context.Context, prompt string, schema, displaySchema json
 	}
 }
 
+// Answer submits a response to the pending question with the given ID.
 func (r *Run) Answer(id string, answer events.Answer) error {
 	r.questionMu.Lock()
 	defer r.questionMu.Unlock()

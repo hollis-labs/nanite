@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"context"
 	"errors"
 	"fmt"
@@ -96,6 +97,49 @@ func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error)
 
 func (e *Engine) Resume(ctx context.Context, id string) (*Run, error) {
 	return e.startRun(ctx, id, Input{}, true)
+}
+
+// Discard abandons the conversation's interrupted turn. Tool calls the turn
+// left unanswered get a result saying so, the turn is recorded as cancelled,
+// and the conversation accepts new messages again.
+func (e *Engine) Discard(ctx context.Context, id string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return fmt.Errorf("nanite: agent is closed")
+	}
+	if e.active[id] != nil {
+		return ErrBusy
+	}
+	turn, err := e.cfg.Store.Interrupted(ctx, id)
+	if err != nil {
+		return err
+	}
+	if turn == nil {
+		return fmt.Errorf("conversation has no interrupted turn")
+	}
+	history, err := e.cfg.Store.History(ctx, id)
+	if err != nil {
+		return err
+	}
+	// A turn whose user message was never stored has nothing to repair and is still discarded.
+	plan, _ := recovery.ResumePlan(history, *turn)
+	journal, err := e.cfg.Store.OpenJournal(ctx, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if len(plan.Missing) > 0 {
+		var parent *string
+		if n := len(history); n > 0 {
+			parent = &history[n-1].ID
+		}
+		err = journal.AppendMessage(store.Message{ID: store.NewID(now), TurnID: turn.ID, Role: "tool", Blocks: plan.Missing, CreatedAt: now}, parent)
+	}
+	if err == nil {
+		err = journal.FinishTurn(store.Turn{ID: turn.ID, UserMessageID: turn.UserMessageID, Status: "cancelled", Error: "discarded after interruption"}, now)
+	}
+	return errors.Join(err, journal.Close())
 }
 
 func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bool) (*Run, error) {

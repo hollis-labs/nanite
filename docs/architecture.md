@@ -97,10 +97,18 @@ to `.nanite/jobs/`. The status tool includes the current 8 KiB log tail. Complet
 
 On open, Nanite marks running turns as interrupted and running jobs as lost.
 It verifies a recorded shell process-group leader before signaling the group.
-The CLI offers to resume the interrupted conversation. Use
+The terminal chat asks what to do with an interrupted conversation: resume
+it, discard the turn, or leave it and start a new conversation. Use
 `nanite --resume <conversation-id>` to resume directly. Recovery uses the stored
 user message, supplies an error result for each incomplete tool call, or
 finalizes a fully recorded turn.
+
+`nanite --discard <conversation-id>` abandons the turn instead. It closes each
+incomplete tool call with an error result and records the turn as cancelled;
+the conversation keeps what was stored and accepts new messages. A one-shot
+`nanite -p` never stops for another conversation's interrupted turn: it names
+the conversation on standard error and answers in a new one. An embedding host
+uses `Conversation.Interrupted`, `Resume` and `Discard`.
 
 The CLI writes normalized runtime events to `.nanite/events.jsonl`.
 `--events <path>` selects another file and `--events -` writes to stdout.

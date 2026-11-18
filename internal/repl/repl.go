@@ -165,16 +165,31 @@ func (t Terminal) render(ctx context.Context, run *engine.Run, report *slots.Rep
 	return err
 }
 
-// ConfirmResume asks before resuming a conversation selected on startup.
-func (t Terminal) ConfirmResume(ctx context.Context, id string) (bool, error) {
-	if _, err := fmt.Fprintf(t.Output, "Interrupted turn %s. Resume? [y/N] ", id); err != nil {
-		return false, err
+// Choices for an interrupted turn found on startup.
+const (
+	ResumeTurn  = "resume"
+	DiscardTurn = "discard"
+	LeaveTurn   = "leave"
+)
+
+// ConfirmResume asks what to do with an interrupted turn found on startup.
+// Anything but a clear yes or discard leaves the turn as it is.
+func (t Terminal) ConfirmResume(ctx context.Context, conversation string) (string, error) {
+	if _, err := fmt.Fprintf(t.Output, "Conversation %s has an interrupted turn. Resume it? [y/N/discard] ", conversation); err != nil {
+		return LeaveTurn, err
 	}
 	response, err := t.read(ctx)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
+		return LeaveTurn, err
 	}
-	return strings.EqualFold(strings.TrimSpace(response), "y") || strings.EqualFold(strings.TrimSpace(response), "yes"), nil
+	switch strings.ToLower(strings.TrimSpace(response)) {
+	case "y", "yes":
+		return ResumeTurn, nil
+	case "d", "discard":
+		return DiscardTurn, nil
+	default:
+		return LeaveTurn, nil
+	}
 }
 
 func (t Terminal) Resume(ctx context.Context, start func(context.Context) (*engine.Run, error)) error {

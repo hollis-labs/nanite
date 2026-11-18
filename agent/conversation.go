@@ -86,6 +86,12 @@ func (c *Conversation) Resume(ctx context.Context) (*Run, error) {
 	return c.agent.engine.Resume(ctx, c.id)
 }
 
+// Discard abandons an interrupted turn instead of resuming it. The
+// conversation keeps what the turn already stored and accepts new messages.
+func (c *Conversation) Discard(ctx context.Context) error {
+	return c.agent.engine.Discard(ctx, c.id)
+}
+
 // History reads the persisted messages in order.
 func (c *Conversation) History(ctx context.Context) ([]Message, error) {
 	return c.agent.store.History(ctx, c.id)

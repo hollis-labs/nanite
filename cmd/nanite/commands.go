@@ -104,12 +104,13 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root := cli.Root(app)
 	root.SilenceUsage = true
 	root.SilenceErrors = true
-	var prompt, output, resume, eventPath string
+	var prompt, output, resume, discard, eventPath string
 	var latest bool
 	root.Flags().StringVarP(&prompt, "prompt", "p", "", "Run one prompt")
 	root.Flags().StringVar(&output, "output", "text", "Output format for -p: text, json or stream-json")
 	root.Flags().BoolVar(&latest, "continue", false, "Continue the latest conversation")
 	root.Flags().StringVar(&resume, "resume", "", "Resume an interrupted turn in the given conversation")
+	root.Flags().StringVar(&discard, "discard", "", "Abandon the interrupted turn in the given conversation")
 	root.Flags().StringVar(&eventPath, "events", "", "Runtime event log path (default .nanite/events.jsonl, - for stdout)")
 	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory")
 	root.Args = cobra.NoArgs
@@ -136,6 +137,19 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			return err
 		}
 		defer func() { retErr = errors.Join(retErr, a.Close()) }()
+		if discard != "" {
+			target, err := a.Conversation(cmd.Context(), discard)
+			if err != nil {
+				return err
+			}
+			if err := target.Discard(cmd.Context()); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "Discarded the interrupted turn in conversation %s.\n", discard)
+			if err != nil || !nonInteractive {
+				return err
+			}
+		}
 		conversation, err := selectConversation(cmd.Context(), a, resume, latest)
 		if err != nil {
 			return err
@@ -152,28 +166,34 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 						return err
 					}
 				case latest:
-					return fmt.Errorf("conversation %s has interrupted turn %s; use --resume %s", conversation.ID(), interrupted.ID, conversation.ID())
+					return fmt.Errorf("conversation %s has interrupted turn %s; use --resume %s or --discard %s", conversation.ID(), interrupted.ID, conversation.ID(), conversation.ID())
 				default:
 					// A one-shot prompt is a new conversation; an unfinished turn elsewhere must not block it.
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: conversation %s has an interrupted turn; continue it with --resume %s\n", conversation.ID(), conversation.ID())
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: conversation %s has an interrupted turn; continue it with --resume %s or drop it with --discard %s\n", conversation.ID(), conversation.ID(), conversation.ID())
 					conversation, err = a.NewConversation(cmd.Context())
 					if err != nil {
 						return err
 					}
 				}
 			} else {
-				confirmed := resume != ""
-				if !confirmed {
-					confirmed, err = terminal.ConfirmResume(cmd.Context(), interrupted.ID)
+				choice := repl.ResumeTurn
+				if resume == "" {
+					choice, err = terminal.ConfirmResume(cmd.Context(), conversation.ID())
 					if err != nil {
 						return err
 					}
 				}
-				if confirmed {
+				switch choice {
+				case repl.ResumeTurn:
 					if err := terminal.Resume(cmd.Context(), conversation.Resume); err != nil {
 						return err
 					}
-				} else {
+				case repl.DiscardTurn:
+					// The conversation stays selected: what it already holds is kept.
+					if err := conversation.Discard(cmd.Context()); err != nil {
+						return err
+					}
+				default:
 					conversation, err = a.NewConversation(cmd.Context())
 					if err != nil {
 						return err

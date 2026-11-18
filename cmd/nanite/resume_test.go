@@ -74,7 +74,7 @@ func TestCLIResumeFinalizesPersistedAnswer(t *testing.T) {
 			if err := root.ExecuteContext(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(out.String(), "saved reply") || (strings.Contains(out.String(), "Interrupted turn") == explicit) {
+			if !strings.Contains(out.String(), "saved reply") || (strings.Contains(out.String(), "has an interrupted turn") == explicit) {
 				t.Fatalf("terminal output %q", out.String())
 			}
 		})

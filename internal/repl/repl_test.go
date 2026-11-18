@@ -118,7 +118,17 @@ func TestTerminalPermissionAndResumePrompts(t *testing.T) {
 	if err != nil || second.Allow {
 		t.Fatalf("denial = %+v, %v", second, err)
 	}
-	if ok, err := term.ConfirmResume(t.Context(), "fixture-turn"); !ok || err != nil {
-		t.Fatalf("resume = %v, %v", ok, err)
+	if choice, err := term.ConfirmResume(t.Context(), "fixture-conversation"); choice != ResumeTurn || err != nil {
+		t.Fatalf("resume = %v, %v", choice, err)
+	}
+}
+
+func TestConfirmResumeChoices(t *testing.T) {
+	for answer, want := range map[string]string{"y": ResumeTurn, "Discard": DiscardTurn, "d": DiscardTurn, "n": LeaveTurn, "": LeaveTurn, "what": LeaveTurn} {
+		var out bytes.Buffer
+		term := NewTerminal(t.Context(), strings.NewReader(answer+"\n"), &out)
+		if got, err := term.ConfirmResume(t.Context(), "fixture-conversation"); got != want || err != nil {
+			t.Errorf("%q: got %q, %v; want %q", answer, got, err, want)
+		}
 	}
 }

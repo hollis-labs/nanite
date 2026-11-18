@@ -5,7 +5,7 @@ go 1.26.11
 require (
 	github.com/hollis-labs/libs/agent/agentdir v0.0.0-20261118040015-f32ce279ccee
 	github.com/hollis-labs/libs/security/policy v0.1.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261116220807-ab6c69519f45
+	github.com/hollis-labs/substrate v0.1.1-0.20261118040605-4306cdbae7a9
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )

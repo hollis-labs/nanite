@@ -9,6 +9,8 @@
 
 - The public scanner has no commit range or since option, so inherited history with unresolved findings prevents using its full history check as an app CI gate.
 
+- The app pins check reads the BOM from the Substrate version in the app's `go.mod`. When the BOM adds a library, the app must move to a Substrate version carrying that pin.
+
 ## libs
 
 - The plugin-mcp client ties the legacy SSE stream to the discovery context. Nanite detaches the stream after the endpoint handshake so discovery cancellation leaves the registration open.

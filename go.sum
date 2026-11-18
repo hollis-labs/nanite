@@ -65,8 +65,8 @@ github.com/hollis-labs/libs/security/redact v0.2.0 h1:yaKmfWRMwlaAH1uur2yyS+DJjd
 github.com/hollis-labs/libs/security/redact v0.2.0/go.mod h1:l6JdQCIwWPy686ZQ5li4clrcN6TtjFueotBzMxUbvbk=
 github.com/hollis-labs/libs/security/secrets v0.1.0 h1:/wrYAM5viUnYMpDhvbQmPlTMesqMIVfvfz+GiZ7jMAs=
 github.com/hollis-labs/libs/security/secrets v0.1.0/go.mod h1:Krd1kgmisOVmeN1G/ltaLMva58tIBki9xShsySqd86Y=
-github.com/hollis-labs/substrate v0.1.1-0.20261116220807-ab6c69519f45 h1:yIIwL2r1puTQ8iaZQQvMa0Pc56KCnn47+QHCitKK1e4=
-github.com/hollis-labs/substrate v0.1.1-0.20261116220807-ab6c69519f45/go.mod h1:0RnOCC5MnvAX30SfyFSrC3dsTa/KEPL3+kxfUFY/+DI=
+github.com/hollis-labs/substrate v0.1.1-0.20261118040605-4306cdbae7a9 h1:vvMrXX9fGev2qgVU+RJoeerOoA7b6IOQEbmUt8JzM6c=
+github.com/hollis-labs/substrate v0.1.1-0.20261118040605-4306cdbae7a9/go.mod h1:0RnOCC5MnvAX30SfyFSrC3dsTa/KEPL3+kxfUFY/+DI=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/invopop/jsonschema v0.14.0 h1:MHQqLhvpNUZfw+hM3AZDYK7jxO8FZoQeQM77g8iyZjg=

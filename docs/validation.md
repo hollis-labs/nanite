@@ -7,11 +7,13 @@ with `GOWORK=off go install ./cmd/nanite`.
 
 Nanite currently pins a pseudo-version from the open
 [libs agentdir PR](https://github.com/hollis-labs/libs/pull/152). Before a
-Nanite release, switch to the published `agent/agentdir/v0.1.0` tag and use
-a Substrate version whose BOM pins that tag in `app_libs`.
+Nanite release, move Substrate from the [BOM PR revision](https://github.com/hollis-labs/substrate/pull/66)
+to the merged commit or next release tag with `agent/agentdir/v0.1.0` in
+`app_libs`. Set `SUBSTRATE_VERSION` to that Substrate version.
 
 ```sh
-GOWORK=off go get github.com/hollis-labs/libs/agent/agentdir@v0.1.0
+GOWORK=off go get "github.com/hollis-labs/substrate@${SUBSTRATE_VERSION}" \
+  github.com/hollis-labs/libs/agent/agentdir@v0.1.0
 GOWORK=off go mod tidy
 ```
 

@@ -83,9 +83,11 @@ The workspace context is clear.
 
 ## Choosing the built-in tools
 
-An agent opened by the terminal gets every built-in tool. A host usually
-wants fewer: a seat inside an application has no business with a shell.
-Set `Options.Builtins` to the groups the agent should have.
+The application decides what its embedded agent can do. An agent whose
+`host.yaml` says `kind: embedded` gets **no built-in tools** unless the host
+names them in `Options.Builtins`; it has the tools the host registers and its
+MCP tools. A stable or task agent, and any agent run by the terminal `nanite`
+command, gets every built-in tool by default.
 
 ```go
 a, err := agent.Open(ctx, agent.Options{
@@ -105,7 +107,9 @@ a, err := agent.Open(ctx, agent.Options{
 | `BuiltinNotes` | `todo_list`, `todo_write`, `scratchpad_read`, `scratchpad_write` |
 | `BuiltinQuestions` | `ask_user` |
 
-Leaving `Builtins` nil offers all groups. An empty slice offers none. A
+Leaving `Builtins` nil gives the default for the agent's kind, as above.
+Pass `agent.AllBuiltins()` to give an embedded agent everything. An empty
+slice offers none for any kind. A
 withheld tool is not sent to the model at all, which is different from a
 permission rule: a denied tool is still described to the model and refused
 when called. The two tools that page through a long tool result are always

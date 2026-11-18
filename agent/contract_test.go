@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/llm/core/llmcontracts"
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/slots"
 )
 
@@ -126,5 +130,76 @@ func TestToolAndSkillGroups(t *testing.T) {
 	}
 	if got := skills.groups.Listing(); got != "- next: replacement" {
 		t.Fatalf("replacement listing = %q", got)
+	}
+}
+
+// offeredTools opens the agent in dir with the given built-in option, runs
+// one turn against a recording provider and returns the tool names it saw.
+func offeredTools(t *testing.T, dir string, builtins []BuiltinGroup) []string {
+	t.Helper()
+	p := &recordingProvider{Provider: fake.New(fake.Text("ok"))}
+	a, err := Open(t.Context(), Options{Dir: dir, GlobalSkillsDir: "-", Provider: p, Builtins: builtins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close() }()
+	c, err := a.NewConversation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := c.Send(t.Context(), Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, tool := range p.last.Tools {
+		names = append(names, tool.Name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+type recordingProvider struct {
+	llmcontracts.Provider
+	last llmtypes.ChatRequest
+}
+
+func (p *recordingProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	p.last = req
+	return p.Provider.StreamChat(ctx, req)
+}
+
+func agentDirOfKind(t *testing.T, profile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	definition := "---\nschema_version: \"2\"\ndefinition_id: def:kind-test\nrevision: \"1\"\nname: kind-test\ndescription: Kind test.\nbehavior:\n  purpose: Test.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: default\ncontinuity:\n  mode: durable\n---\nTest.\n"
+	for name, text := range map[string]string{"agent.md": definition, "host.yaml": profile} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestEmbeddedAgentGetsNoBuiltinsUnlessTheHostOptsIn(t *testing.T) {
+	const embedded = "kind: embedded\nlifetime: application\napplication_id: kind-test\n"
+	const stable = "kind: stable\nlifetime: on-demand\nseat_id: kind-test\n"
+	paging := []string{"fetch_tool_result", "search_tool_result"}
+
+	if got := offeredTools(t, agentDirOfKind(t, embedded), nil); !slices.Equal(got, paging) {
+		t.Fatalf("embedded agent with no option was offered %v, want only %v", got, paging)
+	}
+	got := offeredTools(t, agentDirOfKind(t, embedded), []BuiltinGroup{BuiltinFilesRead})
+	if !slices.Contains(got, "read_file") || slices.Contains(got, "bash") || slices.Contains(got, "write_file") {
+		t.Fatalf("embedded agent with the read group was offered %v", got)
+	}
+	if got := offeredTools(t, agentDirOfKind(t, embedded), AllBuiltins()); !slices.Contains(got, "bash") || !slices.Contains(got, "write_file") {
+		t.Fatalf("embedded agent with every group was offered %v", got)
+	}
+	if got := offeredTools(t, agentDirOfKind(t, stable), nil); !slices.Contains(got, "bash") || !slices.Contains(got, "write_file") {
+		t.Fatalf("stable agent with no option was offered %v", got)
 	}
 }

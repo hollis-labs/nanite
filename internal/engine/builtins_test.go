@@ -61,12 +61,13 @@ func TestNilBuiltinsOfferEverything(t *testing.T) {
 	if _, err := run.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	got := offered(p.requests[0])
-	// The test engine has no workspace root, so bash and background_start are absent here.
-	for _, name := range []string{"ask_user", "background_status", "edit_file", "read_file", "skill_get", "subagent_spawn", "todo_write"} {
-		if !slices.Contains(got, name) {
-			t.Errorf("%s missing from the default tool list %v", name, got)
-		}
+	// The complete default list. The test engine has no workspace root, so
+	// bash and background_start, which need one, are absent here.
+	want := strings.Fields("ask_user background_cancel background_status edit_file fetch_tool_result find_files list_dir read_file " +
+		"scratchpad_read scratchpad_write search_files search_tool_result skill_get skill_list " +
+		"subagent_cancel subagent_spawn subagent_status todo_list todo_write write_file")
+	if got := offered(p.requests[0]); !slices.Equal(got, want) {
+		t.Fatalf("default tool list changed:\n got %v\nwant %v", got, want)
 	}
 }
 
@@ -80,5 +81,37 @@ func TestUnknownBuiltinGroupIsRejected(t *testing.T) {
 		if err != nil || !set.Has(group) {
 			t.Fatalf("%s: %v", group, err)
 		}
+	}
+}
+
+func TestCallToWithheldBuiltinIsRefused(t *testing.T) {
+	call := fake.Response{Events: []llmtypes.StreamEvent{
+		{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-1", Name: "scratchpad_write", Input: map[string]any{"key": "k", "content": "should not be stored"}}},
+		{Type: llmtypes.EventDone},
+	}}
+	p := &watchedProvider{Provider: fake.New(call, fake.Text("done"))}
+	e, db, id := setupEngine(t, p, "")
+	set, err := tools.NewBuiltins([]tools.BuiltinGroup{tools.BuiltinFilesRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.Builtins = set
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 2 {
+		t.Fatalf("model was called %d times", len(p.requests))
+	}
+	messages := p.requests[1].Messages
+	result := messages[len(messages)-1].ContentBlocks[0]
+	if result.Type != "tool_result" || !result.IsError || result.Content != "tool unavailable: scratchpad_write" {
+		t.Fatalf("withheld tool call answered with %+v", result)
+	}
+	if stored, _ := db.Scratch(t.Context(), id, "k"); stored != "" {
+		t.Fatalf("withheld tool ran and stored %q", stored)
 	}
 }

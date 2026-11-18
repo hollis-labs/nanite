@@ -9,6 +9,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/hollis-labs/libs/llm/core v0.4.0 // indirect
+
 require (
 	github.com/cyberphone/json-canonicalization v0.0.0-20261011152517-32a48195b9b2 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
@@ -16,9 +18,11 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hollis-labs/libs/agent/core v0.5.0
 	github.com/hollis-labs/libs/core/panics v0.1.0 // indirect
 	github.com/hollis-labs/libs/core/store v0.1.0 // indirect
 	github.com/hollis-labs/libs/core/util v0.6.0 // indirect
+	github.com/hollis-labs/libs/harness/core v0.17.1-0.20261115212742-8f2ed31176b0
 	github.com/hollis-labs/libs/security/redact v0.2.0 // indirect
 	github.com/hollis-labs/libs/security/secrets v0.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

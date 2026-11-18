@@ -15,7 +15,7 @@ const (
 	System       Name = "system"
 	Memory       Name = "memory"
 	Agent        Name = "agent"
-	ModeSlot     Name = "mode"
+	Mode         Name = "mode"
 	Rules        Name = "rules"
 	Permissions  Name = "permissions"
 	Workspace    Name = "workspace"
@@ -28,13 +28,14 @@ const (
 	Conversation Name = "conversation"
 )
 
-func names() []Name {
-	return []Name{Universal, System, Memory, Agent, ModeSlot, Rules, Permissions, Workspace, Skills, Tools, Session, Context, UserContext, Handoff, Conversation}
+// Names returns the canonical slot order in a new slice.
+func Names() []Name {
+	return []Name{Universal, System, Memory, Agent, Mode, Rules, Permissions, Workspace, Skills, Tools, Session, Context, UserContext, Handoff, Conversation}
 }
 
 func HostWritable(n Name) bool {
 	switch n {
-	case System, Memory, ModeSlot, Rules, Workspace, Skills, Tools, Session, Context, UserContext:
+	case System, Memory, Mode, Rules, Workspace, Skills, Tools, Session, Context, UserContext:
 		return true
 	default:
 		return false
@@ -58,7 +59,7 @@ type Store struct {
 func NewStore() *Store { return &Store{entries: make(map[Name]map[ownerKey]Entry)} }
 
 func validate(slot Name, e Entry) error {
-	if !slices.Contains(names(), slot) {
+	if !slices.Contains(Names(), slot) {
 		return fmt.Errorf("unknown slot %q", slot)
 	}
 	if e.Owner == "" || e.Key == "" {
@@ -169,8 +170,21 @@ func (s Snapshot) Entries(slot Name) []Entry {
 
 func (s Snapshot) Version() uint64 { return s.version }
 
-// Copy creates an independent store from a snapshot for turn-scoped changes.
-func (s Snapshot) Copy() *Store {
+// With applies updates to an independent snapshot.
+func (s Snapshot) With(updates ...Update) (Snapshot, error) {
+	if len(updates) == 0 {
+		return s, nil
+	}
+	out := s.copyStore()
+	for _, update := range updates {
+		if err := out.Put(update.Slot, update.Entry); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	return out.Snapshot(), nil
+}
+
+func (s Snapshot) copyStore() *Store {
 	out := NewStore()
 	out.version = s.version
 	for name, entries := range s.entries {

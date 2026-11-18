@@ -12,8 +12,8 @@ import (
 )
 
 func TestNames(t *testing.T) {
-	got := make([]string, 0, len(names()))
-	for _, name := range names() {
+	got := make([]string, 0, len(Names()))
+	for _, name := range Names() {
 		got = append(got, string(name))
 	}
 	if !slices.Equal(got, ctxpkg.SlotOrder) {
@@ -95,13 +95,13 @@ func TestSelectionAndChanges(t *testing.T) {
 	}
 	first := compose(nil)
 	modes := first.Report[Context].Decisions
-	if len(modes) != 3 || modes[0].Key != "b" || modes[0].Mode != ModeShip || modes[1].Mode != ModePointer || modes[2].Mode != ModeSkip {
+	if len(modes) != 3 || modes[0].Key != "b" || modes[0].Disposition != Ship || modes[1].Disposition != Pointer || modes[2].Disposition != Skip {
 		t.Fatalf("decisions = %+v", modes)
 	}
 	if first.Blocks[0].SlotName != string(Universal) {
 		t.Fatalf("first block = %v", first.Blocks[0])
 	}
-	for _, slot := range names() {
+	for _, slot := range Names() {
 		state := first.Window.Slot(string(slot))
 		if slot != Agent && state.MaxTokens > 0 && state.TokenCount > state.MaxTokens {
 			t.Fatalf("oversized slot %s", slot)
@@ -120,5 +120,82 @@ func TestSelectionAndChanges(t *testing.T) {
 	store.Remove(Memory, "notes", "a")
 	if !compose(next.Window.PrevHashes).Report[Memory].Changed {
 		t.Fatal("clearing a slot must report a change")
+	}
+}
+
+func TestDynamicToolsBudgetAndHashLifecycle(t *testing.T) {
+	ctx := context.Background()
+	budgets := make(map[Name]int)
+	for name, budget := range ctxpkg.DefaultBudgets() {
+		budgets[Name(name)] = budget
+	}
+	if budget, ok := budgets[Tools]; !ok || budget != 0 {
+		t.Fatalf("expected a dynamic tools budget, got %d (present=%v)", budget, ok)
+	}
+	store := NewStore()
+	var hashes map[string]string
+	for _, tc := range []struct {
+		text    string
+		changed bool
+	}{
+		{"tools guidance", true}, {"tools guidance", false}, {"updated tools guidance", true}, {"", true}, {"", false},
+	} {
+		if err := store.Put(Tools, Entry{Owner: "host", Key: "tools", Content: tc.text}); err != nil {
+			t.Fatal(err)
+		}
+		snap := store.Snapshot()
+		plan, err := DefaultSelector(nil).Select(ctx, TurnInfo{}, snap, budgets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.Decisions[Tools][0].Disposition; got != Ship {
+			t.Fatalf("tools disposition = %v", got)
+		}
+		assembled, err := Assemble(ctx, snap, plan, hashes, 0, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := assembled.Report[Tools].Changed; got != tc.changed {
+			t.Errorf("text %q changed = %v, want %v", tc.text, got, tc.changed)
+		}
+		if _, ok := assembled.Hashes[string(Tools)]; ok != (tc.text != "") {
+			t.Fatalf("hashes = %v for text %q", assembled.Hashes, tc.text)
+		}
+		if tc.text != "" && (len(assembled.Blocks) != 1 || assembled.Blocks[0].Content != tc.text) {
+			t.Fatalf("tools guidance absent: %+v", assembled.Blocks)
+		}
+		hashes = assembled.Hashes
+	}
+}
+
+func TestSnapshotWith(t *testing.T) {
+	store := NewStore()
+	if err := store.Put(Context, Entry{Owner: "host", Key: "original", Content: "before"}); err != nil {
+		t.Fatal(err)
+	}
+	orig := store.Snapshot()
+	labels := map[string]string{"fixture": "before"}
+	updated, err := orig.With(
+		Update{Slot: Context, Entry: Entry{Owner: "host", Key: "original", Content: "after"}},
+		Update{Slot: Context, Entry: Entry{Owner: "host", Key: "higher", Priority: 1, Labels: labels}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels["fixture"] = "changed"
+	got := updated.Entries(Context)
+	if len(got) != 2 || got[0].Key != "higher" || got[0].Labels["fixture"] != "before" || got[1].Content != "after" {
+		t.Fatalf("updates = %+v", got)
+	}
+	if len(orig.Entries(Context)) != 1 || orig.Entries(Context)[0].Content != "before" {
+		t.Fatalf("original changed: %+v", orig.Entries(Context))
+	}
+	if _, err := orig.With(Update{Slot: Agent, Entry: Entry{Owner: "host", Key: "reserved"}}); err == nil {
+		t.Fatal("accepted a reserved slot update")
+	}
+	names := Names()
+	names[0] = Context
+	if Names()[0] != Universal {
+		t.Fatal("Names returned shared storage")
 	}
 }

@@ -99,7 +99,7 @@ func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error)
 	ctx, cancel := context.WithCancel(ctx)
 	r := &Run{id: store.NewID(time.Now()), events: make(chan events.Event, 65), done: make(chan struct{}), cancel: cancel}
 	prev := maps.Clone(e.previous[id])
-	state := e.cfg.Slots.Snapshot().Copy()
+	state := e.cfg.Slots.Snapshot()
 	e.active[id] = r
 	go e.execute(ctx, r, info, input, state, prev, e.cfg.Tools.Snapshot(), e.cfg.Skills.Listing())
 	return r, nil
@@ -128,68 +128,56 @@ func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, err
 	return provider.New(cfg)
 }
 
-func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state *slots.Store, prev map[string]string, skillListing string) (slots.Assembled, error) {
+func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing string) (slots.Assembled, error) {
 	mode := def.Snapshot.Profile.Permissions.Mode
 	if mode == "" {
 		mode = "default"
 	}
-	for _, u := range []slots.Update{
+	updates := []slots.Update{
 		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: "Use the available tools when needed. Respect the workspace and tool permissions."}},
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: "Permission mode: " + mode}},
-	} {
-		if err := state.Put(u.Slot, u.Entry); err != nil {
-			return slots.Assembled{}, err
-		}
+		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "host-skills", Content: skillListing}},
 	}
-	if err := state.Put(slots.Skills, slots.Entry{Owner: "engine", Key: "host-skills", Content: skillListing}); err != nil {
-		return slots.Assembled{}, err
-	}
+
 	var authored strings.Builder
 	for _, name := range slices.Sorted(maps.Keys(def.Skills)) {
 		ref := def.Skills[name]
 		fmt.Fprintf(&authored, "- %s: %s\n", ref.Name, ref.Description)
 	}
 	if authored.Len() > 0 {
-		if err := state.Put(slots.Skills, slots.Entry{Owner: "file", Key: "authored-skills", Content: strings.TrimSuffix(authored.String(), "\n")}); err != nil {
-			return slots.Assembled{}, err
-		}
+		updates = append(updates, slots.Update{Slot: slots.Skills, Entry: slots.Entry{Owner: "file", Key: "authored-skills", Content: strings.TrimSuffix(authored.String(), "\n")}})
 	}
 	for _, file := range def.Context {
-		if err := state.Put(slots.Context, slots.Entry{Owner: "file", Key: file.Name, Content: file.Text}); err != nil {
-			return slots.Assembled{}, err
-		}
+		updates = append(updates, slots.Update{Slot: slots.Context, Entry: slots.Entry{Owner: "file", Key: file.Name, Content: file.Text}})
 	}
 	for _, source := range e.cfg.SlotSources {
 		owner := source.Name()
 		if owner == "engine" || owner == "file" || owner == "" {
 			return slots.Assembled{}, fmt.Errorf("invalid slot source owner %q", owner)
 		}
-		updates, err := source.Slots(ctx, info)
+		sourceUpdates, err := source.Slots(ctx, info)
 		if err != nil {
 			return slots.Assembled{}, fmt.Errorf("slot source %s: %w", owner, err)
 		}
-		for _, u := range updates {
+		for _, u := range sourceUpdates {
 			u.Entry.Owner = owner
-			if err := state.Put(u.Slot, u.Entry); err != nil {
-				return slots.Assembled{}, err
-			}
+			updates = append(updates, u)
 		}
 	}
 	for _, u := range input.Slots {
 		if !slots.HostWritable(u.Slot) || u.Entry.Owner == "engine" || u.Entry.Owner == "file" {
 			return slots.Assembled{}, fmt.Errorf("turn override for %q uses a reserved slot or owner", u.Slot)
 		}
-		if err := state.Put(u.Slot, u.Entry); err != nil {
-			return slots.Assembled{}, err
-		}
+		updates = append(updates, u)
 	}
-	snap := state.Snapshot()
+	snap, err := state.With(updates...)
+	if err != nil {
+		return slots.Assembled{}, err
+	}
 	budgets := make(map[slots.Name]int)
 	for name, size := range ctxpkg.DefaultBudgets() {
-		if size > 0 {
-			budgets[slots.Name(name)] = size
-		}
+		budgets[slots.Name(name)] = size
 	}
 	plan, err := e.cfg.SlotSelector.Select(ctx, info, snap, budgets)
 	if err != nil {

@@ -9,12 +9,12 @@ import (
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 )
 
-type Mode uint8
+type Disposition uint8
 
 const (
-	ModeShip Mode = iota
-	ModePointer
-	ModeSkip
+	Ship Disposition = iota
+	Pointer
+	Skip
 )
 
 type Source interface {
@@ -32,9 +32,9 @@ type Selector interface {
 }
 type Plan struct{ Decisions map[Name][]Decision }
 type Decision struct {
-	Owner, Key string
-	Mode       Mode
-	Reason     string
+	Owner, Key  string
+	Disposition Disposition
+	Reason      string
 }
 
 type defaultSelector struct{ est ctxpkg.TokenEstimator }
@@ -48,22 +48,22 @@ func DefaultSelector(est ctxpkg.TokenEstimator) Selector {
 
 func (s defaultSelector) Select(ctx context.Context, _ TurnInfo, in Snapshot, budgets map[Name]int) (Plan, error) {
 	out := Plan{Decisions: make(map[Name][]Decision)}
-	for _, slot := range names() {
+	for _, slot := range Names() {
 		if err := ctx.Err(); err != nil {
 			return Plan{}, err
 		}
 		entries := in.entries[slot]
-		budget, limited := budgets[slot]
+		budget := budgets[slot]
 		text := ""
 		for _, e := range entries {
-			pick := Decision{Owner: e.Owner, Key: e.Key, Mode: ModeShip}
+			pick := Decision{Owner: e.Owner, Key: e.Key, Disposition: Ship}
 			candidate := appendEntry(text, e, e.Content, len(entries) > 1)
-			if slot != Agent && limited && s.est.Estimate(candidate) > budget {
+			if slot != Agent && budget > 0 && s.est.Estimate(candidate) > budget {
 				candidate = appendEntry(text, e, e.Pointer, len(entries) > 1)
-				pick.Mode, pick.Reason = ModePointer, "content exceeds slot budget"
+				pick.Disposition, pick.Reason = Pointer, "content exceeds slot budget"
 				if e.Pointer == "" || s.est.Estimate(candidate) > budget {
 					candidate = text
-					pick.Mode, pick.Reason = ModeSkip, "entry exceeds remaining slot budget"
+					pick.Disposition, pick.Reason = Skip, "entry exceeds remaining slot budget"
 				}
 			}
 			out.Decisions[slot] = append(out.Decisions[slot], pick)
@@ -96,13 +96,15 @@ type Assembled struct {
 	Blocks []ctxpkg.SlotBlock
 	Window *ctxpkg.ContextWindow
 	Report Report
+	Hashes map[string]string
 }
 
 func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]string, windowSize int, est ctxpkg.TokenEstimator) (Assembled, error) {
 	window := ctxpkg.NewContextWindow(windowSize, est)
 	window.PrevHashes = maps.Clone(prev)
 	report := make(Report)
-	for _, slot := range names() {
+	hashes := make(map[string]string)
+	for _, slot := range Names() {
 		if err := ctx.Err(); err != nil {
 			return Assembled{}, err
 		}
@@ -116,20 +118,20 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 		for _, e := range entries {
 			d, ok := decisions[ownerKey{e.Owner, e.Key}]
 			if !ok {
-				d = Decision{Owner: e.Owner, Key: e.Key, Mode: ModeSkip, Reason: "omitted by selector"}
+				d = Decision{Owner: e.Owner, Key: e.Key, Disposition: Skip, Reason: "omitted by selector"}
 			}
 			if slot == Agent {
-				d.Mode, d.Reason = ModeShip, ""
+				d.Disposition, d.Reason = Ship, ""
 			}
 			var body string
-			switch d.Mode {
-			case ModeShip:
+			switch d.Disposition {
+			case Ship:
 				body = e.Content
-			case ModePointer:
+			case Pointer:
 				body = e.Pointer
-			case ModeSkip:
+			case Skip:
 			default:
-				return Assembled{}, fmt.Errorf("slot %q has invalid selection mode %d", slot, d.Mode)
+				return Assembled{}, fmt.Errorf("slot %q has invalid selection mode %d", slot, d.Disposition)
 			}
 			if body != "" {
 				if text.Len() > 0 {
@@ -147,7 +149,10 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 		if slot != Agent && state.MaxTokens > 0 && state.TokenCount > state.MaxTokens {
 			return Assembled{}, fmt.Errorf("selector exceeded %q slot budget: %d > %d", slot, state.TokenCount, state.MaxTokens)
 		}
+		if text.Len() > 0 {
+			hashes[name] = state.CacheKey
+		}
 		report[slot] = SlotReport{Tokens: state.TokenCount, Changed: prev[name] != state.CacheKey, Decisions: applied}
 	}
-	return Assembled{Blocks: window.Assemble(), Window: window, Report: report}, nil
+	return Assembled{Blocks: window.Assemble(), Window: window, Report: report, Hashes: hashes}, nil
 }

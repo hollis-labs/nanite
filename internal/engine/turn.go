@@ -41,7 +41,7 @@ type execution struct {
 	result     events.Result
 }
 
-func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state *slots.Store, prev map[string]string, hostTools []tools.Tool, skills string) {
+func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, skills string) {
 	result, err := e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, skills)
 	if err != nil {
 		if clean := e.scrub.Text(err.Error()); clean != err.Error() {
@@ -55,7 +55,7 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	e.mu.Unlock()
 }
 
-func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state *slots.Store, prev map[string]string, hostTools []tools.Tool, skills string) (events.Result, error) {
+func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, skills string) (events.Result, error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
 	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	if err != nil {
@@ -100,7 +100,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 
 	if err = x.append(message); err == nil {
 		e.mu.Lock()
-		e.previous[info.ID] = assembled.Window.PrevHashes
+		e.previous[info.ID] = assembled.Hashes
 		e.mu.Unlock()
 		r.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.SlotsAssembled{EventMeta: meta, Report: assembled.Report}

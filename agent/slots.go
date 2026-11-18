@@ -11,39 +11,44 @@ import (
 type SlotName = slots.Name
 
 const (
-	// SlotUniversal holds shared engine instructions.
+	// SlotUniversal holds shared engine instructions. Writes are reserved for Nanite.
 	SlotUniversal = slots.Universal
-	// SlotSystem holds host framing.
+	// SlotSystem holds host framing. Hosts may write this slot.
 	SlotSystem = slots.System
-	// SlotMemory holds recalled knowledge.
+	// SlotMemory holds recalled knowledge. Hosts may write this slot.
 	SlotMemory = slots.Memory
-	// SlotAgent holds the agent instructions.
+	// SlotAgent holds the agent instructions. Writes are reserved for Nanite.
 	SlotAgent = slots.Agent
-	// SlotMode holds the current role or mode.
-	SlotMode = slots.ModeSlot
-	// SlotRules holds rules and nudges.
+	// SlotMode holds the current role or mode. Hosts may write this slot.
+	SlotMode = slots.Mode
+	// SlotRules holds rules and nudges. Hosts may write this slot.
 	SlotRules = slots.Rules
-	// SlotPermissions holds the permission summary.
+	// SlotPermissions holds the permission summary. Writes are reserved for Nanite.
 	SlotPermissions = slots.Permissions
-	// SlotWorkspace holds focused workspace information.
+	// SlotWorkspace holds focused workspace information. Hosts may write this slot.
 	SlotWorkspace = slots.Workspace
-	// SlotSkills holds skill names and descriptions.
+	// SlotSkills holds skill names and descriptions. Hosts may write this slot.
 	SlotSkills = slots.Skills
-	// SlotTools holds tool guidance.
+	// SlotTools holds tool guidance. Hosts may write this slot.
 	SlotTools = slots.Tools
-	// SlotSession holds session facts and notices.
+	// SlotSession holds session facts and notices. Hosts may write this slot.
 	SlotSession = slots.Session
-	// SlotContext holds additional context.
+	// SlotContext holds additional context. Hosts may write this slot.
 	SlotContext = slots.Context
-	// SlotUserContext holds the user's current context.
+	// SlotUserContext holds the user's current context. Hosts may write this slot.
 	SlotUserContext = slots.UserContext
-	// SlotHandoff holds engine handoff information.
+	// SlotHandoff holds engine handoff information. Writes are reserved for Nanite.
 	SlotHandoff = slots.Handoff
-	// SlotConversation is reserved for conversation accounting.
+	// SlotConversation holds conversation accounting. Writes are reserved for Nanite.
 	SlotConversation = slots.Conversation
 )
 
-// SlotEntry is a single contribution to a slot.
+// SlotNames returns a fresh slice of all slot names in assembly order.
+func SlotNames() []SlotName { return slots.Names() }
+
+// SlotEntry is a contribution to a slot. Writers and sources overwrite Owner.
+// A Key is unique per owner within its slot. Pointer is the one-line stand-in
+// for the full content. Labels are never sent to the model.
 type SlotEntry = slots.Entry
 
 // SlotUpdate supplies a slot entry for one turn.
@@ -73,22 +78,23 @@ type SlotPlan = slots.Plan
 // SlotDecision determines how a slot entry is presented.
 type SlotDecision = slots.Decision
 
-// SlotModeValue is a selector decision mode.
-type SlotModeValue = slots.Mode
+// SlotDisposition determines whether a selector ships content, ships a pointer, or skips an entry.
+type SlotDisposition = slots.Disposition
 
 const (
 	// SlotShip ships the entry's full content.
-	SlotShip = slots.ModeShip
+	SlotShip = slots.Ship
 	// SlotPointer ships its pointer.
-	SlotPointer = slots.ModePointer
+	SlotPointer = slots.Pointer
 	// SlotSkip omits it.
-	SlotSkip = slots.ModeSkip
+	SlotSkip = slots.Skip
 )
 
 // Slots manages host contributions to the next turn's context.
 type Slots struct{ store *slots.Store }
 
-// SlotWriter writes entries on behalf of one host owner.
+// SlotWriter applies changes at the start of the next turn. A writer is safe
+// for concurrent use.
 type SlotWriter struct {
 	store *slots.Store
 	owner string

@@ -1,4 +1,3 @@
-// Package agent embeds Nanite in a Go application.
 package agent
 
 import (
@@ -34,17 +33,32 @@ var (
 
 // Options configures an embedded agent.
 type Options struct {
-	Dir, DataDir, GlobalSkillsDir string
-	Provider                      llmcontracts.Provider
-	Gateway                       Gateway
-	Store                         *store.Store
-	Logger                        *slog.Logger
-	Events                        EventSink
-	Gate                          Gate
-	PDP                           policy.PDP
-	SlotSources                   []SlotSource
-	SlotSelector                  SlotSelector
-	Secrets                       *secrets.Resolver
+	// Dir is the required authored agent directory.
+	Dir string
+	// DataDir defaults to .nanite inside Dir.
+	DataDir string
+	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
+	GlobalSkillsDir string
+	// Provider defaults to the adapter selected by host.yaml and Gateway.
+	Provider llmcontracts.Provider
+	// Gateway optionally directs requests through a model gateway. Its zero value uses the provider endpoint.
+	Gateway Gateway
+	// Store defaults to SQLite at DataDir/nanite.db. The caller retains ownership of a supplied store.
+	Store *store.Store
+	// Logger defaults to slog.Default().
+	Logger *slog.Logger
+	// Events defaults to nil, with no external runtime event sink.
+	Events EventSink
+	// Gate defaults to DenyGate for tool calls that require approval.
+	Gate Gate
+	// PDP defaults to nil, with authorization based on the agent's authored rules.
+	PDP policy.PDP
+	// SlotSources defaults to an empty list. Sources contribute entries at the start of each turn.
+	SlotSources []SlotSource
+	// SlotSelector defaults to priority order with pointer and skip fallback to fit the slot budget.
+	SlotSelector SlotSelector
+	// Secrets defaults to the standard secrets resolver.
+	Secrets *secrets.Resolver
 }
 
 // Gateway configures the model gateway.

@@ -25,19 +25,19 @@ import (
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
-func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog) error {
+func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Catalog) error {
 	cache := x.engine.cache
-	catalogue := selftools.New(x.engine.cfg.Store, x.info.ID, x.engine.cfg.WorkspaceRoots)
-	catalogue = append(catalogue, selftools.Question(func(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error) {
+	catalog := selftools.New(x.engine.cfg.Store, x.info.ID, x.engine.cfg.WorkspaceRoots)
+	catalog = append(catalog, selftools.Question(func(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error) {
 		return x.ask(ctx, prompt, schema)
 	}))
 
-	catalogue = append(catalogue, selftools.Skills(catalog)...)
-	catalogue = append(catalogue, mcp...)
-	catalogue = append(catalogue, x.jobTools()...)
+	catalog = append(catalog, selftools.Skills(skillCatalog)...)
+	catalog = append(catalog, mcp...)
+	catalog = append(catalog, x.jobTools()...)
 	roots := x.engine.cfg.WorkspaceRoots
 	if len(roots) > 0 {
-		catalogue = append(catalogue, selftools.Bash(shell.Plain{}, roots[0], x.definition.Runtime.Env))
+		catalog = append(catalog, selftools.Bash(shell.Plain{}, roots[0], x.definition.Runtime.Env))
 	}
 
 	for _, item := range []struct {
@@ -48,7 +48,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 		if err != nil {
 			return err
 		}
-		catalogue = append(catalogue, tools.Tool{Name: item.spec.Name, Description: item.spec.Description, InputSchema: schema, ReadOnly: true,
+		catalog = append(catalog, tools.Tool{Name: item.spec.Name, Description: item.spec.Description, InputSchema: schema, ReadOnly: true,
 			Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
 				args, err := permission.Args(call.Input)
 				if err != nil {
@@ -59,9 +59,9 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 			},
 		})
 	}
-	x.catalogue = make(map[string]tools.Tool)
+	x.catalog = make(map[string]tools.Tool)
 	x.validators = make(map[string]recover.Validator)
-	for _, tool := range append(catalogue, host...) {
+	for _, tool := range append(catalog, host...) {
 		if !subagent.AllowsTool(x.info.Role, tool.Name, tool.ReadOnly) {
 			continue
 		}
@@ -69,7 +69,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 			return fmt.Errorf("tool %s schema: %w", tool.Name, err)
 		}
-		x.catalogue[tool.Name] = tool
+		x.catalog[tool.Name] = tool
 		x.validators[tool.Name] = recover.NewValidator(tool.InputSchema)
 		x.specs = append(x.specs, llmtypes.ToolDefinition{Name: tool.Name, Description: tool.Description, InputSchema: schema})
 	}
@@ -134,7 +134,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			results[i].Content = "cancelled"
 			continue
 		}
-		t, ok := x.catalogue[call.Name]
+		t, ok := x.catalog[call.Name]
 		if !ok {
 			results[i].Content = "tool unavailable: " + call.Name
 			continue
@@ -184,7 +184,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		toolCtx, endSpan := events.ToolSpan(ctx, x.engine.scrub.Text(call.Name))
 		defer endSpan()
 
-		result, err := x.catalogue[call.Name].Handler(x.askContext(toolCtx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+		result, err := x.catalog[call.Name].Handler(x.askContext(toolCtx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
 		if err != nil {
 			result = tools.Result{Text: err.Error(), IsError: true}
 		}

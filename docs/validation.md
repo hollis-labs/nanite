@@ -17,7 +17,7 @@ module also builds from a standalone checkout.
 ## Checks
 
 The repository's check workflow runs on pull requests and pushes to `main`.
-It runs vet, verifies BOM pins and generated CLI wiring, compiles packages,
+It runs lint, vet, and vulnerability checks, verifies BOM pins and generated CLI wiring, cross-compiles packages,
 runs the race suite and offline example, and scans the working tree for public hygiene. The
 compile step has no artifact upload or deploy job.
 
@@ -26,7 +26,8 @@ go vet ./...
 GOWORK=off go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
 go run github.com/hollis-labs/substrate/cmd/substrate generate -f cmd/nanite/substrate.yaml
 git diff --exit-code -- cmd/nanite/substrate_wiring.go
-go build ./...
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
 go test -race -count=1 ./...
 go run ./examples/embed-host --offline
 go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree
@@ -55,22 +56,46 @@ git -C "$scan_dir" checkout -q --detach "$parent"
 go run github.com/hollis-labs/substrate/cmd/substrate scan-public --repo "$scan_dir" --ref HEAD
 ```
 
-Release validation also includes lint, vulnerability scanning, coverage, and
-cross-builds. Use the tool versions from the pinned Substrate BOM.
+The lint and vulnerability commands use versions from the Substrate BOM.
+For release validation, also collect coverage across package boundaries.
 
 ```sh
 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
-go test -coverprofile=coverage.out ./...
+go test -coverpkg=./... -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
-GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
+awk 'NR > 1 {
+  statements[$1] = $2
+  if ($3 > 0) hit[$1] = 1
+} END {
+  for (block in statements) {
+    pkg = block
+    sub("/[^/]+$", "", pkg)
+    total[pkg] += statements[block]
+    if (hit[block]) covered[pkg] += statements[block]
+  }
+  for (pkg in total) printf "%s %.1f%%\n", pkg, 100*covered[pkg]/total[pkg]
+}' coverage.out | sort
 ```
 
 Run the race suite three times with `-count=1` for release validation.
 The embedding API golden test runs as part of the suite. For an intentional
 API change, regenerate it with
 `go test ./agent -run '^TestAPIGolden$' -update-agent-api` and review the diff.
+
+## Live gateway test
+
+The default run skips the live test. Set `NANITE_GATEWAY_URL` and
+`NANITE_GATEWAY_KEY_REF` for your gateway, then run the test below. To use
+OpenAI, set `NANITE_LIVE_PROVIDER=openai` and set
+`NANITE_DEFAULT_MODEL` to a compatible model.
+
+```sh
+NANITE_LIVE_TEST=1 go test ./cmd/nanite -run '^TestLiveGatewayToolTurn$' -count=1 -v
+```
+
+It opens a temporary agent, verifies one real `read_file` tool call, and
+checks the model's reply for the fixture content.
 
 ## Manual end-to-end check
 

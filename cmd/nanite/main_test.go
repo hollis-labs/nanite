@@ -97,7 +97,7 @@ func TestPromptViaLocalGateway(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("event log permissions: %v %v", info, err)
 	}
-	raw, err := os.ReadFile(eventPath)
+	raw, err := os.ReadFile(eventPath) // #nosec G304 -- Reads the event fixture under the temporary agent directory.
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -59,8 +59,8 @@ func (s *Store) CreateConversation(ctx context.Context, c Conversation) error {
 	if err != nil {
 		return err
 	}
-	defer journal.Close()
-	return journal.sideband("nanite.conversation", c.ID, c.CreatedAt, c)
+	appendErr := journal.sideband("nanite.conversation", c.ID, c.CreatedAt, c)
+	return errors.Join(appendErr, journal.Close())
 }
 
 func (j *Journal) StartTurn(turn Turn, at time.Time) error {
@@ -273,7 +273,7 @@ func (s *Store) historyAfter(ctx context.Context, id, after string) ([]Message, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	var out []Message
 	for rows.Next() {
 		var m Message

@@ -155,7 +155,7 @@ func TestTornTailAndNoImplicitRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir, _ := ConversationDir(root, "conversation")
-	f, err := os.OpenFile(segmentPath(dir, 1), os.O_APPEND|os.O_WRONLY, 0)
+	f, err := os.OpenFile(segmentPath(dir, 1), os.O_APPEND|os.O_WRONLY, 0) // #nosec G304 -- Writes a fixture under a test-only temporary directory.
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,12 +233,12 @@ func TestRotationAndChangedPrefix(t *testing.T) {
 	}
 	dir, _ := ConversationDir(root, "conversation")
 	path := segmentPath(dir, 1)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- Reads a segment under the test temporary directory.
 	if err != nil {
 		t.Fatal(err)
 	}
 	data = bytes.Replace(data, []byte("msg_fixture0003"), []byte("msg_fixture0008"), 1)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil { // #nosec G703 -- Modifies a test-only segment to detect a broken chain.
 		t.Fatal(err)
 	}
 	if _, err := Replay(root, "conversation", cursors[0]); !errors.Is(err, ErrGap) {

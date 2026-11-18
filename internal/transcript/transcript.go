@@ -77,7 +77,9 @@ func ConversationDir(root, conversationID string) (string, error) {
 		return "", ErrInvalid
 	}
 	for _, r := range conversationID {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
 			return "", ErrInvalid
 		}
 	}
@@ -101,12 +103,12 @@ func Open(root, conversationID string, options Options) (_ *Writer, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, ".writer.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(filepath.Join(dir, ".writer.lock"), os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- Uses a fixed lock filename beneath a validated conversation directory.
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { // #nosec G115 -- File.Fd carries a Unix file descriptor.
+		_ = lock.Close() // The lock acquisition error takes priority.
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, ErrBusy
 		}
@@ -226,7 +228,7 @@ func (w *Writer) Close() error {
 		w.file = nil
 	}
 	if w.lock != nil {
-		if e := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_UN); err == nil {
+		if e := syscall.Flock(int(w.lock.Fd()), syscall.LOCK_UN); err == nil { // #nosec G115 -- File.Fd carries a Unix file descriptor.
 			err = e
 		}
 		if e := w.lock.Close(); err == nil {
@@ -337,15 +339,12 @@ func createSegment(dir string, n uint64) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := os.Open(dir)
+	d, err := os.Open(dir) // #nosec G304 -- Opens the validated conversation directory for fsync.
 	if err != nil {
-		f.Close()
-		return nil, err
+		return nil, errors.Join(err, f.Close())
 	}
 	if err = d.Sync(); err != nil {
-		f.Close()
-		d.Close()
-		return nil, err
+		return nil, errors.Join(err, f.Close(), d.Close())
 	}
 	_ = d.Close()
 	return f, nil
@@ -386,7 +385,7 @@ func scanSegment(dir string, n uint64, previousHash string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Read-only segment.
 	r := bufio.NewReader(f)
 	var out []Entry
 	var offset int64

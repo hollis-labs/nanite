@@ -96,7 +96,7 @@ func (w workspace) read(ctx context.Context, args pathArgs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }() // Closing the directory handle does not commit writes.
 	return readRegular(root, path)
 }
 
@@ -112,7 +112,7 @@ func readRegular(root *os.Root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // Read-only handle.
 	opened, err := file.Stat()
 	if err != nil {
 		return "", err
@@ -135,7 +135,7 @@ func (w workspace) list(ctx context.Context, args pathArgs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }() // Closing the directory handle does not commit writes.
 	entries, err := fs.ReadDir(root.FS(), filepath.ToSlash(path))
 	if err != nil {
 		return "", err
@@ -159,7 +159,7 @@ func (w workspace) write(ctx context.Context, args writeArgs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }() // Closing the directory handle does not commit writes.
 	return "File written.", writeRegular(ctx, root, path, args.Content)
 }
 
@@ -168,7 +168,7 @@ func (w workspace) edit(ctx context.Context, args editArgs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }() // Closing the directory handle does not commit writes.
 	original, err := readRegular(root, path)
 	if err != nil {
 		return "", err
@@ -201,7 +201,7 @@ func writeRegular(ctx context.Context, root *os.Root, path, text string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temp)
+	defer func() { _ = root.Remove(temp) }() // Rename already removes the temporary path on success.
 	if _, err := io.WriteString(file, text); err != nil {
 		_ = file.Close()
 		return err

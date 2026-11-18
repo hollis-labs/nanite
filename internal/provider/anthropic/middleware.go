@@ -43,7 +43,7 @@ const (
 // Transport-layer errors (network failure, ctx cancel) propagate through
 // next(req) as-is and increment breaker failure once — same as the deleted
 // adapter recorded a failure for each non-OK exit out of the retry loop.
-func rateAwareMiddleware(rt *llmcontracts.TokenRateTracker, cb *llmcontracts.CircuitBreaker, calibrated *atomic.Bool) option.Middleware {
+func rateAwareMiddleware(rt *llmcontracts.TokenRateTracker, cb *llmcontracts.CircuitBreaker, calibrated *atomic.Bool) option.Middleware { //nolint:staticcheck // Match the existing adapter breaker without changing request accounting.
 	return func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 		resp, err := next(req)
 		if err != nil {

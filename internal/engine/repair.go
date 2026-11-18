@@ -31,7 +31,7 @@ func (x *execution) repairArgs(ctx context.Context, s *step) {
 		if !validator.Classify(err) {
 			continue
 		}
-		tool := x.catalogue[call.Name]
+		tool := x.catalog[call.Name]
 		raw, err := json.Marshal(struct {
 			Tool      string
 			Arguments map[string]any

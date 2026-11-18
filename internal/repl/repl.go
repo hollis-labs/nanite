@@ -99,10 +99,10 @@ func (t Terminal) Chat(ctx context.Context, fresh func(context.Context) (Sender,
 			return err
 		}
 		line, err := t.read(ctx)
-		if err == io.EOF && line == "" {
+		if errors.Is(err, io.EOF) && line == "" {
 			return nil
 		}
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 		line = strings.TrimSpace(line)
@@ -260,7 +260,7 @@ func (t Terminal) answer(ctx context.Context, run *engine.Run, q events.Question
 		}
 		line, err := t.read(ctx)
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // Let render drain the canceled run and return its terminal error.
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
@@ -277,7 +277,7 @@ func (t Terminal) answer(ctx context.Context, run *engine.Run, q events.Question
 		}
 		if err := run.Answer(q.ID, events.Answer{Value: value}); err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return nil //nolint:nilerr // Let render report the run cancellation.
 			}
 			if _, writeErr := fmt.Fprintln(t.Output, err); writeErr != nil {
 				return writeErr

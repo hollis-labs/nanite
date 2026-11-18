@@ -44,7 +44,7 @@ type execution struct {
 	messages   []llmtypes.ChatMessage
 	parent     *string
 	validators map[string]recover.Validator
-	catalogue  map[string]tools.Tool
+	catalog    map[string]tools.Tool
 	specs      []llmtypes.ToolDefinition
 	loop       *loopdetect.Detector
 	result     events.Result
@@ -68,7 +68,7 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	e.mu.Unlock()
 }
 
-func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) (events.Result, error) {
+func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) (_ events.Result, retErr error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
 	var resume recovery.Plan
 	if interrupted != nil {
@@ -120,7 +120,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	defer journal.Close()
+	defer func() { retErr = errors.Join(retErr, journal.Close()) }()
 	x.journal = journal
 	summary, history, parent, err := e.cfg.Store.ModelHistory(ctx, info.ID)
 	if err != nil {
@@ -337,20 +337,22 @@ func (x *execution) retry(ctx context.Context, err error, retries *int, runErr *
 		*retries++
 		switch classified.Class {
 		case failure.Overflow:
-			if compactErr := x.compact(ctx, true); compactErr == nil {
+			compactErr := x.compact(ctx, true)
+			if compactErr == nil {
 				return runloop.Retry
-			} else {
-				err = errors.Join(err, compactErr)
 			}
+			err = errors.Join(err, compactErr)
 		case failure.Retryable:
 			base := time.Second << (*retries - 1)
-			delay := max(classified.RetryAfter, base+rand.N(base/4))
+			delay := max(classified.RetryAfter, base+rand.N(base/4)) // #nosec G404 -- Retry jitter does not need unpredictability.
 			select {
 			case <-time.After(delay):
 				return runloop.Retry
 			case <-ctx.Done():
 				err = ctx.Err()
 			}
+		case failure.Auth, failure.Fatal:
+			// These failures terminate without retrying.
 		}
 	}
 
@@ -505,6 +507,8 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			got.calls = append(got.calls, tool)
 			got.blocks = append(got.blocks, llmtypes.ContentBlock{Type: "tool_use", ID: tool.ID, Name: tool.Name, Input: &clean})
 			got.emitted = true
+		case llmtypes.EventSessionID:
+			// Nanite owns the conversation identifier.
 		case llmtypes.EventUsage:
 			if ev.Usage == nil {
 				continue

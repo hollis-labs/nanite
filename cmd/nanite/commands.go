@@ -111,7 +111,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root.Flags().StringVar(&eventPath, "events", "", "Runtime event log path (default .nanite/events.jsonl, - for stdout)")
 	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory")
 	root.Args = cobra.NoArgs
-	root.RunE = func(cmd *cobra.Command, _ []string) error {
+	root.RunE = func(cmd *cobra.Command, _ []string) (retErr error) {
 		nonInteractive := cmd.Flags().Changed("prompt")
 		var gate agent.Gate
 		var terminal repl.Terminal
@@ -123,7 +123,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer closeEvents()
+		defer func() { retErr = errors.Join(retErr, closeEvents()) }()
 		if os.Getenv("NANITE_OTEL_DISABLED") != "1" &&
 			(hotel.EnabledFromEnv("NANITE_OTEL_ENABLED") || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "") {
 			defer hotel.InitOrWarn(cmd.Context(), func(format string, args ...any) { _, _ = fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) },
@@ -133,7 +133,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		defer a.Close()
+		defer func() { retErr = errors.Join(retErr, a.Close()) }()
 		conversation, err := selectConversation(cmd.Context(), a, resume, latest)
 		if err != nil {
 			return err
@@ -197,12 +197,12 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name)
 			return err
 		}},
-		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
 			a, err := openAgent(cmd, app, dir, nil, nil)
 			if err != nil {
 				return err
 			}
-			defer a.Close()
+			defer func() { retErr = errors.Join(retErr, a.Close()) }()
 			conversations, err := a.Conversations(cmd.Context())
 			if err != nil {
 				return err
@@ -210,12 +210,12 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(conversations)
 		}},
 		&cobra.Command{Use: "rebuild-index", Short: "Rebuild the conversation index from JSONL transcripts", Args: cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
+			RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
 				a, err := openAgent(cmd, app, dir, nil, nil)
 				if err != nil {
 					return err
 				}
-				defer a.Close()
+				defer func() { retErr = errors.Join(retErr, a.Close()) }()
 				return a.RebuildIndex(cmd.Context())
 			},
 		},

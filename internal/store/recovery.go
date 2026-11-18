@@ -15,7 +15,7 @@ func (s *Store) RunningTurns(ctx context.Context) ([]RunningTurn, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	var out []RunningTurn
 	for rows.Next() {
 		var turn RunningTurn
@@ -46,7 +46,7 @@ func (s *Store) RunningJobs(ctx context.Context) ([]Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	var out []Job
 	for rows.Next() {
 		var job Job

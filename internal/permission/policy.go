@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,14 +14,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type rulePDP struct{ engine *rules.Engine }
+// RulePDP evaluates the authored tool rules and exposes their effective mode.
+type RulePDP struct{ engine *rules.Engine }
 
-func (p rulePDP) Evaluate(ctx context.Context, req policy.Request) (policy.Decision, error) {
+func (p RulePDP) Evaluate(ctx context.Context, req policy.Request) (policy.Decision, error) {
 	input, _ := req.Context["input"].(map[string]any)
 	readOnly, _ := req.Context["read_only"].(bool)
 	destructive, _ := req.Context["destructive"].(bool)
 	check := p.engine.Check(ctx, req.Scope, req.Resource.ID, input, rules.ToolMeta{IsReadOnly: readOnly, IsDestructive: destructive})
-	effect := policy.Deny
+	var effect policy.Effect
 	switch check.Decision {
 	case rules.DecisionAllow:
 		effect = policy.Allow
@@ -38,9 +40,9 @@ func (p rulePDP) Evaluate(ctx context.Context, req policy.Request) (policy.Decis
 	return policy.Decision{Effect: effect, Reason: check.Reason}, nil
 }
 
-func (p rulePDP) Mode() string { return string(p.engine.Mode()) }
+func (p RulePDP) Mode() string { return string(p.engine.Mode()) }
 
-func Rules(mode string, data []byte) (*rulePDP, error) {
+func Rules(mode string, data []byte) (*RulePDP, error) {
 	var file rules.PermissionsFile
 	if len(bytes.TrimSpace(data)) > 0 {
 		decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -49,7 +51,7 @@ func Rules(mode string, data []byte) (*rulePDP, error) {
 			return nil, fmt.Errorf("permissions.yaml: %w", err)
 		}
 		var extra any
-		if err := decoder.Decode(&extra); err != io.EOF {
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("permissions.yaml must contain one document")
 		}
 	}
@@ -62,7 +64,7 @@ func Rules(mode string, data []byte) (*rulePDP, error) {
 	if mode == "" {
 		mode = string(rules.ModeDefault)
 	}
-	return &rulePDP{rules.NewEngine(rules.Mode(mode), &file.Permissions, rules.WithFileEditTools("write_file", "edit_file"))}, nil
+	return &RulePDP{rules.NewEngine(rules.Mode(mode), &file.Permissions, rules.WithFileEditTools("write_file", "edit_file"))}, nil
 }
 
 func Evaluate(ctx context.Context, logger *slog.Logger, outer, local policy.PDP, principal, role string, req PermissionRequest, args map[string]any) (policy.Decision, error) {

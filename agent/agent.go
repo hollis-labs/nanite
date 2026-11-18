@@ -107,11 +107,11 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if err := nanitestore.PreparePrivateDir(data); err != nil {
 		return nil, fmt.Errorf("create agent data directory: %w", err)
 	}
-	lock, err := os.OpenFile(filepath.Join(data, "agent.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	lock, err := os.OpenFile(filepath.Join(data, "agent.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600) // #nosec G304 -- The caller selects the private agent state directory.
 	if err != nil {
 		return nil, fmt.Errorf("open agent lock: %w", err)
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { // #nosec G115 -- File.Fd carries a Unix file descriptor.
 		_ = lock.Close()
 		return nil, fmt.Errorf("lock agent data directory %q: %w", data, err)
 	}

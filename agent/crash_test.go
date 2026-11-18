@@ -50,7 +50,7 @@ Recovery test.
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestResumeAfterSIGKILLMidTool$")
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestResumeAfterSIGKILLMidTool$") // #nosec G204 G702 -- Runs the current test binary with fixed test flags.
 	cmd.Env = append(os.Environ(), env+"="+dir)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func crashDuringTool(t *testing.T, dir string) {
 	defer a.Close()
 	if err := a.Tools().SetGroup("fixture", agent.Tool{Name: "blocking_tool", InputSchema: json.RawMessage(`{"type":"object"}`),
 		Handler: func(ctx context.Context, _ agent.ToolCall) (agent.ToolResult, error) {
-			if err := os.WriteFile(filepath.Join(dir, "tool-active"), nil, 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "tool-active"), nil, 0600); err != nil { // #nosec G703 -- Reads a transcript in the test temporary directory.
 				return agent.ToolResult{}, err
 			}
 			<-ctx.Done()

@@ -22,7 +22,7 @@ func (s *Store) PendingNotices(ctx context.Context, conversation string) ([]Noti
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	var notices []Notice
 	for rows.Next() {
 		n := Notice{ConversationID: conversation}

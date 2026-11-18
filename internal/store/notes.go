@@ -19,7 +19,7 @@ func (s *Store) Todos(ctx context.Context, conversation string) ([]Todo, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	out := []Todo{}
 	for rows.Next() {
 		var t Todo

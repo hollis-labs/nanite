@@ -105,7 +105,7 @@ func TestCommandsIgnoreConfigAndKeepWorkingDirectoryClean(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, ".nanite")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected agent state: %v", err)
 	}
-	content, err := os.ReadFile(legacy)
+	content, err := os.ReadFile(legacy) // #nosec G304 -- Reads a fixture under the test temporary directory.
 	if err != nil || string(content) != string(bad) {
 		t.Fatalf("legacy config changed: %v", err)
 	}

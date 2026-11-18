@@ -63,7 +63,7 @@ func StartStreaming(ctx context.Context, command Command, writer io.Writer) (*Pr
 
 func start(ctx context.Context, command Command, writer io.Writer) (*Process, error) {
 	runCtx, cancel := context.WithTimeout(ctx, command.Timeout)
-	cmd := exec.CommandContext(runCtx, "bash", "--noprofile", "--norc", "-c", command.Script)
+	cmd := exec.CommandContext(runCtx, "bash", "--noprofile", "--norc", "-c", command.Script) // #nosec G204 -- Bash executes an approved command after policy checks.
 	cmd.Dir = command.Dir
 	cmd.Env = processenv.List(processenv.Build(command.Env))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

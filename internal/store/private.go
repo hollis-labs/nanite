@@ -34,14 +34,14 @@ func PreparePrivateDir(dir string) error {
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("Nanite data path %q must be a real directory", dir)
+		return fmt.Errorf("nanite data path %q must be a real directory", dir)
 	}
-	return os.Chmod(dir, 0700)
+	return os.Chmod(dir, 0700) // #nosec G302 -- Mode 0700 applies to the private directory, which requires owner traversal.
 }
 
 func privateFile(path string, create bool) error {
 	if create {
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- Only fixed SQLite filenames beneath the caller-selected private dir reach this helper.
 		if err == nil {
 			if err := file.Close(); err != nil {
 				return err
@@ -58,7 +58,7 @@ func privateFile(path string, create bool) error {
 		return err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("Nanite data path %q must be a regular file", path)
+		return fmt.Errorf("nanite data path %q must be a regular file", path)
 	}
 	return os.Chmod(path, 0600)
 }

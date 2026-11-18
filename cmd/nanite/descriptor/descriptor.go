@@ -12,7 +12,7 @@ import (
 
 // Load reads and structurally validates a descriptor without rewriting it.
 func Load(path string) (*kinds.Project, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- The caller provides the local descriptor path.
 	if err != nil {
 		return nil, err
 	}

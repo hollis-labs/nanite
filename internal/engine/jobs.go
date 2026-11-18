@@ -115,7 +115,7 @@ func (x *execution) jobStatus(ctx context.Context, kind, id string) (string, err
 		if err != nil {
 			return "", err
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }() // Read-only status log.
 		const tailSize = 8 << 10
 		stat, err := file.Stat()
 		if err != nil {

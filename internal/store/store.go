@@ -123,7 +123,7 @@ func (s *Store) Conversations(ctx context.Context) ([]Conversation, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	out := []Conversation{}
 	for rows.Next() {
 		c, err := scanConversation(rows)

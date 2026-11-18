@@ -121,7 +121,7 @@ func TestStreamChat_DeltasToolCallUsage(t *testing.T) {
 		gotError string
 	)
 	for ev := range ch {
-		switch ev.Type {
+		switch ev.Type { //nolint:exhaustive // This assertion collects only the event types under test.
 		case llmtypes.EventDelta:
 			text.WriteString(ev.Content)
 		case llmtypes.EventToolUse:
@@ -193,7 +193,7 @@ func TestStreamChat_MalformedToolArgumentsGracefulFallback(t *testing.T) {
 		gotError string
 	)
 	for ev := range ch {
-		switch ev.Type {
+		switch ev.Type { //nolint:exhaustive // This assertion collects only the event types under test.
 		case llmtypes.EventToolUse:
 			tu := *ev.ToolUse
 			toolUse = &tu
@@ -243,7 +243,7 @@ func TestStreamChat_ErrorTranslated(t *testing.T) {
 		gotDone  bool
 	)
 	for ev := range ch {
-		switch ev.Type {
+		switch ev.Type { //nolint:exhaustive // This assertion collects only the event types under test.
 		case llmtypes.EventError:
 			gotError = ev.Error
 		case llmtypes.EventDone:

@@ -23,7 +23,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+      - name: lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run
       - run: go vet ./...
+      - name: vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - name: pins match the Substrate BOM
         env:
           GOWORK: "off"
@@ -32,7 +36,10 @@ jobs:
         run: |
           go run github.com/hollis-labs/substrate/cmd/substrate generate -f cmd/nanite/substrate.yaml
           git diff --exit-code -- cmd/nanite/substrate_wiring.go
-      - run: go build ./...
+      - name: compile for darwin/arm64 and linux/amd64
+        run: |
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
       - run: go test -race -count=1 ./...
       - run: go run ./examples/embed-host --offline
       - name: public working-tree hygiene

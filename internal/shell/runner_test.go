@@ -73,7 +73,7 @@ wait "$child"`,
 	case <-time.After(2 * time.Second):
 		t.Fatal("shell stayed active after cancellation")
 	}
-	if content, err := os.ReadFile(cleaned); err != nil || string(content) != "cleaned" {
+	if content, err := os.ReadFile(cleaned); err != nil || string(content) != "cleaned" { // #nosec G304 -- Reads a test fixture.
 		t.Fatalf("cleanup marker = %q, %v", content, err)
 	}
 }

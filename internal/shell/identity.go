@@ -16,7 +16,7 @@ func ProcessIdentity(ctx context.Context, pid int) string {
 	}
 	limit, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(limit, "/bin/ps", "-o", "pgid=", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	cmd := exec.CommandContext(limit, "/bin/ps", "-o", "pgid=", "-o", "lstart=", "-p", strconv.Itoa(pid)) // #nosec G204 -- Queries the fixed process utility with a numeric PID.
 	cmd.Env = []string{"LC_ALL=C"}
 	raw, err := cmd.Output()
 	if err != nil {

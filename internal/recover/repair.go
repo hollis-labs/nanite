@@ -38,7 +38,7 @@ type outcome struct {
 	MissingRequired []string       `json:"missing_required"`
 }
 
-// Repair adapts the original structural repair contract. The model may move
+// ParseRepair adapts the original structural repair contract. The model may move
 // existing values or use an authored schema default. Every proposed repair
 // must pass both the value check and the complete schema before execution.
 func ParseRepair(raw string, original map[string]any, schema json.RawMessage) (map[string]any, error) {

@@ -90,6 +90,8 @@ func (p *Provider) Complete(ctx context.Context, req llmtypes.ChatRequest) (stri
 			return "", fmt.Errorf("fake provider: %s", event.Error)
 		case llmtypes.EventDone:
 			return text.String(), nil
+		default:
+			// Only text and terminal events affect Complete.
 		}
 	}
 	if err := ctx.Err(); err != nil {

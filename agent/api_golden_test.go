@@ -92,7 +92,7 @@ func TestAPIGolden(t *testing.T) {
 
 	const path = "testdata/exported-api.golden"
 	if *updateAPIGolden {
-		if err := os.WriteFile(path, []byte(got.String()), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(got.String()), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

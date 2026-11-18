@@ -45,6 +45,8 @@ func translateError(err error) error {
 	switch translated.Class {
 	case failure.Retryable:
 		translated.Cause = fmt.Errorf("%w: %w", ErrTransient, apiErr)
+	case failure.Overflow, failure.Fatal:
+		// Keep the classified error as-is.
 	case failure.Auth:
 		translated.Cause = fmt.Errorf("%w: %w", ErrAuthentication, apiErr)
 	}

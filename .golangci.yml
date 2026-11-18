@@ -77,14 +77,14 @@ linters:
       rules:
         engine-boundary:
           files:
-            - "**/agent/**/*.go"
-            - "**/internal/**/*.go"
+            - "**/agent/**.go"
+            - "**/internal/**.go"
           deny:
             - pkg: github.com/hollis-labs/substrate
               desc: Substrate wiring belongs under cmd/nanite.
         public-boundary:
           files:
-            - "**/internal/**/*.go"
+            - "**/internal/**.go"
           deny:
             - pkg: github.com/hollis-labs/nanite/agent
               desc: Define shared values internally and alias them from agent.
@@ -119,6 +119,8 @@ linters:
 
     misspell:
       locale: US
+      # The existing SQLite status and tool result wire spelling is stable.
+      ignore-rules: [cancelled]
 
     revive:
       # Only enable rules that catch real problems. Avoid cosmetic rules that
@@ -166,6 +168,10 @@ linters:
     generated: lax
 
     rules:
+      # The shadow analyzer flags checked, early-returning err values in
+      # nested scopes. Keep its checks for other shadowed variables.
+      - linters: [govet]
+        text: 'shadow: declaration of "err" shadows declaration'
       # Test files: relax errcheck — test helpers often ignore errors
       # intentionally (e.g., httptest, os.Remove cleanup).
       - path: _test\.go

@@ -34,14 +34,14 @@ permissions:
 `
 
 func initAgent(dir string) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil { // #nosec G703 -- The operator explicitly selects where to initialize the agent.
 		return err
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }() // Closed after all files have been committed.
 	files := []struct{ name, data string }{{"agent.md", starterAgent}, {"host.yaml", starterHost}, {".mcp.json", "{\"mcpServers\":{}}\n"}, {".gitignore", ".nanite/\n"}}
 	for _, entry := range files {
 		if _, err := root.Lstat(entry.name); err == nil {

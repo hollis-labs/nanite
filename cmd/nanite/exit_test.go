@@ -27,7 +27,7 @@ func TestPromptWithoutKeyExitsNonzero(t *testing.T) {
 	for _, key := range []string{"SUBSTRATE_CONFIG", "NANITE_CONFIG", "NANITE_GATEWAY_URL", "NANITE_GATEWAY_KEY_REF", "NANITE_PROVIDER_KEY_ENV", "ANTHROPIC_API_KEY"} {
 		t.Setenv(key, "")
 	}
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPromptWithoutKeyExitsNonzero$")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPromptWithoutKeyExitsNonzero$") // #nosec G204 G702 -- Runs the current test binary with fixed test flags.
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	err := cmd.Run()

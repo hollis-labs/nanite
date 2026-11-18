@@ -30,7 +30,7 @@ func cliEvents(dir, path string, stdout io.Writer) (runtimeevents.Sink, func() e
 	if path == "" {
 		path = filepath.Join(dir, ".nanite", "events.jsonl")
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0600) // #nosec G304 G703 -- The operator selects the log path; open uses O_NOFOLLOW and mode 0600.
 	if err != nil {
 		return nil, nil, err
 	}

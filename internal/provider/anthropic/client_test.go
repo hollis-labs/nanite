@@ -21,7 +21,6 @@ func TestClient_ImplementsContracts(t *testing.T) {
 	c := New()
 	var _ llmcontracts.Provider = c
 	var _ llmcontracts.RateLimited = c
-	var _ llmcontracts.CacheableProvider = c
 	var _ llmcontracts.Cacheable = c
 }
 
@@ -298,7 +297,7 @@ func TestStreamChat_MalformedToolArgumentsGracefulFallback(t *testing.T) {
 		gotError     string
 	)
 	for ev := range ch {
-		switch ev.Type {
+		switch ev.Type { //nolint:exhaustive // This assertion collects only the event types under test.
 		case llmtypes.EventToolUse:
 			tu := *ev.ToolUse
 			toolUse = &tu

@@ -32,7 +32,7 @@ func useConfigFile(skip bool) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) { // #nosec G703 -- The operator selects this local configuration path.
 		return noop, nil
 	} else if err != nil {
 		return nil, err

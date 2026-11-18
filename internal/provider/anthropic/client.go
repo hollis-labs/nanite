@@ -51,9 +51,9 @@ type Client struct {
 	sdk            sdk.Client
 	httpClient     *http.Client
 	RateTracker    *llmcontracts.TokenRateTracker
-	CircuitBreaker *llmcontracts.CircuitBreaker
-	OnStatus       StatusCallback // optional; called during pacing waits
-	OnCircuitOpen  func()         // called when the circuit breaker trips
+	CircuitBreaker *llmcontracts.CircuitBreaker //nolint:staticcheck // Retain the adapter’s existing streaming breaker semantics.
+	OnStatus       StatusCallback               // optional; called during pacing waits
+	OnCircuitOpen  func()                       // called when the circuit breaker trips
 	// cacheHints holds hints set via SetCacheHints. Deprecated: prefer
 	// llmtypes.ChatRequest.CacheHints on each call. Retained as a fallback
 	// for callers that have not migrated; effectiveCacheHints reads
@@ -78,7 +78,7 @@ type StatusCallback = func(string)
 var (
 	_ llmcontracts.Provider          = (*Client)(nil)
 	_ llmcontracts.RateLimited       = (*Client)(nil)
-	_ llmcontracts.CacheableProvider = (*Client)(nil)
+	_ llmcontracts.CacheableProvider = (*Client)(nil) //nolint:staticcheck // Compatibility fallback is covered by the adapter cache tests.
 	_ llmcontracts.Cacheable         = (*Client)(nil)
 )
 

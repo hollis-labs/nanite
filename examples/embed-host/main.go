@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,14 +35,14 @@ func main() {
 	}
 }
 
-func demo(ctx context.Context, w io.Writer, dir string, offline bool) error {
+func demo(ctx context.Context, w io.Writer, dir string, offline bool) (retErr error) {
 	if dir == "" {
 		var err error
 		dir, err = os.MkdirTemp("", "nanite-embed-")
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(dir)
+		defer func() { retErr = errors.Join(retErr, os.RemoveAll(dir)) }()
 		for _, name := range []string{"agent.md", "host.yaml"} {
 			data, err := exampleFiles.ReadFile("agentdir/" + name)
 			if err != nil {
@@ -75,7 +76,7 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) error {
 	if err != nil {
 		return err
 	}
-	defer a.Close()
+	defer func() { retErr = errors.Join(retErr, a.Close()) }()
 	conversation, err := a.NewConversation(ctx)
 	if err != nil {
 		return err
@@ -162,12 +163,14 @@ func turnReport(turn int, report agent.SlotReport, offered, calls []string, resp
 		}
 		fmt.Fprintf(&out, "  %s: %d tokens, changed %s\n", name, slot.Tokens, changed)
 		for _, entry := range slot.Decisions {
-			disposition := "skip"
+			var disposition string
 			switch entry.Disposition {
 			case agent.SlotShip:
 				disposition = "ship"
 			case agent.SlotPointer:
 				disposition = "pointer"
+			case agent.SlotSkip:
+				disposition = "skip"
 			}
 			fmt.Fprintf(&out, "    %s/%s: %s\n", entry.Owner, entry.Key, disposition)
 		}

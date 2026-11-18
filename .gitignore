@@ -100,3 +100,7 @@ __pycache__/
 
 # Personal per-machine Claude Code settings — never tracked
 .claude/settings.local.json
+
+# Agent-local runtime state
+.nanite/
+*.open.lock

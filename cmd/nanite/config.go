@@ -9,10 +9,16 @@ import (
 // useConfigFile keeps an explicit SUBSTRATE_CONFIG, otherwise reads the app's
 // optional XDG config. It never creates a file or depends on the checkout.
 // Called once at process entry, before Substrate reads its override.
-func useConfigFile() (func(), error) {
+func useConfigFile(skip bool) (func(), error) {
+	if skip {
+		return overrideConfig("")
+	}
 	noop := func() {}
 	if os.Getenv("SUBSTRATE_CONFIG") != "" {
 		return noop, nil
+	}
+	if path := os.Getenv("NANITE_CONFIG"); path != "" {
+		return overrideConfig(path)
 	}
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
@@ -22,7 +28,7 @@ func useConfigFile() (func(), error) {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	path, err := filepath.Abs(filepath.Join(dir, substrateApp, "config.yaml"))
+	path, err := filepath.Abs(filepath.Join(dir, substrateApp, "nanite.yaml"))
 	if err != nil {
 		return nil, err
 	}
@@ -31,6 +37,10 @@ func useConfigFile() (func(), error) {
 	} else if err != nil {
 		return nil, err
 	}
+	return overrideConfig(path)
+}
+
+func overrideConfig(path string) (func(), error) {
 	old, had := os.LookupEnv("SUBSTRATE_CONFIG")
 	if err := os.Setenv("SUBSTRATE_CONFIG", path); err != nil {
 		return nil, err

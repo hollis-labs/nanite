@@ -27,15 +27,19 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	restore, err := useConfigFile()
+	return runArgs(ctx, os.Args[1:])
+}
+
+func runArgs(ctx context.Context, argv []string) error {
+	dir, args, err := extractDir(argv)
+	if err != nil {
+		return err
+	}
+	restore, err := useConfigFile(configIndependent(args))
 	if err != nil {
 		return err
 	}
 	defer restore()
-	dir, args, err := extractDir(os.Args[1:])
-	if err != nil {
-		return err
-	}
 	// Init and the Substrate commands do not require an agent database.
 	dataDir := ""
 	if requiresAgent(args) {
@@ -54,16 +58,37 @@ func run(ctx context.Context) error {
 	return root.ExecuteContext(ctx)
 }
 
-func requiresAgent(args []string) bool {
-	for _, arg := range args {
-		switch arg {
-		case "init", "validate", "version", "config", "health", "help", "completion", "-h", "--help":
+func configIndependent(args []string) bool {
+	if hasHelpFlag(args) {
+		return true
+	}
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "version", "init", "validate", "help", "completion":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasHelpFlag(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--":
 			return false
-		default:
+		case "-p", "--prompt", "--output", "--resume":
+			i++
+		case "-h", "--help":
 			return true
 		}
 	}
-	return true
+	return false
+}
+
+func requiresAgent(args []string) bool {
+	return !configIndependent(args) && (len(args) == 0 || (args[0] != "config" && args[0] != "health"))
 }
 
 type localBoundary struct{}

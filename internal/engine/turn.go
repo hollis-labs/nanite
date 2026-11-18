@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/station"
+	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tools"
@@ -45,8 +46,8 @@ type execution struct {
 	result     events.Result
 }
 
-func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, skills string) {
-	result, err := e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, skills)
+func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill) {
+	result, err := e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills)
 	if err != nil {
 		if clean := e.scrub.Text(err.Error()); clean != err.Error() {
 			err = errors.New(clean)
@@ -59,7 +60,7 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	e.mu.Unlock()
 }
 
-func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, skills string) (events.Result, error) {
+func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill) (events.Result, error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
 	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	if err != nil {
@@ -73,12 +74,21 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, skills)
+	catalog := skills.NewCatalog(def.Skills, hostSkills)
+	lease, warnings := e.mcp.Reconcile(ctx, def.Snapshot.MCP)
+	defer lease.Close()
+	mcpTools, discoveryWarnings := lease.Tools(ctx)
+	warnings = append(warnings, discoveryWarnings...)
+	for i, warning := range warnings {
+		warnings[i] = e.scrub.Text(warning)
+		e.cfg.Logger.WarnContext(ctx, warnings[i])
+	}
+	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, catalog.Listing(), warnings)
 	if err != nil {
 		return events.Result{}, err
 	}
 	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New()}
-	if err := x.prepareTools(hostTools); err != nil {
+	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)

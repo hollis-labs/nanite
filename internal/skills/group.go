@@ -43,13 +43,20 @@ func (g *Groups) RemoveGroup(group string) {
 
 // Listing returns names and descriptions for the skills slot.
 func (g *Groups) Listing() string {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
 	var lines []string
-	for _, id := range slices.Sorted(maps.Keys(g.groups)) {
-		for _, skill := range g.groups[id] {
-			lines = append(lines, "- "+skill.Name+": "+skill.Description)
-		}
+	for _, skill := range g.Snapshot() {
+		lines = append(lines, "- "+skill.Name+": "+skill.Description)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Snapshot returns host skills in stable group order.
+func (g *Groups) Snapshot() []Skill {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	var out []Skill
+	for _, group := range slices.Sorted(maps.Keys(g.groups)) {
+		out = append(out, g.groups[group]...)
+	}
+	return out
 }

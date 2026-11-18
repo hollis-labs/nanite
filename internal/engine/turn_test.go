@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tools"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const fixtureAgent = `---
@@ -251,5 +256,88 @@ func TestThinkingReplayPreservesOnlyValidSignatures(t *testing.T) {
 	h, err := db.History(t.Context(), id)
 	if err != nil || len(h[1].Blocks) != 3 || strings.Contains(h[1].Blocks[1].Text, key) || h[1].Blocks[1].Signature != "" {
 		t.Fatalf("redacted thinking missing from raw history, error %v", err)
+	}
+}
+
+func TestSkillEditTakesEffectOnNextTurn(t *testing.T) {
+	call := func(id string) fake.Response {
+		return fake.Response{Events: []llmtypes.StreamEvent{
+			{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: id, Name: "skill_get", Input: map[string]any{"name": "fixture"}}},
+			{Type: llmtypes.EventDone},
+		}}
+	}
+	p := &watchedProvider{Provider: fake.New(call("one"), fake.Text("first"), call("two"), fake.Text("second"))}
+	e, db, id := setupEngine(t, p, "")
+	dir := filepath.Join(e.cfg.Dir, "skills", "fixture")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"old skill body", "new skill body"} {
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: fixture\ndescription: load fixture\n---\n"+body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		run, err := e.Send(t.Context(), id, Input{Text: "read the skill"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		history, err := db.History(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := history[len(history)-2].Blocks[0].Content
+		if !strings.Contains(result, body) || !strings.Contains(result, dir) {
+			t.Fatalf("skill result %q", result)
+		}
+	}
+	for _, req := range p.requests {
+		for _, slot := range req.SlotBlocks {
+			if slot.Name == "skills" && (strings.Contains(slot.Content, "skill body") || !strings.Contains(slot.Content, "fixture: load fixture")) {
+				t.Fatalf("skills slot leaked body or lost listing: %q", slot.Content)
+			}
+		}
+	}
+}
+
+func TestMCPConfigurationReloadAndWarnings(t *testing.T) {
+	p := &watchedProvider{Provider: fake.New(fake.Text("first"), fake.Text("second"), fake.Text("third"))}
+	e, _, id := setupEngine(t, p, "")
+	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "1"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "ping", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil, nil
+		})
+	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+	defer httpServer.Close()
+	t.Setenv("NANITE_MCP_TEST_MISSING", "")
+	if err := os.Unsetenv("NANITE_MCP_TEST_MISSING"); err != nil {
+		t.Fatal(err)
+	}
+	authored := []string{
+		fmt.Sprintf(`{"mcpServers":{"fixture":{"type":"http","url":%q}}}`, httpServer.URL),
+		`{"mcpServers":{"broken":{"command":"unused","env":{"VALUE":"${NANITE_MCP_TEST_MISSING}"}}}}`,
+		`{"mcpServers":{}}`,
+	}
+	for i, file := range authored {
+		if err := os.WriteFile(filepath.Join(e.cfg.Dir, ".mcp.json"), []byte(file), 0600); err != nil {
+			t.Fatal(err)
+		}
+		run, err := e.Send(t.Context(), id, Input{Text: "go"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		req := p.requests[i]
+		tool := slices.ContainsFunc(req.Tools, func(t llmtypes.ToolDefinition) bool { return t.Name == "mcp__fixture__ping" })
+		warning := slices.ContainsFunc(req.SlotBlocks, func(s llmtypes.SlotBlock) bool {
+			return s.Name == "session" && strings.Contains(s.Content, "MCP server")
+		})
+		if tool != (i == 0) || warning != (i == 1) {
+			t.Fatalf("turn %d: MCP tool=%v warning=%v", i, tool, warning)
+		}
 	}
 }

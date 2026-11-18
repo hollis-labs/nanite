@@ -19,6 +19,17 @@ it covers. Provider requests use that summary and the messages that follow it.
 Host history retains the full transcript. New schema changes use numbered
 migrations.
 
+## MCP and skills
+
+Nanite reads `.mcp.json` at the start of each turn. It supports stdio,
+streamable HTTP, and SSE. An unchanged server connection is reused. A replaced
+connection closes when turns already using it finish. Discovery failures appear
+as warnings in the session slot and logs.
+
+The skills slot contains names and descriptions. The read-only `skill_get`
+tool returns the instructions and, for authored skills, their directory. Changes
+to `SKILL.md` take effect on the next turn.
+
 ## Known limitations
 
 File tools are confined to the workspace roots. Approved Bash commands run with

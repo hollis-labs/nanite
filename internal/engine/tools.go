@@ -16,13 +16,16 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/shell"
+	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
-func (x *execution) prepareTools(host []tools.Tool) error {
+func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog) error {
 	cache := x.engine.cache
 	catalogue := selftools.New(x.engine.cfg.Store, x.info.ID, x.engine.cfg.WorkspaceRoots)
+	catalogue = append(catalogue, selftools.Skills(catalog)...)
+	catalogue = append(catalogue, mcp...)
 	roots := x.engine.cfg.WorkspaceRoots
 	if len(roots) > 0 {
 		catalogue = append(catalogue, selftools.Bash(shell.Plain{}, roots[0], x.definition.Runtime.Env))

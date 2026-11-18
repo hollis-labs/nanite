@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
+	"github.com/hollis-labs/nanite/internal/mcpclient"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/skills"
@@ -52,6 +51,7 @@ type Engine struct {
 	grants   map[string]map[string]bool
 	closed   bool
 	scrub    *redact.Redactor
+	mcp      *mcpclient.Client
 	cache    *toolresult.Cache
 }
 
@@ -70,7 +70,7 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{cfg: cfg, scrub: scrub, cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
+	return &Engine{cfg: cfg, scrub: scrub, mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool)}, nil
 }
 
@@ -101,7 +101,7 @@ func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error)
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
 	e.active[id] = r
-	go e.execute(ctx, r, info, input, state, prev, e.cfg.Tools.Snapshot(), e.cfg.Skills.Listing())
+	go e.execute(ctx, r, info, input, state, prev, e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot())
 	return r, nil
 }
 
@@ -117,6 +117,10 @@ func (e *Engine) Close() {
 	for _, r := range runs {
 		<-r.done
 	}
+	if err := e.mcp.Close(); err != nil {
+		e.cfg.Logger.Warn("MCP connections did not close cleanly")
+	}
+
 }
 
 func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, error) {
@@ -128,7 +132,7 @@ func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, err
 	return provider.New(cfg)
 }
 
-func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing string) (slots.Assembled, error) {
+func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing string, warnings []string) (slots.Assembled, error) {
 	mode := def.Snapshot.Profile.Permissions.Mode
 	if mode == "" {
 		mode = "default"
@@ -137,16 +141,11 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: "Use the available tools when needed. Respect the workspace and tool permissions."}},
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: "Permission mode: " + mode + ". File tools are confined to the workspace roots. Approved Bash commands run with the user’s privileges and can access paths outside those roots."}},
-		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "host-skills", Content: skillListing}},
+		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},
 	}
 
-	var authored strings.Builder
-	for _, name := range slices.Sorted(maps.Keys(def.Skills)) {
-		ref := def.Skills[name]
-		fmt.Fprintf(&authored, "- %s: %s\n", ref.Name, ref.Description)
-	}
-	if authored.Len() > 0 {
-		updates = append(updates, slots.Update{Slot: slots.Skills, Entry: slots.Entry{Owner: "file", Key: "authored-skills", Content: strings.TrimSuffix(authored.String(), "\n")}})
+	for i, warning := range warnings {
+		updates = append(updates, slots.Update{Slot: slots.Session, Entry: slots.Entry{Owner: "engine", Key: fmt.Sprintf("mcp-warning-%04d", i), Content: warning}})
 	}
 	for _, file := range def.Context {
 		updates = append(updates, slots.Update{Slot: slots.Context, Entry: slots.Entry{Owner: "file", Key: file.Name, Content: file.Text}})

@@ -1,0 +1,13 @@
+# Generated from project.yaml settings.runtime; regenerate with folio deploy render.
+schema: fleet-deploy/v1
+app: nanite
+repo: hollis-labs/nanite
+artifact: {name: "nanite-{sha12}", tarball: "nanite_{version}_{os}_{arch}.tar.gz", sums: SHA256SUMS}
+targets:
+  - id: nanite-linux-amd64
+    when: {os: linux, arch: amd64}
+    hosts: [fleet-host]
+    binary: nanite
+    install_root: "~/.local/share/fleet/releases/nanite"
+    symlinks:
+      - path: "~/.local/bin/nanite"

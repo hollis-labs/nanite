@@ -1,0 +1,11 @@
+# nanite on Substrate (class 2). The manifest is the shell: modules and config.
+app: nanite
+variant: cli
+profiles: [minimal]
+modules:
+  add: [cli, secrets, database, policy]
+config:
+  logging: { level: info, format: text }
+  database:
+    sqlite: { path: ":memory:" }
+  policy: { mode: enforce }

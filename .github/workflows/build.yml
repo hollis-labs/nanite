@@ -1,0 +1,19 @@
+name: nanite build
+# Release recipe (class 2: tags optional): publishes the release tarballs and SHA256SUMS as workflow
+# artifacts (no tag, no release, no install) that `fleet-install` reads; deploy.yaml rides inside the
+# selected target tarball. Signing is a later step.
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  build:
+    uses: hollis-labs/tools/.github/workflows/go-app-build.yml@145fb50d827a1af7e38236eda5751cee22970ba5
+    with:
+      working_directory: .
+      app: nanite
+      targets: '["linux/amd64"]'
+      main_pkg: ./cmd/nanite
+      test_cmd: "go vet ./... && go test -race -count=1 ./..."
+      extra_files: deploy.yaml project.yaml

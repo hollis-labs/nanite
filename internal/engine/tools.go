@@ -13,7 +13,9 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/internal/events"
+	"github.com/hollis-labs/nanite/internal/mcpclient"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/skills"
@@ -24,6 +26,10 @@ import (
 func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog) error {
 	cache := x.engine.cache
 	catalogue := selftools.New(x.engine.cfg.Store, x.info.ID, x.engine.cfg.WorkspaceRoots)
+	catalogue = append(catalogue, selftools.Question(func(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error) {
+		return x.ask(ctx, prompt, schema)
+	}))
+
 	catalogue = append(catalogue, selftools.Skills(catalog)...)
 	catalogue = append(catalogue, mcp...)
 	roots := x.engine.cfg.WorkspaceRoots
@@ -51,6 +57,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 		})
 	}
 	x.catalogue = make(map[string]tools.Tool)
+	x.validators = make(map[string]recover.Validator)
 	for _, tool := range append(catalogue, host...) {
 		if x.info.Role == "planner" && !tool.ReadOnly {
 			continue
@@ -60,6 +67,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 			return fmt.Errorf("tool %s schema: %w", tool.Name, err)
 		}
 		x.catalogue[tool.Name] = tool
+		x.validators[tool.Name] = recover.NewValidator(tool.InputSchema)
 		x.specs = append(x.specs, llmtypes.ToolDefinition{Name: tool.Name, Description: tool.Description, InputSchema: schema})
 	}
 	return nil
@@ -141,6 +149,11 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.ToolCallStarted{EventMeta: meta, CallID: call.ID, Name: t.Name, Input: started}
 		})
+		if err := x.validators[t.Name].Validate(call.Input); err != nil {
+			results[i].Content = "invalid tool arguments: " + x.engine.scrub.Text(err.Error())
+			continue
+		}
+
 		if call.Name == "bash" {
 			if _, err := selftools.ParseBash(raw); err != nil {
 				results[i].Content = x.engine.scrub.Text(err.Error())
@@ -165,7 +178,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			return
 		}
 		started := time.Now()
-		result, err := x.catalogue[call.Name].Handler(ctx, tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+		result, err := x.catalogue[call.Name].Handler(mcpclient.WithAsk(ctx, x.ask), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
 		if err != nil {
 			result = tools.Result{Text: err.Error(), IsError: true}
 		}
@@ -203,4 +216,8 @@ func (x *execution) cancelledTools(calls []llmtypes.ToolUseBlock) error {
 		blocks[i] = llmtypes.ContentBlock{Type: "tool_result", ToolUseID: call.ID, Content: "turn interrupted before execution", IsError: true}
 	}
 	return x.message("tool", blocks)
+}
+
+func (x *execution) ask(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error) {
+	return x.run.ask(ctx, x.engine.scrub.Text(prompt), schema, x.engine.scrub.Bytes(schema))
 }

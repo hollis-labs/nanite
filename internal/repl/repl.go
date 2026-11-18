@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -130,6 +131,14 @@ func (t Terminal) Chat(ctx context.Context, fresh func(context.Context) (Sender,
 						_, _ = fmt.Fprint(t.Output, v.Text)
 					case events.ToolCallStarted:
 						_, _ = fmt.Fprintf(t.Output, "\n[%s]\n", v.Name)
+					case events.Question:
+						if answerErr := t.answer(turnCtx, run, v); answerErr != nil {
+							run.Cancel()
+							stop()
+							_, _ = run.Wait()
+							return answerErr
+						}
+
 					case events.SlotsAssembled:
 						report = v.Report
 					}
@@ -159,6 +168,10 @@ func One(ctx context.Context, c Sender, prompt, format string, out io.Writer) er
 	if format == "stream-json" {
 		enc := json.NewEncoder(out)
 		for event := range run.Events() {
+			if question, ok := event.(events.Question); ok {
+				_ = run.Answer(question.ID, events.Answer{Value: json.RawMessage("null")})
+			}
+
 			var payload any = event
 			if failed, ok := event.(events.RunFailed); ok {
 				payload = struct {
@@ -187,6 +200,51 @@ func One(ctx context.Context, c Sender, prompt, format string, out io.Writer) er
 		_, err = fmt.Fprintln(out, result.Text)
 	}
 	return err
+}
+
+func (t Terminal) answer(ctx context.Context, run *engine.Run, q events.Question) error {
+	var schema struct{ Type string }
+	_ = json.Unmarshal(q.Schema, &schema)
+	if _, err := fmt.Fprintf(t.Output, "\n%s\n", q.Prompt); err != nil {
+		return err
+	}
+	if schema.Type != "string" {
+		if _, err := fmt.Fprintf(t.Output, "Answer as JSON matching %s. Enter /decline to skip.\n", q.Schema); err != nil {
+			return err
+		}
+	}
+	for {
+		if _, err := fmt.Fprint(t.Output, "Answer: "); err != nil {
+			return err
+		}
+		line, err := t.read(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		input := strings.TrimSpace(line)
+		var value json.RawMessage
+		switch {
+		case input == "/decline" || (input == "" && errors.Is(err, io.EOF)):
+			value = json.RawMessage("null")
+		case schema.Type == "string":
+			value, _ = json.Marshal(input)
+		default:
+			value = json.RawMessage(input)
+		}
+		if err := run.Answer(q.ID, events.Answer{Value: value}); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if _, writeErr := fmt.Fprintln(t.Output, err); writeErr != nil {
+				return writeErr
+			}
+			continue
+		}
+		return nil
+	}
 }
 
 // Sender is the part of an authored conversation used by the terminal.

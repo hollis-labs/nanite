@@ -51,6 +51,7 @@ type Engine struct {
 	grants   map[string]map[string]bool
 	closed   bool
 	scrub    *redact.Redactor
+	notices  chan store.Notice
 	mcp      *mcpclient.Client
 	cache    *toolresult.Cache
 }
@@ -70,7 +71,7 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{cfg: cfg, scrub: scrub, mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
+	return &Engine{cfg: cfg, scrub: scrub, notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool)}, nil
 }
 
@@ -108,6 +109,7 @@ func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error)
 func (e *Engine) Close() {
 	e.mu.Lock()
 	e.closed = true
+	close(e.notices)
 	runs := make([]*Run, 0, len(e.active))
 	for _, r := range e.active {
 		runs = append(runs, r)
@@ -132,7 +134,7 @@ func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, err
 	return provider.New(cfg)
 }
 
-func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing string, warnings []string) (slots.Assembled, error) {
+func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing string, warnings []string, pending []store.Notice) (slots.Assembled, error) {
 	mode := def.Snapshot.Profile.Permissions.Mode
 	if mode == "" {
 		mode = "default"
@@ -142,6 +144,10 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: "Permission mode: " + mode + ". File tools are confined to the workspace roots. Approved Bash commands run with the user’s privileges and can access paths outside those roots."}},
 		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},
+	}
+
+	for _, notice := range pending {
+		updates = append(updates, slots.Update{Slot: slots.Session, Entry: slots.Entry{Owner: "engine", Key: "notice-" + notice.ID, Priority: 1, Content: notice.Kind + ": " + notice.Body}})
 	}
 
 	for i, warning := range warnings {

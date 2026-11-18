@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -10,14 +9,16 @@ import (
 )
 
 type Run struct {
-	id     string
-	events chan events.Event
-	done   chan struct{}
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	seq    uint64
-	result events.Result
-	err    error
+	id         string
+	events     chan events.Event
+	done       chan struct{}
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	questionMu sync.Mutex
+	questions  map[string]*pendingQuestion
+	seq        uint64
+	result     events.Result
+	err        error
 }
 
 func (r *Run) ID() string                  { return r.id }
@@ -28,17 +29,21 @@ func (r *Run) Wait() (events.Result, error) {
 		select {
 		case <-r.done:
 			return r.result, r.err
-		case _, open := <-r.events:
+		case event, open := <-r.events:
 			if !open {
 				<-r.done
 				return r.result, r.err
 			}
+			if question, ok := event.(events.Question); ok {
+				// A caller waiting without consuming events has no way to answer.
+				_ = r.Answer(question.ID, events.Answer{Value: []byte("null")})
+			}
+
 		}
 	}
 }
 
-func (r *Run) Answer(string, events.Answer) error { return errors.New("nanite: no pending question") }
-func (r *Run) Cancel()                            { r.cancel() }
+func (r *Run) Cancel() { r.cancel() }
 
 func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Event) {
 	r.mu.Lock()

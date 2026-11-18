@@ -75,7 +75,6 @@ type Agent struct {
 	slots     Slots
 	tools     ToolSet
 	skills    SkillSet
-	notices   chan Notice
 }
 
 // Info describes the current definition loaded from disk.
@@ -85,7 +84,7 @@ type Info struct {
 }
 
 // Notice reports an asynchronous completion.
-type Notice struct{ ID, ConversationID, Kind, Body string }
+type Notice = nanitestore.Notice
 
 // Open validates the authored agent directory and takes its exclusive lock.
 func Open(ctx context.Context, opts Options) (*Agent, error) {
@@ -123,7 +122,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	a := &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}, notices: make(chan Notice)}
+	a := &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}}
 	roots := []string{def.Directory}
 	if cwd, err := os.Getwd(); err == nil && cwd != def.Directory {
 		roots = append([]string{cwd}, roots...)
@@ -146,7 +145,6 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 func (a *Agent) Close() error {
 	a.closeOnce.Do(func() {
 		a.engine.Close()
-		close(a.notices)
 		a.closeErr = errors.Join(a.store.Close(), a.lock.Close())
 	})
 	return a.closeErr
@@ -174,7 +172,7 @@ func (a *Agent) Tools() *ToolSet { return &a.tools }
 func (a *Agent) Skills() *SkillSet { return &a.skills }
 
 // Notices returns asynchronous job and subagent notices.
-func (a *Agent) Notices() <-chan Notice { return a.notices }
+func (a *Agent) Notices() <-chan Notice { return a.engine.Notices() }
 
 // RebuildIndex reconstructs the SQLite conversation projection from transcripts.
 func (a *Agent) RebuildIndex(ctx context.Context) error {

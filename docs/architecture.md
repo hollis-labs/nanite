@@ -32,6 +32,19 @@ The skills slot contains names and descriptions. The read-only `skill_get`
 tool returns the instructions and, for authored skills, their directory. Changes
 to `SKILL.md` take effect on the next turn.
 
+## Questions and notices
+
+The `ask_user` tool and MCP form elicitation pause an active tool call until a
+host answers or the turn is cancelled. The REPL prompts for an answer. One-shot
+CLI commands decline questions. A completion notice goes to the host's notice
+channel and stays in SQLite until it appears in a later turn's session slot.
+
+Before running a tool, Nanite validates the arguments against its schema. For
+invalid arguments, it can ask the provider for one structural repair using
+existing values or schema defaults. Repaired arguments pass schema validation
+and authorization before execution. Set `NANITE_AUTO_REPAIR=false` to turn off
+repair calls.
+
 ## Known limitations
 
 File tools are confined to the workspace roots. Approved Bash commands run with
@@ -51,3 +64,6 @@ catalog consumes context, and Nanite logs a warning above 100 MCP tools.
 Default-mode approvals use the server's `readOnlyHint`. An explicit deny or
 ask rule in `permissions.yaml`, such as `tool: mcp__myserver__*`, overrides
 that hint.
+
+MCP elicitation supports form prompts. Calls sharing one registration run
+serially so a server question can be routed to the correct turn.

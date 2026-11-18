@@ -22,6 +22,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/station"
+	"github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -37,9 +38,11 @@ type execution struct {
 	assembled  slots.Assembled
 	policy     policy.PDP
 	journal    *store.Journal
+	submitted  bool
 	messageIDs []string
 	messages   []llmtypes.ChatMessage
 	parent     *string
+	validators map[string]recover.Validator
 	catalogue  map[string]tools.Tool
 	specs      []llmtypes.ToolDefinition
 	loop       *loopdetect.Detector
@@ -83,7 +86,11 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		warnings[i] = e.scrub.Text(warning)
 		e.cfg.Logger.WarnContext(ctx, warnings[i])
 	}
-	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, catalog.Listing(), warnings)
+	pending, err := e.cfg.Store.PendingNotices(ctx, info.ID)
+	if err != nil {
+		return events.Result{}, err
+	}
+	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, catalog.Listing(), warnings, pending)
 	if err != nil {
 		return events.Result{}, err
 	}
@@ -126,7 +133,11 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		r.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.SlotsAssembled{EventMeta: meta, Report: assembled.Report}
 		})
+		// Mark delivery only after a model request has received the session slot.
 		err = x.generate(ctx)
+		if x.submitted {
+			err = errors.Join(err, e.cfg.Store.MarkNoticesDelivered(context.WithoutCancel(ctx), info.ID, r.id, deliveredNoticeIDs(assembled.Report, pending)))
+		}
 	}
 	record.Status = "completed"
 	record.StopReason = x.result.StopReason
@@ -206,6 +217,7 @@ func (x *execution) generate(ctx context.Context) error {
 			cancel()
 			return attempt{}, x.retry(ctx, err, &retries, &runErr)
 		}
+		x.submitted = true
 		return attempt{events: stream, cancel: cancel}, runloop.Proceed
 	}
 	consume := func(ctx context.Context, a attempt) (step, runloop.Directive) {
@@ -232,6 +244,7 @@ func (x *execution) generate(ctx context.Context) error {
 	settle := func(ctx context.Context, got step) runloop.Directive {
 		allText.WriteString(got.text)
 		x.result.Steps++
+		x.repairArgs(ctx, &got)
 		if len(got.blocks) > 0 {
 			if runErr = x.message("assistant", got.blocks); runErr != nil {
 				return runloop.Terminate

@@ -5,13 +5,14 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 )
 
-// Run is an active conversation turn.
+// Run is an active conversation turn. Read Events and call Answer for interactive
+// questions before Wait. Wait declines any unanswered question it consumes.
 type Run = engine.Run
 
 // EventSink receives normalized runtime events.
 type EventSink = events.Sink
 
-// Answer is part of the run event contract.
+// Answer carries a JSON value for a pending question. Use JSON null to decline.
 type Answer = events.Answer
 
 // Event is part of the run event contract.

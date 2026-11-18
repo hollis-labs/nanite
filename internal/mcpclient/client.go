@@ -46,6 +46,8 @@ type Client struct {
 
 type registration struct {
 	name, key        string
+	callSlot         chan struct{}
+	question         callQuestion
 	legacySSE        bool
 	digest           [32]byte
 	users            int
@@ -72,6 +74,11 @@ func New(dir string, resolver *secrets.Resolver, scope *redact.Scope, logger *sl
 	c.pool = mcp.NewPool(mcp.WithIdentity("nanite", "0.5.0"), mcp.WithRetries(1),
 		mcp.WithCommandEnv(commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes), mcp.WithHTTPClient(httpClient),
 		mcp.WithDefaultCallTimeouts(map[string]time.Duration{"stdio": 60 * time.Second, "http": 60 * time.Second, "sse": 60 * time.Second}),
+		mcp.WithClientOptions(func(key string, options *sdk.ClientOptions) {
+			options.ElicitationHandler = c.elicit(key)
+			options.Capabilities = &sdk.ClientCapabilities{Elicitation: &sdk.ElicitationCapabilities{Form: &sdk.FormElicitationCapabilities{}}}
+
+		}),
 		mcp.WithToolListChangedHandler(func(_ context.Context, key string) {
 			if value, ok := c.byKey.Load(key); ok {
 				value.(*registration).generation.Add(1)
@@ -122,7 +129,7 @@ func (c *Client) Reconcile(ctx context.Context, cfg agentdir.MCPConfig) (*Lease,
 				warnings = append(warnings, fmt.Sprintf("MCP server %q registration failed: %v", name, err))
 				continue
 			}
-			reg = &registration{name: name, key: key, digest: entry.digest, legacySSE: entry.config.Transport == "sse", current: true, listing: make(chan struct{}, 1)}
+			reg = &registration{name: name, key: key, digest: entry.digest, legacySSE: entry.config.Transport == "sse", current: true, listing: make(chan struct{}, 1), callSlot: make(chan struct{}, 1)}
 			c.byKey.Store(key, reg)
 			c.servers[name] = reg
 		}
@@ -263,6 +270,11 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 			if err := json.Unmarshal(call.Input, &args); err != nil {
 				return tools.Result{}, err
 			}
+			release, err := reg.bind(ctx)
+			if err != nil {
+				return tools.Result{}, err
+			}
+			defer release()
 			result, _, err := l.client.pool.CallTool(reg.transportContext(ctx), reg.key, spec.Name, args, mcp.WithCallRetry(mcp.RetryIfUnsent))
 			if err != nil {
 				if isUnknownTool(err) {

@@ -16,12 +16,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
 func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 	launch := toolResponse("background_start")
-	launch.Events[0].ToolUse.Input = map[string]any{"command": "while [ ! -f release ]; do sleep 0.05; done; printf job-finished", "timeout_seconds": 10.0}
+	launch.Events[0].ToolUse.Input = map[string]any{"command": "printf 'first-line\\n'; while [ ! -f release ]; do sleep 0.05; done; printf job-finished", "timeout_seconds": 10.0}
 	p := &watchedProvider{Provider: fake.New(launch, fake.Text("started"), fake.Text("noticed"))}
 	e, db, id := setupEngine(t, p, "")
 	e.cfg.WorkspaceRoots = []string{e.cfg.Dir}
@@ -50,6 +51,25 @@ func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 	if err != nil || job.Status != "running" {
 		t.Fatalf("job %+v, %v", job, err)
 	}
+	deadline := time.Now().Add(3 * time.Second)
+	check := execution{engine: e, info: store.Conversation{ID: id}}
+	for {
+		body, err := check.jobStatus(t.Context(), "shell", started.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(body, "first-line") {
+			if !strings.Contains(body, `"status":"running"`) {
+				t.Errorf("output appeared after job stopped: %s", body)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("live job never exposed its first output line")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "release"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +82,7 @@ func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 		t.Fatal("background job never posted a notice")
 	}
 	raw, err := os.ReadFile(job.OutputPath)
-	if err != nil || string(raw) != "job-finished" {
+	if err != nil || string(raw) != "first-line\njob-finished" {
 		t.Fatalf("job output %q, %v", raw, err)
 	}
 	info, err := os.Stat(job.OutputPath)

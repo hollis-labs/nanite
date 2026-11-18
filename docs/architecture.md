@@ -54,8 +54,23 @@ up to four children can run per agent. Cancelling a parent turn cancels its
 foreground child. Background children run until completion or job cancellation.
 
 Background Bash uses the same permission check, environment, and denylist as
-foreground Bash. A job can outlive its turn and records bounded, redacted output
-in `.nanite/jobs/`. Completion writes a notice for the parent conversation.
+foreground Bash. A job can outlive its turn and streams bounded, redacted output
+to `.nanite/jobs/`. The status tool includes the current 8 KiB log tail. Completion writes a notice for the parent conversation.
+
+## Recovery and observability
+
+On open, Nanite marks running turns as interrupted and running jobs as lost.
+It verifies a recorded shell process-group leader before signaling the group.
+The CLI offers to resume the interrupted conversation. Use
+`nanite --resume <conversation-id>` to resume directly. Recovery uses the stored
+user message, supplies an error result for each incomplete tool call, or
+finalizes a fully recorded turn.
+
+The CLI writes normalized runtime events to `.nanite/events.jsonl`.
+`--events <path>` selects another file and `--events -` writes to stdout.
+Nanite creates OpenTelemetry spans for turns, model requests, and tool calls.
+Set `NANITE_OTEL_DISABLED=1` to suppress span creation. An embedding process can
+configure its own global tracer provider.
 
 ## Known limitations
 
@@ -80,3 +95,7 @@ that hint.
 MCP elicitation supports form prompts. Calls sharing one registration run
 serially so a server question can be routed to the correct turn. This also
 serializes read-only calls to that server.
+
+Recovery signals shell jobs whose recorded process-group leader can still be
+verified. For an older or unverified process record, recovery marks the job
+lost and preserves the partial log.

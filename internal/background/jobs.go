@@ -5,13 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -25,7 +26,7 @@ type Task struct {
 	PID  int
 	Wait func() Outcome
 }
-type Start func(context.Context) (Task, error)
+type Start func(context.Context, io.Writer) (Task, error)
 
 type activeJob struct {
 	cancel context.CancelFunc
@@ -34,7 +35,7 @@ type activeJob struct {
 
 type Manager struct {
 	db     *store.Store
-	scrub  func(string) string
+	scrub  *redact.Redactor
 	notify func(store.Notice)
 	logger *slog.Logger
 	mu     sync.Mutex
@@ -42,7 +43,7 @@ type Manager struct {
 	closed bool
 }
 
-func New(db *store.Store, scrub func(string) string, notify func(store.Notice), logger *slog.Logger) *Manager {
+func New(db *store.Store, scrub *redact.Redactor, notify func(store.Notice), logger *slog.Logger) *Manager {
 	return &Manager{db: db, scrub: scrub, notify: notify, logger: logger, active: make(map[string]activeJob)}
 }
 
@@ -70,31 +71,37 @@ func (m *Manager) Start(ctx context.Context, job store.Job, start Start) (store.
 		return store.Job{}, err
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	task, err := start(runCtx)
+	logWriter := m.scrub.Writer(&boundedLog{file: file})
+	task, err := start(runCtx, logWriter)
 	if err != nil {
 		cancel()
+		_ = logWriter.Close()
 		_ = file.Close()
 		_ = os.Remove(job.OutputPath)
 		return store.Job{}, err
 	}
 	job.PID = task.PID
+	if task.PID > 0 {
+		job.ProcessIdentity = shell.ProcessIdentity(runCtx, task.PID)
+	}
 	if err := m.db.StartJob(runCtx, job); err != nil {
 		cancel()
 		locked = false
 		m.mu.Unlock()
 		_ = task.Wait()
+		_ = logWriter.Close()
 		_ = file.Close()
 		_ = os.Remove(job.OutputPath)
 		return store.Job{}, err
 	}
 	active := activeJob{cancel: cancel, done: make(chan struct{})}
 	m.active[job.ID] = active
-	go m.finish(runCtx, job, task, file, active)
+	go m.finish(runCtx, job, task, file, logWriter, active)
 	job.Status = "running"
 	return job, nil
 }
 
-func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os.File, active activeJob) {
+func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os.File, logWriter io.WriteCloser, active activeJob) {
 	defer active.cancel()
 	defer close(active.done)
 	defer func() { m.mu.Lock(); delete(m.active, job.ID); m.mu.Unlock() }()
@@ -106,25 +113,23 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 	} else if got.Err != nil || (got.ExitCode != nil && *got.ExitCode != 0) {
 		job.Status = "failed"
 	}
-	output := m.scrub(got.Output)
+	output := got.Output
 	if got.Err != nil {
-		output += "\n" + m.scrub(got.Err.Error()) + "\n"
+		output += "\n" + got.Err.Error() + "\n"
 	}
-	if len(output) > 64<<10 {
-		output = strings.ToValidUTF8(output[:64<<10], "") + "\n[output truncated]"
-	}
-	_, writeErr := file.WriteString(output)
-	if err := errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
-		m.logger.Warn("write background job output failed", "job", job.ID, "error", m.scrub(err.Error()))
+	_, writeErr := io.WriteString(logWriter, output)
+	flushErr := logWriter.Close()
+	if err := errors.Join(writeErr, flushErr, file.Sync(), file.Close()); err != nil {
+		m.logger.Warn("write background job output failed", "job", job.ID, "error", m.scrub.Text(err.Error()))
 		if job.Status == "succeeded" {
 			job.Status = "failed"
 		}
 	}
 	n := store.Notice{ID: store.NewID(time.Now()), ConversationID: job.ConversationID, Kind: job.Kind,
 		Body: fmt.Sprintf("%s job %s %s. Output: %s", job.Kind, job.ID, job.Status, job.OutputPath)}
-	n.Body = m.scrub(n.Body)
+	n.Body = m.scrub.Text(n.Body)
 	if err := m.db.CompleteJob(context.WithoutCancel(ctx), job, n); err != nil {
-		m.logger.Warn("persist background job completion failed", "job", job.ID, "error", m.scrub(err.Error()))
+		m.logger.Warn("persist background job completion failed", "job", job.ID, "error", m.scrub.Text(err.Error()))
 		return
 	}
 	m.notify(n)
@@ -155,8 +160,8 @@ func (m *Manager) Close() {
 }
 
 // Shell starts an isolated process group and returns a cancellable job task.
-func Shell(ctx context.Context, command shell.Command) (Task, error) {
-	process, err := shell.Start(ctx, command)
+func Shell(ctx context.Context, command shell.Command, output io.Writer) (Task, error) {
+	process, err := shell.StartStreaming(ctx, command, output)
 	if err != nil {
 		return Task{}, err
 	}
@@ -169,4 +174,29 @@ func Shell(ctx context.Context, command shell.Command) (Task, error) {
 		}
 		return Outcome{Output: result.Output, ExitCode: exit, Err: err}
 	}}, nil
+}
+
+const logCap = 64 << 10
+const truncatedMarker = "\n[output truncated]\n"
+
+type boundedLog struct {
+	file      *os.File
+	written   int
+	truncated bool
+}
+
+func (b *boundedLog) Write(p []byte) (int, error) {
+	n := min(len(p), logCap-len(truncatedMarker)-b.written)
+	written, err := b.file.Write(p[:n])
+	b.written += written
+	if err != nil {
+		return written, err
+	}
+	if n < len(p) && !b.truncated {
+		b.truncated = true
+		if _, err := b.file.WriteString(truncatedMarker); err != nil {
+			return n, err
+		}
+	}
+	return len(p), nil
 }

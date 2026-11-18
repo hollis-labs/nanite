@@ -30,6 +30,7 @@ import (
 var ErrBusy = errors.New("nanite: conversation is busy")
 
 type Config struct {
+	Events               events.Sink
 	Logger               *slog.Logger
 	Dir, GlobalSkillsDir string
 	Provider             llmcontracts.Provider
@@ -53,6 +54,7 @@ type Engine struct {
 	grants   map[string]map[string]bool
 	closed   bool
 	scrub    *redact.Redactor
+	runtime  *events.Runtime
 	jobs     *background.Manager
 	children subagent.Limit
 	notices  chan store.Notice
@@ -75,9 +77,9 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{cfg: cfg, scrub: scrub, notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
+	e := &Engine{cfg: cfg, scrub: scrub, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
-	e.jobs = background.New(cfg.Store, scrub.Text, e.publishNotice, cfg.Logger)
+	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger)
 	return e, nil
 }
 
@@ -87,6 +89,14 @@ type Input struct {
 }
 
 func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error) {
+	return e.startRun(ctx, id, input, false)
+}
+
+func (e *Engine) Resume(ctx context.Context, id string) (*Run, error) {
+	return e.startRun(ctx, id, Input{}, true)
+}
+
+func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bool) (*Run, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -103,12 +113,31 @@ func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error)
 	if err != nil {
 		return nil, err
 	}
+	interrupted, err := e.cfg.Store.Interrupted(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if interrupted != nil && !resume {
+		return nil, fmt.Errorf("conversation has an interrupted turn; resume it before sending")
+	}
+	if interrupted == nil && resume {
+		return nil, fmt.Errorf("conversation has no interrupted turn")
+	}
+	runID := store.NewID(time.Now())
+	if interrupted != nil {
+		runID = interrupted.ID
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
-	r := &Run{id: store.NewID(time.Now()), events: make(chan events.Event, 65), done: make(chan struct{}), cancel: cancel}
+	r := &Run{id: runID, events: make(chan events.Event, 65), done: make(chan struct{}), cancel: cancel}
+	r.observe = func(eventCtx context.Context, event events.Event) {
+		e.runtime.Observe(eventCtx, id, r.id, event)
+	}
+
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
 	e.active[id] = r
-	go e.execute(ctx, r, info, input, state, prev, e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot())
+	go e.execute(ctx, r, info, input, state, prev, e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot(), interrupted)
 	return r, nil
 }
 

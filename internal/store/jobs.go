@@ -10,22 +10,23 @@ import (
 )
 
 type Job struct {
-	ID             string `json:"id"`
-	ConversationID string `json:"conversation_id"`
-	Kind           string `json:"kind"`
-	Status         string `json:"status"`
-	Spec           string `json:"-"`
-	PID            int    `json:"-"`
-	OutputPath     string `json:"output_path,omitempty"`
-	ExitCode       *int   `json:"exit_code,omitempty"`
+	ID              string `json:"id"`
+	ConversationID  string `json:"conversation_id"`
+	Kind            string `json:"kind"`
+	Status          string `json:"status"`
+	Spec            string `json:"-"`
+	ProcessIdentity string `json:"-"`
+	PID             int    `json:"-"`
+	OutputPath      string `json:"output_path,omitempty"`
+	ExitCode        *int   `json:"exit_code,omitempty"`
 }
 
 func (s *Store) JobDir() string { return filepath.Join(filepath.Dir(s.transcripts), "jobs") }
 
 func (s *Store) StartJob(ctx context.Context, job Job) error {
 	return s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,conversation_id,kind,status,spec_json,pid,output_path,started_at)
-  VALUES(?,?,?,'running',?,NULLIF(?,0),?,?)`, job.ID, job.ConversationID, job.Kind, job.Spec, job.PID, job.OutputPath, format(time.Now()))
+		_, err := tx.ExecContext(ctx, `INSERT INTO jobs(id,conversation_id,kind,status,spec_json,pid,output_path,started_at,process_identity)
+  VALUES(?,?,?,'running',?,NULLIF(?,0),?,?,?)`, job.ID, job.ConversationID, job.Kind, job.Spec, job.PID, job.OutputPath, format(time.Now()), job.ProcessIdentity)
 		return err
 	})
 }

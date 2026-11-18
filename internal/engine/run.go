@@ -9,6 +9,7 @@ import (
 )
 
 type Run struct {
+	observe    func(context.Context, events.Event)
 	id         string
 	events     chan events.Event
 	done       chan struct{}
@@ -60,18 +61,29 @@ func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Even
 		return
 	}
 	r.seq++
-	r.events <- event(events.EventMeta{RunID: r.id, Seq: r.seq})
+	value := event(events.EventMeta{RunID: r.id, Seq: r.seq})
+	r.report(ctx, value)
+	r.events <- value
 }
 
-func (r *Run) finish(result events.Result, err error) {
-	r.result, r.err = result, err
+func (r *Run) report(ctx context.Context, event events.Event) {
+	if r.observe != nil {
+		r.observe(ctx, event)
+	}
+}
+
+func (r *Run) terminal(result events.Result, err error) events.Event {
 	r.seq++
 	meta := events.EventMeta{RunID: r.id, Seq: r.seq}
 	if err != nil {
-		r.events <- events.RunFailed{EventMeta: meta, Err: err}
-	} else {
-		r.events <- events.RunFinished{EventMeta: meta, Result: result}
+		return events.RunFailed{EventMeta: meta, Err: err}
 	}
+	return events.RunFinished{EventMeta: meta, Result: result}
+}
+
+func (r *Run) finish(result events.Result, err error, event events.Event) {
+	r.result, r.err = result, err
+	r.events <- event
 	close(r.events)
 	close(r.done)
 }

@@ -27,7 +27,7 @@ type Input = engine.Input
 type Message = store.Message
 
 // InterruptedTurn identifies a turn that can be resumed.
-type InterruptedTurn struct{ ID, UserMessageID string }
+type InterruptedTurn = store.InterruptedTurn
 
 // NewConversation creates a conversation.
 func (a *Agent) NewConversation(ctx context.Context, options ...ConversationOption) (*Conversation, error) {
@@ -73,10 +73,15 @@ func (c *Conversation) Send(ctx context.Context, in Input) (*Run, error) {
 }
 
 // Interrupted reports the turn left unfinished by the previous process.
-func (c *Conversation) Interrupted() *InterruptedTurn { return nil }
+func (c *Conversation) Interrupted() *InterruptedTurn {
+	turn, _ := c.agent.store.Interrupted(context.Background(), c.id)
+	return turn
+}
 
 // Resume continues an interrupted turn.
-func (c *Conversation) Resume(context.Context) (*Run, error) { return nil, ErrNotImplemented }
+func (c *Conversation) Resume(ctx context.Context) (*Run, error) {
+	return c.agent.engine.Resume(ctx, c.id)
+}
 
 // History reads the persisted messages in order.
 func (c *Conversation) History(ctx context.Context) ([]Message, error) {

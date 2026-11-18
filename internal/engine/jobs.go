@@ -32,7 +32,9 @@ func (x *execution) startShell(ctx context.Context, raw json.RawMessage) (string
 	e := x.engine
 	command := input.ShellCommand(e.cfg.WorkspaceRoots[0], x.definition.Runtime.Env)
 	job, err := e.jobs.Start(ctx, store.Job{ID: store.NewID(time.Now()), ConversationID: x.info.ID, Kind: "shell", Spec: e.scrub.Text(string(raw))},
-		func(runCtx context.Context) (background.Task, error) { return background.Shell(runCtx, command) })
+		func(runCtx context.Context, output io.Writer) (background.Task, error) {
+			return background.Shell(runCtx, command, output)
+		})
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +63,7 @@ func (x *execution) spawn(ctx context.Context, request subagent.Start) (string, 
 	if request.Background {
 		spec, _ := json.Marshal(struct{ ChildID, Role string }{child.ID, child.Role})
 		job, err := e.jobs.Start(ctx, store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: "subagent", Spec: string(spec)},
-			func(runCtx context.Context) (background.Task, error) {
+			func(runCtx context.Context, _ io.Writer) (background.Task, error) {
 				run, err := start(runCtx)
 				if err != nil {
 					return background.Task{}, err
@@ -108,13 +110,21 @@ func (x *execution) jobStatus(ctx context.Context, kind, id string) (string, err
 		return "", err
 	}
 	output := ""
-	if job.Status != "running" && job.OutputPath != "" {
+	if job.OutputPath != "" {
 		file, err := os.Open(job.OutputPath)
 		if err != nil {
 			return "", err
 		}
 		defer file.Close()
-		data, err := io.ReadAll(io.LimitReader(file, 128<<10))
+		const tailSize = 8 << 10
+		stat, err := file.Stat()
+		if err != nil {
+			return "", err
+		}
+		if _, err := file.Seek(max(0, stat.Size()-tailSize), io.SeekStart); err != nil {
+			return "", err
+		}
+		data, err := io.ReadAll(io.LimitReader(file, tailSize))
 		if err != nil {
 			return "", err
 		}

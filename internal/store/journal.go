@@ -76,6 +76,10 @@ func (j *Journal) InterruptTurn(turnID string, at time.Time) error {
 	return j.sideband("nanite.turn.interrupt", turnID, at, Turn{ID: turnID})
 }
 
+func (j *Journal) ResumeTurn(turn Turn, at time.Time) error {
+	return j.sideband("nanite.turn.resume", turn.ID, at, turn)
+}
+
 type messageBody struct {
 	Role         string          `json:"role"`
 	Content      json.RawMessage `json:"content"`
@@ -193,7 +197,7 @@ func projectEntry(ctx context.Context, tx core.Tx, conversation string, entry tr
 			}
 		}
 
-	case "nanite.turn.start", "nanite.turn.finish", "nanite.turn.interrupt":
+	case "nanite.turn.start", "nanite.turn.finish", "nanite.turn.interrupt", "nanite.turn.resume":
 		var turn Turn
 		if err := json.Unmarshal(record.Payload, &turn); err != nil {
 			return err
@@ -221,6 +225,10 @@ func projectTurn(ctx context.Context, tx core.Tx, conversation string, turn Turn
 		_, err := tx.ExecContext(ctx, `INSERT INTO turns(id,conversation_id,seq,status,user_message_id,started_at)
    VALUES(?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM turns WHERE conversation_id=?),'running',?,?)
    ON CONFLICT(id) DO NOTHING`, turn.ID, conversation, conversation, turn.UserMessageID, format(at))
+		return err
+	}
+	if subtype == "nanite.turn.resume" {
+		_, err := tx.ExecContext(ctx, "UPDATE turns SET status='running' WHERE id=? AND conversation_id=? AND status='interrupted'", turn.ID, conversation)
 		return err
 	}
 	if subtype == "nanite.turn.interrupt" {

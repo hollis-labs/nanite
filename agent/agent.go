@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/slots"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
@@ -122,13 +123,18 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
+	if err := recovery.Recover(ctx, db); err != nil {
+		_ = db.Close()
+		_ = lock.Close()
+		return nil, fmt.Errorf("recover agent: %w", err)
+	}
 	a := &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}}
 	roots := []string{def.Directory}
 	if cwd, err := os.Getwd(); err == nil && cwd != def.Directory {
 		roots = append([]string{cwd}, roots...)
 	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets},
 		Slots:          a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots,

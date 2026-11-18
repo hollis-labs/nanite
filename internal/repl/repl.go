@@ -125,25 +125,7 @@ func (t Terminal) Chat(ctx context.Context, fresh func(context.Context) (Sender,
 			turnCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
 			run, err := conversation.Send(turnCtx, engine.Input{Text: line})
 			if err == nil {
-				for event := range run.Events() {
-					switch v := event.(type) {
-					case events.TextDelta:
-						_, _ = fmt.Fprint(t.Output, v.Text)
-					case events.ToolCallStarted:
-						_, _ = fmt.Fprintf(t.Output, "\n[%s]\n", v.Name)
-					case events.Question:
-						if answerErr := t.answer(turnCtx, run, v); answerErr != nil {
-							run.Cancel()
-							stop()
-							_, _ = run.Wait()
-							return answerErr
-						}
-
-					case events.SlotsAssembled:
-						report = v.Report
-					}
-				}
-				_, err = run.Wait()
+				err = t.render(turnCtx, run, &report)
 			}
 			stop()
 			if err != nil {
@@ -153,6 +135,61 @@ func (t Terminal) Chat(ctx context.Context, fresh func(context.Context) (Sender,
 			}
 		}
 	}
+}
+
+func (t Terminal) render(ctx context.Context, run *engine.Run, report *slots.Report) error {
+	streamed := false
+	for event := range run.Events() {
+		var err error
+		switch v := event.(type) {
+		case events.TextDelta:
+			streamed = true
+			_, err = fmt.Fprint(t.Output, v.Text)
+		case events.ToolCallStarted:
+			_, err = fmt.Fprintf(t.Output, "\n[%s]\n", v.Name)
+		case events.Question:
+			err = t.answer(ctx, run, v)
+		case events.SlotsAssembled:
+			*report = v.Report
+		}
+		if err != nil {
+			run.Cancel()
+			_, _ = run.Wait()
+			return err
+		}
+	}
+	result, err := run.Wait()
+	if err == nil && !streamed && result.Text != "" {
+		_, err = fmt.Fprint(t.Output, result.Text)
+	}
+	return err
+}
+
+// ConfirmResume asks before resuming a conversation selected on startup.
+func (t Terminal) ConfirmResume(ctx context.Context, id string) (bool, error) {
+	if _, err := fmt.Fprintf(t.Output, "Interrupted turn %s. Resume? [y/N] ", id); err != nil {
+		return false, err
+	}
+	response, err := t.read(ctx)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	return strings.EqualFold(strings.TrimSpace(response), "y") || strings.EqualFold(strings.TrimSpace(response), "yes"), nil
+}
+
+func (t Terminal) Resume(ctx context.Context, start func(context.Context) (*engine.Run, error)) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+	run, err := start(ctx)
+	if err != nil {
+		return err
+	}
+	var report slots.Report
+	if err := t.render(ctx, run, &report); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(t.Output)
+	return err
 }
 
 func One(ctx context.Context, c Sender, prompt, format string, out io.Writer) error {
@@ -165,6 +202,10 @@ func One(ctx context.Context, c Sender, prompt, format string, out io.Writer) er
 	if err != nil {
 		return err
 	}
+	return Output(run, format, out)
+}
+
+func Output(run *engine.Run, format string, out io.Writer) error {
 	if format == "stream-json" {
 		enc := json.NewEncoder(out)
 		for event := range run.Events() {

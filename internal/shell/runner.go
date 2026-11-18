@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -52,6 +53,15 @@ type Process struct {
 }
 
 func Start(ctx context.Context, command Command) (*Process, error) {
+	return start(ctx, command, nil)
+}
+
+// StartStreaming sends combined output to a single writer as it is produced.
+func StartStreaming(ctx context.Context, command Command, writer io.Writer) (*Process, error) {
+	return start(ctx, command, writer)
+}
+
+func start(ctx context.Context, command Command, writer io.Writer) (*Process, error) {
 	runCtx, cancel := context.WithTimeout(ctx, command.Timeout)
 	cmd := exec.CommandContext(runCtx, "bash", "--noprofile", "--norc", "-c", command.Script)
 	cmd.Dir = command.Dir
@@ -60,7 +70,10 @@ func Start(ctx context.Context, command Command) (*Process, error) {
 	cmd.Cancel = func() error { return terminateGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = 2 * time.Second
 	output := &cappedOutput{}
-	cmd.Stdout, cmd.Stderr = output, output
+	if writer == nil {
+		writer = output
+	}
+	cmd.Stdout, cmd.Stderr = writer, writer
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start bash: %w", err)

@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
+	hotel "github.com/hollis-labs/libs/core/util/otel"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/internal/repl"
@@ -43,7 +45,7 @@ func extractDir(args []string) (string, []string, error) {
 			dir = strings.TrimPrefix(arg, "--dir=")
 		case strings.HasPrefix(arg, "-C="):
 			dir = strings.TrimPrefix(arg, "-C=")
-		case arg == "--prompt" || arg == "-p" || arg == "--resume" || arg == "--output":
+		case arg == "--prompt" || arg == "-p" || arg == "--resume" || arg == "--output" || arg == "--events":
 			out = append(out, arg)
 			if i+1 < len(args) {
 				i++
@@ -64,7 +66,7 @@ func (p appPDP) Evaluate(ctx context.Context, req libpolicy.Request) (libpolicy.
 	return result.Decision, err
 }
 
-func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate) (*agent.Agent, error) {
+func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate, sink agent.EventSink) (*agent.Agent, error) {
 	top, _ := app.Config["nanite"].(map[string]any)
 	settings, _ := top["gateway"].(map[string]any)
 	base, _ := settings["url"].(string)
@@ -91,7 +93,7 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate)
 	}
 	value, _ := app.Value(logging.Key)
 	logger, _ := value.(*slog.Logger)
-	return agent.Open(cmd.Context(), agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger,
+	return agent.Open(cmd.Context(), agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger, Events: sink,
 		Secrets: secrets.Resolver(app), PDP: appPDP{policy.From(app)}, Gateway: agent.Gateway{BaseURL: base, Headers: headers, KeyRef: ref, Auth: auth},
 	})
 }
@@ -100,12 +102,13 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root := cli.Root(app)
 	root.SilenceUsage = true
 	root.SilenceErrors = true
-	var prompt, output, resume string
+	var prompt, output, resume, eventPath string
 	var latest bool
 	root.Flags().StringVarP(&prompt, "prompt", "p", "", "Run one prompt")
 	root.Flags().StringVar(&output, "output", "text", "Output format for -p: text, json or stream-json")
 	root.Flags().BoolVar(&latest, "continue", false, "Continue the latest conversation")
-	root.Flags().StringVar(&resume, "resume", "", "Open a specific conversation ID")
+	root.Flags().StringVar(&resume, "resume", "", "Resume an interrupted turn in the given conversation")
+	root.Flags().StringVar(&eventPath, "events", "", "Runtime event log path (default .nanite/events.jsonl, - for stdout)")
 	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory")
 	root.Args = cobra.NoArgs
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
@@ -116,7 +119,17 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			terminal = repl.NewTerminal(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
 			gate = terminal
 		}
-		a, err := openAgent(cmd, app, dir, gate)
+		sink, closeEvents, err := cliEvents(dir, eventPath, cmd.OutOrStdout())
+		if err != nil {
+			return err
+		}
+		defer closeEvents()
+		if os.Getenv("NANITE_OTEL_DISABLED") != "1" &&
+			(hotel.EnabledFromEnv("NANITE_OTEL_ENABLED") || os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "") {
+			defer hotel.InitOrWarn(cmd.Context(), func(format string, args ...any) { _, _ = fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) },
+				5*time.Second, hotel.WithServiceName("nanite"))()
+		}
+		a, err := openAgent(cmd, app, dir, gate, sink)
 		if err != nil {
 			return err
 		}
@@ -125,6 +138,39 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if interrupted := conversation.Interrupted(); interrupted != nil {
+			if nonInteractive {
+				if resume == "" {
+					return fmt.Errorf("conversation %s has interrupted turn %s; use --resume %s", conversation.ID(), interrupted.ID, conversation.ID())
+				}
+				run, err := conversation.Resume(cmd.Context())
+				if err != nil {
+					return err
+				}
+				if err := repl.Output(run, "text", cmd.ErrOrStderr()); err != nil {
+					return err
+				}
+			} else {
+				confirmed := resume != ""
+				if !confirmed {
+					confirmed, err = terminal.ConfirmResume(cmd.Context(), interrupted.ID)
+					if err != nil {
+						return err
+					}
+				}
+				if confirmed {
+					if err := terminal.Resume(cmd.Context(), conversation.Resume); err != nil {
+						return err
+					}
+				} else {
+					conversation, err = a.NewConversation(cmd.Context())
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+
 		if nonInteractive {
 			return repl.One(cmd.Context(), conversation, prompt, output, cmd.OutOrStdout())
 		}
@@ -152,7 +198,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			return err
 		}},
 		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			a, err := openAgent(cmd, app, dir, nil)
+			a, err := openAgent(cmd, app, dir, nil, nil)
 			if err != nil {
 				return err
 			}
@@ -165,7 +211,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		}},
 		&cobra.Command{Use: "rebuild-index", Short: "Rebuild the conversation index from JSONL transcripts", Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				a, err := openAgent(cmd, app, dir, nil)
+				a, err := openAgent(cmd, app, dir, nil, nil)
 				if err != nil {
 					return err
 				}
@@ -186,6 +232,21 @@ func selectConversation(ctx context.Context, a *agent.Agent, resume string, late
 		if !errors.Is(err, agent.ErrNoConversation) {
 			return c, err
 		}
+	} else {
+		conversations, err := a.Conversations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, info := range conversations {
+			c, err := a.Conversation(ctx, info.ID)
+			if err != nil {
+				return nil, err
+			}
+			if c.Interrupted() != nil {
+				return c, nil
+			}
+		}
 	}
+
 	return a.NewConversation(ctx)
 }

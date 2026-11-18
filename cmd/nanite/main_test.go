@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,4 +92,36 @@ func TestPromptViaLocalGateway(t *testing.T) {
 	if !called.Load() || out.String() != "hello from local gateway\n" {
 		t.Fatalf("output %q called=%v", out.String(), called.Load())
 	}
+	eventPath := filepath.Join(dir, ".nanite", "events.jsonl")
+	info, err := os.Stat(eventPath)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("event log permissions: %v %v", info, err)
+	}
+	raw, err := os.ReadFile(eventPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint64
+	kinds := make(map[runtimeevents.EventKind]bool)
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var event runtimeevents.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		if err := event.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if event.Sequence != last+1 {
+			t.Fatalf("runtime sequence = %d, preceding %d", event.Sequence, last)
+		}
+		last = event.Sequence
+		kinds[event.Kind] = true
+	}
+	for _, kind := range []runtimeevents.EventKind{runtimeevents.KindSessionReady, runtimeevents.KindSessionProcessing,
+		runtimeevents.KindTurnStarted, runtimeevents.KindAgentDelta, runtimeevents.KindTurnCompleted, runtimeevents.KindSessionIdle} {
+		if !kinds[kind] {
+			t.Errorf("missing %s", kind)
+		}
+	}
+
 }

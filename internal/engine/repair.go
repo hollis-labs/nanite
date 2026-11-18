@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/recover"
 )
 
@@ -40,10 +41,12 @@ func (x *execution) repairArgs(ctx context.Context, s *step) {
 		if err != nil || len(raw) > 32<<10 {
 			continue
 		}
-		repairCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		spanCtx, endSpan := events.ModelSpan(ctx, x.engine.scrub.Text(x.definition.Runtime.Model))
+		repairCtx, cancel := context.WithTimeout(spanCtx, 30*time.Second)
 		response, err := x.provider.Complete(repairCtx, llmtypes.ChatRequest{Model: x.definition.Runtime.Model,
 			SystemPrompt: repairPrompt, MaxTokens: 1024, Messages: []llmtypes.ChatMessage{{Role: "user", Content: x.engine.scrub.Text(string(raw))}}})
 		cancel()
+		endSpan()
 		if err != nil {
 			continue
 		}

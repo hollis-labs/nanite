@@ -23,6 +23,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/station"
 	"github.com/hollis-labs/nanite/internal/recover"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -49,22 +50,39 @@ type execution struct {
 	result     events.Result
 }
 
-func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill) {
-	result, err := e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills)
+func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) {
+	ctx, endSpan := events.TurnSpan(ctx)
+	result, err := e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted)
 	if err != nil {
 		if clean := e.scrub.Text(err.Error()); clean != err.Error() {
 			err = errors.New(clean)
 		}
 	}
+	endSpan()
+	terminal := r.terminal(result, err)
+	r.report(context.WithoutCancel(ctx), terminal)
 	r.cancel()
 	e.mu.Lock()
 	delete(e.active, info.ID)
-	r.finish(result, err)
+	r.finish(result, err, terminal)
 	e.mu.Unlock()
 }
 
-func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill) (events.Result, error) {
+func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) (events.Result, error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
+	var resume recovery.Plan
+	if interrupted != nil {
+		rawHistory, err := e.cfg.Store.History(ctx, info.ID)
+		if err != nil {
+			return events.Result{}, err
+		}
+		resume, err = recovery.ResumePlan(rawHistory, *interrupted)
+		if err != nil || !resume.Generate {
+			return e.finalizeInterrupted(ctx, info.ID, *interrupted, resume, err)
+		}
+		input.Text = resume.UserText
+	}
+
 	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	if err != nil {
 		return events.Result{}, err
@@ -121,12 +139,24 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 
 	now := time.Now().UTC()
 	record := store.Turn{ID: r.id, UserMessageID: store.NewID(now)}
-	if err := journal.StartTurn(record, now); err != nil {
-		return events.Result{}, err
+	if interrupted != nil {
+		record.UserMessageID = interrupted.UserMessageID
+		x.result.Steps = resume.Steps
+		if err := journal.ResumeTurn(record, now); err != nil {
+			return events.Result{}, err
+		}
+		if len(resume.Missing) > 0 {
+			err = x.message("tool", resume.Missing)
+		}
+	} else {
+		if err := journal.StartTurn(record, now); err != nil {
+			return events.Result{}, err
+		}
+		message := store.Message{ID: record.UserMessageID, TurnID: r.id, Role: "user", CreatedAt: now,
+			Blocks: []llmtypes.ContentBlock{{Type: "text", Text: e.scrub.Text(input.Text)}}}
+		err = x.append(message)
 	}
-	message := store.Message{ID: record.UserMessageID, TurnID: r.id, Role: "user", CreatedAt: now, Blocks: []llmtypes.ContentBlock{{Type: "text", Text: e.scrub.Text(input.Text)}}}
-
-	if err = x.append(message); err == nil {
+	if err == nil {
 		e.mu.Lock()
 		e.previous[info.ID] = assembled.Hashes
 		e.mu.Unlock()
@@ -151,6 +181,21 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	err = errors.Join(err, journal.FinishTurn(record, time.Now().UTC()))
 	return x.result, err
+}
+
+func (e *Engine) finalizeInterrupted(ctx context.Context, conversation string, turn store.InterruptedTurn, plan recovery.Plan, planErr error) (events.Result, error) {
+	j, err := e.cfg.Store.OpenJournal(ctx, conversation)
+	if err != nil {
+		return events.Result{}, err
+	}
+	record := store.Turn{ID: turn.ID, UserMessageID: turn.UserMessageID, Status: "completed", StopReason: llmtypes.StopReasonEndTurn}
+	if planErr != nil {
+		record.Status = "failed"
+		record.Error = planErr.Error()
+		record.StopReason = ""
+	}
+	result := events.Result{Text: plan.AssistantText, Steps: plan.Steps, StopReason: record.StopReason}
+	return result, errors.Join(planErr, j.FinishTurn(record, time.Now().UTC()), j.Close())
 }
 
 func (x *execution) addMessage(message store.Message) {
@@ -211,7 +256,10 @@ func (x *execution) generate(ctx context.Context) error {
 			SlotBlocks: blocks, Messages: x.messages, Tools: x.specs, CacheHints: []llmtypes.CacheHint{
 				{Position: "system"}, {Position: "tools"}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
 			}}
-		callCtx, cancel := context.WithCancel(ctx)
+		safeModel := x.engine.scrub.Text(req.Model)
+		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)
+		callCtx, cancelCall := context.WithCancel(spanCtx)
+		cancel := func() { cancelCall(); endSpan() }
 		stream, err := x.provider.StreamChat(callCtx, req)
 		if err != nil {
 			cancel()
@@ -322,7 +370,7 @@ func (x *execution) compact(ctx context.Context, force bool) error {
 		return nil
 	}
 	before := est.Estimate(string(raw))
-	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), messages: x.messages, messageIDs: x.messageIDs}
+	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(x.definition.Runtime.Model)}
 	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
 	if force {
 		_, err = pipeline.RunForce(ctx)
@@ -370,6 +418,7 @@ type capturingSummarizer struct {
 	ctxpkg.Summarizer
 	messages   []llmtypes.ChatMessage
 	messageIDs []string
+	model      string
 	count      int
 	summary    string
 }
@@ -383,7 +432,9 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 	if end < 1 || s.messageIDs[end-1] == "" {
 		return "", nil
 	}
-	summary, err := s.Summarizer.Summarize(ctx, prompt, span[:end])
+	spanCtx, endSpan := events.ModelSpan(ctx, s.model)
+	defer endSpan()
+	summary, err := s.Summarizer.Summarize(spanCtx, prompt, span[:end])
 	if err == nil {
 		s.count, s.summary = end, summary
 	}

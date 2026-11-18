@@ -79,7 +79,7 @@ func hasHelpFlag(args []string) bool {
 		switch args[i] {
 		case "--":
 			return false
-		case "-p", "--prompt", "--output", "--resume":
+		case "-p", "--prompt", "--output", "--resume", "--events":
 			i++
 		case "-h", "--help":
 			return true

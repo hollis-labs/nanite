@@ -181,7 +181,10 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			return
 		}
 		started := time.Now()
-		result, err := x.catalogue[call.Name].Handler(x.askContext(ctx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+		toolCtx, endSpan := events.ToolSpan(ctx, x.engine.scrub.Text(call.Name))
+		defer endSpan()
+
+		result, err := x.catalogue[call.Name].Handler(x.askContext(toolCtx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
 		if err != nil {
 			result = tools.Result{Text: err.Error(), IsError: true}
 		}

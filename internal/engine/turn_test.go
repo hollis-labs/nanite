@@ -341,3 +341,74 @@ func TestMCPConfigurationReloadAndWarnings(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthoredInputsReloadTogether(t *testing.T) {
+	if os.Getenv("NANITE_TEST_RELOAD_MCP") == "1" {
+		server := mcp.NewServer(&mcp.Implementation{Name: "reload-fixture", Version: "1"}, nil)
+		mcp.AddTool(server, &mcp.Tool{Name: "probe", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+			func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ready"}}}, nil, nil
+			})
+		if err := server.Run(t.Context(), &mcp.StdioTransport{}); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	p := &watchedProvider{Provider: fake.New(fake.Text("first"), fake.Text("second"))}
+	e, _, id := setupEngine(t, p, "runtime:\n  model: model-before\n")
+	send := func() {
+		t.Helper()
+		run, err := e.Send(t.Context(), id, Input{Text: "report"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(name, value string) {
+		t.Helper()
+		path := filepath.Join(e.cfg.Dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send()
+	cfg, err := json.Marshal(map[string]any{"mcpServers": map[string]any{"fixture": map[string]any{
+		"command": os.Args[0], "args": []string{"-test.run=^TestAuthoredInputsReloadTogether$"},
+		"env": map[string]string{"NANITE_TEST_RELOAD_MCP": "1"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("agent.md", strings.Replace(fixtureAgent, "Engine test instructions.", "Revised agent instructions.", 1))
+	write("host.yaml", "kind: embedded\nlifetime: application\napplication_id: fixture\nruntime:\n  model: model-after\n")
+	write(".mcp.json", string(cfg))
+	write("skills/new/SKILL.md", "---\nname: new-skill\ndescription: works after reload\n---\nprivate skill body")
+	send()
+	findSlot := func(req llmtypes.ChatRequest, name string) string {
+		for _, slot := range req.SlotBlocks {
+			if slot.Name == name {
+				return slot.Content
+			}
+		}
+		return ""
+	}
+	hasTool := func(req llmtypes.ChatRequest) bool {
+		return slices.ContainsFunc(req.Tools, func(t llmtypes.ToolDefinition) bool { return t.Name == "mcp__fixture__probe" })
+	}
+	before, after := p.requests[0], p.requests[1]
+	if before.Model != "model-before" || hasTool(before) || findSlot(before, "skills") != "" ||
+		!strings.Contains(findSlot(before, "agent"), "Engine test instructions.") {
+		t.Fatal("turn 1 did not use the original inputs")
+	}
+	if after.Model != "model-after" || !hasTool(after) ||
+		!strings.Contains(findSlot(after, "agent"), "Revised agent instructions.") ||
+		!strings.Contains(findSlot(after, "skills"), "new-skill: works after reload") ||
+		strings.Contains(findSlot(after, "skills"), "private skill body") {
+		t.Fatal("turn 2 did not load all revised authored inputs")
+	}
+}

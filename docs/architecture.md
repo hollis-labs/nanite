@@ -38,3 +38,8 @@ denylist is a backstop against obvious accidents and applies in every permission
 mode. Bash starts in the workspace root, limits execution time and output, and
 receives a small set of environment variables plus literal values declared in
 `host.yaml` under `runtime.env`.
+
+The provider adapters carry failure classification in the stream event's
+`Content` field because `llm/core`'s `StreamEvent` has no typed error field.
+The engine uses the classification to distinguish retryable failures, context
+overflow, and terminal errors.

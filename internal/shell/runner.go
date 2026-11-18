@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/processenv"
 )
 
 const maxOutput = 64 << 10
@@ -40,7 +41,7 @@ func (Plain) Run(ctx context.Context, command Command) (Result, error) {
 
 	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-c", command.Script)
 	cmd.Dir = command.Dir
-	cmd.Env = environment(command.Env)
+	cmd.Env = processenv.List(processenv.Build(command.Env))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return terminateGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = 2 * time.Second
@@ -92,33 +93,6 @@ func terminateGroup(pid int) error {
 			return err
 		}
 	}
-}
-
-func environment(declared map[string]string) []string {
-	env := make(map[string]string)
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR", "SHELL":
-			env[key] = value
-		default:
-			if strings.HasPrefix(key, "LC_") {
-				env[key] = value
-			}
-		}
-	}
-	for key, value := range declared {
-		env[key] = value
-	}
-	out := make([]string, 0, len(env))
-	for key, value := range env {
-		out = append(out, key+"="+value)
-	}
-	slices.Sort(out)
-	return out
 }
 
 type cappedOutput struct {

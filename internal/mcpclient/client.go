@@ -19,6 +19,7 @@ import (
 	mcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/client"
 	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/libs/security/secrets"
+	"github.com/hollis-labs/nanite/internal/processenv"
 	"github.com/hollis-labs/nanite/internal/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -268,12 +269,7 @@ func (c *Client) resolve(ctx context.Context, input agentdir.MCPServer) (mcp.Ser
 		out.Command = filepath.Join(c.dir, out.Command)
 	}
 	if out.Transport == "stdio" {
-		out.Env = make(map[string]string)
-		for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
-			if val, ok := os.LookupEnv(key); ok {
-				out.Env[key] = val
-			}
-		}
+		out.Env = processenv.Build(nil)
 		for key, value := range input.Env {
 			expanded, err := c.expand(ctx, key, value)
 			if err != nil {
@@ -322,9 +318,5 @@ func commandEnv(cfg mcp.ServerConfig) ([]string, error) {
 	if !strings.ContainsRune(cfg.Command, '/') && cfg.Env["PATH"] == "" {
 		return nil, fmt.Errorf("MCP stdio command requires PATH")
 	}
-	env := make([]string, 0, len(cfg.Env))
-	for _, key := range slices.Sorted(maps.Keys(cfg.Env)) {
-		env = append(env, key+"="+cfg.Env[key])
-	}
-	return env, nil
+	return processenv.List(cfg.Env), nil
 }

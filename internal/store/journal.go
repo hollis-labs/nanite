@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	core "github.com/hollis-labs/libs/core/store"
@@ -248,13 +249,21 @@ func projectTurn(ctx context.Context, tx core.Tx, conversation string, turn Turn
 }
 
 func projectMessage(ctx context.Context, tx core.Tx, conversation, id string, at time.Time, body messageBody, cursor string) error {
-	var blocks []struct{ Type string }
+	var blocks []struct{ Type, Text string }
 	if err := json.Unmarshal(body.Content, &blocks); err != nil {
 		return err
 	}
 	role := body.Role
 	if role == "user" && len(blocks) > 0 && blocks[0].Type == "tool_result" {
 		role = "tool"
+	}
+	if role == "user" && len(blocks) > 0 {
+		// An untitled conversation takes its title from the first thing the user said.
+		if title := titleFrom(blocks[0].Text); title != "" {
+			if _, err := tx.ExecContext(ctx, "UPDATE conversations SET title=? WHERE id=? AND title=''", title, conversation); err != nil {
+				return err
+			}
+		}
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO messages(id,conversation_id,turn_id,seq,role,blocks_json,transcript_cursor,created_at)
   VALUES(?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE conversation_id=?),?,?,?,?)
@@ -295,4 +304,13 @@ func (s *Store) historyAfter(ctx context.Context, id, after string) ([]Message, 
 
 func (j *Journal) RecordPermission(id string, at time.Time, details any) error {
 	return j.sideband("nanite.permission", id, at, details)
+}
+
+// titleFrom shortens text to a single line of at most 60 characters.
+func titleFrom(text string) string {
+	title := []rune(strings.Join(strings.Fields(text), " "))
+	if len(title) > 60 {
+		title = append(title[:59], '…')
+	}
+	return string(title)
 }

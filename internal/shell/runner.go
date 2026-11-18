@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -48,7 +49,7 @@ func (Plain) Run(ctx context.Context, command Command) (Result, error) {
 type Process struct {
 	cmd     *exec.Cmd
 	ctx     context.Context
-	release context.CancelFunc
+	release func()
 	output  *cappedOutput
 }
 
@@ -78,7 +79,38 @@ func start(ctx context.Context, command Command, writer io.Writer) (*Process, er
 		cancel()
 		return nil, fmt.Errorf("start bash: %w", err)
 	}
-	return &Process{cmd: cmd, ctx: runCtx, release: cancel, output: output}, nil
+	stopLifeline := startLifeline(cmd.Process.Pid)
+	return &Process{cmd: cmd, ctx: runCtx, release: func() { stopLifeline(); cancel() }, output: output}, nil
+}
+
+// lifelineScript terminates a process group once its standard input closes.
+const lifelineScript = `read -r _; kill -TERM -- "-$1" 2>/dev/null; sleep 1; kill -KILL -- "-$1" 2>/dev/null`
+
+// startLifeline ties the command's process group to this process. A watcher
+// holds the read end of a pipe whose only write end lives here, so the group
+// is terminated even when this process is killed and can run no cleanup. The
+// returned function retires the watcher after normal completion. A watcher
+// that cannot start leaves the command running as before.
+func startLifeline(pgid int) (stop func()) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		return func() {}
+	}
+	watcher := exec.Command("/bin/sh", "-c", lifelineScript, "nanite-lifeline", strconv.Itoa(pgid)) // #nosec G204 -- Fixed script with a numeric process group.
+	watcher.Stdin = read
+	watcher.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	err = watcher.Start()
+	_ = read.Close() // The watcher holds its own copy.
+	if err != nil {
+		_ = write.Close()
+		return func() {}
+	}
+	return func() {
+		// Kill before closing so a finished command's reused group ID is never signaled.
+		_ = watcher.Process.Kill()
+		_ = write.Close()
+		_ = watcher.Wait()
+	}
 }
 
 func (p *Process) PID() int { return p.cmd.Process.Pid }

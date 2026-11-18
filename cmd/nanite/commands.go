@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
@@ -207,7 +209,10 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(conversations)
+			if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(conversations)
+			}
+			return printConversations(cmd.OutOrStdout(), conversations)
 		}},
 		&cobra.Command{Use: "rebuild-index", Short: "Rebuild the conversation index from JSONL transcripts", Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
@@ -220,6 +225,9 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			},
 		},
 	)
+	if list, _, err := root.Find([]string{"conversations"}); err == nil {
+		list.Flags().Bool("json", false, "Print the full records as JSON")
+	}
 	return root
 }
 
@@ -249,4 +257,38 @@ func selectConversation(ctx context.Context, a *agent.Agent, resume string, late
 	}
 
 	return a.NewConversation(ctx)
+}
+
+// printConversations lists top-level conversations newest first, with the
+// subagent conversations each one started indented beneath it.
+func printConversations(w io.Writer, all []agent.ConversationInfo) error {
+	if len(all) == 0 {
+		_, err := fmt.Fprintln(w, "No conversations yet.")
+		return err
+	}
+	children := map[string][]agent.ConversationInfo{}
+	for _, c := range all {
+		if c.ParentID != "" {
+			children[c.ParentID] = append(children[c.ParentID], c)
+		}
+	}
+	table := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(table, "ID\tUPDATED\tROLE\tTITLE")
+	row := func(c agent.ConversationInfo, indent string) {
+		title := c.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s%s\n", c.ID, c.UpdatedAt.Local().Format("2006-01-02 15:04"), c.Role, indent, title)
+	}
+	for _, c := range all {
+		if c.ParentID != "" {
+			continue
+		}
+		row(c, "")
+		for _, child := range children[c.ID] {
+			row(child, "  ")
+		}
+	}
+	return table.Flush()
 }

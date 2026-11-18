@@ -2,7 +2,6 @@ package definition
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -60,48 +59,8 @@ func Load(dir, globalSkillsDir string) (Definition, error) {
 		out.Skills[ref.Name] = ref
 	}
 	for _, file := range snap.Context {
-		text, err := readAuthored(file.Path)
-		if err != nil {
-			return Definition{}, err
-		}
-		out.Context = append(out.Context, Context{Name: file.Name, Text: string(text)})
+		out.Context = append(out.Context, Context{Name: file.Name, Text: file.Body})
 	}
-	if snap.PermissionsFile != "" {
-		out.Rules, err = readAuthored(snap.PermissionsFile)
-		if err != nil {
-			return Definition{}, err
-		}
-	}
+	out.Rules = snap.PermissionsRaw
 	return out, nil
-}
-
-func readAuthored(path string) ([]byte, error) {
-	const limit = 1 << 20
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() || info.Size() > limit {
-		return nil, fmt.Errorf("%s must be a regular file at most 1 MiB", path)
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !os.SameFile(info, opened) {
-		return nil, fmt.Errorf("%s changed while opening", path)
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > limit {
-		return nil, fmt.Errorf("%s exceeds 1 MiB", path)
-	}
-	return raw, nil
 }

@@ -84,7 +84,8 @@ func start(ctx context.Context, command Command, writer io.Writer) (*Process, er
 }
 
 // lifelineScript terminates a process group once its standard input closes.
-const lifelineScript = `read -r _; kill -TERM -- "-$1" 2>/dev/null; sleep 1; kill -KILL -- "-$1" 2>/dev/null`
+// It avoids `kill --`, which dash rejects.
+const lifelineScript = `read -r _; kill -TERM "-$1" 2>/dev/null; sleep 1; kill -KILL "-$1" 2>/dev/null`
 
 // startLifeline ties the command's process group to this process. A watcher
 // holds the read end of a pipe whose only write end lives here, so the group

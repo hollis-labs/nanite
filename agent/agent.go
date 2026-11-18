@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/tools"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -56,6 +57,11 @@ type Options struct {
 	SlotSources []SlotSource
 	// SlotSelector defaults to priority order with pointer and skip fallback to fit the slot budget.
 	SlotSelector SlotSelector
+	// Builtins limits which of Nanite's own tool groups the agent is offered.
+	// Nil offers all of them; an empty slice offers none. A withheld tool is
+	// not sent to the model. Tools that page through a long tool result are
+	// always offered.
+	Builtins []BuiltinGroup
 	// Secrets defaults to the standard secrets resolver.
 	Secrets *secrets.Resolver
 }
@@ -134,8 +140,14 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if cwd, err := os.Getwd(); err == nil && cwd != def.Directory {
 		roots = append([]string{cwd}, roots...)
 	}
+	builtins, err := tools.NewBuiltins(opts.Builtins)
+	if err != nil {
+		_ = db.Close()
+		_ = lock.Close()
+		return nil, err
+	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets},
 		Slots:          a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots,

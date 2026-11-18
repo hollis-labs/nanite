@@ -10,9 +10,19 @@ type Agent struct
   (*Agent) Skills() *SkillSet
   (*Agent) Slots() *Slots
   (*Agent) Tools() *ToolSet
+func AllBuiltins() []BuiltinGroup
 var AllowGate github.com/hollis-labs/nanite/internal/permission.Gate
 type Answer = github.com/hollis-labs/nanite/internal/events.Answer struct
   field Value encoding/json.RawMessage
+const BuiltinBackground github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinFilesRead github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinFilesWrite github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+type BuiltinGroup = github.com/hollis-labs/nanite/internal/tools.BuiltinGroup string
+const BuiltinNotes github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinQuestions github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinShell github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinSkills github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinSubagents github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 type Compacted = github.com/hollis-labs/nanite/internal/events.Compacted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int
@@ -83,6 +93,7 @@ type Options struct
   field PDP github.com/hollis-labs/libs/security/policy.PDP
   field SlotSources []SlotSource
   field SlotSelector SlotSelector
+  field Builtins []BuiltinGroup
   field Secrets *github.com/hollis-labs/libs/security/secrets.Resolver
 type PermissionAsked = github.com/hollis-labs/nanite/internal/events.PermissionAsked struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta

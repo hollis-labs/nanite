@@ -36,6 +36,8 @@ type Config struct {
 	Events               events.Sink
 	Logger               *slog.Logger
 	Dir, GlobalSkillsDir string
+	// Builtins limits which of Nanite's own tool groups are offered. Nil offers all.
+	Builtins tools.Builtins
 	Provider             llmcontracts.Provider
 	ProviderConfig       provider.Config
 	Store                *store.Store

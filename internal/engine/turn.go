@@ -108,7 +108,11 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, catalog.Listing(), pdp.Mode(), warnings, pending)
+	skillListing := catalog.Listing()
+	if !e.cfg.Builtins.Has(tools.BuiltinSkills) {
+		skillListing = "" // Without the skill tools a listing would name things the agent cannot load.
+	}
+	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, skillListing, pdp.Mode(), warnings, pending)
 	if err != nil {
 		return events.Result{}, err
 	}

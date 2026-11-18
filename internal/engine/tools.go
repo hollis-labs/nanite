@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"slices"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -59,6 +60,8 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 			},
 		})
 	}
+	// A withheld built-in is never sent to the model. Host tools are the host's own choice.
+	catalog = slices.DeleteFunc(catalog, func(tool tools.Tool) bool { return !x.engine.cfg.Builtins.Offers(tool.Name) })
 	x.catalog = make(map[string]tools.Tool)
 	x.validators = make(map[string]recover.Validator)
 	for _, tool := range append(catalog, host...) {

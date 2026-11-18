@@ -80,3 +80,58 @@ Turn 3 slots:
 Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
 The workspace context is clear.
 ```
+
+## Choosing the built-in tools
+
+An agent opened by the terminal gets every built-in tool. A host usually
+wants fewer: a seat inside an application has no business with a shell.
+Set `Options.Builtins` to the groups the agent should have.
+
+```go
+a, err := agent.Open(ctx, agent.Options{
+    Dir:      dir,
+    Builtins: []agent.BuiltinGroup{agent.BuiltinFilesRead, agent.BuiltinSkills, agent.BuiltinNotes},
+})
+```
+
+| Group | Tools |
+|---|---|
+| `BuiltinFilesRead` | `read_file`, `list_dir`, `find_files`, `search_files` |
+| `BuiltinFilesWrite` | `write_file`, `edit_file` |
+| `BuiltinShell` | `bash` |
+| `BuiltinBackground` | `background_start`, `background_status`, `background_cancel` |
+| `BuiltinSubagents` | `subagent_spawn`, `subagent_status`, `subagent_cancel` |
+| `BuiltinSkills` | `skill_list`, `skill_get`, and the skill listing in the prompt |
+| `BuiltinNotes` | `todo_list`, `todo_write`, `scratchpad_read`, `scratchpad_write` |
+| `BuiltinQuestions` | `ask_user` |
+
+Leaving `Builtins` nil offers all groups. An empty slice offers none. A
+withheld tool is not sent to the model at all, which is different from a
+permission rule: a denied tool is still described to the model and refused
+when called. The two tools that page through a long tool result are always
+offered. Tools the host registers with `a.Tools().SetGroup` and MCP tools are
+not affected.
+
+## Where an application keeps its agents
+
+Nanite expects nothing beyond a directory path, so this is a convention for
+hosts to share.
+
+- One setting in the application's config, `agents.dir`, names a directory.
+  The default is `agents/` beside the config file.
+- Each agent is a subdirectory, and the directory name is the agent's name.
+- The authored files (`agent.md`, `host.yaml`, `permissions.yaml`, `skills/`,
+  `context/`) live there. They can be checked in or shipped read-only.
+- The agent's `host.yaml` says `kind: embedded`, `lifetime: application`, and
+  an `application_id` naming the application.
+- Run-time state need not sit beside the authored files. Pass
+  `Options.DataDir`, one directory per agent under the application's own
+  state root. When it is empty, state goes in `.nanite/` inside the agent
+  directory, as the terminal does.
+
+Only one process can hold an agent's state directory open. If the
+application keeps state in its own `DataDir`, `nanite -C agents/<name>` from a
+terminal still works while the application runs: it reads the same authored
+files and keeps separate conversations in `.nanite/` inside the agent
+directory. If the application leaves `DataDir` empty, the two share one state
+directory and the second to start is refused.

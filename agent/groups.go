@@ -41,3 +41,21 @@ func (s *SkillSet) SetGroup(group string, specs ...Skill) error {
 
 // RemoveGroup removes a skill group.
 func (s *SkillSet) RemoveGroup(group string) { s.groups.RemoveGroup(group) }
+
+// BuiltinGroup names a set of Nanite's own tools. See Options.Builtins.
+type BuiltinGroup = tools.BuiltinGroup
+
+// The built-in tool groups.
+const (
+	BuiltinFilesRead  = tools.BuiltinFilesRead  // read_file, list_dir, find_files, search_files
+	BuiltinFilesWrite = tools.BuiltinFilesWrite // write_file, edit_file
+	BuiltinShell      = tools.BuiltinShell      // bash
+	BuiltinBackground = tools.BuiltinBackground // background_start, background_status, background_cancel
+	BuiltinSubagents  = tools.BuiltinSubagents  // subagent_spawn, subagent_status, subagent_cancel
+	BuiltinSkills     = tools.BuiltinSkills     // skill_list, skill_get
+	BuiltinNotes      = tools.BuiltinNotes      // todo_list, todo_write, scratchpad_read, scratchpad_write
+	BuiltinQuestions  = tools.BuiltinQuestions  // ask_user
+)
+
+// AllBuiltins lists every built-in group, for a host that wants all but a few.
+func AllBuiltins() []BuiltinGroup { return tools.AllBuiltins() }

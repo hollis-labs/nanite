@@ -39,6 +39,8 @@ func TestLiveGatewayToolTurn(t *testing.T) {
 	default:
 		t.Fatalf("unsupported NANITE_LIVE_PROVIDER %q", name)
 	}
+	// Relative tool paths resolve against the working directory, not the agent directory.
+	t.Chdir(dir)
 	const marker = "nanite-live-fixture-2874"
 	if err := os.WriteFile(filepath.Join(dir, "fixture.txt"), []byte(marker), 0600); err != nil {
 		t.Fatal(err)

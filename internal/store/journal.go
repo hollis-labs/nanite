@@ -181,6 +181,18 @@ func projectEntry(ctx context.Context, tx core.Tx, conversation string, entry tr
 			c.ID, c.ParentID, c.Role, c.Title, c.Status, format(c.CreatedAt), format(c.UpdatedAt)); err != nil {
 			return err
 		}
+	case "nanite.compaction":
+		var details Compaction
+		if err := json.Unmarshal(record.Payload, &details); err != nil {
+			return err
+		}
+		// Older development transcripts may carry compaction telemetry only.
+		if details.ThroughMessageID != "" && details.Summary != "" {
+			if err := projectCompaction(ctx, tx, record.UUID, conversation, details); err != nil {
+				return err
+			}
+		}
+
 	case "nanite.turn.start", "nanite.turn.finish", "nanite.turn.interrupt":
 		var turn Turn
 		if err := json.Unmarshal(record.Payload, &turn); err != nil {
@@ -243,7 +255,13 @@ func projectMessage(ctx context.Context, tx core.Tx, conversation, id string, at
 }
 
 func (s *Store) History(ctx context.Context, id string) ([]Message, error) {
-	rows, err := s.db.Reader().QueryContext(ctx, "SELECT id,turn_id,role,blocks_json,created_at FROM messages WHERE conversation_id=? ORDER BY seq", id)
+	return s.historyAfter(ctx, id, "")
+}
+
+func (s *Store) historyAfter(ctx context.Context, id, after string) ([]Message, error) {
+	rows, err := s.db.Reader().QueryContext(ctx, `SELECT id,turn_id,role,blocks_json,created_at FROM messages
+ WHERE conversation_id=? AND seq>COALESCE((SELECT seq FROM messages WHERE conversation_id=? AND id=?),0)
+ ORDER BY seq`, id, id, after)
 	if err != nil {
 		return nil, err
 	}
@@ -269,8 +287,4 @@ func (s *Store) History(ctx context.Context, id string) ([]Message, error) {
 
 func (j *Journal) RecordPermission(id string, at time.Time, details any) error {
 	return j.sideband("nanite.permission", id, at, details)
-}
-
-func (j *Journal) RecordCompaction(id string, at time.Time, details any) error {
-	return j.sideband("nanite.compaction", id, at, details)
 }

@@ -31,6 +31,9 @@ type Store struct {
 func Open(ctx context.Context, dataDir string, db *core.Store) (*Store, error) {
 	s := &Store{db: db, transcripts: filepath.Join(dataDir, "transcripts")}
 	if db == nil {
+		if err := PreparePrivateDB(dataDir); err != nil {
+			return nil, err
+		}
 		opened, err := core.Open(ctx, core.Config{Driver: core.DriverSQLite, SQLite: core.SQLiteConfig{Path: filepath.Join(dataDir, "nanite.db")}})
 		if err != nil {
 			return nil, err
@@ -133,3 +136,10 @@ func (s *Store) Conversations(ctx context.Context) ([]Conversation, error) {
 }
 
 func format(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000000000Z") }
+
+// TurnStatus reads the projected state of a turn.
+func (s *Store) TurnStatus(ctx context.Context, id string) (string, error) {
+	var status string
+	err := s.db.Reader().QueryRowContext(ctx, "SELECT status FROM turns WHERE id=?", id).Scan(&status)
+	return status, err
+}

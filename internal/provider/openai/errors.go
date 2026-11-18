@@ -5,33 +5,24 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/station"
 	sdk "github.com/openai/openai-go/v3"
 )
 
-// errEmptyResponse is returned when the API replies 200 with no usable
-// choices/data — typically indicates a transient API hiccup.
 var errEmptyResponse = errors.New("openai: empty response")
 
-// translateError wraps SDK errors into nanite-friendly diagnostic shapes.
-// The current OpenAI provider in nanite did not classify into specific
-// sentinels (no provider.ErrRateLimit / ErrRequestExceedsRateBudget paths
-// for OpenAI); we keep that shape and only annotate the message with the
-// upstream HTTP status when available.
-//
-// Adding sentinels (e.g. for 429-driven backoff) is captured as follow-up
-// `followups.nanite.cw_20260508_0012.openai_rate_budget_parity`.
 func translateError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var apierr *sdk.Error
-	if errors.As(err, &apierr) {
-		if gwErr := station.Classify(apierr.StatusCode, apierr.Code, apierr.RawJSON(), fmt.Errorf("%d %s: %s", apierr.StatusCode, apierr.Code, apierr.Message)); gwErr != nil {
-			return gwErr
-		}
-		return fmt.Errorf("openai: %s %d %s: %s",
-			http.StatusText(apierr.StatusCode), apierr.StatusCode, apierr.Code, apierr.Message)
+	var apiErr *sdk.Error
+	if !errors.As(err, &apiErr) {
+		return failure.Transport(err)
 	}
-	return fmt.Errorf("openai: %w", err)
+	cause := fmt.Errorf("openai: %s %d %s: %s", http.StatusText(apiErr.StatusCode), apiErr.StatusCode, apiErr.Code, apiErr.Message)
+	if gwErr := station.Classify(apiErr.StatusCode, apiErr.Code, apiErr.RawJSON(), cause); gwErr != nil {
+		return &failure.Error{Class: failure.Fatal, Cause: gwErr}
+	}
+	return failure.HTTP(apiErr.StatusCode, apiErr.Code, apiErr.Response, cause)
 }

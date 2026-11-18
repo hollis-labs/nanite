@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/station"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -33,6 +36,7 @@ type execution struct {
 	assembled  slots.Assembled
 	policy     policy.PDP
 	journal    *store.Journal
+	messageIDs []string
 	messages   []llmtypes.ChatMessage
 	parent     *string
 	catalogue  map[string]tools.Tool
@@ -83,9 +87,16 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	defer journal.Close()
 	x.journal = journal
-	history, err := e.cfg.Store.History(ctx, info.ID)
+	summary, history, parent, err := e.cfg.Store.ModelHistory(ctx, info.ID)
 	if err != nil {
 		return events.Result{}, err
+	}
+	if summary != "" {
+		x.messages = append(x.messages, llmtypes.ChatMessage{Role: "user", Content: summary})
+		x.messageIDs = append(x.messageIDs, "")
+	}
+	if parent != "" {
+		x.parent = &parent
 	}
 	for _, m := range history {
 		x.addMessage(m)
@@ -126,8 +137,15 @@ func (x *execution) addMessage(message store.Message) {
 	if role == "tool" {
 		role = "user"
 	}
-	x.messages = append(x.messages, llmtypes.ChatMessage{Role: role, ContentBlocks: message.Blocks})
 	x.parent = &message.ID
+	blocks := slices.DeleteFunc(slices.Clone(message.Blocks), func(b llmtypes.ContentBlock) bool {
+		return b.Type == "thinking" && b.Signature == ""
+	})
+	if len(blocks) == 0 {
+		return
+	}
+	x.messages = append(x.messages, llmtypes.ChatMessage{Role: role, ContentBlocks: blocks})
+	x.messageIDs = append(x.messageIDs, message.ID)
 }
 
 func (x *execution) append(message store.Message) error {
@@ -238,23 +256,33 @@ func (x *execution) generate(ctx context.Context) error {
 }
 
 func (x *execution) retry(ctx context.Context, err error, retries *int, runErr *error) runloop.Directive {
-	if ctx.Err() == nil && *retries < 2 {
+	var classified *failure.Error
+	if errors.Is(err, llmcontracts.ErrRequestExceedsRateBudget) {
+		classified = &failure.Error{Class: failure.Overflow, Cause: err}
+	} else {
+		_ = errors.As(err, &classified)
+	}
+	if ctx.Err() == nil && *retries < 2 && classified != nil {
 		*retries++
-		if ctxpkg.IsContextOverflow(err) {
+		switch classified.Class {
+		case failure.Overflow:
 			if compactErr := x.compact(ctx, true); compactErr == nil {
 				return runloop.Retry
 			} else {
 				err = errors.Join(err, compactErr)
 			}
-		} else if strings.Contains(strings.ToLower(err.Error()), "rate limit") || strings.Contains(strings.ToLower(err.Error()), "overload") {
+		case failure.Retryable:
+			base := time.Second << (*retries - 1)
+			delay := max(classified.RetryAfter, base+rand.N(base/4))
 			select {
-			case <-time.After(time.Duration(*retries) * 200 * time.Millisecond):
+			case <-time.After(delay):
 				return runloop.Retry
 			case <-ctx.Done():
 				err = ctx.Err()
 			}
 		}
 	}
+
 	*runErr = err
 	return runloop.Terminate
 }
@@ -271,35 +299,72 @@ func (x *execution) compact(ctx context.Context, force bool) error {
 		return nil
 	}
 	before := est.Estimate(string(raw))
-	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: x.messages,
-		Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), SessionID: x.info.ID}
-	var result *ctxpkg.CompactionResult
+	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), messages: x.messages, messageIDs: x.messageIDs}
+	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
 	if force {
-		result, err = pipeline.RunForce(ctx)
+		_, err = pipeline.RunForce(ctx)
 	} else {
-		result, err = pipeline.Run(ctx)
+		_, err = pipeline.Run(ctx)
 	}
 	if err != nil {
 		return err
 	}
-	x.messages = pipeline.ConversationMessages
-	if result != nil && result.TokensSaved > 0 {
-		now := time.Now().UTC()
-		payload := struct {
-			TurnID        string
-			Before, After int
-			Summary       string
-		}{
-			x.run.id, before, max(0, before-result.TokensSaved), x.engine.scrub.Text(result.Summary),
+	if summarizer.count == 0 || strings.TrimSpace(summarizer.summary) == "" {
+		// Stage-only changes preserve message positions. A durable summary must
+		// carry a message ID so future turns can reconstruct exactly its coverage.
+		if len(pipeline.ConversationMessages) == len(x.messageIDs) {
+			x.messages = pipeline.ConversationMessages
 		}
-		if err := x.journal.RecordCompaction(store.NewID(now), now, payload); err != nil {
-			return err
-		}
-		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-			return events.Compacted{EventMeta: meta, Before: before, After: max(0, before-result.TokensSaved)}
-		})
+		return nil
 	}
+	count := summarizer.count
+	through := x.messageIDs[count-1]
+	if through == "" {
+		return nil
+	}
+	summary := fmt.Sprintf("[Conversation summary — %d messages compacted]\n\n%s", count, x.engine.scrub.Text(summarizer.summary))
+	compacted := append([]llmtypes.ChatMessage{{Role: "user", Content: summary}}, x.messages[count:]...)
+	remaining, err := json.Marshal(compacted)
+	if err != nil {
+		return err
+	}
+	after := est.Estimate(string(remaining))
+	now := time.Now().UTC()
+	if err := x.journal.RecordCompaction(store.NewID(now), now, store.Compaction{
+		TurnID: x.run.id, ThroughMessageID: through, Summary: summary, Before: before, After: after,
+	}); err != nil {
+		return err
+	}
+	x.messages = compacted
+	x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
+	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
+		return events.Compacted{EventMeta: meta, Before: before, After: after}
+	})
 	return nil
+}
+
+type capturingSummarizer struct {
+	ctxpkg.Summarizer
+	messages   []llmtypes.ChatMessage
+	messageIDs []string
+	count      int
+	summary    string
+}
+
+func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span []llmtypes.ChatMessage) (string, error) {
+	end := len(span)
+	// Keep a tool call and its immediately following result together.
+	if end < len(s.messages) && slices.ContainsFunc(s.messages[end].ContentBlocks, func(b llmtypes.ContentBlock) bool { return b.Type == "tool_result" }) {
+		end--
+	}
+	if end < 1 || s.messageIDs[end-1] == "" {
+		return "", nil
+	}
+	summary, err := s.Summarizer.Summarize(ctx, prompt, span[:end])
+	if err == nil {
+		s.count, s.summary = end, summary
+	}
+	return summary, err
 }
 
 func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEvent) (step, error) {
@@ -322,7 +387,7 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 		case llmtypes.EventDone:
 			return got, nil
 		case llmtypes.EventError:
-			return got, errors.New(ev.Error)
+			return got, failure.FromEvent(ev)
 		case llmtypes.EventDelta:
 			clean := x.engine.scrub.Text(ev.Content)
 			text.WriteString(clean)
@@ -339,7 +404,11 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 				continue
 			}
 			text := x.engine.scrub.Text(ev.ThinkingBlock.Thinking)
-			got.blocks = append(got.blocks, llmtypes.ContentBlock{Type: "thinking", Text: text, Signature: ev.ThinkingBlock.Signature})
+			signature := ev.ThinkingBlock.Signature
+			if text != ev.ThinkingBlock.Thinking {
+				signature = ""
+			}
+			got.blocks = append(got.blocks, llmtypes.ContentBlock{Type: "thinking", Text: text, Signature: signature})
 			got.emitted = true
 			x.run.emit(ctx, func(meta events.EventMeta) events.Event { return events.Thinking{EventMeta: meta, Text: text} })
 		case llmtypes.EventToolUse:

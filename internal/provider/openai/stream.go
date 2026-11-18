@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"errors"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/toolargs"
@@ -94,10 +95,10 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 		}
 		if err := stream.Err(); err != nil {
 			if errors.Is(err, context.Canceled) {
-				_ = emit(llmtypes.StreamEvent{Type: llmtypes.EventError, Error: err.Error()})
+				_ = emit(failure.Event(err))
 				return
 			}
-			_ = emit(llmtypes.StreamEvent{Type: llmtypes.EventError, Error: translateError(err).Error()})
+			_ = emit(failure.Event(translateError(err)))
 			return
 		}
 

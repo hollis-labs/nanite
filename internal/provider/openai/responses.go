@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"io"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -35,7 +36,7 @@ func (c *Client) completeResponse(ctx context.Context, req llmtypes.ChatRequest)
 
 func responseFailure(response responses.Response) error {
 	if response.Error.Message != "" {
-		return fmt.Errorf("openai: %s: %s", response.Error.Code, response.Error.Message)
+		return failure.HTTP(0, string(response.Error.Code), nil, fmt.Errorf("openai: %s: %s", response.Error.Code, response.Error.Message))
 	}
 	if response.Status == "incomplete" {
 		return fmt.Errorf("openai: response incomplete: %s", response.IncompleteDetails.Reason)
@@ -78,7 +79,7 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 			}
 		}
 		fail := func(err error) {
-			emit(llmtypes.StreamEvent{Type: llmtypes.EventError, Error: err.Error()})
+			emit(failure.Event(err))
 		}
 		for stream.Next() {
 			event := stream.Current()

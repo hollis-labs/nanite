@@ -14,7 +14,10 @@ messages and turn state transitions.
 
 Nanite syncs each transcript record before updating SQLite. It commits the
 projection and transcript cursor in the same transaction, then replays any
-remaining records on open. New schema changes use numbered migrations.
+remaining records on open. Compaction records the summary and the last message
+it covers. Provider requests use that summary and the messages that follow it.
+Host history retains the full transcript. New schema changes use numbered
+migrations.
 
 ## Known limitations
 

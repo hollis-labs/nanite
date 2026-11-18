@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"log/slog"
 	"strings"
 
@@ -298,10 +299,7 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 		// Non-terminal error from the SDK (network drop, decode failure,
 		// API error mid-stream). Translate to internal error event so the
 		// chat loop's error envelope path picks it up.
-		if !emit(llmtypes.StreamEvent{
-			Type:  llmtypes.EventError,
-			Error: translateError(streamErr).Error(),
-		}) {
+		if !emit(failure.Event(translateError(streamErr))) {
 			return
 		}
 	}

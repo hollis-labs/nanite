@@ -20,7 +20,22 @@ func (p rulePDP) Evaluate(ctx context.Context, req policy.Request) (policy.Decis
 	readOnly, _ := req.Context["read_only"].(bool)
 	destructive, _ := req.Context["destructive"].(bool)
 	check := p.engine.Check(ctx, req.Scope, req.Resource.ID, input, rules.ToolMeta{IsReadOnly: readOnly, IsDestructive: destructive})
-	return policy.Decision{Effect: policy.Effect(check.Decision), Reason: check.Reason}, nil
+	effect := policy.Deny
+	switch check.Decision {
+	case rules.DecisionAllow:
+		effect = policy.Allow
+		if p.engine.Mode() == rules.ModeDefault && isEdit(req.Resource.ID) && check.MatchedRule == nil {
+			effect = policy.Ask
+			check.Reason = "default mode requires approval for file edits"
+		}
+	case rules.DecisionAsk:
+		effect = policy.Ask
+	case rules.DecisionDeny:
+		effect = policy.Deny
+	default:
+		return policy.Decision{Effect: policy.Deny, Reason: "unrecognized permission decision"}, nil
+	}
+	return policy.Decision{Effect: effect, Reason: check.Reason}, nil
 }
 
 func Rules(mode string, data []byte) (policy.PDP, error) {
@@ -90,3 +105,5 @@ func (a auditLog) Record(ctx context.Context, event policy.AuditEvent) error {
 		"decision", string(event.Decision.Effect), "failure", string(event.Failure))
 	return nil
 }
+
+func isEdit(name string) bool { return name == "write_file" || name == "edit_file" }

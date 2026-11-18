@@ -22,7 +22,7 @@ func (s *Store) RebuildIndex(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
 			return err
 		}
-		for _, stmt := range []string{"DELETE FROM transcript_cursors", "DELETE FROM messages", "DELETE FROM turns", "DELETE FROM conversations"} {
+		for _, stmt := range []string{"DELETE FROM transcript_cursors", "DELETE FROM compactions", "DELETE FROM messages", "DELETE FROM turns", "DELETE FROM conversations"} {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return err
 			}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
+	nanitestore "github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/boot"
 	"github.com/hollis-labs/substrate/module"
 	"github.com/hollis-labs/substrate/modules/policy"
@@ -103,7 +104,7 @@ func start(ctx context.Context, dataDir string) (*boot.Running, error) {
 		AfterConfig: func(_ context.Context, app *module.App) error {
 			path := ":memory:"
 			if dataDir != "" {
-				if err := os.MkdirAll(dataDir, 0700); err != nil {
+				if err := nanitestore.PreparePrivateDB(dataDir); err != nil {
 					return err
 				}
 				path = filepath.Join(dataDir, "nanite.db")

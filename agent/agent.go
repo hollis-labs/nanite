@@ -103,16 +103,20 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if data == "" {
 		data = filepath.Join(def.Directory, ".nanite")
 	}
-	if err := os.MkdirAll(data, 0700); err != nil {
+	if err := nanitestore.PreparePrivateDir(data); err != nil {
 		return nil, fmt.Errorf("create agent data directory: %w", err)
 	}
-	lock, err := os.OpenFile(filepath.Join(data, "agent.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(data, "agent.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open agent lock: %w", err)
 	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = lock.Close()
 		return nil, fmt.Errorf("lock agent data directory %q: %w", data, err)
+	}
+	if err := lock.Chmod(0600); err != nil {
+		_ = lock.Close()
+		return nil, err
 	}
 	db, err := nanitestore.Open(ctx, data, opts.Store)
 	if err != nil {

@@ -96,7 +96,7 @@ func builtin(name string) bool {
 	case "todo_write", "todo_list", "scratchpad_write", "scratchpad_read",
 		"skill_list", "skill_get", "subagent_spawn", "subagent_status", "subagent_cancel",
 		"background_start", "background_status", "background_cancel", "fetch_tool_result",
-		"search_tool_result", "ask_user", "read_file", "write_file", "edit_file", "list_dir", "bash":
+		"search_tool_result", "ask_user", "read_file", "write_file", "edit_file", "list_dir", "find_files", "search_files", "bash":
 		return true
 	default:
 		return strings.HasPrefix(name, "mcp__")

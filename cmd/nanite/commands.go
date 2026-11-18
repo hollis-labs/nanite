@@ -142,15 +142,24 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		}
 		if interrupted := conversation.Interrupted(); interrupted != nil {
 			if nonInteractive {
-				if resume == "" {
+				switch {
+				case resume != "":
+					run, err := conversation.Resume(cmd.Context())
+					if err != nil {
+						return err
+					}
+					if err := repl.Output(run, "text", cmd.ErrOrStderr()); err != nil {
+						return err
+					}
+				case latest:
 					return fmt.Errorf("conversation %s has interrupted turn %s; use --resume %s", conversation.ID(), interrupted.ID, conversation.ID())
-				}
-				run, err := conversation.Resume(cmd.Context())
-				if err != nil {
-					return err
-				}
-				if err := repl.Output(run, "text", cmd.ErrOrStderr()); err != nil {
-					return err
+				default:
+					// A one-shot prompt is a new conversation; an unfinished turn elsewhere must not block it.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: conversation %s has an interrupted turn; continue it with --resume %s\n", conversation.ID(), conversation.ID())
+					conversation, err = a.NewConversation(cmd.Context())
+					if err != nil {
+						return err
+					}
 				}
 			} else {
 				confirmed := resume != ""

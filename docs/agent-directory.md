@@ -126,6 +126,19 @@ of `allow`, `ask`, or `deny`. Deny takes priority over ask, then allow.
 The first match within a behavior wins. The effective mode is
 `host.yaml`'s `permissions.mode`, then the rule file's `mode`, then
 `default`. Modes are `default`, `accept-edits`, `plan`, and `yolo`.
+
+| Mode | What it does |
+|---|---|
+| `default` | Read-only tools run. Tools that change something ask first. |
+| `accept-edits` | As `default`, and `write_file` and `edit_file` run without asking. |
+| `plan` | Read-only tools run. Everything else is denied; rules cannot allow it. |
+| `yolo` | Everything runs, including tools a rule denies. |
+
+Something must answer an "ask". The interactive terminal prompts with
+`[y/N/always]`; `always` allows that tool for the rest of the conversation. A
+one-shot run (`nanite -p`) has nobody to ask, so an "ask" is denied and the
+model is told so. Allow the tool with a rule if a one-shot run needs it.
+
 An embedding host can add a policy decision point and an approval gate.
 File-tool confinement and Bash behavior are described in the
 [architecture limitations](architecture.md#known-limitations).

@@ -47,7 +47,7 @@ Turn 1 slots:
     demo/view: ship
   context: 4 tokens, changed yes
     demo/selection: ship
-Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, list_dir, notes_search, read_file, scratchpad_read, scratchpad_write, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
+Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, find_files, list_dir, notes_search, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
 Tool called: notes_search
 The notes mention a planning meeting.
 Turn 2 slots:
@@ -63,7 +63,7 @@ Turn 2 slots:
     demo/view: ship
   context: 4 tokens, changed yes
     demo/selection: ship
-Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, files_list, list_dir, read_file, scratchpad_read, scratchpad_write, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
+Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, files_list, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
 Tool called: files_list
 The workspace contains agenda.md.
 Turn 3 slots:
@@ -77,6 +77,6 @@ Turn 3 slots:
     engine/mode: ship
   workspace: 0 tokens, changed yes
   context: 0 tokens, changed yes
-Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, list_dir, read_file, scratchpad_read, scratchpad_write, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
+Tools offered: ask_user, background_cancel, background_start, background_status, bash, edit_file, fetch_tool_result, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write, write_file
 The workspace context is clear.
 ```

@@ -79,7 +79,7 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{cfg: cfg, scrub: scrub, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
+	e := &Engine{cfg: cfg, scrub: scrub, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger)
 	return e, nil
@@ -162,6 +162,10 @@ func (e *Engine) Close() {
 	}
 
 }
+
+// toolResultBudget is how much of one tool result the model sees inline. A
+// larger result is cached and shown as a preview the model pages through.
+const toolResultBudget = 24 << 10
 
 func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, error) {
 	if e.cfg.Provider != nil {

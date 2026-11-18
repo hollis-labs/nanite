@@ -11,7 +11,7 @@ import (
 )
 
 func New(db *store.Store, conversation string, roots []string) []tools.Tool {
-	workspace := workspace{roots: roots}
+	files := workspace{roots: roots}
 	return []tools.Tool{
 		spec("todo_list", "Read the current conversation's checklist.", `{}`, nil, true,
 			func(ctx context.Context, _ struct{}) (string, error) {
@@ -48,10 +48,14 @@ func New(db *store.Store, conversation string, roots []string) []tools.Tool {
 				}
 				return "Scratchpad updated.", db.SetScratch(ctx, conversation, args.Key, args.Content)
 			}),
-		spec("read_file", "Read a workspace file.", `{"path":{"type":"string"}}`, []string{"path"}, true, workspace.read),
-		spec("list_dir", "List a workspace directory.", `{"path":{"type":"string"}}`, []string{"path"}, true, workspace.list),
-		spec("write_file", "Create or replace a workspace file.", `{"path":{"type":"string"},"content":{"type":"string"}}`, []string{"path", "content"}, false, workspace.write),
-		spec("edit_file", "Replace one exact occurrence in a workspace file.", `{"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}}`, []string{"path", "old", "new"}, false, workspace.edit),
+		spec("read_file", "Read a workspace file.", `{"path":{"type":"string"}}`, []string{"path"}, true, files.read),
+		spec("list_dir", "List a workspace directory.", `{"path":{"type":"string"}}`, []string{"path"}, true, files.list),
+		spec("find_files", "Find workspace files by name. The pattern is a glob such as *.md or docs/**/*.md; a pattern without a slash matches the file name at any depth. path limits the search to a directory.",
+			`{"pattern":{"type":"string"},"path":{"type":"string"}}`, []string{"pattern"}, true, files.find),
+		spec("search_files", "Search the text of workspace files with a regular expression. Returns matching lines as path:line: text. path limits the search to a directory or one file; glob limits it to matching file names.",
+			`{"pattern":{"type":"string"},"path":{"type":"string"},"glob":{"type":"string"}}`, []string{"pattern"}, true, files.search),
+		spec("write_file", "Create or replace a workspace file.", `{"path":{"type":"string"},"content":{"type":"string"}}`, []string{"path", "content"}, false, files.write),
+		spec("edit_file", "Replace one exact occurrence in a workspace file.", `{"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}}`, []string{"path", "old", "new"}, false, files.edit),
 	}
 }
 

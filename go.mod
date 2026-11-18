@@ -23,6 +23,7 @@ require (
 	github.com/hollis-labs/libs/core/store v0.1.0 // indirect
 	github.com/hollis-labs/libs/core/util v0.6.0 // indirect
 	github.com/hollis-labs/libs/harness/core v0.17.1-0.20261115212742-8f2ed31176b0
+	github.com/hollis-labs/libs/mesh/core v0.11.0
 	github.com/hollis-labs/libs/security/redact v0.2.0 // indirect
 	github.com/hollis-labs/libs/security/secrets v0.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

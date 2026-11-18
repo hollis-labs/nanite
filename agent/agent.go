@@ -16,13 +16,14 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/internal/slots"
+	nanitestore "github.com/hollis-labs/nanite/internal/store"
 )
 
 var (
 	// ErrBusy means a run is already active in the conversation.
 	ErrBusy = errors.New("nanite: conversation is busy")
 	// ErrNoConversation means the requested conversation does not exist.
-	ErrNoConversation = errors.New("nanite: no conversation")
+	ErrNoConversation = nanitestore.ErrNoConversation
 	// ErrNotImplemented means the engine does not yet implement the operation.
 	ErrNotImplemented = errors.New("nanite: not implemented")
 )
@@ -54,6 +55,7 @@ type Agent struct {
 	dir       string
 	lock      *os.File
 	closeOnce sync.Once
+	store     *nanitestore.Store
 	closeErr  error
 	slots     Slots
 	tools     ToolSet
@@ -97,14 +99,19 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, fmt.Errorf("lock agent data directory %q: %w", data, err)
 	}
-	return &Agent{dir: def.Directory, lock: lock, slots: Slots{store: slots.NewStore()}, notices: make(chan Notice)}, nil
+	db, err := nanitestore.Open(ctx, data, opts.Store)
+	if err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}, notices: make(chan Notice)}, nil
 }
 
 // Close releases this agent's resources and directory lock.
 func (a *Agent) Close() error {
 	a.closeOnce.Do(func() {
 		close(a.notices)
-		a.closeErr = a.lock.Close()
+		a.closeErr = errors.Join(a.store.Close(), a.lock.Close())
 	})
 	return a.closeErr
 }

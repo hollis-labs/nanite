@@ -1,0 +1,1 @@
+{"version":"resultenv/v1","outcome":"success","mcp_result":{"content":[{"type":"text","text":"42"}],"structuredContent":{"value":42},"_meta":{"fixture":"sdk-fakehost"}}}

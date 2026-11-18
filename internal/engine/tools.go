@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/libs/agent/core/loopdetect"
@@ -20,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
@@ -32,6 +34,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 
 	catalogue = append(catalogue, selftools.Skills(catalog)...)
 	catalogue = append(catalogue, mcp...)
+	catalogue = append(catalogue, x.jobTools()...)
 	roots := x.engine.cfg.WorkspaceRoots
 	if len(roots) > 0 {
 		catalogue = append(catalogue, selftools.Bash(shell.Plain{}, roots[0], x.definition.Runtime.Env))
@@ -59,7 +62,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, catalog skills.Catalog)
 	x.catalogue = make(map[string]tools.Tool)
 	x.validators = make(map[string]recover.Validator)
 	for _, tool := range append(catalogue, host...) {
-		if x.info.Role == "planner" && !tool.ReadOnly {
+		if !subagent.AllowsTool(x.info.Role, tool.Name, tool.ReadOnly) {
 			continue
 		}
 		var schema map[string]any
@@ -154,7 +157,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			continue
 		}
 
-		if call.Name == "bash" {
+		if call.Name == "bash" || call.Name == "background_start" {
 			if _, err := selftools.ParseBash(raw); err != nil {
 				results[i].Content = x.engine.scrub.Text(err.Error())
 				continue
@@ -178,7 +181,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			return
 		}
 		started := time.Now()
-		result, err := x.catalogue[call.Name].Handler(mcpclient.WithAsk(ctx, x.ask), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+		result, err := x.catalogue[call.Name].Handler(x.askContext(ctx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
 		if err != nil {
 			result = tools.Result{Text: err.Error(), IsError: true}
 		}
@@ -220,4 +223,15 @@ func (x *execution) cancelledTools(calls []llmtypes.ToolUseBlock) error {
 
 func (x *execution) ask(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error) {
 	return x.run.ask(ctx, x.engine.scrub.Text(prompt), schema, x.engine.scrub.Bytes(schema))
+}
+
+func (x *execution) askContext(ctx context.Context, tool string) context.Context {
+	if !strings.HasPrefix(tool, "mcp__") {
+		return ctx
+	}
+	var ask mcpclient.Ask
+	if x.info.ParentID == "" && x.info.Role == "chat" {
+		ask = x.ask
+	}
+	return mcpclient.WithAsk(ctx, ask)
 }

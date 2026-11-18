@@ -44,13 +44,19 @@ func TestPlainRunnerGivesTerminationHandlerTime(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := (Plain{}).Run(ctx, Command{Dir: dir, Timeout: 5 * time.Second,
-			Script: `trap 'printf cleaned > cleaned; exit 0' TERM; printf ready > ready; while true; do sleep 1; done`,
+			Script: `trap 'printf cleaned > cleaned; kill -KILL "$child"; wait "$child" 2>/dev/null; exit 0' TERM
+(trap '' TERM; printf ready > child_ready; exec sleep 30) &
+child=$!
+printf ready > ready
+wait "$child"`,
 		})
 		done <- err
 	}()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "ready")); err == nil {
+		_, parentReady := os.Stat(filepath.Join(dir, "ready"))
+		_, childReady := os.Stat(filepath.Join(dir, "child_ready"))
+		if parentReady == nil && childReady == nil {
 			break
 		}
 		if time.Now().After(deadline) {

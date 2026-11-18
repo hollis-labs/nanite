@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/libs/security/redact"
+	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/mcpclient"
@@ -22,6 +23,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
@@ -51,6 +53,8 @@ type Engine struct {
 	grants   map[string]map[string]bool
 	closed   bool
 	scrub    *redact.Redactor
+	jobs     *background.Manager
+	children subagent.Limit
 	notices  chan store.Notice
 	mcp      *mcpclient.Client
 	cache    *toolresult.Cache
@@ -71,8 +75,10 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{cfg: cfg, scrub: scrub, notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
-		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool)}, nil
+	e := &Engine{cfg: cfg, scrub: scrub, notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{}), active: make(map[string]*Run),
+		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
+	e.jobs = background.New(cfg.Store, scrub.Text, e.publishNotice, cfg.Logger)
+	return e, nil
 }
 
 type Input struct {
@@ -116,6 +122,7 @@ func (e *Engine) Close() {
 		r.Cancel()
 	}
 	e.mu.Unlock()
+	e.jobs.Close()
 	for _, r := range runs {
 		<-r.done
 	}
@@ -144,6 +151,10 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: "Permission mode: " + mode + ". File tools are confined to the workspace roots. Approved Bash commands run with the user’s privileges and can access paths outside those roots."}},
 		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},
+	}
+
+	if prompt := subagent.Prompt(info.Role); prompt != "" {
+		updates = append(updates, slots.Update{Slot: slots.Mode, Entry: slots.Entry{Owner: "engine", Key: "subagent-role", Content: prompt, Priority: 100}})
 	}
 
 	for _, notice := range pending {

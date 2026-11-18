@@ -36,21 +36,46 @@ type Runner interface {
 type Plain struct{}
 
 func (Plain) Run(ctx context.Context, command Command) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, command.Timeout)
-	defer cancel()
+	process, err := Start(ctx, command)
+	if err != nil {
+		return Result{}, err
+	}
+	return process.Wait()
+}
 
-	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-c", command.Script)
+// Process is a started shell command. Its caller must Wait exactly once.
+type Process struct {
+	cmd     *exec.Cmd
+	ctx     context.Context
+	release context.CancelFunc
+	output  *cappedOutput
+}
+
+func Start(ctx context.Context, command Command) (*Process, error) {
+	runCtx, cancel := context.WithTimeout(ctx, command.Timeout)
+	cmd := exec.CommandContext(runCtx, "bash", "--noprofile", "--norc", "-c", command.Script)
 	cmd.Dir = command.Dir
 	cmd.Env = processenv.List(processenv.Build(command.Env))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return terminateGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = 2 * time.Second
-	var output cappedOutput
-	cmd.Stdout, cmd.Stderr = &output, &output
-	err := cmd.Run()
-	result := Result{Output: output.String()}
-	if ctx.Err() != nil {
-		return result, ctx.Err()
+	output := &cappedOutput{}
+	cmd.Stdout, cmd.Stderr = output, output
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("start bash: %w", err)
+	}
+	return &Process{cmd: cmd, ctx: runCtx, release: cancel, output: output}, nil
+}
+
+func (p *Process) PID() int { return p.cmd.Process.Pid }
+
+func (p *Process) Wait() (Result, error) {
+	defer p.release()
+	err := p.cmd.Wait()
+	result := Result{Output: p.output.String()}
+	if p.ctx.Err() != nil {
+		return result, p.ctx.Err()
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -62,6 +87,9 @@ func (Plain) Run(ctx context.Context, command Command) (Result, error) {
 	}
 	return result, nil
 }
+
+// CleanupGroup terminates descendants still present after background job exit.
+func (p *Process) CleanupGroup() { _ = terminateGroup(p.PID()) }
 
 // terminateGroup gives the shell and its children time to handle SIGTERM.
 func terminateGroup(pid int) error {

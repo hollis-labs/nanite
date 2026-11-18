@@ -63,7 +63,7 @@ func (t Terminal) Decide(ctx context.Context, request permission.PermissionReque
 	if err := ctx.Err(); err != nil {
 		return permission.PermissionDecision{}, err
 	}
-	if request.Tool == "bash" {
+	if request.Tool == "bash" || request.Tool == "background_start" {
 		var args struct{ Command string }
 		if err := json.Unmarshal(request.Input, &args); err != nil {
 			return permission.PermissionDecision{}, err

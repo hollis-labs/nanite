@@ -34,20 +34,26 @@ func ParseBash(raw json.RawMessage) (BashInput, error) {
 	return input, nil
 }
 
+const BashSchema = `{"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600,"default":120}},"required":["command"],"additionalProperties":false}`
+
+func (input BashInput) ShellCommand(dir string, env map[string]string) shell.Command {
+	seconds := 120
+	if input.TimeoutSeconds != nil {
+		seconds = *input.TimeoutSeconds
+	}
+	return shell.Command{Script: input.Command, Dir: dir, Env: env, Timeout: time.Duration(seconds) * time.Second}
+}
+
 func Bash(runner shell.Runner, dir string, env map[string]string) tools.Tool {
 	return tools.Tool{Name: "bash", Description: "Run a Bash command from the workspace root with the current user's privileges.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600,"default":120}},"required":["command"],"additionalProperties":false}`),
+		InputSchema: json.RawMessage(BashSchema),
 		Destructive: true,
 		Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
 			input, err := ParseBash(call.Input)
 			if err != nil {
 				return tools.Result{}, err
 			}
-			seconds := 120
-			if input.TimeoutSeconds != nil {
-				seconds = *input.TimeoutSeconds
-			}
-			result, err := runner.Run(ctx, shell.Command{Script: input.Command, Dir: dir, Env: env, Timeout: time.Duration(seconds) * time.Second})
+			result, err := runner.Run(ctx, input.ShellCommand(dir, env))
 			text := result.Output
 			if err != nil {
 				return tools.Result{Text: fmt.Sprintf("%s\nBash: %v", text, err), IsError: true}, nil

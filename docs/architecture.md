@@ -45,6 +45,18 @@ existing values or schema defaults. Repaired arguments pass schema validation
 and authorization before execution. Set `NANITE_AUTO_REPAIR=false` to turn off
 repair calls.
 
+## Subagents and background jobs
+
+A chat conversation can start a worker or planner child as a foreground tool
+call or background job. Worker tools use the same permission check as chat
+tools. Planners see read-only tools. Children cannot start another child, and
+up to four children can run per agent. Cancelling a parent turn cancels its
+foreground child. Background children run until completion or job cancellation.
+
+Background Bash uses the same permission check, environment, and denylist as
+foreground Bash. A job can outlive its turn and records bounded, redacted output
+in `.nanite/jobs/`. Completion writes a notice for the parent conversation.
+
 ## Known limitations
 
 File tools are confined to the workspace roots. Approved Bash commands run with
@@ -66,4 +78,5 @@ ask rule in `permissions.yaml`, such as `tool: mcp__myserver__*`, overrides
 that hint.
 
 MCP elicitation supports form prompts. Calls sharing one registration run
-serially so a server question can be routed to the correct turn.
+serially so a server question can be routed to the correct turn. This also
+serializes read-only calls to that server.

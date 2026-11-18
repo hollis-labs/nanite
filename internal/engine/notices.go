@@ -21,12 +21,24 @@ func (e *Engine) PostNotice(ctx context.Context, conversation, kind, body string
 	if err := e.cfg.Store.AddNotice(ctx, notice); err != nil {
 		return err
 	}
+	e.sendNoticeLocked(notice)
+	return nil
+}
+
+func (e *Engine) publishNotice(notice store.Notice) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.closed {
+		e.sendNoticeLocked(notice)
+	}
+}
+
+func (e *Engine) sendNoticeLocked(notice store.Notice) {
 	// The channel wakes idle hosts. SQLite is the pending delivery queue.
 	select {
 	case e.notices <- notice:
 	default:
 	}
-	return nil
 }
 
 func deliveredNoticeIDs(report slots.Report, pending []store.Notice) []string {

@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/selftools"
+	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
@@ -22,6 +23,11 @@ import (
 func (x *execution) prepareTools(host []tools.Tool) error {
 	cache := x.engine.cache
 	catalogue := selftools.New(x.engine.cfg.Store, x.info.ID, x.engine.cfg.WorkspaceRoots)
+	roots := x.engine.cfg.WorkspaceRoots
+	if len(roots) > 0 {
+		catalogue = append(catalogue, selftools.Bash(shell.Plain{}, roots[0], x.definition.Runtime.Env))
+	}
+
 	for _, item := range []struct {
 		spec    toolresult.ToolSpec
 		handler func(context.Context, string, map[string]any, int) (string, bool)
@@ -132,6 +138,13 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.ToolCallStarted{EventMeta: meta, CallID: call.ID, Name: t.Name, Input: started}
 		})
+		if call.Name == "bash" {
+			if _, err := selftools.ParseBash(raw); err != nil {
+				results[i].Content = x.engine.scrub.Text(err.Error())
+				continue
+			}
+		}
+
 		if d := x.authorize(ctx, t, call, raw); !d.Allow {
 			results[i].Content = "permission denied: " + d.Reason
 			continue

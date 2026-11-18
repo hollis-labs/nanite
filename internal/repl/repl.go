@@ -62,6 +62,15 @@ func (t Terminal) Decide(ctx context.Context, request permission.PermissionReque
 	if err := ctx.Err(); err != nil {
 		return permission.PermissionDecision{}, err
 	}
+	if request.Tool == "bash" {
+		var args struct{ Command string }
+		if err := json.Unmarshal(request.Input, &args); err != nil {
+			return permission.PermissionDecision{}, err
+		}
+		if _, err := fmt.Fprintf(t.Output, "Bash command: %q\n", args.Command); err != nil {
+			return permission.PermissionDecision{}, err
+		}
+	}
 	if _, err := fmt.Fprintf(t.Output, "Allow %s (%s)? [y/N/always] ", request.Tool, request.Reason); err != nil {
 		return permission.PermissionDecision{}, err
 	}

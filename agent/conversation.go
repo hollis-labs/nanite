@@ -92,6 +92,13 @@ func (c *Conversation) Discard(ctx context.Context) error {
 	return c.agent.engine.Discard(ctx, c.id)
 }
 
+// Record adds an exchange the host answered itself, without calling the
+// model, so the agent's history includes it on the next turn. It fails while
+// a turn is running or interrupted.
+func (c *Conversation) Record(ctx context.Context, userText, answer string) error {
+	return c.agent.engine.Record(ctx, c.id, userText, answer)
+}
+
 // History reads the persisted messages in order.
 func (c *Conversation) History(ctx context.Context) ([]Message, error) {
 	return c.agent.store.History(ctx, c.id)

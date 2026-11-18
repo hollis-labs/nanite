@@ -364,7 +364,7 @@ func (x *execution) retry(ctx context.Context, err error, retries *int, runErr *
 	return runloop.Terminate
 }
 
-func (x *execution) compact(ctx context.Context, force bool) error {
+func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	est := ctxpkg.DefaultEstimator{}
 	raw, err := json.Marshal(x.messages)
 	if err != nil {
@@ -376,6 +376,23 @@ func (x *execution) compact(ctx context.Context, force bool) error {
 		return nil
 	}
 	before := est.Estimate(string(raw))
+	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
+		return events.CompactionStarted{EventMeta: meta, Before: before}
+	})
+	// Every start is followed by exactly one outcome. Paths that end without
+	// a durable summary report the estimate unchanged.
+	reported := false
+	defer func() {
+		if reported {
+			return
+		}
+		x.run.emit(context.WithoutCancel(ctx), func(meta events.EventMeta) events.Event {
+			if retErr != nil {
+				return events.CompactionFailed{EventMeta: meta, Err: retErr}
+			}
+			return events.Compacted{EventMeta: meta, Before: before, After: before}
+		})
+	}()
 	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(x.definition.Runtime.Model)}
 	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
 	if force {
@@ -414,6 +431,7 @@ func (x *execution) compact(ctx context.Context, force bool) error {
 	}
 	x.messages = compacted
 	x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
+	reported = true
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 		return events.Compacted{EventMeta: meta, Before: before, After: after}
 	})

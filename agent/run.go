@@ -64,6 +64,13 @@ type SubagentStarted = events.SubagentStarted
 // SubagentFinished reports the result or error of a foreground child.
 type SubagentFinished = events.SubagentFinished
 
+// CompactionStarted reports that history compaction is beginning. Exactly one
+// Compacted or CompactionFailed follows it.
+type CompactionStarted = events.CompactionStarted
+
+// CompactionFailed reports that compaction did not complete.
+type CompactionFailed = events.CompactionFailed
+
 // Compacted reports the token estimate before and after history compaction.
 type Compacted = events.Compacted
 

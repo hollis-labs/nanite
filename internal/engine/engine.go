@@ -1,10 +1,11 @@
 package engine
 
 import (
-	"github.com/hollis-labs/nanite/internal/recovery"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"log/slog"
 	"maps"
 	"runtime"
@@ -37,18 +38,18 @@ type Config struct {
 	Logger               *slog.Logger
 	Dir, GlobalSkillsDir string
 	// Builtins limits which of Nanite's own tool groups are offered. Nil offers all.
-	Builtins tools.Builtins
-	Provider             llmcontracts.Provider
-	ProviderConfig       provider.Config
-	Store                *store.Store
-	Gate                 permission.Gate
-	PDP                  policy.PDP
-	Slots                *slots.Store
-	SlotSources          []slots.Source
-	SlotSelector         slots.Selector
-	Tools                *tools.Groups
-	Skills               *skills.Groups
-	WorkspaceRoots       []string
+	Builtins       tools.Builtins
+	Provider       llmcontracts.Provider
+	ProviderConfig provider.Config
+	Store          *store.Store
+	Gate           permission.Gate
+	PDP            policy.PDP
+	Slots          *slots.Store
+	SlotSources    []slots.Source
+	SlotSelector   slots.Selector
+	Tools          *tools.Groups
+	Skills         *skills.Groups
+	WorkspaceRoots []string
 }
 
 type Engine struct {
@@ -140,6 +141,63 @@ func (e *Engine) Discard(ctx context.Context, id string) error {
 	}
 	if err == nil {
 		err = journal.FinishTurn(store.Turn{ID: turn.ID, UserMessageID: turn.UserMessageID, Status: "cancelled", Error: "discarded after interruption"}, now)
+	}
+	return errors.Join(err, journal.Close())
+}
+
+// Record adds an exchange the host handled itself to the conversation's
+// history: what the user said and the answer the host gave. No model is
+// called. The next turn sees the exchange like any other.
+func (e *Engine) Record(ctx context.Context, id, userText, answer string) error {
+	if strings.TrimSpace(userText) == "" || strings.TrimSpace(answer) == "" {
+		return fmt.Errorf("nanite: a recorded exchange needs both the user text and the answer")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return fmt.Errorf("nanite: agent is closed")
+	}
+	if e.active[id] != nil {
+		return ErrBusy
+	}
+	if _, err := e.cfg.Store.Conversation(ctx, id); err != nil {
+		return err
+	}
+	interrupted, err := e.cfg.Store.Interrupted(ctx, id)
+	if err != nil {
+		return err
+	}
+	if interrupted != nil {
+		return fmt.Errorf("conversation has an interrupted turn; resume or discard it first")
+	}
+	history, err := e.cfg.Store.History(ctx, id)
+	if err != nil {
+		return err
+	}
+	journal, err := e.cfg.Store.OpenJournal(ctx, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	turn := store.Turn{ID: store.NewID(now), UserMessageID: store.NewID(now)}
+	var parent *string
+	if n := len(history); n > 0 {
+		parent = &history[n-1].ID
+	}
+	text := func(s string) []llmtypes.ContentBlock {
+		return []llmtypes.ContentBlock{{Type: "text", Text: e.scrub.Text(s)}}
+	}
+	reply := store.Message{ID: store.NewID(now), TurnID: turn.ID, Role: "assistant", Blocks: text(answer), CreatedAt: now}
+	err = journal.StartTurn(turn, now)
+	if err == nil {
+		err = journal.AppendMessage(store.Message{ID: turn.UserMessageID, TurnID: turn.ID, Role: "user", Blocks: text(userText), CreatedAt: now}, parent)
+	}
+	if err == nil {
+		err = journal.AppendMessage(reply, &turn.UserMessageID)
+	}
+	if err == nil {
+		turn.Status, turn.StopReason = "completed", llmtypes.StopReasonEndTurn
+		err = journal.FinishTurn(turn, now)
 	}
 	return errors.Join(err, journal.Close())
 }

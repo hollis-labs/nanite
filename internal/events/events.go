@@ -104,6 +104,20 @@ type SubagentFinished struct {
 	Err    error
 }
 
+// CompactionStarted reports that the conversation history is about to be
+// compacted. Exactly one Compacted or CompactionFailed follows it.
+type CompactionStarted struct {
+	EventMeta
+	Before int
+}
+
+// CompactionFailed reports that compaction did not complete. The history is
+// unchanged.
+type CompactionFailed struct {
+	EventMeta
+	Err error
+}
+
 // Compacted reports the change in token usage after context compaction.
 type Compacted struct {
 	EventMeta

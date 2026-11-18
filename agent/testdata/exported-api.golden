@@ -27,11 +27,18 @@ type Compacted = github.com/hollis-labs/nanite/internal/events.Compacted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int
   field After int
+type CompactionFailed = github.com/hollis-labs/nanite/internal/events.CompactionFailed struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Err error
+type CompactionStarted = github.com/hollis-labs/nanite/internal/events.CompactionStarted struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Before int
 type Conversation struct
   (*Conversation) Discard(ctx context.Context) error
   (*Conversation) History(ctx context.Context) ([]Message, error)
   (*Conversation) ID() string
   (*Conversation) Interrupted() *InterruptedTurn
+  (*Conversation) Record(ctx context.Context, userText string, answer string) error
   (*Conversation) Resume(ctx context.Context) (*Run, error)
   (*Conversation) Send(ctx context.Context, in Input) (*Run, error)
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct

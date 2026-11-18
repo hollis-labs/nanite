@@ -20,9 +20,7 @@ import (
 //     `tool_calls`) and tool_result blocks (rendered as `tool` role
 //     messages keyed by ToolUseID).
 //   - Tool definitions translated via translateTools.
-//   - MaxTokens routed to MaxCompletionTokens (OpenAI's recommended field
-//     for newer models), or to max_tokens for a model the registry marks
-//     LegacyMaxTokens (gateway alias go-glm).
+//   - MaxTokens routed to MaxCompletionTokens or the legacy GPT-3.5 field.
 func buildChatParams(req llmtypes.ChatRequest) (sdk.ChatCompletionNewParams, error) {
 	msgs := make([]sdk.ChatCompletionMessageParamUnion, 0, 1+len(req.Messages))
 

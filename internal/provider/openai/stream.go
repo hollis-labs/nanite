@@ -184,10 +184,7 @@ type stringBuf struct{ b []byte }
 func (s *stringBuf) WriteString(v string) { s.b = append(s.b, v...) }
 func (s *stringBuf) String() string       { return string(s.b) }
 
-// mapStopReason normalizes OpenAI finish reasons into the same vocabulary
-// nanite uses across providers (see chat_generate.go's reading of
-// Usage.StopReason). "tool_calls" → "tool_use" matches the existing
-// Anthropic provider's convention.
+// mapStopReason maps OpenAI finish reasons to the shared stop reasons.
 func mapStopReason(r string) string {
 	switch r {
 	case "tool_calls":

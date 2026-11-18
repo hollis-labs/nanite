@@ -1,22 +1,5 @@
-// Package anthropic is nanite's wrapper around the official anthropic-sdk-go
-// for chat completions. It satisfies llmcontracts.Provider (StreamChat,
-// Complete, Capabilities), llmcontracts.RateLimited (RateLimitTPM),
-// llmcontracts.CacheableProvider (SetCacheHints, deprecated), and
-// llmcontracts.Cacheable (EstimateCacheablePrefix), preserving the public
-// surface the deleted go-providers/provider/anthropic.go exposed to nanite
-// call-sites.
-//
-// The wrapper relocates header parsing from a hand-rolled HTTP middleware
-// into option.WithMiddleware (SDK-blessed), drives the existing
-// llmcontracts.TokenRateTracker + CircuitBreaker (the "three load-bearing
-// seams" identified in CW-20260508-0009), and translates 429 →
-// ErrRequestExceedsRateBudget for the existing pre-flight gate.
-//
-// Cache-hint sourcing (FU-13 / CW-20260520-0054): hints are read per call
-// from llmtypes.ChatRequest.CacheHints. The deprecated SetCacheHints setter
-// stays as a fallback for unmigrated callers; effectiveCacheHints prefers
-// req.CacheHints when populated, so concurrent sessions on the same Client
-// no longer race on the shared c.cacheHints field.
+// Package anthropic adapts the Anthropic Messages API to the native provider
+// contract, including streaming, prompt caching and rate-budget accounting.
 package anthropic
 
 import (
@@ -48,12 +31,8 @@ const DefaultRateLimitTPM = 50000
 // failures. Mirrors the value used by the deleted adapter.
 const DefaultBreakerThreshold = 3
 
-// ErrModelRequired is returned by StreamChat / Complete when the caller
-// supplies an empty ChatRequest.Model. There is no default model anywhere in
-// Nanite (CW-20260526-0003, CW-20261011-0031): every caller must name one
-// before invoking the SDK. A silent default here was load-bearing in the
-// original bug (a stale bare alias hit Anthropic and returned 404).
-var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (select a model on the agent, session or launch)")
+// ErrModelRequired indicates that a request omitted its selected model.
+var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (set runtime.model)")
 
 // InterleavedThinkingBetaHeader is the beta header value that enables
 // interleaved thinking (thinking_delta blocks). Supported on Claude
@@ -61,12 +40,7 @@ var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (sel
 // 20250514. Mirrors the constant the deleted adapter exported.
 const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
 
-// Client wraps anthropic-sdk-go and exposes the rate-budget primitives nanite
-// chat-service expects (RateTracker + CircuitBreaker fields, RateLimitTPM
-// method, ErrRequestExceedsRateBudget pre-flight). Concrete-type field
-// access matches the shape of the deleted *provider.Anthropic so consumers
-// like chat_generate.go and chat_rate_budget_pause.go can migrate via type
-// rename only.
+// Client wraps the Messages API with rate tracking and a circuit breaker.
 type Client struct {
 	// keyMu guards apiKey, sdk, keyFn and keyLoaded, which a lazily resolved
 	// key (SetKeyFunc) changes at first use rather than at construction.
@@ -101,8 +75,6 @@ type Client struct {
 // hook can migrate without behavior change.
 type StatusCallback = func(string)
 
-// Compile-time assertions that the wrapper implements the contracts the
-// chat-service depends on.
 var (
 	_ llmcontracts.Provider          = (*Client)(nil)
 	_ llmcontracts.RateLimited       = (*Client)(nil)
@@ -110,14 +82,8 @@ var (
 	_ llmcontracts.Cacheable         = (*Client)(nil)
 )
 
-// New constructs a wrapper Client. apiKey may be empty here; SetAPIKey is
-// called separately during composition (mirrors the deleted adapter's
-// keychain-deferred wiring in cmd/nanite/main.go).
-//
-// The SDK client is built with option.WithMaxRetries(0) — nanite owns its
-// own compaction-tied retry loop in chat_rate_budget_pause.go, and SDK-side
-// retry would double-fire. The rate-aware middleware feeds the
-// TokenRateTracker / CircuitBreaker as responses flow through.
+// New constructs an adapter. API keys may be configured eagerly or lazily.
+// Nanite owns the retry policy for streamed turns.
 func New() *Client {
 	httpClient := &http.Client{}
 	rt := llmcontracts.NewTokenRateTracker(DefaultRateLimitTPM)
@@ -169,7 +135,7 @@ func (c *Client) rebuildSDK() {
 // the shared singleton.
 //
 // Deprecated: this is the legacy path that races under concurrent callers
-// — session A's hints can be overwritten by session B between the
+// — one caller's hints can be overwritten by another caller between the
 // SetCacheHints call and the request build, producing requests without
 // cache_control markers and the cache-miss-echo signature
 // (cache_read=0 with input_tokens<10) tracked under FU-13. New code MUST
@@ -186,7 +152,7 @@ func (c *Client) SetCacheHints(hints []llmcontracts.CacheHint) {
 // Prefers req.CacheHints (per-call, race-free) over c.cacheHints (shared
 // singleton populated by the deprecated SetCacheHints). When a caller
 // populates the per-call slot, the shared field is ignored entirely so
-// concurrent sessions on the same Client cannot leak hints across calls.
+// concurrent calls on the same Client cannot leak hints across calls.
 // When both are empty the result is nil and the cache pipeline is no-op.
 func (c *Client) effectiveCacheHints(req llmtypes.ChatRequest) []llmcontracts.CacheHint {
 	if c.gw != nil && c.gw.DisableCacheControl {
@@ -252,9 +218,7 @@ func (c *Client) RateLimitTPM() int {
 	return limit
 }
 
-// Capabilities implements llmcontracts.Provider. Mirrors the capability set
-// the deleted hand-rolled adapter advertised so chat-service feature gates
-// (system-prompt caching, tool use, image input) light up as before.
+// Capabilities reports supported message and tool features.
 func (c *Client) Capabilities() llmtypes.ProviderCapabilities {
 	return llmtypes.ProviderCapabilities{
 		SupportsStreamJSON:          true,   // streaming with tool use
@@ -337,25 +301,10 @@ func resolveModel(req llmtypes.ChatRequest) (string, error) {
 	return req.Model, nil
 }
 
-// resolveMaxTokens returns the max_tokens to use for a request. An explicit
-// value is honored but never exceeds the model's real output limit. When the
-// request omits one it is the model's real output limit (models.MaxOutputFor,
-// which the container keeps in step with the models.dev catalog), falling back
-// to DefaultMaxTokens for a model nothing is known about.
-//
-// This is the streaming resolution. Non-streaming Complete caps the default
-// at DefaultMaxTokens first (see nonStreamingRequest), because the SDK refuses
-// a non-streaming request whose max_tokens implies more than ten minutes.
+// resolveMaxTokens uses the request limit when set and the adapter default otherwise.
 func resolveMaxTokens(req llmtypes.ChatRequest) int64 {
-	limit := 0
 	if req.MaxTokens > 0 {
-		if limit > 0 && req.MaxTokens > limit {
-			return int64(limit)
-		}
 		return int64(req.MaxTokens)
-	}
-	if limit > 0 {
-		return int64(limit)
 	}
 	return DefaultMaxTokens
 }

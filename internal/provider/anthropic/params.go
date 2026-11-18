@@ -267,7 +267,7 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 //
 // Cache hints come from effectiveCacheHints(in): per-call in.CacheHints
 // wins, falling back to the deprecated c.cacheHints only when the caller
-// has not migrated. This keeps concurrent sessions on a shared Client
+// has not migrated. This keeps concurrent requests on a shared Client
 // from racing on the singleton field (FU-13 / CW-20260520-0054).
 func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, interleavedThinking bool, reasoningCfg llmcontracts.ReasoningConfig) sdk.MessageNewParams {
 	plan := planCacheMarkersWithHints(in, c.effectiveCacheHints(in))
@@ -361,7 +361,6 @@ func (c *Client) EstimateCacheablePrefix(ctx context.Context, in llmtypes.ChatRe
 
 // computeCacheablePrefixBytes approximates the byte size of the cached
 // prefix in payload as the offset of the last `"cache_control":{` marker.
-// Mirrors the heuristic from the deleted adapter; see provider/anthropic.go
 // rev abb3a08 for the prose justification.
 func computeCacheablePrefixBytes(payload []byte, hints []llmcontracts.CacheHint) int {
 	if len(hints) == 0 {

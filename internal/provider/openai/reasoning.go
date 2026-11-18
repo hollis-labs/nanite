@@ -39,9 +39,8 @@ func modelSupportsReasoningNone(model string) bool {
 	return false
 }
 
-// useResponses decides the endpoint for a request. A wire pinned in the model
-// registry wins: a gateway alias such as go-gpt is served on one endpoint only
-// and cannot be recognized by name. Otherwise the model-name rules below apply.
+// useResponses selects the wire endpoint from the request's reasoning needs
+// and the capabilities of its model family.
 func useResponses(ctx context.Context, req llmtypes.ChatRequest) bool {
 	if isAstra(req.Model) {
 		return true

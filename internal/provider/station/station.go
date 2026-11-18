@@ -21,7 +21,7 @@ import (
 // SessionHeader is the request header the gateway attributes a call to.
 const SessionHeader = "X-Station-Session"
 
-// Settings keys in a station provider row's settings JSON.
+// Configuration field names used in validation errors.
 const (
 	SettingBaseURL              = "base_url"
 	SettingHeaders              = "headers"
@@ -36,16 +36,12 @@ const (
 	AuthBearer  = "bearer" // Authorization: Bearer <key>
 )
 
-// Settings is the gateway part of a station provider row's settings JSON.
-// key_ref, the one other setting a provider row carries, is read by
-// internal/providerkeys and is not repeated here.
+// Settings configures the Station gateway transport.
 type Settings struct {
 	// BaseURL is the gateway root. The Anthropic wire takes it without /v1
 	// (https://host/api/llm-gateway); the OpenAI wire takes it with /v1.
 	BaseURL string
-	// Headers are sent on every request. They are stored in the row in clear,
-	// so they must not carry a credential; Authorization and the key headers
-	// are refused.
+	// Headers are sent on every request. Credentials travel through Auth.
 	Headers map[string]string
 	// DisableAnthropicBeta stops the Anthropic adapter sending the
 	// anthropic-beta header (and the interleaved-thinking request that needs it).
@@ -112,10 +108,10 @@ var sessionIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 // ValidSessionID reports whether id is acceptable to the gateway as is.
 func ValidSessionID(id string) bool { return sessionIDRe.MatchString(id) }
 
-// NormalizeSessionID maps a Nanite session id onto the gateway grammar: other
+// NormalizeSessionID maps a Nanite conversation ID onto the gateway grammar: other
 // characters become '-', leading non-alphanumerics are trimmed and the result
 // is cut to 128. It returns "" when nothing usable is left. The mapping is
-// deterministic, so every turn and retry of one session sends the same value.
+// deterministic, so every turn and retry of one conversation sends the same value.
 func NormalizeSessionID(id string) string {
 	if ValidSessionID(id) {
 		return id
@@ -140,7 +136,7 @@ func NormalizeSessionID(id string) string {
 
 type sessionKey struct{}
 
-// WithSessionID returns ctx carrying the Nanite session id the adapters send
+// WithSessionID returns ctx carrying the Nanite conversation ID the adapters send
 // as X-Station-Session. ChatRequest has no field for it, so it travels in the
 // context like the reasoning config. An id that normalizes to nothing leaves
 // ctx unchanged.
@@ -161,7 +157,7 @@ func SessionID(ctx context.Context) (string, bool) {
 // Typed gateway refusals. Each carries the remedy; the original error text is
 // appended by Classify.
 var (
-	ErrSessionRequired   = errors.New("station gateway: the request carried no session id (X-Station-Session); the call did not come from a Nanite session")
+	ErrSessionRequired   = errors.New("station gateway: the request carried no session id (X-Station-Session); the call did not come from a Nanite conversation")
 	ErrInvalidSession    = errors.New("station gateway: the session id was rejected (X-Station-Session must be 1-128 characters of [A-Za-z0-9._:-], starting alphanumeric)")
 	ErrModelNotAvailable = errors.New("station gateway: model not available on this wire; this alias is served on a different endpoint (wrong wire for this alias: chat/completions, responses and messages are separate aliases)")
 )

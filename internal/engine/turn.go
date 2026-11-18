@@ -169,7 +169,9 @@ func (x *execution) generate(ctx context.Context) error {
 			return attempt{}, runloop.Terminate
 		}
 		req := llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens,
-			SlotBlocks: blocks, Messages: x.messages, Tools: x.specs, CacheHints: []llmtypes.CacheHint{{Position: "system"}}}
+			SlotBlocks: blocks, Messages: x.messages, Tools: x.specs, CacheHints: []llmtypes.CacheHint{
+				{Position: "system"}, {Position: "tools"}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
+			}}
 		callCtx, cancel := context.WithCancel(ctx)
 		stream, err := x.provider.StreamChat(callCtx, req)
 		if err != nil {

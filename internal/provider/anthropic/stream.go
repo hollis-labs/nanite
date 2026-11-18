@@ -57,7 +57,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 	}
 
 	// Rate-limit pre-flight + pacing. Cache hints are sourced per call via
-	// effectiveCacheHints(in) so concurrent sessions on the same Client
+	// effectiveCacheHints(in) so concurrent requests on the same Client
 	// don't race on the deprecated shared c.cacheHints field
 	// (FU-13 / CW-20260520-0054).
 	if c.RateTracker != nil {
@@ -82,9 +82,6 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 		// If the request alone is larger than the per-minute window, no
 		// amount of waiting can fit it — signal the caller to compact
 		// instead of repeating waits until the outer ctx deadline fires.
-		// Same wrap format the deleted adapter used so the chat-service
-		// regex parser at chat_rate_budget_pause.go:rateBudgetEstimateRE
-		// still matches.
 		if limit > 0 && estimatedTokens > limit {
 			slog.Warn("provider: request exceeds per-minute rate budget — signaling caller to compact",
 				"provider", "anthropic",
@@ -174,8 +171,7 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 		case "message_start":
 			// Usage on message_start carries input_tokens (and cache
 			// creation/read counts). Record input to the rate tracker for
-			// sliding-window math, and emit a usage event so chat-service
-			// telemetry is fed.
+			// sliding-window math and emit a normalized usage event.
 			start := ev.AsMessageStart()
 			u := start.Message.Usage
 			// message_start output is provisional; only message_delta reports billed output.

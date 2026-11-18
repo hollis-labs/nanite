@@ -37,6 +37,9 @@ func New(cfg Config) (llmcontracts.Provider, error) {
 			return nil, err
 		}
 	}
+	if cfg.Redactor == nil {
+		cfg.Redactor = redact.NewScope()
+	}
 	resolver := cfg.Secrets
 	if resolver == nil {
 		resolver = secrets.New()

@@ -1,15 +1,4 @@
-// Package openai is nanite's SDK-backed wrapper around openai-go.
-//
-// This package replaces the deleted hand-rolled provider/openai.go HTTP client
-// from go-providers v0.10. It exposes both the chat-completion path
-// (llmcontracts.Provider — StreamChat / Complete / Capabilities) and an
-// embedding path (embedcontracts.Embedder).
-//
-// Per CW-20260508-0009 (rate-tracker spike) the OpenAI wrapper does NOT
-// implement llmcontracts.RateLimited and does NOT carry a TokenRateTracker /
-// CircuitBreaker. The replaced provider had no rate-budget plumbing and
-// release-scope parity with Anthropic was deferred to follow-up
-// `followups.nanite.cw_20260508_0012.openai_rate_budget_parity`.
+// Package openai adapts the OpenAI Chat Completions and Responses APIs.
 package openai
 
 import (
@@ -42,7 +31,7 @@ type Client struct {
 
 // Compile-time interface assertion. The Client also exposes Embed* methods
 // and EmbeddingDimensions but those satisfy embedcontracts.Embedder via the
-// dedicated Embedder type below — keeping the chat client's surface narrow.
+// embedding endpoint.
 var _ llmcontracts.Provider = (*Client)(nil)
 
 // New constructs a Client. apiKey defaults to OPENAI_API_KEY when empty.
@@ -51,9 +40,7 @@ var _ llmcontracts.Provider = (*Client)(nil)
 // the API-key + http-client + retry options so callers (notably tests) can
 // override the base URL.
 //
-// SDK retry is disabled (option.WithMaxRetries(0)) to match nanite's
-// existing OpenAI behavior and avoid double-retry pathology with the
-// chat-rate-budget loop in chat_rate_budget_pause.go.
+// Nanite owns retries, so the SDK uses zero automatic retries.
 func New(apiKey string, httpClient *http.Client, opts ...option.RequestOption) *Client {
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")

@@ -139,3 +139,69 @@ terminal still works while the application runs: it reads the same authored
 files and keeps separate conversations in `.nanite/` inside the agent
 directory. If the application leaves `DataDir` empty, the two share one state
 directory and the second to start is refused.
+
+## Hosting an agent behind the chat handler
+
+`github.com/hollis-labs/nanite/chatrunner` runs an agent behind the
+conversation handler in `github.com/hollis-labs/libs/agent/chat`. It
+implements `chat.Runner`, so the application gets the conversation routes,
+replay, leases and approvals from the library and Nanite does the turns.
+
+```go
+r, err := chatrunner.Open(ctx, chatrunner.Options{
+    Agent: agent.Options{Dir: "agents/desk", DataDir: stateDir},
+    Tools: []chatrunner.Tool{{
+        Name: "notes_save", Description: "Save a note.",
+        InputSchema: schema, Level: chatrunner.LevelWrite,
+        Run: func(ctx context.Context, call agent.ToolCall) (agent.ToolResult, error) { ... },
+    }},
+})
+svc, err := chat.NewService(chat.Config{Runner: r, ...})
+```
+
+`Options.Agent` is the same `agent.Options` as above, so `Builtins` chooses
+Nanite's own tools as usual. Leave `Gate` nil: approvals are answered on the
+chat wire. `r.Agent()` gives the agent for slots, skills and notices, and
+`r.Close()` releases the directory.
+
+**Conversations.** Each chat conversation is one Nanite conversation, created
+on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
+`runner_ref` on the chat conversation record. A turn the previous process
+left unfinished is discarded when the conversation is next used.
+
+**The turn's context.** `Turn.Context` goes into one slot entry
+(`SlotUserContext` unless `Options.ContextSlot` names another) for that turn
+only. A JSON string is placed as its text; any other JSON is placed as
+written. Nanite still assembles everything else.
+
+**Host tools.** A tool has a level, and the level decides whether a call asks
+first. Replace the whole set between turns with `r.SetTools(...)`. A tool's
+`Run` function can read the turn with `chatrunner.TurnFromContext(ctx)`.
+
+| Level | In `default` mode |
+|---|---|
+| `LevelRead` | Runs without asking. |
+| `LevelAct` | Runs without asking. |
+| `LevelWrite` | Asks. An answer for the conversation, or a standing grant, covers later calls. |
+| `LevelConfirm` | Asks every time, including in `yolo` mode. No answer covers a later call. |
+
+An empty or unknown level is `LevelWrite`. `Options.Ask` is called before
+each host-tool call and can make that one call ask, whatever the level; it
+cannot make a call looser. `Options.Granted` reports a standing grant the
+application stored through `chat.Grants`; a covered call runs without asking.
+The agent's `permissions.yaml` and mode still apply to every tool.
+
+**Approvals.** A call that asks becomes `approval.request` and the turn waits
+for the answer the Service delivers. Its `descriptor` carries `description`,
+`standing` (false for a `LevelConfirm` tool), `tool` and `input`. The scopes
+`conversation` and `always` both stand for the rest of the conversation in
+Nanite; keeping `always` beyond it is the application's `Granted` function. A
+tool call made inside a subagent cannot ask and is denied.
+
+**Events.** Each model step is a `step.start` / `step.finish` pair around one
+assistant message that holds the step's text, reasoning, tool calls and tool
+results. Activity kinds are `nanite.slots`, `nanite.subagent` and
+`nanite.compact` (`value.state` is `start`, `done` or `failed`). `run.finish`
+has reason `turn_limit` at the step limit and `length` at the model's output
+limit. A cancelled turn ends in `run.abort`, a failed one in `run.error` with
+code `turn_failed`. The `ask_user` tool is declined.

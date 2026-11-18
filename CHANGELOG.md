@@ -13,3 +13,5 @@ and legacy databases have no compatibility layer.
 - Run tools through permission rules and optional host approval. Support
   worker and planner subagents, background jobs, questions, and notices.
 - Persist conversations to JSONL transcripts with a rebuildable SQLite index.
+- Add the `chatrunner` package, which runs an agent behind the
+  `libs/agent/chat` conversation handler with host tools and approvals.

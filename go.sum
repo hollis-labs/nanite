@@ -43,6 +43,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/hollis-labs/libs/agent/agentdir v0.1.0 h1:uvxJbOPqqcP56PpSv0WNZkuDCWDW3hodo27iMsUdrn0=
 github.com/hollis-labs/libs/agent/agentdir v0.1.0/go.mod h1:MCikgc+Fc49QRuVXXA/QbPNEKNCOV2a7JoEJAgcHbRs=
+github.com/hollis-labs/libs/agent/chat v0.1.0 h1:NHored2kzzCXwgaX96joqO4ZJejKyLm/4G5IEvRE8Rc=
+github.com/hollis-labs/libs/agent/chat v0.1.0/go.mod h1:rDzqOwUmC6Gu2wN5XjG59lcRcJPXKhbj/77U63w0Gr8=
 github.com/hollis-labs/libs/agent/core v0.5.0 h1:bk2GAHef+lH5ihYKBnQpir5SZoeRNTp7AyY8iYCLkr0=
 github.com/hollis-labs/libs/agent/core v0.5.0/go.mod h1:AHtYM1ZFiaAVnPQYaZjJrI8trpmwomFMPknACIUe+4Y=
 github.com/hollis-labs/libs/core/panics v0.1.0 h1:mWJ9yPTRCBsLFprCNGIJrroehfh/g3UaDmLEH6gncB8=
@@ -65,6 +67,8 @@ github.com/hollis-labs/libs/security/redact v0.2.0 h1:yaKmfWRMwlaAH1uur2yyS+DJjd
 github.com/hollis-labs/libs/security/redact v0.2.0/go.mod h1:l6JdQCIwWPy686ZQ5li4clrcN6TtjFueotBzMxUbvbk=
 github.com/hollis-labs/libs/security/secrets v0.1.0 h1:/wrYAM5viUnYMpDhvbQmPlTMesqMIVfvfz+GiZ7jMAs=
 github.com/hollis-labs/libs/security/secrets v0.1.0/go.mod h1:Krd1kgmisOVmeN1G/ltaLMva58tIBki9xShsySqd86Y=
+github.com/hollis-labs/libs/ui/ui-go v0.4.0 h1:3TydDJElqD1ilgfY1FY+ei+joAuRcwMyuorGTDD1qIw=
+github.com/hollis-labs/libs/ui/ui-go v0.4.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
 github.com/hollis-labs/substrate v0.1.1-0.20261118181415-ea679652a9db h1:BBmSvjOxt6D1oowbH0PGya9xc63mayi7MDhABxSIDUQ=
 github.com/hollis-labs/substrate v0.1.1-0.20261118181415-ea679652a9db/go.mod h1:0RnOCC5MnvAX30SfyFSrC3dsTa/KEPL3+kxfUFY/+DI=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=

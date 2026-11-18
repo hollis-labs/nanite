@@ -137,24 +137,25 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			results[i].Content = "cancelled"
 			continue
 		}
+		raw, err := json.Marshal(call.Input)
+		if err != nil || string(raw) == "null" {
+			raw = []byte("{}")
+		}
+		args[i] = raw
+		// Every call the model made is reported, including one that cannot run.
+		started := x.engine.scrub.Bytes(raw)
+		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
+			return events.ToolCallStarted{EventMeta: meta, CallID: call.ID, Name: x.engine.scrub.Text(call.Name), Input: started}
+		})
+		if err != nil {
+			results[i].Content = "invalid tool arguments"
+			continue
+		}
 		t, ok := x.catalog[call.Name]
 		if !ok {
 			results[i].Content = "tool unavailable: " + call.Name
 			continue
 		}
-		raw, err := json.Marshal(call.Input)
-		if err != nil {
-			results[i].Content = "invalid tool arguments"
-			continue
-		}
-		if string(raw) == "null" {
-			raw = []byte("{}")
-		}
-		args[i] = raw
-		started := x.engine.scrub.Bytes(raw)
-		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-			return events.ToolCallStarted{EventMeta: meta, CallID: call.ID, Name: t.Name, Input: started}
-		})
 		if err := x.validators[t.Name].Validate(call.Input); err != nil {
 			results[i].Content = "invalid tool arguments: " + x.engine.scrub.Text(err.Error())
 			continue

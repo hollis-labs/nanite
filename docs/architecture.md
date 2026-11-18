@@ -9,6 +9,7 @@ slots. Each conversation admits one active run.
 | Package | Responsibility |
 | --- | --- |
 | `agent` | Public embedding API for agents, conversations, runs, and host contributions |
+| `chatrunner` | Runs an agent behind the `libs/agent/chat` conversation handler |
 | `cmd/nanite`, `internal/repl` | Substrate startup and CLI commands, interactive terminal |
 | `internal/definition`, `internal/slots`, `internal/skills` | Authored input reload, slot selection, skill catalog |
 | `internal/engine`, `internal/events` | Turn loop, subagents, background jobs, and event contract |

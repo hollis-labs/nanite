@@ -10,9 +10,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
+	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/definition"
+	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 )
 
@@ -51,10 +56,21 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) error {
 		BaseURL: os.Getenv("NANITE_GATEWAY_URL"), KeyRef: os.Getenv("NANITE_GATEWAY_KEY_REF"),
 		Auth: os.Getenv("NANITE_GATEWAY_AUTH"),
 	}}
+	model := &observedProvider{}
 	if offline {
-		opts.Provider = fake.New(call("1", "notes_search"), fake.Text("The notes mention a planning meeting."),
+		model.Provider = fake.New(call("1", "notes_search"), fake.Text("The notes mention a planning meeting."),
 			call("2", "files_list"), fake.Text("The workspace contains agenda.md."), fake.Text("The workspace context is clear."))
+	} else {
+		def, err := definition.Load(dir, "-")
+		if err != nil {
+			return err
+		}
+		model.Provider, err = provider.New(provider.Config{Provider: def.Runtime.Provider, Gateway: opts.Gateway})
+		if err != nil {
+			return err
+		}
 	}
+	opts.Provider = model
 	a, err := agent.Open(ctx, opts)
 	if err != nil {
 		return err
@@ -94,20 +110,14 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) error {
 		if err != nil {
 			return err
 		}
+		var report agent.SlotReport
+		var calls []string
 		for event := range run.Events() {
 			switch e := event.(type) {
 			case agent.SlotsAssembled:
-				if _, err := fmt.Fprintf(w, "Turn %d slots: %s, %s\n", i+1, slotStatus(e.Report, agent.SlotWorkspace), slotStatus(e.Report, agent.SlotContext)); err != nil {
-					run.Cancel()
-					_, _ = run.Wait()
-					return err
-				}
+				report = e.Report
 			case agent.ToolCallStarted:
-				if _, err := fmt.Fprintf(w, "Tool: %s\n", e.Name); err != nil {
-					run.Cancel()
-					_, _ = run.Wait()
-					return err
-				}
+				calls = append(calls, e.Name)
 			case agent.Question:
 				_ = run.Answer(e.ID, agent.Answer{Value: json.RawMessage("null")})
 			}
@@ -116,22 +126,58 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) error {
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(w, result.Text); err != nil {
+		if _, err := fmt.Fprint(w, turnReport(i+1, report, model.offered, calls, result.Text)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func slotStatus(report agent.SlotReport, name agent.SlotName) string {
-	slot := report[name]
-	if slot.Tokens == 0 && slot.Changed {
-		return string(name) + " cleared"
+// observedProvider records the tool names from the actual provider requests.
+type observedProvider struct {
+	llmcontracts.Provider
+	offered []string
+}
+
+func (p *observedProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	p.offered = p.offered[:0]
+	for _, tool := range req.Tools {
+		p.offered = append(p.offered, tool.Name)
 	}
-	if slot.Changed {
-		return string(name) + " changed"
+	slices.Sort(p.offered)
+	return p.Provider.StreamChat(ctx, req)
+}
+
+func turnReport(turn int, report agent.SlotReport, offered, calls []string, response string) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "Turn %d slots:\n", turn)
+	for _, name := range agent.SlotNames() {
+		slot := report[name]
+		if slot.Tokens == 0 && !slot.Changed {
+			continue
+		}
+		changed := "no"
+		if slot.Changed {
+			changed = "yes"
+		}
+		fmt.Fprintf(&out, "  %s: %d tokens, changed %s\n", name, slot.Tokens, changed)
+		for _, entry := range slot.Decisions {
+			disposition := "skip"
+			switch entry.Disposition {
+			case agent.SlotShip:
+				disposition = "ship"
+			case agent.SlotPointer:
+				disposition = "pointer"
+			}
+			fmt.Fprintf(&out, "    %s/%s: %s\n", entry.Owner, entry.Key, disposition)
+		}
 	}
-	return string(name) + " unchanged"
+	fmt.Fprintf(&out, "Tools offered: %s\n", strings.Join(offered, ", "))
+	for _, name := range calls {
+		fmt.Fprintf(&out, "Tool called: %s\n", name)
+	}
+	fmt.Fprintln(&out, response)
+	return out.String()
 }
 
 func lookup(name, description, text string) agent.Tool {

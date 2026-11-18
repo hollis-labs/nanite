@@ -1,9 +1,45 @@
 # Nanite architecture
 
-Nanite runs one authored agent directory per process. The embedding API lives
-in `agent`. Substrate handles CLI startup in `cmd/nanite`. Each turn reads the
-agent definition and takes a snapshot of the host's tool groups and context
-contributions.
+Nanite opens one authored agent directory per agent instance and locks its
+data directory. Conversations share that instance's host tools, skills, and
+slots. Each conversation admits one active run.
+
+## Package map
+
+| Package | Responsibility |
+| --- | --- |
+| `agent` | Public embedding API for agents, conversations, runs, and host contributions |
+| `cmd/nanite`, `internal/repl` | Substrate startup and CLI commands, interactive terminal |
+| `internal/definition`, `internal/slots`, `internal/skills` | Authored input reload, slot selection, skill catalog |
+| `internal/engine`, `internal/events` | Turn loop, subagents, background jobs, and event contract |
+| `internal/provider`, `internal/mcpclient` | Native model adapters, gateway configuration, MCP lifecycle |
+| `internal/tools`, `internal/selftools`, `internal/permission`, `internal/shell` | Tool registrations, built-ins, policy evaluation, shell execution |
+| `internal/store`, `internal/transcript`, `internal/recovery` | SQLite projections, durable JSONL journal, interruption recovery |
+
+Substrate imports are limited to `cmd/nanite`. The engine and public embedding
+package work in an ordinary Go process.
+
+## Turn lifecycle
+
+1. `Conversation.Send` admits the run and snapshots host contributions. The
+   engine reloads authored files and reconciles MCP servers.
+2. The engine assembles context in fixed slot order, using the selector's
+   ship, pointer, and skip decisions. It emits `SlotsAssembled` and prepares
+   provider requests from slot blocks, conversation history, and tool schemas.
+3. The provider streams text or tool requests. The engine validates and
+   authorizes each request before executing a tool. Results are journaled
+   alongside their calls and fed back to the provider for the next step.
+4. The engine records the terminal status and closes the run event stream.
+   The caller reads the final response and error with `Run.Wait`.
+
+## Permission flow
+
+The engine combines any host policy decision point with the authored
+permission rules. A deny from either stops the call. An ask passes to the
+host gate for an approval decision. Policy failures and unsupported
+obligations fail closed. The embedding default gate denies requests that
+require approval. The REPL can prompt the user. File tools apply workspace
+confinement separately from these decisions.
 
 ## Conversation storage
 

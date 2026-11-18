@@ -7,6 +7,8 @@
 - Folio's default XDG filename collided with legacy Nanite's incompatible `config.yaml`. Substrate's config module reads a file only from `SUBSTRATE_CONFIG` and provides neither XDG discovery nor an app-specific filename.
 - The `v0.1.0` Substrate tag predates `boot.StartWith`. The scaffold uses the pinned pseudo-version for its post-config hook.
 
+- The public scanner has no commit range or since option, so inherited history with unresolved findings prevents using its full history check as an app CI gate.
+
 ## libs
 
 - The plugin-mcp client ties the legacy SSE stream to the discovery context. Nanite detaches the stream after the endpoint handshake so discovery cancellation leaves the registration open.

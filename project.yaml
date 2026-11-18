@@ -1,10 +1,7 @@
-# project.yaml — the project descriptor (project/1, release candidate 1: fields may change without a version bump
-# until 1.0). Written once by Folio and never overwritten; edit it by hand. `internal/descriptor` validates it
-# and checks that deploy.yaml and the code agree with it.
 schema: project/1
 id: nanite
 name: Nanite
-description: "TODO(author): one line"
+description: Run an authored agent locally or embed it in a Go application.
 class: 2
 lifecycle: experimental
 visibility: public
@@ -17,14 +14,3 @@ interfaces:
     name: nanite
     auth: none
 substrate: { variant: cli, profile: minimal, version: v0.1.1-0.20261116220807-ab6c69519f45 }
-deploy:
-  fleet: deploy.yaml
-release: { tagging: ci-artifact-only }
-settings:
-  # Folio-owned deployment projection; credentials belong in operator config.
-  runtime:
-    target_os: linux
-    target_arch: amd64
-    host: fleet-host
-    binary_link: ~/.local/bin/nanite
-    install_root: ~/.local/share/fleet/releases/nanite

@@ -12,6 +12,7 @@ require (
 require github.com/hollis-labs/libs/llm/core v0.4.0 // indirect
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/cyberphone/json-canonicalization v0.0.0-20261011152517-32a48195b9b2 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
@@ -34,6 +35,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/openai/openai-go/v3 v3.61.0
 	github.com/pressly/goose/v3 v3.29.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sethvargo/go-retry v0.5.0 // indirect

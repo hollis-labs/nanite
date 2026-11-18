@@ -10,7 +10,7 @@ nanite
 nanite -p 'Summarize this workspace' --output json
 ```
 
-Configure an Anthropic or OpenAI provider before the first model turn. See [agent directory and gateway settings](docs/agent-directory.md). For a checkout of the rebuild, use the [development setup](docs/validation.md) until its dependencies are released.
+Configure an Anthropic or OpenAI provider before the first model turn. See [agent directory and gateway settings](docs/agent-directory.md). See [validation](docs/validation.md) for building from a source checkout.
 
 Embed the same agent with `github.com/hollis-labs/nanite/agent`. A host can supply its own provider, permission gate, tools, skills, and context.
 

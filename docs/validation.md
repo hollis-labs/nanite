@@ -1,18 +1,19 @@
 # Validate Nanite
 
-Use the Go version in `go.mod`. During the rebuild, check out the companion
-`libs` branch in a sibling directory. Until `agent/agentdir` is released and
-pinned in `go.mod`, initialize a local workspace in their parent directory.
+Use the Go version in `go.mod`. Build the CLI from a standalone checkout
+with `GOWORK=off go install ./cmd/nanite`.
+
+## Agent directory dependency
+
+Nanite currently pins a pseudo-version from the open
+[libs agentdir PR](https://github.com/hollis-labs/libs/pull/152). Before a
+Nanite release, switch to the published `agent/agentdir/v0.1.0` tag and use
+a Substrate version whose BOM pins that tag in `app_libs`.
 
 ```sh
-go work init ./nanite ./libs/agent/agentdir
-cd nanite
-go install ./cmd/nanite
+GOWORK=off go get github.com/hollis-labs/libs/agent/agentdir@v0.1.0
+GOWORK=off go mod tidy
 ```
-
-An existing workspace can add the same modules with `go work use`.
-The workspace is local development state. After the dependency is pinned, the
-module also builds from a standalone checkout.
 
 ## Checks
 

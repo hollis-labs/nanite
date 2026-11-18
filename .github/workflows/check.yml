@@ -17,6 +17,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the public-hygiene scan reads the full history
       # go.mod is the single Go pin: the `go` line is the floor; an optional `toolchain` line, if
       # present, wins (setup-go v6+ only).
       - uses: actions/setup-go@v6
@@ -42,5 +44,5 @@ jobs:
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
       - run: go test -race -count=1 ./...
       - run: go run ./examples/embed-host --offline
-      - name: public working-tree hygiene
-        run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree
+      - name: public hygiene (tree and history)
+        run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --ref HEAD

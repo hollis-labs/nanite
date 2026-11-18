@@ -21,7 +21,7 @@ Keep the `substrate` version in `project.yaml` equal to the one in `go.mod`.
 
 The repository's check workflow runs on pull requests and pushes to `main`.
 It runs lint, vet, and vulnerability checks, verifies BOM pins and generated CLI wiring, cross-compiles packages,
-runs the race suite and offline example, and scans the working tree for public hygiene. The
+runs the race suite and offline example, and scans the tree and history for public hygiene. The
 compile step has no artifact upload or deploy job.
 
 ```sh
@@ -33,7 +33,7 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
 go test -race -count=1 ./...
 go run ./examples/embed-host --offline
-go run github.com/hollis-labs/substrate/cmd/substrate scan-public --tree
+go run github.com/hollis-labs/substrate/cmd/substrate scan-public --ref HEAD
 ```
 
 The scanner has no native commit range or since option. CI scans the entire

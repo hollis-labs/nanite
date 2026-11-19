@@ -63,8 +63,12 @@ func withoutAmbientIdentity() []option.RequestOption {
 		option.WithHeaderDel("OpenAI-Project"),
 	}
 	for _, line := range strings.Split(os.Getenv("OPENAI_CUSTOM_HEADERS"), "\n") {
-		if name, _, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(name) != "" {
-			opts = append(opts, option.WithHeaderDel(strings.TrimSpace(name)))
+		name, _, ok := strings.Cut(line, ":")
+		name = strings.TrimSpace(name)
+		// Authorization carries the key Nanite set; deleting it would strip
+		// the real credential.
+		if ok && name != "" && !strings.EqualFold(name, "Authorization") {
+			opts = append(opts, option.WithHeaderDel(name))
 		}
 	}
 	return opts

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -285,11 +286,16 @@ func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, inter
 	return params
 }
 
-// buildInputSchema carries a tool's whole JSON-schema document into
+// buildInputSchema carries a tool's JSON-schema document into
 // ToolInputSchemaParam. Properties and required go to their typed fields;
-// every other keyword ($defs, anyOf, additionalProperties, description and
-// so on) goes through ExtraFields so nothing the tool declared is dropped.
+// other keywords ($defs, additionalProperties, description and so on) go
+// through ExtraFields so the tool's schema is not reduced to a bare object.
 // "type" is always "object", which is all the Messages API accepts.
+//
+// The API also refuses anyOf, oneOf and allOf at the top level, so those are
+// not forwarded. Their branches' properties are folded into properties
+// (first definition of a name wins, none of them required), which keeps the
+// fields visible to the model; the tool still validates its own input.
 func buildInputSchema(schema map[string]any) sdk.ToolInputSchemaParam {
 	param := sdk.ToolInputSchemaParam{
 		Properties: extractSchemaProperties(schema),
@@ -298,6 +304,9 @@ func buildInputSchema(schema map[string]any) sdk.ToolInputSchemaParam {
 	for k, v := range schema {
 		switch k {
 		case "type", "properties", "required":
+			continue
+		case "anyOf", "oneOf", "allOf":
+			param.Properties = foldBranchProperties(param.Properties, v)
 			continue
 		}
 		if param.ExtraFields == nil {
@@ -308,15 +317,39 @@ func buildInputSchema(schema map[string]any) sdk.ToolInputSchemaParam {
 	return param
 }
 
-// extractSchemaProperties pulls the "properties" map out of a JSON-schema
-// document. A schema without one (a no-argument tool, or one built from
-// anyOf/$ref) gets an empty object, so the request always carries
+// foldBranchProperties adds each property named by a combinator's branches
+// to props when props is a map that does not define it already.
+func foldBranchProperties(props any, branches any) any {
+	merged, ok := props.(map[string]any)
+	if !ok {
+		return props
+	}
+	list, _ := branches.([]any)
+	for _, b := range list {
+		branch, _ := b.(map[string]any)
+		bp, _ := branch["properties"].(map[string]any)
+		for name, def := range bp {
+			if _, exists := merged[name]; !exists {
+				merged[name] = def
+			}
+		}
+	}
+	return merged
+}
+
+// extractSchemaProperties returns a copy of the "properties" map of a
+// JSON-schema document. A schema without one (a no-argument tool, or one
+// built from anyOf/$ref) gets an empty object, so the request always carries
 // "properties" rather than a bare {"type":"object"}.
 func extractSchemaProperties(schema map[string]any) any {
-	if p, ok := schema["properties"]; ok && p != nil {
-		return p
+	p, ok := schema["properties"]
+	if !ok || p == nil {
+		return map[string]any{}
 	}
-	return map[string]any{}
+	if m, ok := p.(map[string]any); ok {
+		return maps.Clone(m)
+	}
+	return p
 }
 
 // extractSchemaRequired pulls the "required" array out of a JSON-schema

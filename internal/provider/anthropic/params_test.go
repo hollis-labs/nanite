@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	sdk "github.com/anthropics/anthropic-sdk-go"
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 
@@ -590,8 +591,25 @@ func TestNonStreamingRequest_CapsUnsetMaxTokens(t *testing.T) {
 
 // The value reaches the wire params for the streaming path.
 
-// A tool whose schema has no "properties" key must still reach the API with
-// its schema intact: an empty properties object plus every other keyword.
+func inputSchemaOf(t *testing.T, tool sdk.ToolUnionParam) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		InputSchema map[string]any `json:"input_schema"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	return got.InputSchema
+}
+
+// A tool whose schema has no "properties" key must still reach the API as an
+// object with properties, keep its other keywords, and not carry top-level
+// anyOf/oneOf/allOf, which the API refuses. The branches' properties are
+// folded in, none required.
 func TestBuildTools_SchemaWithoutPropertiesIsKept(t *testing.T) {
 	c := New()
 	schema := map[string]any{
@@ -604,40 +622,59 @@ func TestBuildTools_SchemaWithoutPropertiesIsKept(t *testing.T) {
 		},
 	}
 	out := c.buildTools([]llmtypes.ToolDefinition{{Name: "lookup", InputSchema: schema}}, cachePlan{})
-	data, err := json.Marshal(out[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got struct {
-		InputSchema map[string]any `json:"input_schema"`
-	}
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	in := got.InputSchema
+	in := inputSchemaOf(t, out[0])
 	if in["type"] != "object" {
-		t.Fatalf("type = %v, want object: %s", in["type"], data)
+		t.Fatalf("type = %v, want object: %v", in["type"], in)
 	}
-	if p, ok := in["properties"].(map[string]any); !ok || len(p) != 0 {
-		t.Fatalf("properties = %v, want empty object: %s", in["properties"], data)
+	props, ok := in["properties"].(map[string]any)
+	if !ok || len(props) != 2 || props["id"] == nil || props["name"] == nil {
+		t.Fatalf("properties = %v, want id and name folded in", in["properties"])
 	}
-	for _, k := range []string{"anyOf", "additionalProperties", "description"} {
+	if _, ok := in["required"]; ok {
+		t.Fatalf("required = %v, want none from branches", in["required"])
+	}
+	for _, k := range []string{"additionalProperties", "description"} {
 		if _, ok := in[k]; !ok {
-			t.Fatalf("input_schema lost %q: %s", k, data)
+			t.Fatalf("input_schema lost %q: %v", k, in)
 		}
 	}
-	if branches, _ := in["anyOf"].([]any); len(branches) != 2 {
-		t.Fatalf("anyOf = %v, want 2 branches", in["anyOf"])
+	if _, ok := schema["properties"]; ok {
+		t.Fatal("the tool's own schema was modified")
+	}
+}
+
+func TestBuildTools_TopLevelCombinatorsAreNotSent(t *testing.T) {
+	c := New()
+	for _, k := range []string{"anyOf", "oneOf", "allOf"} {
+		schema := map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"q": map[string]any{"type": "string"}},
+			k:            []any{map[string]any{"properties": map[string]any{"q": map[string]any{"type": "integer"}, "n": map[string]any{"type": "integer"}}}},
+		}
+		in := inputSchemaOf(t, c.buildTools([]llmtypes.ToolDefinition{{Name: "t", InputSchema: schema}}, cachePlan{})[0])
+		if _, ok := in[k]; ok {
+			t.Fatalf("%s reached the wire: %v", k, in)
+		}
+		props := in["properties"].(map[string]any)
+		if q := props["q"].(map[string]any); q["type"] != "string" {
+			t.Fatalf("%s: declared property overridden by branch: %v", k, q)
+		}
+		if props["n"] == nil {
+			t.Fatalf("%s: branch property not folded in: %v", k, props)
+		}
+		if len(schema["properties"].(map[string]any)) != 1 {
+			t.Fatalf("%s: the tool's own properties map was modified", k)
+		}
 	}
 }
 
 func TestBuildTools_EmptySchemaGetsObjectWithProperties(t *testing.T) {
 	c := New()
 	for _, schema := range []map[string]any{nil, {}, {"type": "object"}} {
-		out := c.buildTools([]llmtypes.ToolDefinition{{Name: "ping", InputSchema: schema}}, cachePlan{})
-		data, _ := json.Marshal(out[0])
-		if !strings.Contains(string(data), `"input_schema":{"properties":{},"type":"object"}`) {
-			t.Fatalf("schema %v: got %s", schema, data)
+		in := inputSchemaOf(t, c.buildTools([]llmtypes.ToolDefinition{{Name: "ping", InputSchema: schema}}, cachePlan{})[0])
+		props, ok := in["properties"].(map[string]any)
+		if in["type"] != "object" || !ok || len(props) != 0 || len(in) != 2 {
+			t.Fatalf("schema %v: got %v", schema, in)
 		}
 	}
 }
@@ -651,11 +688,17 @@ func TestBuildTools_SchemaWithPropertiesKeepsOtherKeywords(t *testing.T) {
 		"$defs":                map[string]any{"query": map[string]any{"type": "string"}},
 		"additionalProperties": false,
 	}
-	out := c.buildTools([]llmtypes.ToolDefinition{{Name: "search", InputSchema: schema}}, cachePlan{})
-	data, _ := json.Marshal(out[0])
-	for _, want := range []string{`"$defs":{"query":{"type":"string"}}`, `"additionalProperties":false`, `"required":["q"]`, `"$ref":"#/$defs/query"`} {
-		if !strings.Contains(string(data), want) {
-			t.Fatalf("missing %s in %s", want, data)
-		}
+	in := inputSchemaOf(t, c.buildTools([]llmtypes.ToolDefinition{{Name: "search", InputSchema: schema}}, cachePlan{})[0])
+	if _, ok := in["$defs"].(map[string]any)["query"]; !ok {
+		t.Fatalf("$defs lost: %v", in)
+	}
+	if in["additionalProperties"] != false {
+		t.Fatalf("additionalProperties lost: %v", in)
+	}
+	if req, _ := in["required"].([]any); len(req) != 1 || req[0] != "q" {
+		t.Fatalf("required = %v", in["required"])
+	}
+	if ref := in["properties"].(map[string]any)["q"].(map[string]any)["$ref"]; ref != "#/$defs/query" {
+		t.Fatalf("$ref lost: %v", in)
 	}
 }

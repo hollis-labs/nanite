@@ -15,3 +15,7 @@ and legacy databases have no compatibility layer.
 - Persist conversations to JSONL transcripts with a rebuildable SQLite index.
 - Add the `chatrunner` package, which runs an agent behind the
   `libs/agent/chat` conversation handler with host tools and approvals.
+- Send each tool's input schema to Anthropic in full. A schema without
+  `properties` now gets an empty one, and keywords such as `$defs` and
+  `additionalProperties` are kept. Top-level `anyOf`, `oneOf` and `allOf`,
+  which the API refuses, are folded into `properties`.

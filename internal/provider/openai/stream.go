@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"errors"
+
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -42,8 +43,9 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 	stream := api.Chat.Completions.NewStreaming(ctx, params, c.requestOptions(ctx)...)
 
 	out := make(chan llmtypes.StreamEvent, 16)
-	go func() {
+	failure.Guard(c.panics).Go("openai stream", func() {
 		defer close(out)
+		defer failure.RecoverStream(ctx, c.panics, "openai stream", out)
 		defer func() { _ = stream.Close() }()
 		var (
 			stopReason   string
@@ -132,7 +134,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 		}
 
 		_ = emit(llmtypes.StreamEvent{Type: llmtypes.EventDone})
-	}()
+	}, nil)
 
 	return out, nil
 }

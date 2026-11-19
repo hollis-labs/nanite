@@ -4,6 +4,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/libs/security/redact"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,11 +23,37 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "nanite:", err)
+	if code := guardedMain(ctx, run, os.Stderr); code != 0 {
 		stop()
-		os.Exit(1)
+		os.Exit(code)
 	}
+}
+
+// guardedMain runs the CLI under the outermost panic guard. A panic that
+// escapes every inner boundary prints a ref and exits with
+// panics.ExitSoftware instead of a stack dump; the redacted record goes to
+// standard error.
+func guardedMain(ctx context.Context, run func(context.Context) error, stderr io.Writer) int {
+	guard := panics.New(panics.Config{Reporter: panics.StderrReporter(stderr), Redact: mainRedactor()})
+	err := guard.Call("nanite main", func() error { return run(ctx) })
+	if err == nil {
+		return 0
+	}
+	fmt.Fprintln(stderr, "nanite:", err)
+	if _, ok := panics.Ref(err); ok {
+		return panics.ExitSoftware
+	}
+	return 1
+}
+
+// mainRedactor scrubs known secret shapes from a panic record. Without one
+// the guard withholds the value entirely.
+func mainRedactor() func(string) string {
+	r, err := redact.New()
+	if err != nil {
+		return nil
+	}
+	return r.Text
 }
 
 func run(ctx context.Context) error {

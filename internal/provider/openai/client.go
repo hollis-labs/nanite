@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hollis-labs/libs/core/panics"
+
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/station"
@@ -28,7 +30,13 @@ type Client struct {
 	// gw is set for a Station gateway provider (SetGateway). It is part of
 	// every SDK rebuild so a key set never drops the base URL or headers.
 	gw *station.Settings
+	// panics contains a panic in a stream goroutine (SetPanicGuard).
+	panics *panics.Guard
 }
+
+// SetPanicGuard sets the guard that contains a panic in a stream goroutine.
+// Nil withholds panic values and reports to standard error.
+func (c *Client) SetPanicGuard(g *panics.Guard) { c.panics = g }
 
 // Compile-time interface assertion. The Client also exposes Embed* methods
 // and EmbeddingDimensions but those satisfy embedcontracts.Embedder via the

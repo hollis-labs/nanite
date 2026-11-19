@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/libs/core/panics"
 	"io"
 	"os"
 	"os/signal"
@@ -29,7 +30,7 @@ type Terminal struct {
 
 func NewTerminal(ctx context.Context, input io.Reader, output io.Writer) Terminal {
 	lines := make(chan line)
-	go func() {
+	inputGuard.Go("read terminal input", func() {
 		defer close(lines)
 		reader := bufio.NewReader(input)
 		for ctx.Err() == nil {
@@ -43,9 +44,13 @@ func NewTerminal(ctx context.Context, input io.Reader, output io.Writer) Termina
 				return
 			}
 		}
-	}()
+	}, nil)
 	return Terminal{lines: lines, Output: output}
 }
+
+// inputGuard contains a panic in the input reader. A closed input ends the
+// session as end of input does. The value is withheld.
+var inputGuard = panics.New(panics.Config{})
 
 func (t Terminal) read(ctx context.Context) (string, error) {
 	select {

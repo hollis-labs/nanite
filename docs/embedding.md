@@ -116,6 +116,27 @@ when called. The two tools that page through a long tool result are always
 offered. Tools the host registers with `a.Tools().SetGroup` and MCP tools are
 not affected.
 
+## Panics in host code
+
+A panic in code the host gives Nanite does not take the host process down.
+Nanite contains it at each boundary and turns it into an error carrying only
+a reference, `internal error (ref pnc_...)`:
+
+| Where it panics | What happens |
+|---|---|
+| A host tool's handler | The call gets an error tool result; the turn continues. |
+| A slot source or the slot selector | The turn fails before any model request. |
+| The approval gate or the PDP | The call is denied. |
+| The event sink | The event is dropped; the turn continues. |
+| A provider stream | The turn fails and is recorded as failed. |
+| A background job | The job is marked failed. |
+
+The next turn works as usual. The record of each panic, with its value and
+stack passed through the agent's redactor, goes to `Options.Logger` and to
+`Options.PanicReporter` when set. `agent.PanicRef(err)` returns the reference
+from an error. Nanite never replaces the process-wide default guard of
+`libs/core/panics`; that is the host's to set.
+
 ## Where an application keeps its agents
 
 Nanite expects nothing beyond a directory path, so this is a convention for

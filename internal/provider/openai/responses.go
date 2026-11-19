@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"io"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/toolargs"
@@ -68,8 +69,9 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 	}
 	stream := api.Responses.NewStreaming(ctx, params, c.requestOptions(ctx)...)
 	out := make(chan llmtypes.StreamEvent, 16)
-	go func() {
+	failure.Guard(c.panics).Go("openai responses stream", func() {
 		defer close(out)
+		defer failure.RecoverStream(ctx, c.panics, "openai responses stream", out)
 		defer func() { _ = stream.Close() }()
 		emit := func(event llmtypes.StreamEvent) bool {
 			select {
@@ -157,6 +159,6 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 			// A clean socket EOF does not mean the provider finished the turn.
 			fail(fmt.Errorf("openai: response stream ended before completion: %w", io.ErrUnexpectedEOF))
 		}
-	}()
+	}, nil)
 	return out, nil
 }

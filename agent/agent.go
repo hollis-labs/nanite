@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/nanite/internal/tools"
 	"log/slog"
 	"os"
@@ -66,7 +67,24 @@ type Options struct {
 	Builtins []BuiltinGroup
 	// Secrets defaults to the standard secrets resolver.
 	Secrets *secrets.Resolver
+	// PanicReporter also receives each panic the agent contains. Nanite
+	// contains panics in host tools, slot sources, the selector, the
+	// approval gate, the PDP, the event sink, provider streams and its own
+	// goroutines, so they fail a tool call or a turn rather than the host
+	// process. The error the host sees carries only a ref ("internal error
+	// (ref pnc_...)"); the record with the redacted value and stack is
+	// logged to Logger and handed to this reporter. Nil logs only.
+	PanicReporter PanicReporter
 }
+
+// PanicReporter receives the record of a contained panic.
+type PanicReporter = panics.Reporter
+
+// PanicRecord is the redacted record of a contained panic.
+type PanicRecord = panics.Record
+
+// PanicRef returns the ref of a contained panic carried by err.
+func PanicRef(err error) (string, bool) { return panics.Ref(err) }
 
 // Gateway configures the model gateway.
 type Gateway = provider.Gateway
@@ -158,7 +176,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets},
 		Slots:          a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
-		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots,
+		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
 	})
 	if err != nil {
 		_ = db.Close()

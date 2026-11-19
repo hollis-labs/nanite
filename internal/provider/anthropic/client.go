@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/hollis-labs/libs/core/panics"
+
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
@@ -43,6 +45,8 @@ const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
 
 // Client wraps the Messages API with rate tracking and a circuit breaker.
 type Client struct {
+	// panics contains a panic in the stream goroutine (SetPanicGuard).
+	panics *panics.Guard
 	// keyMu guards apiKey, sdk, keyFn and keyLoaded, which a lazily resolved
 	// key (SetKeyFunc) changes at first use rather than at construction.
 	keyMu          sync.Mutex
@@ -218,6 +222,10 @@ func (c *Client) RateLimitTPM() int {
 	_, limit := c.RateTracker.Remaining()
 	return limit
 }
+
+// SetPanicGuard sets the guard that contains a panic in a stream goroutine.
+// Nil withholds panic values and reports to standard error.
+func (c *Client) SetPanicGuard(g *panics.Guard) { c.panics = g }
 
 // Capabilities reports supported message and tool features. MaxTokens and
 // ContextWindowSize are a conservative floor shared by every Claude model;

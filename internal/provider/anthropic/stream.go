@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"log/slog"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
@@ -117,7 +118,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 	}
 
 	ch := make(chan llmtypes.StreamEvent, 64)
-	go c.runStream(ctx, stream, ch, interleavedThinking)
+	failure.Guard(c.panics).Go("anthropic stream", func() { c.runStream(ctx, stream, ch, interleavedThinking) }, nil)
 	return ch, nil
 }
 
@@ -128,6 +129,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 // accurate across turns.
 func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.MessageStreamEventUnion], ch chan<- llmtypes.StreamEvent, interleavedThinking bool) {
 	defer close(ch)
+	defer failure.RecoverStream(ctx, c.panics, "anthropic stream", ch)
 	defer func() {
 		// Close errors here are best-effort: the stream is already drained
 		// (or aborted), and surfacing a close error would obscure the real

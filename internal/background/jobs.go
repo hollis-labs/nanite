@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -41,13 +42,14 @@ type Manager struct {
 	scrub  *redact.Redactor
 	notify func(store.Notice)
 	logger *slog.Logger
+	panics *panics.Guard
 	mu     sync.Mutex
 	active map[string]activeJob
 	closed bool
 }
 
-func New(db *store.Store, scrub *redact.Redactor, notify func(store.Notice), logger *slog.Logger) *Manager {
-	return &Manager{db: db, scrub: scrub, notify: notify, logger: logger, active: make(map[string]activeJob)}
+func New(db *store.Store, scrub *redact.Redactor, notify func(store.Notice), logger *slog.Logger, guard *panics.Guard) *Manager {
+	return &Manager{db: db, scrub: scrub, notify: notify, logger: logger, panics: guard, active: make(map[string]activeJob)}
 }
 
 func (m *Manager) Start(ctx context.Context, job store.Job, start Start) (store.Job, error) {
@@ -75,7 +77,11 @@ func (m *Manager) Start(ctx context.Context, job store.Job, start Start) (store.
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	logWriter := m.scrub.Writer(&boundedLog{file: file})
-	task, err := start(runCtx, logWriter)
+	var task Task
+	err = m.panics.Call("start "+job.Kind+" job", func() (err error) {
+		task, err = start(runCtx, logWriter)
+		return err
+	}, panics.With("job", job.ID))
 	if err != nil {
 		cancel()
 		_ = logWriter.Close()
@@ -99,7 +105,8 @@ func (m *Manager) Start(ctx context.Context, job store.Job, start Start) (store.
 	}
 	active := activeJob{cancel: cancel, done: make(chan struct{})}
 	m.active[job.ID] = active
-	go m.finish(runCtx, job, task, file, logWriter, active)
+	started := job // finish owns its copy; job is still updated below
+	m.panics.Go("finish "+job.Kind+" job", func() { m.finish(runCtx, started, task, file, logWriter, active) }, nil, panics.With("job", job.ID))
 	job.Status = "running"
 	return job, nil
 }
@@ -108,7 +115,12 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 	defer active.cancel()
 	defer close(active.done)
 	defer func() { m.mu.Lock(); delete(m.active, job.ID); m.mu.Unlock() }()
-	got := task.Wait()
+	// A panic while the job runs fails the job with the ref; the job is still
+	// completed, logged and announced.
+	var got Outcome
+	if err := m.panics.Call("run "+job.Kind+" job", func() error { got = task.Wait(); return nil }, panics.With("job", job.ID)); err != nil {
+		got = Outcome{Err: err}
+	}
 	job.Status = "succeeded"
 	job.ExitCode = got.ExitCode
 	if errors.Is(got.Err, context.Canceled) || ctx.Err() != nil {

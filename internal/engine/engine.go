@@ -15,6 +15,7 @@ import (
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
+	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/libs/security/redact"
@@ -50,6 +51,9 @@ type Config struct {
 	Tools          *tools.Groups
 	Skills         *skills.Groups
 	WorkspaceRoots []string
+	// PanicReporter also receives each contained panic. The engine always
+	// logs one; this adds the host's own record.
+	PanicReporter panics.Reporter
 }
 
 type Engine struct {
@@ -66,6 +70,11 @@ type Engine struct {
 	notices  chan store.Notice
 	mcp      *mcpclient.Client
 	cache    *toolresult.Cache
+	// panics contains panics at every boundary where Nanite runs code it
+	// does not own (host tools, slot sources, gates, provider streams) and
+	// in every goroutine it starts. It is per engine: a library never sets
+	// the process-wide default.
+	panics *panics.Guard
 }
 
 func New(cfg Config) (*Engine, error) {
@@ -83,10 +92,26 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{cfg: cfg, scrub: scrub, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget}), active: make(map[string]*Run),
+	guard := newGuard(cfg.Logger, scrub, cfg.PanicReporter)
+	cfg.ProviderConfig.Panics = guard
+	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
-	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger)
+	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	return e, nil
+}
+
+// newGuard builds the engine's panic guard. Panic values and stacks pass
+// through the engine's redactor; each record is logged and handed to the
+// host's reporter when it supplied one.
+func newGuard(logger *slog.Logger, scrub *redact.Redactor, host panics.Reporter) *panics.Guard {
+	log := panics.ReporterFunc(func(r panics.Record) {
+		logger.Error("nanite: panic contained", "ref", r.Ref, "where", r.Where, "value", r.Value, "attrs", r.Attrs, "stack", r.Stack)
+	})
+	reporter := panics.Reporter(log)
+	if host != nil {
+		reporter = panics.Multi(log, host)
+	}
+	return panics.New(panics.Config{Reporter: reporter, Redact: scrub.Text})
 }
 
 type Input struct {
@@ -237,13 +262,29 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	ctx, cancel := context.WithCancel(ctx)
 	r := &Run{id: runID, events: make(chan events.Event, 65), done: make(chan struct{}), cancel: cancel}
 	r.observe = func(eventCtx context.Context, event events.Event) {
-		e.runtime.Observe(eventCtx, id, r.id, event)
+		// The host's event sink is telemetry: a panic in it is recorded and
+		// the turn goes on.
+		_ = e.panics.Call("event sink", func() error {
+			e.runtime.Observe(eventCtx, id, r.id, event)
+			return nil
+		}, panics.With("conversation", id))
 	}
 
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
 	e.active[id] = r
-	go e.execute(ctx, r, info, input, state, prev, e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot(), interrupted)
+	hostTools, hostSkills := e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot()
+	e.panics.Go("turn", func() {
+		e.execute(ctx, r, info, input, state, prev, hostTools, hostSkills, interrupted)
+	}, func(pe *panics.Error) {
+		// A panic after the guarded turn (while finalizing the run) must
+		// still end the run, or Wait would block and the conversation would
+		// stay busy.
+		r.cancel()
+		e.release(id, r, func() {
+			r.finish(events.Result{}, pe, events.RunFailed{EventMeta: events.EventMeta{RunID: r.id}, Err: pe})
+		})
+	}, panics.With("conversation", id), panics.With("run", runID))
 	return r, nil
 }
 
@@ -313,11 +354,16 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		updates = append(updates, slots.Update{Slot: slots.Context, Entry: slots.Entry{Owner: "file", Key: file.Name, Content: file.Text}})
 	}
 	for _, source := range e.cfg.SlotSources {
-		owner := source.Name()
-		if owner == "engine" || owner == "file" || owner == "" {
-			return slots.Assembled{}, fmt.Errorf("invalid slot source owner %q", owner)
-		}
-		sourceUpdates, err := source.Slots(ctx, info)
+		var owner string
+		var sourceUpdates []slots.Update
+		err := e.panics.Call("slot source", func() (err error) {
+			owner = source.Name()
+			if owner == "engine" || owner == "file" || owner == "" {
+				return fmt.Errorf("invalid slot source owner %q", owner)
+			}
+			sourceUpdates, err = source.Slots(ctx, info)
+			return err
+		}, panics.With("conversation", info.ConversationID))
 		if err != nil {
 			return slots.Assembled{}, fmt.Errorf("slot source %s: %w", owner, err)
 		}
@@ -340,7 +386,11 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	for name, size := range ctxpkg.DefaultBudgets() {
 		budgets[slots.Name(name)] = size
 	}
-	plan, err := e.cfg.SlotSelector.Select(ctx, info, snap, budgets)
+	var plan slots.Plan
+	err = e.panics.Call("slot selector", func() (err error) {
+		plan, err = e.cfg.SlotSelector.Select(ctx, info, snap, budgets)
+		return err
+	}, panics.With("conversation", info.ConversationID))
 	if err != nil {
 		return slots.Assembled{}, err
 	}

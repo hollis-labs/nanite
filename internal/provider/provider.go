@@ -25,6 +25,7 @@ import (
 	"maps"
 	"os"
 
+	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/libs/security/secrets"
@@ -45,6 +46,9 @@ type Config struct {
 	Gateway  Gateway
 	Secrets  *secrets.Resolver
 	Redactor *redact.Scope
+	// Panics contains panics in the adapters' stream goroutines. Nil uses a
+	// guard that withholds panic values and reports to standard error.
+	Panics *panics.Guard
 }
 
 func New(cfg Config) (llmcontracts.Provider, error) {
@@ -95,6 +99,7 @@ func New(cfg Config) (llmcontracts.Provider, error) {
 	switch cfg.Provider {
 	case "anthropic":
 		client := anthropic.New()
+		client.SetPanicGuard(cfg.Panics)
 		if gateway.BaseURL != "" {
 			client.SetGateway(gateway)
 		}
@@ -102,6 +107,7 @@ func New(cfg Config) (llmcontracts.Provider, error) {
 		return client, nil
 	case "openai":
 		client := openai.New("", nil)
+		client.SetPanicGuard(cfg.Panics)
 		if gateway.BaseURL != "" {
 			client.SetGateway(gateway)
 		}

@@ -171,3 +171,23 @@ serializes read-only calls to that server.
 Recovery signals shell jobs whose recorded process-group leader can still be
 verified. For an older or unverified process record, recovery marks the job
 lost and preserves the partial log.
+
+## MCP server adoption boundary
+
+Nanite is an MCP client, not an MCP server. The current CLI and embedding API
+have no admin MCP listener or `admin_mcp.go`; the Substrate manifest enables
+CLI, secrets, database and policy modules, without the MCP server module.
+`internal/mcpclient` owns outbound MCP connections and `internal/engine` uses
+those connections to execute discovered tools. There is no application server
+to migrate to `go-mcp/server` or wrap in `go-mcp/auth`.
+
+Direct official-SDK server and Streamable HTTP handler construction remains
+only in client/engine test fixtures. Those fixtures intentionally exercise
+remote-peer protocol behavior, including stateful sessions and elicitation,
+without coupling the test peer to Nanite's client library. They are not
+production listeners. Gateway credentials and host policy stay in the client
+and embedding configuration; adding inbound bearer middleware would not
+replace that outbound authentication boundary.
+
+The `plugin-mcp` version follows the Substrate dependency set. Server library
+adoption does not require overriding that BOM or introducing an admin server.

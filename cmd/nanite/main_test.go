@@ -66,8 +66,10 @@ func TestRootHasCommands(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "variants", "remote.md"), []byte("---\nprovider: nowhere\nmodel: m\n---\nBody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), `provider "nowhere"`) {
-		t.Fatalf("validate accepted an unknown variant provider: %v", err)
+	var warnings bytes.Buffer
+	root.SetErr(&warnings)
+	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(warnings.String(), `provider "nowhere" is not defined here; it must come from the embedding host`) {
+		t.Fatalf("validate with a host-only variant provider: %v, warnings %q", err, warnings.String())
 	}
 }
 

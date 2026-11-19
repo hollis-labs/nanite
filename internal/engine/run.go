@@ -103,6 +103,12 @@ func (r *Run) terminal(result events.Result, err error) events.Event {
 // handler, does nothing.
 func (r *Run) finish(result events.Result, err error, event events.Event) {
 	r.finishOnce.Do(func() {
+		// A run can finish without terminal() (the panic path); mark it closing
+		// here too, so a late emit is dropped instead of sending on a closed
+		// channel.
+		r.mu.Lock()
+		r.closing = true
+		r.mu.Unlock()
 		r.result, r.err = result, err
 		r.events <- event
 		close(r.events)

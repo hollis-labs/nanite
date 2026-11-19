@@ -240,7 +240,10 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			for _, name := range subagent.Names(variants) {
 				p := variants[name].Provider
 				if _, named := def.Providers[p]; p != "" && !named && p != provider.BuiltinAnthropic && p != provider.BuiltinOpenAI {
-					return fmt.Errorf("variants/%s.md: provider %q is not anthropic, openai or a provider in providers.yaml", name, p)
+					// An embedding host can define providers this directory does not.
+					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: variants/%s.md: provider %q is not defined here; it must come from the embedding host\n", name, p); err != nil {
+						return err
+					}
 				}
 			}
 			var authored []string

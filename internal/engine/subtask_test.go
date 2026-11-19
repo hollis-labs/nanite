@@ -722,3 +722,34 @@ func TestBackgroundSubtaskEndingPartial(t *testing.T) {
 		t.Fatalf("background_status %+v, %v", status, err)
 	}
 }
+
+// The panic path finishes a run without terminal(). A background usage
+// report arriving afterwards is dropped, not sent on the closed channel.
+func TestEmitAfterPanicFinishIsDropped(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(), "")
+	r := &Run{id: "turn", events: make(chan events.Event, 65), done: make(chan struct{}), cancel: func() {}}
+	e.mu.Lock()
+	e.active[id] = r
+	e.mu.Unlock()
+	// As Engine.Send's panic handler does: release with finish, no terminal().
+	e.release(id, r, func() {
+		r.finish(events.Result{}, os.ErrClosed, events.RunFailed{EventMeta: events.EventMeta{RunID: r.id}, Err: os.ErrClosed})
+	})
+	e.mu.Lock()
+	e.active[id] = r // A lookup that raced the release still holds the run.
+	e.mu.Unlock()
+	e.reportUsage(t.Context(), id, "child", events.Usage{InputTokens: 1})
+	e.mu.Lock()
+	delete(e.active, id)
+	e.mu.Unlock()
+	var got []events.Event
+	for ev := range r.Events() {
+		got = append(got, ev)
+	}
+	if len(got) != 1 {
+		t.Fatalf("events after finish: %+v", got)
+	}
+	if _, ok := got[0].(events.RunFailed); !ok {
+		t.Fatalf("events %+v", got)
+	}
+}

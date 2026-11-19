@@ -140,3 +140,22 @@ func TestEmptySummaryIsNotACompaction(t *testing.T) {
 		t.Fatalf("recorded summary %q, %v", summary, err)
 	}
 }
+
+func TestStepCompactionFailureDoesNotEndTurn(t *testing.T) {
+	// The window needs compaction after the tool step; the summarizer fails.
+	p := failingSummaries{&watchedProvider{Provider: fake.New(toolResponse("unknown"), fake.Text("finished anyway"))}}
+	e, db, id := setupEngine(t, p, "runtime:\n  context_window: 2000\n")
+	seedLongHistory(t, db, id)
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := compactionEvents(t, run)
+	result, err := run.Wait()
+	if err != nil || !strings.Contains(result.Text, "finished anyway") {
+		t.Fatalf("result %+v, %v", result, err)
+	}
+	if len(got) != 2 || got[0] != "started" || !strings.Contains(got[1], "summary unavailable") {
+		t.Fatalf("compaction events: %q", got)
+	}
+}

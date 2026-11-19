@@ -54,8 +54,8 @@ type execution struct {
 	stalled     bool
 }
 
-// Compaction limits for one turn. A pass that frees less than
-// minCompactionGain of the estimate does not count as progress.
+// Compaction limits for one turn. After a pass that frees less than
+// minCompactionGain of the estimate, the step path stops compacting.
 const (
 	maxCompactionsPerTurn = 3
 	minCompactionGain     = 0.10
@@ -405,16 +405,23 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 		return events.CompactionStarted{EventMeta: meta, Before: before}
 	})
-	// Every start is followed by exactly one outcome. A pass that fails or
-	// frees too little stops further passes in this turn. On the step path
-	// compaction is opportunistic: the turn continues without it. A forced
-	// pass, made to recover from an overflow, returns the error so the request
-	// is not retried unchanged.
+	// Every start is followed by exactly one outcome.
+	//   - A pass that fails, or changes nothing, emits CompactionFailed and
+	//     stops compaction for the rest of the turn. On the step path
+	//     compaction is opportunistic, so the turn continues. A forced pass,
+	//     made to recover from an overflow, returns the error so the request
+	//     is not retried unchanged.
+	//   - A pass that changed the history emits Compacted, even when it freed
+	//     less than minCompactionGain; that small a gain only stops later
+	//     step-path passes.
 	after := before
 	defer func() {
 		failure := retErr
-		if failure == nil && float64(before-after) < minCompactionGain*float64(before) {
+		if failure == nil && after >= before {
 			failure = errCompactionNoProgress
+		}
+		if failure == nil && float64(before-after) < minCompactionGain*float64(before) {
+			x.stalled = true
 		}
 		if failure != nil {
 			x.stalled = true
@@ -422,6 +429,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 				retErr = failure
 			} else {
 				x.engine.cfg.Logger.WarnContext(ctx, "compaction skipped for the rest of the turn", "error", x.engine.scrub.Text(failure.Error()))
+				retErr = nil
 			}
 		}
 		x.run.emit(context.WithoutCancel(ctx), func(meta events.EventMeta) events.Event {

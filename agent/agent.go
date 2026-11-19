@@ -41,6 +41,8 @@ type Options struct {
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
 	// Provider defaults to the adapter selected by host.yaml and Gateway.
+	// When set, it serves every use except one that providers.yaml points at
+	// a provider in Providers.
 	Provider llmcontracts.Provider
 	// Gateway optionally directs requests through a model gateway. Its zero value uses the provider endpoint.
 	Gateway Gateway

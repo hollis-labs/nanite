@@ -85,11 +85,10 @@ func loadProviders(dir string) (map[string]provider.Spec, map[string]Selection, 
 		default:
 			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer or subagent", use)
 		}
+		// A name not defined here may be one the host supplies; the engine
+		// reports a name nobody defines when the use is resolved.
 		if sel.Provider == "" || sel.Model == "" {
 			return nil, nil, fmt.Errorf("providers.yaml: use %s needs provider and model", use)
-		}
-		if _, ok := specs[sel.Provider]; !ok && sel.Provider != provider.BuiltinAnthropic && sel.Provider != provider.BuiltinOpenAI {
-			return nil, nil, fmt.Errorf("providers.yaml: use %s names unknown provider %q", use, sel.Provider)
 		}
 	}
 	return specs, file.Use, nil

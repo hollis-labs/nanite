@@ -2,6 +2,8 @@ package openai
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/provider/station"
 	sdk "github.com/openai/openai-go/v3"
@@ -25,6 +27,7 @@ func (c *Client) newSDK(key string) sdk.Client {
 	opts := []option.RequestOption{option.WithAPIKey(key), option.WithMaxRetries(0)}
 	if c.gw != nil {
 		opts = append(opts, option.WithBaseURL(c.gw.BaseURL))
+		opts = append(opts, withoutAmbientIdentity()...)
 		for name, v := range c.gw.Headers {
 			opts = append(opts, option.WithHeader(name, v))
 		}
@@ -47,4 +50,22 @@ func (c *Client) requestOptions(ctx context.Context) []option.RequestOption {
 		return []option.RequestOption{option.WithHeader(station.SessionHeader, id)}
 	}
 	return nil
+}
+
+// withoutAmbientIdentity drops what the SDK's environment defaults add
+// besides the key, which Nanite sets itself: the organization and project
+// headers, the admin key and OPENAI_CUSTOM_HEADERS. A gateway or other
+// endpoint must not receive an account's identity from the environment.
+func withoutAmbientIdentity() []option.RequestOption {
+	opts := []option.RequestOption{
+		option.WithAdminAPIKey(""),
+		option.WithHeaderDel("OpenAI-Organization"),
+		option.WithHeaderDel("OpenAI-Project"),
+	}
+	for _, line := range strings.Split(os.Getenv("OPENAI_CUSTOM_HEADERS"), "\n") {
+		if name, _, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(name) != "" {
+			opts = append(opts, option.WithHeaderDel(strings.TrimSpace(name)))
+		}
+	}
+	return opts
 }

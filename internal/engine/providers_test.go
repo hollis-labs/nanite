@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/agentdir"
+	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 )
@@ -109,10 +111,11 @@ func TestSubagentUsesItsOwnProvider(t *testing.T) {
 	srv, models := streamingCompatServer(t, "sub")
 	spawn := toolResponse("subagent_spawn")
 	spawn.Events[0].ToolUse.Input = map[string]any{"role": "worker", "task": "child work"}
-	// The parent runs on the host's fake provider (built-in default); the
-	// child is selected onto the named provider.
+	// The parent runs on the host's injected fake provider; the child is
+	// selected onto a provider only the host defines.
 	e, db, id := setupEngine(t, fake.New(spawn, fake.Text("parent done")), "")
-	file := "providers:\n  sub:\n    wire: openai-chat\n    base_url: " + srv.URL + "/v1\n    auth: none\nuse:\n  subagent: {provider: sub, model: small-model}\n"
+	e.cfg.Providers = map[string]provider.Spec{"sub": {Name: "sub", Wire: provider.WireOpenAIChat, BaseURL: srv.URL + "/v1", Auth: provider.AuthNone}}
+	file := "use:\n  subagent: {provider: sub, model: small-model}\n"
 	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "providers.yaml"), []byte(file), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +137,8 @@ func TestSummarizerUsesItsOwnProvider(t *testing.T) {
 	// compaction whose summary comes from the named provider.
 	e, db, id := setupEngine(t, overflowThen(fake.Text("after compaction")), "")
 	seedLongHistory(t, db, id)
-	file := "providers:\n  small:\n    wire: openai-chat\n    base_url: " + srv.URL + "/v1\n    auth: none\nuse:\n  summarizer: {provider: small, model: tiny-summarizer}\n"
+	e.cfg.Providers = map[string]provider.Spec{"small": {Name: "small", Wire: provider.WireOpenAIChat, BaseURL: srv.URL + "/v1", Auth: provider.AuthNone}}
+	file := "use:\n  summarizer: {provider: small, model: tiny-summarizer}\n"
 	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "providers.yaml"), []byte(file), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -147,5 +151,35 @@ func TestSummarizerUsesItsOwnProvider(t *testing.T) {
 	summary, _, _, err := db.ModelHistory(t.Context(), id)
 	if err != nil || !strings.Contains(summary, "summary from summarizer") {
 		t.Fatalf("summary %q, %v", summary, err)
+	}
+}
+
+func TestInjectedProviderWinsOverFileProviders(t *testing.T) {
+	srv, models := streamingCompatServer(t, "file")
+	e, _, id := setupEngine(t, fake.New(fake.Text("from the host")), "")
+	file := "providers:\n  local:\n    wire: openai-chat\n    base_url: " + srv.URL + "/v1\n    auth: none\nuse:\n  chat: {provider: local, model: m}\n"
+	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "providers.yaml"), []byte(file), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sendAndWaitText(t, e, id, "from the host"); err != nil {
+		t.Fatal(err)
+	}
+	if len(models()) != 0 {
+		t.Fatal("providers.yaml routed traffic around the host's provider")
+	}
+}
+
+func TestSubagentSummarizerFallsBackToTheSubagentSelection(t *testing.T) {
+	e, _, _ := setupEngine(t, nil, "")
+	e.cfg.Provider = nil
+	e.cfg.Providers = map[string]provider.Spec{"sub": {Name: "sub", Wire: provider.WireOpenAIChat, BaseURL: "http://127.0.0.1:1/v1", Auth: provider.AuthNone}}
+	def := definition.Definition{Runtime: agentdir.Runtime{Provider: "anthropic", Model: "claude-sonnet-5-5"},
+		Use: map[string]definition.Selection{definition.UseSubagent: {Provider: "sub", Model: "small-model"}}}
+	_, model, err := e.provider(def, definition.UseSubagent)
+	if err != nil || model != "small-model" {
+		t.Fatalf("subagent selection %q, %v", model, err)
+	}
+	if _, _, err := e.provider(definition.Definition{Use: map[string]definition.Selection{definition.UseChat: {Provider: "nowhere", Model: "m"}}}, definition.UseChat); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("unknown provider: %v", err)
 	}
 }

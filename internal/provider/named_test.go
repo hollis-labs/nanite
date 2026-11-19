@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -98,5 +99,54 @@ func TestNamedAnthropicWireUsesBearerAuth(t *testing.T) {
 	}
 	if path != "/v1/messages" || auth != "Bearer fixture-gateway-key" || apiKey != "" {
 		t.Fatalf("path %q auth %q x-api-key %q", path, auth, apiKey)
+	}
+}
+
+func TestNamedProvidersIgnoreAmbientCredentials(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "ambient-anthropic-key")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "ambient-anthropic-token")
+	t.Setenv("OPENAI_ORG_ID", "ambient-org")
+	t.Setenv("OPENAI_PROJECT_ID", "ambient-project")
+	t.Setenv("OPENAI_CUSTOM_HEADERS", "X-Ambient: ambient-header")
+	var mu sync.Mutex
+	var seen []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Clone())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","model":"m","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"ok"}]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"x","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	request := llmtypes.ChatRequest{Model: "m", Messages: []llmtypes.ChatMessage{{Role: "user", Content: "hi"}}}
+	for _, spec := range []Spec{
+		{Name: "a-none", Wire: WireAnthropic, BaseURL: srv.URL, Auth: AuthNone},
+		{Name: "o-none", Wire: WireOpenAIChat, BaseURL: srv.URL + "/v1", Auth: AuthNone},
+	} {
+		p, err := NewNamed(spec, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Complete(context.Background(), request); err != nil {
+			t.Fatalf("%s: %v", spec.Name, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("requests %d", len(seen))
+	}
+	for _, h := range seen {
+		for name, values := range h {
+			for _, v := range values {
+				if strings.Contains(v, "ambient") {
+					t.Errorf("ambient value reached the endpoint in %s: %q", name, v)
+				}
+			}
+		}
 	}
 }

@@ -128,7 +128,10 @@ func (c *Client) rebuildSDK() {
 		}
 	}
 	if c.gw != nil {
-		opts = append(opts, option.WithBaseURL(c.gw.BaseURL))
+		// A gateway or other endpoint gets only the key Nanite resolved: the
+		// SDK's environment defaults would also send ANTHROPIC_API_KEY or
+		// ANTHROPIC_AUTH_TOKEN to it.
+		opts = append(opts, option.WithoutEnvironmentDefaults(), option.WithBaseURL(c.gw.BaseURL))
 		for name, v := range c.gw.Headers {
 			opts = append(opts, option.WithHeader(name, v))
 		}

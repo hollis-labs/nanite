@@ -135,13 +135,17 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
+	// Compaction summaries use their own selection, or else the provider and
+	// model this turn runs on.
+	summaryProvider, summaryModel := model, modelName
+	if sel, ok := def.Use[definition.UseSummarizer]; ok {
+		if summaryProvider, summaryModel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
+			return events.Result{}, err
+		}
+	}
 	// The selected model is the one this turn asks for and reports in the
 	// environment slot.
 	def.Runtime.Model = modelName
-	summaryProvider, summaryModel, err := e.provider(def, definition.UseSummarizer)
-	if err != nil {
-		return events.Result{}, err
-	}
 	catalog := skills.NewCatalog(def.Skills, hostSkills)
 	lease, warnings := e.mcp.Reconcile(ctx, def.Snapshot.MCP)
 	defer lease.Close()

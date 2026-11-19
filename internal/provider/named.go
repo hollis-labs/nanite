@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/redact"
@@ -106,6 +107,16 @@ func (s Spec) Validate() error {
 	}
 	if err := s.settings().Validate(); err != nil {
 		return fmt.Errorf("provider %s: %w", s.Name, err)
+	}
+	// A credential belongs behind key_ref, where it is resolved and redacted,
+	// never in a header value under some other name.
+	for name := range s.Headers {
+		lower := strings.ToLower(name)
+		for _, word := range []string{"key", "token", "secret", "auth", "password", "credential"} {
+			if strings.Contains(lower, word) {
+				return fmt.Errorf("provider %s: header %q looks like a credential; use key_ref", s.Name, name)
+			}
+		}
 	}
 	return nil
 }

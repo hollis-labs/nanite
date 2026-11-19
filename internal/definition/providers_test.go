@@ -50,8 +50,8 @@ use:
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, auth: bearer}\n":                     "anthropic wire",
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, auth: none, key_ref: k}\n":           "no key_ref",
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, headers: {Authorization: secret}}\n": "header",
+		"providers:\n  p: {wire: openai-chat, base_url: http://x, headers: {api-key: secret}}\n":       "looks like a credential",
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, extra: 1}\n":                         "field extra not found",
-		"use:\n  chat: {provider: nowhere, model: m}\n":                                                "unknown provider",
 		"use:\n  chat: {provider: anthropic}\n":                                                        "needs provider and model",
 		"use:\n  review: {provider: anthropic, model: m}\n":                                            "chat, summarizer or subagent",
 	} {

@@ -315,11 +315,15 @@ func (e *Engine) Close() {
 // larger result is cached and shown as a preview the model pages through.
 const toolResultBudget = 24 << 10
 
-// provider returns the adapter and model for one use (chat, summarizer or
-// subagent). A use without its own selection in providers.yaml falls back to
-// chat, and chat without one uses host.yaml's runtime.provider and model.
-// A built-in provider name uses the host's Provider when it supplied one;
-// a named provider comes from the host's Providers, then providers.yaml.
+// provider returns the adapter and model for one use (chat or subagent),
+// and resolve does so for an explicit selection.
+//
+// A use without its own selection in providers.yaml falls back to chat, and
+// chat without one uses host.yaml's runtime.provider and model. A provider
+// the host injected (Config.Provider) serves every selection except one that
+// names a provider the host itself defined (Config.Providers), so an agent
+// directory cannot route a host's traffic around it. Otherwise a named
+// provider comes from the host's definitions, then providers.yaml.
 func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.Provider, string, error) {
 	sel, ok := def.Use[use]
 	if !ok {
@@ -328,21 +332,26 @@ func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.P
 	if !ok {
 		sel = definition.Selection{Provider: def.Runtime.Provider, Model: def.Runtime.Model}
 	}
+	return e.resolve(def, use, sel)
+}
+
+func (e *Engine) resolve(def definition.Definition, use string, sel definition.Selection) (llmcontracts.Provider, string, error) {
+	hostSpec, hostDefined := e.cfg.Providers[sel.Provider]
+	if e.cfg.Provider != nil && !hostDefined {
+		return e.cfg.Provider, sel.Model, nil
+	}
 	if sel.Provider == provider.BuiltinAnthropic || sel.Provider == provider.BuiltinOpenAI {
-		if e.cfg.Provider != nil {
-			return e.cfg.Provider, sel.Model, nil
-		}
 		cfg := e.cfg.ProviderConfig
 		cfg.Provider = sel.Provider
 		p, err := provider.New(cfg)
 		return p, sel.Model, err
 	}
-	spec, ok := e.cfg.Providers[sel.Provider]
+	spec, ok := hostSpec, hostDefined
 	if !ok {
 		spec, ok = def.Providers[sel.Provider]
 	}
 	if !ok {
-		return nil, "", fmt.Errorf("%s: unknown provider %q", use, sel.Provider)
+		return nil, "", fmt.Errorf("providers: %s names unknown provider %q", use, sel.Provider)
 	}
 	spec.Name = sel.Provider
 	p, err := provider.NewNamed(spec, e.cfg.ProviderConfig)

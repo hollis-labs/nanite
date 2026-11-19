@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/events"
@@ -357,8 +358,268 @@ func TestSubtaskStatus(t *testing.T) {
 		{"error", t.Context(), events.Result{}, os.ErrInvalid, subagent.StatusError},
 		{"cancelled", cancelled, events.Result{}, context.Canceled, subagent.StatusCancelled},
 	} {
-		if got, _ := subtaskStatus(tc.ctx, tc.result, tc.err); got != tc.want {
+		if got, _ := subtaskStatus(tc.ctx, tc.ctx, tc.result, tc.err); got != tc.want {
 			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestLeadCannotWidenItsChildrensTools(t *testing.T) {
+	denied := []string{"write_file", "edit_file", "bash", "todo_write", "scratchpad_write"}
+	p := &routedProvider{
+		root: fake.New(subtaskCall("lead", "run a council", false), fake.Text("root done")),
+		children: map[string]*fake.Provider{
+			"run a council": fake.New(subtaskCall("code", "write things", false), fake.Text("council done")),
+			"write things":  fake.New(fake.Text("wrote nothing")),
+		},
+	}
+	e, _, id := setupEngine(t, p, "")
+	e.cfg.WorkspaceRoots = []string{e.cfg.Dir}
+	writeVariant(t, e.cfg.Dir, "lead", "---\ncan_spawn: true\ntools:\n  deny: [write_file, edit_file, bash, todo_write, scratchpad_write]\n---\nYou lead.\n")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	root := p.offered("", 0)
+	for _, name := range denied {
+		if !slices.Contains(root, name) {
+			t.Fatalf("root lacks %s: %v", name, root)
+		}
+	}
+	child := p.offered("write things", 0)
+	for _, name := range denied {
+		if slices.Contains(child, name) {
+			t.Fatalf("the lead's code child was offered %s, which the lead denies: %v", name, child)
+		}
+	}
+	if !slices.Contains(child, "read_file") {
+		t.Fatalf("the code child lost tools the lead allows: %v", child)
+	}
+}
+
+func TestOnlyARootRunsBackgroundSubtasks(t *testing.T) {
+	e, db, id := setupEngine(t, fake.New(), "")
+	writeVariant(t, e.cfg.Dir, "lead", "---\ncan_spawn: true\n---\nYou lead.\n")
+	variants, err := subagent.Load(e.cfg.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lead := execution{engine: e, info: store.Conversation{ID: id, ParentID: "parent"}, depth: 1, variant: variants["lead"], variants: variants}
+	_, err = lead.subtask(t.Context(), subagent.Request{Goal: "x", Variant: "worker", ReturnSpec: json.RawMessage(`"y"`), Background: true})
+	if err == nil || !strings.Contains(err.Error(), "background") {
+		t.Fatalf("a lead started a background subtask: %v", err)
+	}
+	if conversations, _ := db.Conversations(t.Context()); len(conversations) != 1 {
+		t.Fatalf("a child was created: %+v", conversations)
+	}
+}
+
+func schemaHasBackground(t *testing.T, req llmtypes.ChatRequest) bool {
+	t.Helper()
+	for _, tool := range req.Tools {
+		if tool.Name == "subtask" {
+			props, _ := tool.InputSchema["properties"].(map[string]any)
+			_, ok := props["background"]
+			return ok
+		}
+	}
+	t.Fatal("subtask not offered")
+	return false
+}
+
+func TestSubtaskBackgroundOnlyWhenPollable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		groups []tools.BuiltinGroup
+		want   bool
+	}{
+		{"all groups", nil, true},
+		{"no background group", []tools.BuiltinGroup{tools.BuiltinSubtasks, tools.BuiltinFilesRead}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &routedProvider{root: fake.New(fake.Text("done"))}
+			e, _, id := setupEngine(t, p, "")
+			builtins, err := tools.NewBuiltins(tc.groups)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.cfg.Builtins = builtins
+			run, err := e.Send(t.Context(), id, Input{Text: "go"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			if got := schemaHasBackground(t, p.requests[""][0]); got != tc.want {
+				t.Fatalf("background offered: %v", got)
+			}
+		})
+	}
+	// A lead's own subtask tool never offers background.
+	p := &routedProvider{root: fake.New(subtaskCall("lead", "lead it", false), fake.Text("done")),
+		children: map[string]*fake.Provider{"lead it": fake.New(fake.Text("led"))}}
+	e, _, id := setupEngine(t, p, "")
+	writeVariant(t, e.cfg.Dir, "lead", "---\ncan_spawn: true\n---\nYou lead.\n")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if schemaHasBackground(t, p.requests["lead it"][0]) {
+		t.Fatal("a lead was offered background subtasks")
+	}
+}
+
+func TestWallBudgetStopsAChildMidStep(t *testing.T) {
+	p := &routedProvider{root: fake.New(subtaskCall("quick", "child work", false), fake.Text("parent done")),
+		children: map[string]*fake.Provider{"child work": fake.New(fake.Response{Stall: true})}}
+	e, db, id := setupEngine(t, p, "")
+	writeVariant(t, e.cfg.Dir, "quick", "---\nbudgets:\n  wall: 200ms\n---\nBe quick.\n")
+	started := time.Now()
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := run.Wait(); err != nil || result.Text != "parent done" {
+		t.Fatalf("parent %+v, %v", result, err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("the wall budget did not stop a stalled step: %v", elapsed)
+	}
+	var out struct{ Status, Reason string }
+	results := toolResults(t, db, id)
+	if len(results) != 1 || !results[0].IsError || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "wall_time" {
+		t.Fatalf("result %+v", results)
+	}
+}
+
+func TestStepBudgetOnlyNarrows(t *testing.T) {
+	p := &routedProvider{root: fake.New(subtaskCall("roomy", "child work", false)),
+		children: map[string]*fake.Provider{"child work": fake.New(toolResponse("unknown"), toolResponse("unknown"), fake.Text("never"))}}
+	e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
+	writeVariant(t, e.cfg.Dir, "roomy", "---\nbudgets:\n  steps: 5\n---\nTake your time.\n")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Status, Reason string
+		Steps          int
+	}
+	results := toolResults(t, db, id)
+	if len(results) != 1 || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "max_steps" || out.Steps != 1 {
+		t.Fatalf("a variant raised the agent's step limit: %+v", results)
+	}
+}
+
+func TestTokenBudgetCountsCachedTokens(t *testing.T) {
+	cached := toolResponse("unknown")
+	cached.Events = append([]llmtypes.StreamEvent{{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 800, CacheCreationTokens: 100}}}, cached.Events...)
+	p := &routedProvider{root: fake.New(subtaskCall("bounded", "child work", false), fake.Text("parent done")),
+		children: map[string]*fake.Provider{"child work": fake.New(cached, fake.Text("never"))}}
+	e, db, id := setupEngine(t, p, "")
+	writeVariant(t, e.cfg.Dir, "bounded", "---\nbudgets:\n  tokens: 1000\n---\nWork.\n")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var out struct{ Status, Reason string }
+	results := toolResults(t, db, id)
+	if len(results) != 1 || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "token_budget" {
+		t.Fatalf("150 fresh + 900 cached tokens did not spend a 1000-token budget: %+v", results)
+	}
+}
+
+func TestBackgroundSubtaskReportsInSubtaskTerms(t *testing.T) {
+	// The parent's second step calls a host tool that holds its turn open until
+	// the background child's notice arrives, so the child finishes while the
+	// parent still has a running turn to report usage on.
+	wait := toolResponse("await_notice")
+	wait.Events[0].ToolUse.ID = "call-2"
+	child := fake.Text("child output")
+	child.Events = append([]llmtypes.StreamEvent{{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 30, OutputTokens: 3}}}, child.Events...)
+	p := &routedProvider{root: fake.New(subtaskCall("worker", "child work", true), wait, fake.Text("parent finished")),
+		children: map[string]*fake.Provider{"child work": fake.New(child)}}
+	e, db, id := setupEngine(t, p, "")
+	notices := make(chan store.Notice, 1)
+	if err := e.cfg.Tools.SetGroup("host", tools.Tool{Name: "await_notice", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(ctx context.Context, _ tools.Call) (tools.Result, error) {
+			select {
+			case n := <-e.Notices():
+				notices <- n
+				return tools.Result{Text: n.Body}, nil
+			case <-time.After(4 * time.Second):
+				return tools.Result{}, context.DeadlineExceeded
+			}
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rolled []events.Usage
+	for event := range run.Events() {
+		if u, ok := event.(events.Usage); ok && u.Subtask != "" {
+			rolled = append(rolled, u)
+		}
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	n := <-notices
+	launched := childOf(t, db, id)
+	if len(rolled) != 1 || rolled[0].Subtask != launched.ID || rolled[0].InputTokens != 30 {
+		t.Fatalf("background usage events %+v", rolled)
+	}
+	if !strings.Contains(n.Body, "ended ok") || !strings.Contains(n.Body, "30 input") {
+		t.Fatalf("notice %q", n.Body)
+	}
+	check := execution{engine: e, info: store.Conversation{ID: id}}
+	status, err := check.jobStatus(t.Context(), launched.ID)
+	if err != nil || status.IsError || !strings.Contains(status.Text, `"status":"ok"`) || !strings.Contains(status.Text, `"kind":"subtask"`) {
+		t.Fatalf("background_status %+v, %v", status, err)
+	}
+}
+
+func TestCancelledBackgroundSubtaskIsAnError(t *testing.T) {
+	p := &routedProvider{root: fake.New(subtaskCall("worker", "child work", true), fake.Text("parent finished")),
+		children: map[string]*fake.Provider{"child work": fake.New(fake.Response{Stall: true})}}
+	e, db, id := setupEngine(t, p, "")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	launched := childOf(t, db, id)
+	check := execution{engine: e, info: store.Conversation{ID: id}}
+	if _, err := check.cancelJob(t.Context(), launched.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-e.Notices():
+		if !strings.Contains(n.Body, "ended cancelled") {
+			t.Fatalf("notice %q", n.Body)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("no notice after cancellation")
+	}
+	status, err := check.jobStatus(t.Context(), launched.ID)
+	if err != nil || !status.IsError || !strings.Contains(status.Text, `"status":"cancelled"`) {
+		t.Fatalf("background_status %+v, %v", status, err)
 	}
 }

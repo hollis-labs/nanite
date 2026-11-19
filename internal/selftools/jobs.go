@@ -16,6 +16,10 @@ type JobTools struct {
 	// offered for its required variant field.
 	Subtask  func(context.Context, subagent.Request) (tools.Result, error)
 	Variants map[string]subagent.Variant
+	// SubtaskBackground offers subtask's background field. Leave it false
+	// unless background_status is offered too, so the model never gets a job
+	// id it cannot poll.
+	SubtaskBackground bool
 	// Status and Cancel serve background shell commands and background
 	// subtasks alike, by job id.
 	Status func(context.Context, string) (tools.Result, error)
@@ -36,7 +40,7 @@ func (t JobTools) Tools() []tools.Tool {
 		})
 	}
 	if t.Subtask != nil {
-		out = append(out, subtaskTool(t.Subtask, t.Variants))
+		out = append(out, subtaskTool(t.Subtask, t.Variants, t.SubtaskBackground))
 	}
 	if t.StartShell != nil || t.Subtask != nil {
 		out = append(out,
@@ -51,7 +55,7 @@ func (t JobTools) Tools() []tools.Tool {
 	return out
 }
 
-func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, error), variants map[string]subagent.Variant) tools.Tool {
+func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, error), variants map[string]subagent.Variant, background bool) tools.Tool {
 	names := subagent.Names(variants)
 	var listing strings.Builder
 	for _, name := range names {
@@ -65,8 +69,11 @@ func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, erro
 		`"return_spec":{"description":"What to return: prose, or a JSON Schema object.","anyOf":[{"type":"string"},{"type":"object"}]},` +
 		`"variant":{"type":"string","enum":` + string(enum) + `,"description":"Which kind of subtask runs it. Required; choose deliberately."},` +
 		`"inputs":{"type":"object","description":"Values the subtask needs verbatim."},` +
-		`"context":{"type":"object","description":"Parent context to share (last_n, include, full)."},` +
-		`"background":{"type":"boolean","description":"Run in the background and get a job id; completion arrives as a notice."}}`
+		`"context":{"type":"object","description":"Parent context to share (last_n, include, full)."}`
+	if background {
+		properties += `,"background":{"type":"boolean","description":"Run in the background and get a job id for background_status; completion arrives as a notice."}`
+	}
+	properties += "}"
 	description := "Delegate a focused goal to a child conversation and get back its result, not its tool traffic. " +
 		"The result has a status: ok, partial, limit (stopped at a step, token or time budget; the result is incomplete), error or cancelled. Variants:" + listing.String()
 	return specResult(subagent.ToolName, description, properties, []string{"goal", "return_spec", "variant"}, false, run)

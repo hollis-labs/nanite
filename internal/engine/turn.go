@@ -62,6 +62,7 @@ type execution struct {
 	// conversation's own when it is a child, and depth is 0 for a root chat.
 	variants map[string]subagent.Variant
 	variant  subagent.Variant
+	chain    []subagent.Variant
 	depth    int
 	// deadline is the child's wall-clock budget, checked between steps.
 	deadline time.Time
@@ -184,6 +185,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		warnings = append(warnings, warning)
 	}
 	var variant subagent.Variant
+	var chain []subagent.Variant
 	depth := 0
 	if info.ParentID != "" {
 		depth = 1
@@ -192,17 +194,25 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 			return events.Result{}, err
 		}
 		if parentInfo.ParentID != "" {
+			// A depth-2 child is also bound by the lead variant that started it.
 			depth = 2
+			lead, ok := variants[parentInfo.Role]
+			if !ok {
+				return events.Result{}, fmt.Errorf("subtask variant %q is not defined", parentInfo.Role)
+			}
+			chain = append(chain, lead)
 		}
 		var ok bool
 		if variant, ok = variants[info.Role]; !ok {
 			return events.Result{}, fmt.Errorf("subtask variant %q is not defined", info.Role)
 		}
+		chain = append(chain, variant)
 		if variant.Model != "" {
 			def.Runtime.Model = variant.Model
 		}
-		if variant.Budgets.Steps > 0 {
-			def.Runtime.MaxSteps = variant.Budgets.Steps
+		// A budget only narrows the agent's own limit.
+		if steps := variant.Budgets.Steps; steps > 0 && steps < def.Runtime.MaxSteps {
+			def.Runtime.MaxSteps = steps
 		}
 	}
 	skillListing := catalog.Listing()
@@ -215,7 +225,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
-		variants: variants, variant: variant, depth: depth}
+		variants: variants, variant: variant, chain: chain, depth: depth}
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)
 	}
@@ -717,9 +727,12 @@ func appendStepText(all *strings.Builder, text string) {
 // or wall-clock budget, checked between steps; "" while within budget.
 func (x *execution) budgetStop() string {
 	if limit := x.variant.Budgets.Tokens; limit > 0 {
+		// Every token counts, cached ones included, and a lead's spend
+		// includes the usage its finished children rolled up into it.
 		x.usageMu.Lock()
-		spent := x.result.Usage.InputTokens + x.result.Usage.OutputTokens
+		u := x.result.Usage
 		x.usageMu.Unlock()
+		spent := u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
 		if spent >= limit {
 			return events.StopTokenBudget
 		}

@@ -8,15 +8,27 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   context?, background?})`. `variant` is required; the model chooses and
   there is no default. Results carry `status` (`ok`, `partial`, `limit`,
   `error` or `cancelled`), the child's text, steps and token usage.
-- Variants: built-in `code`, `research`, `worker` and `planner` (read-only),
+- Variants: built-in `code`, `research`, `worker` and `planner` (read-only,
+  and denying `mcp__*` tools, since MCP `readOnlyHint` is not trusted),
   plus authored `variants/<name>.md` in the agent directory, re-read every
   turn. Frontmatter sets tool allow and deny patterns, `read_only`, `model`,
   `budgets` (steps, tokens, wall, cost), `last_n`, `result_cap` and
-  `can_spawn`. A variant only narrows tools. `nanite validate` checks them.
-- Depth is one level; a `can_spawn` variant may go one level further.
+  `can_spawn`. A variant only narrows tools. `nanite validate` checks them
+  and rejects `read_only` with `can_spawn`.
+- Depth is one level; a `can_spawn` variant (a lead) may go one level
+  further. A lead's children get a tool only when the lead allows it too.
+- Budgets only narrow: `budgets.steps` lowers `max_steps`, never raises it.
+  The token budget counts input, output and cache tokens, and a lead's
+  includes its finished children. The wall budget is a deadline on the child
+  and stops a step in progress. New stop reasons `token_budget` and
+  `wall_time`, both reported as limits.
 - A child's token usage rolls into the parent turn: `Usage` gains `Subtask`,
   the child conversation id, on the rolled-up event.
-- New stop reasons `token_budget` and `wall_time`, both reported as limits.
+- Background subtasks: only a root chat starts them, and the `background`
+  field is offered only alongside `background_status`. Their notice and
+  `background_status` use the subtask statuses; a cancelled one is an error.
+  The notice carries the child's token usage, and a parent turn still running
+  at completion gets a `Usage` event with `Subtask` set.
 - Removed `subagent_spawn`, `subagent_status` and `subagent_cancel`, with no
   alias. `background_status` and `background_cancel` now also serve
   background subtasks. The built-in group `BuiltinSubagents` ("subagents") is

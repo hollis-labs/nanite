@@ -108,7 +108,11 @@ func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 
 func subtaskCall(variant, goal string, background bool) fake.Response {
 	spawn := toolResponse("subtask")
-	spawn.Events[0].ToolUse.Input = map[string]any{"variant": variant, "goal": goal, "return_spec": "a short report", "background": background}
+	spawn.Events[0].ToolUse.Input = map[string]any{"variant": variant, "goal": goal, "return_spec": "a short report"}
+	if background {
+		// background is only in the schema where the caller can poll the job.
+		spawn.Events[0].ToolUse.Input["background"] = true
+	}
 	return spawn
 }
 

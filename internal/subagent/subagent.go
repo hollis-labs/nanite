@@ -78,19 +78,41 @@ const (
 func (s Status) Failed() bool { return s != StatusOK }
 
 // AllowsTool reports whether a conversation offers a tool. A root chat offers
-// everything; a child offers what its variant allows. canSpawn is whether this
-// child may run subtask itself.
-func AllowsTool(root bool, v Variant, canSpawn bool, name string, readOnly bool) bool {
+// everything. A child offers a tool only when every variant in chain allows
+// it: its own and, at depth 2, the lead's that started it, so a child never
+// has a tool its parent lacked. The subtask tool also needs canSpawn.
+func AllowsTool(root bool, chain []Variant, canSpawn bool, name string, readOnly bool) bool {
 	if root {
 		return true
 	}
 	if name == "ask_user" {
 		return false
 	}
-	if name == ToolName {
-		return canSpawn
+	for _, v := range chain {
+		if !v.Allows(name, readOnly) {
+			return false
+		}
 	}
-	return v.Allows(name, readOnly)
+	return name != ToolName || canSpawn
+}
+
+// StatusOf maps a finished background subtask job's status and reason to
+// the subtask vocabulary; "running" while it runs.
+func StatusOf(job, reason string) string {
+	switch job {
+	case "succeeded":
+		if reason != "" {
+			return string(StatusPartial)
+		}
+		return string(StatusOK)
+	case "limit":
+		return string(StatusLimit)
+	case "cancelled":
+		return string(StatusCancelled)
+	case "failed", "lost":
+		return string(StatusError)
+	}
+	return job
 }
 
 // ToolName is the subtask tool's name.

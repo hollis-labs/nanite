@@ -109,8 +109,7 @@ func sendAndWaitText(t *testing.T, e *Engine, id, want string) error {
 
 func TestSubagentUsesItsOwnProvider(t *testing.T) {
 	srv, models := streamingCompatServer(t, "sub")
-	spawn := toolResponse("subagent_spawn")
-	spawn.Events[0].ToolUse.Input = map[string]any{"role": "worker", "task": "child work"}
+	spawn := subtaskCall("worker", "child work", false)
 	// The parent runs on the host's injected fake provider; the child is
 	// selected onto a provider only the host defines.
 	e, db, id := setupEngine(t, fake.New(spawn, fake.Text("parent done")), "")

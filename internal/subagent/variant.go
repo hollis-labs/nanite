@@ -81,7 +81,10 @@ func Builtins() map[string]Variant {
 			Prompt: "You are a research subtask. Read and search broadly, then return findings with their sources." + contract},
 		"worker": {Name: "worker", Builtin: true, Description: "General work on a focused task.",
 			Prompt: "You are a worker subtask. Complete the assigned goal and report the result to your parent." + contract},
-		"planner": {Name: "planner", Builtin: true, ReadOnly: true, Description: "Read-only; gathers context and returns a plan.",
+		// MCP tools are denied: a server's readOnlyHint is the server's claim,
+		// not Nanite's, so it does not make a tool safe for a read-only
+		// planner. An authored variant may allow them explicitly.
+		"planner": {Name: "planner", Builtin: true, ReadOnly: true, Deny: []string{"mcp__*"}, Description: "Read-only; gathers context and returns a plan.",
 			Prompt: "You are a planner subtask. Use read-only tools to gather context and return a concrete plan." + contract},
 	}
 }
@@ -163,6 +166,10 @@ func parse(name, file string) (Variant, error) {
 		LastN:   meta.LastN, ResultCap: meta.ResultCap, CanSpawn: meta.CanSpawn}
 	if v.Prompt == "" {
 		return Variant{}, fmt.Errorf("the body (the role prompt) is empty")
+	}
+	if v.ReadOnly && v.CanSpawn {
+		// subtask is not read-only, and its children could do what this one cannot.
+		return Variant{}, fmt.Errorf("read_only and can_spawn cannot be combined")
 	}
 	if meta.Budgets.Wall != "" {
 		if v.Budgets.Wall, err = time.ParseDuration(meta.Budgets.Wall); err != nil || v.Budgets.Wall <= 0 {

@@ -24,6 +24,8 @@ func (x *execution) jobTools() []tools.Tool {
 	handlers := selftools.JobTools{Status: x.jobStatus, Cancel: x.cancelJob}
 	if x.canSpawn() {
 		handlers.Subtask, handlers.Variants = x.subtask, x.variants
+		// Only a root chat runs background subtasks, and only where it can poll them.
+		handlers.SubtaskBackground = x.depth == 0 && x.engine.cfg.Builtins.Offers("background_status")
 	}
 	if len(x.engine.cfg.WorkspaceRoots) > 0 {
 		handlers.StartShell = x.startShell
@@ -72,6 +74,10 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	if err := request.Validate(x.variants); err != nil {
 		return tools.Result{}, err
 	}
+	if request.Background && x.depth > 0 {
+		// A background grandchild would outlive the lead that is waiting on it.
+		return tools.Result{}, fmt.Errorf("a subtask cannot start a background subtask; run it in the foreground")
+	}
 	variant := x.variants[request.Variant]
 	e := x.engine
 	release, err := e.children.Acquire()
@@ -92,15 +98,32 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 			ReturnSpec, Context    json.RawMessage `json:",omitempty"`
 		}{child.ID, variant.Name, request.Goal, request.ReturnSpec, request.Context})
 		job, err := e.jobs.Start(ctx, store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: subtaskJobKind, Spec: string(spec)},
-			func(runCtx context.Context, _ io.Writer) (background.Task, error) {
+			func(jobCtx context.Context, _ io.Writer) (background.Task, error) {
+				runCtx, stopWall := wallContext(jobCtx, variant)
 				run, err := start(runCtx)
 				if err != nil {
+					stopWall()
 					return background.Task{}, err
 				}
 				return background.Task{Wait: func() background.Outcome {
 					defer release()
+					defer stopWall()
 					result, err := run.Wait()
-					return background.Outcome{Output: result.Text, Err: err, Limit: events.LimitReason(result.StopReason)}
+					status, reason := subtaskStatus(jobCtx, runCtx, result, err)
+					e.reportUsage(context.WithoutCancel(jobCtx), x.info.ID, child.ID, result.Usage)
+					outcome := background.Outcome{Output: result.Text,
+						Summary: fmt.Sprintf("subtask %s (%s) ended %s%s; usage %d input, %d output, %d cache-read, %d cache-write tokens.",
+							child.ID, variant.Name, status, parenthesize(reason), result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CacheReadTokens, result.Usage.CacheWriteTokens)}
+					switch status {
+					case subagent.StatusLimit:
+						outcome.Limit = reason
+					case subagent.StatusPartial:
+						outcome.Reason = reason
+					case subagent.StatusError, subagent.StatusCancelled:
+						outcome.Err = err
+					case subagent.StatusOK:
+					}
+					return outcome
 				}}, nil
 			})
 		if err != nil {
@@ -113,13 +136,15 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		return tools.Result{Text: text}, err
 	}
 	defer release()
-	run, err := start(ctx)
+	runCtx, stopWall := wallContext(ctx, variant)
+	defer stopWall()
+	run, err := start(runCtx)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	x.emitSubtaskStarted(ctx, child, request)
 	result, err := run.Wait()
-	status, reason := subtaskStatus(ctx, result, err)
+	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Variant: variant.Name, Status: string(status), Result: result, Err: err, Limit: events.LimitReason(result.StopReason)}
@@ -130,11 +155,23 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	return tools.Result{Text: string(raw), IsError: status.Failed()}, err
 }
 
+// wallContext bounds a child by its variant's wall-clock budget, so the
+// budget holds even in the middle of a step.
+func wallContext(ctx context.Context, variant subagent.Variant) (context.Context, context.CancelFunc) {
+	if variant.Budgets.Wall <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, variant.Budgets.Wall)
+}
+
 // subtaskStatus classifies how a child turn ended, with a reason when it did
-// not end ok.
-func subtaskStatus(ctx context.Context, result events.Result, err error) (subagent.Status, string) {
+// not end ok. parent is the caller's context; run is the child's, which
+// carries the wall-clock budget.
+func subtaskStatus(parent, run context.Context, result events.Result, err error) (subagent.Status, string) {
 	switch {
-	case err != nil && (errors.Is(err, context.Canceled) || ctx.Err() != nil):
+	case err != nil && parent.Err() == nil && errors.Is(run.Err(), context.DeadlineExceeded):
+		return subagent.StatusLimit, events.StopWallBudget
+	case err != nil && (errors.Is(err, context.Canceled) || parent.Err() != nil):
 		return subagent.StatusCancelled, "cancelled"
 	case err != nil:
 		return subagent.StatusError, err.Error()
@@ -144,6 +181,29 @@ func subtaskStatus(ctx context.Context, result events.Result, err error) (subage
 		return subagent.StatusOK, ""
 	default:
 		return subagent.StatusPartial, result.StopReason
+	}
+}
+
+func parenthesize(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return " (" + reason + ")"
+}
+
+// reportUsage reports a finished background subtask's usage as a Usage event
+// on the parent conversation's running turn, if it has one. Background usage
+// is never added to a turn's own totals; the completion notice carries it too.
+func (e *Engine) reportUsage(ctx context.Context, parent, child string, u events.Usage) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	// Holding the lock keeps the run from finishing while the event is sent.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if r := e.active[parent]; r != nil {
+		r.emit(ctx, func(meta events.EventMeta) events.Event {
+			return events.Usage{EventMeta: meta, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, Subtask: child}
+		})
 	}
 }
 
@@ -196,9 +256,10 @@ func (x *execution) jobStatus(ctx context.Context, id string) (tools.Result, err
 		return tools.Result{}, err
 	}
 	text, err := x.jobOutput(job)
-	// A subtask that failed or stopped short is an error the model must
-	// notice; a shell job's exit status is already in the body.
-	failed := job.Kind == subtaskJobKind && (job.Status == "limit" || job.Status == "failed" || job.Status == "lost")
+	// A subtask that did not end ok is an error the model must notice; a
+	// shell job's exit status is already in the body.
+	status := subagent.Status(subagent.StatusOf(job.Status, job.Reason))
+	failed := job.Kind == subtaskJobKind && job.Status != "running" && status.Failed()
 	return tools.Result{Text: text, IsError: failed}, err
 }
 
@@ -239,6 +300,17 @@ func (x *execution) cancelJob(ctx context.Context, id string) (string, error) {
 }
 
 func jobJSON(job store.Job, output string) (string, error) {
+	if job.Kind == subtaskJobKind {
+		// A subtask job speaks the subtask vocabulary.
+		raw, err := json.Marshal(struct {
+			ID     string `json:"id"`
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+			Reason string `json:"reason,omitempty"`
+			Output string `json:"output,omitempty"`
+		}{job.ID, "subtask", subagent.StatusOf(job.Status, job.Reason), job.Reason, output})
+		return string(raw), err
+	}
 	raw, err := json.Marshal(struct {
 		store.Job
 		Output string `json:"output,omitempty"`

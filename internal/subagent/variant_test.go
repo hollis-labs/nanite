@@ -49,6 +49,10 @@ func TestLoadAuthoredVariants(t *testing.T) {
 	if variants["planner"].Allows("write_file", false) || !variants["planner"].Allows("read_file", true) {
 		t.Error("planner is not read-only")
 	}
+	// MCP readOnlyHint is the server's word; the built-in planner does not take it.
+	if variants["planner"].Allows("mcp__notes__search", true) {
+		t.Error("planner allows an MCP tool")
+	}
 }
 
 func TestLoadRejectsBadVariantsButKeepsGoodOnes(t *testing.T) {
@@ -63,6 +67,7 @@ func TestLoadRejectsBadVariantsButKeepsGoodOnes(t *testing.T) {
 		"neg.md":      "---\nbudgets:\n  steps: -1\n---\nBody\n",
 		"open.md":     "---\nmodel: x\nBody\n",
 		"glob.md":     "---\ntools:\n  allow: [\"[\"]\n---\nBody\n",
+		"lookout.md":  "---\nread_only: true\ncan_spawn: true\n---\nBody\n",
 	} {
 		write(t, dir, name, body)
 	}
@@ -70,7 +75,7 @@ func TestLoadRejectsBadVariantsButKeepsGoodOnes(t *testing.T) {
 	if err == nil {
 		t.Fatal("bad variants loaded without error")
 	}
-	for _, file := range []string{"typo", "empty", "Bad_Name", "worker", "wall", "neg", "open", "glob"} {
+	for _, file := range []string{"typo", "empty", "Bad_Name", "worker", "wall", "neg", "open", "glob", "lookout"} {
 		if !strings.Contains(err.Error(), "variants/"+file+".md") {
 			t.Errorf("no error for %s: %v", file, err)
 		}
@@ -108,5 +113,25 @@ func TestRequestValidateAndMessage(t *testing.T) {
 	}
 	if msg := base.Message(); !strings.HasSuffix(msg, "Return: a list") {
 		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestAllowsToolNeedsTheWholeChain(t *testing.T) {
+	lead := Variant{Name: "lead", CanSpawn: true, Deny: []string{"write_file", "subtask"}}
+	code := Builtins()["code"]
+	if AllowsTool(false, []Variant{lead, code}, false, "write_file", false) {
+		t.Error("a child was allowed a tool its lead denies")
+	}
+	if !AllowsTool(false, []Variant{lead, code}, false, "read_file", true) {
+		t.Error("a child lost a tool both allow")
+	}
+	if AllowsTool(false, []Variant{lead}, true, "subtask", false) {
+		t.Error("can_spawn overrode the variant's own deny list")
+	}
+	if !AllowsTool(false, []Variant{{Name: "x", CanSpawn: true}}, true, "subtask", false) || AllowsTool(false, []Variant{code}, false, "subtask", false) {
+		t.Error("subtask does not follow canSpawn")
+	}
+	if !AllowsTool(true, nil, true, "anything", false) || AllowsTool(false, []Variant{code}, false, "ask_user", true) {
+		t.Error("root or ask_user handling changed")
 	}
 }

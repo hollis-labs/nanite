@@ -102,7 +102,7 @@ a, err := agent.Open(ctx, agent.Options{
 | `BuiltinFilesWrite` | `write_file`, `edit_file` |
 | `BuiltinShell` | `bash` |
 | `BuiltinBackground` | `background_start`, `background_status`, `background_cancel` |
-| `BuiltinSubtasks` | `subtask` (a background subtask is polled and cancelled with `background_status` and `background_cancel`, from `BuiltinBackground`) |
+| `BuiltinSubtasks` | `subtask`. Background subtasks are offered only together with `BuiltinBackground`, whose `background_status` and `background_cancel` poll and cancel them. The built-in `planner` variant denies `mcp__*` tools; see "Subtasks and background jobs" in `architecture.md`. |
 | `BuiltinSkills` | `skill_list`, `skill_get`, and the skill listing in the prompt |
 | `BuiltinNotes` | `todo_list`, `todo_write`, `scratchpad_read`, `scratchpad_write` |
 | `BuiltinQuestions` | `ask_user` |

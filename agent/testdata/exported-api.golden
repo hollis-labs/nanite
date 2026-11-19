@@ -103,6 +103,8 @@ type Options struct
   field SlotSelector SlotSelector
   field Builtins []BuiltinGroup
   field Secrets *github.com/hollis-labs/libs/security/secrets.Resolver
+  field TraceFiles bool
+  field TraceSink func(context.Context, TraceRecord)
   field PanicReporter PanicReporter
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
   field Ref string
@@ -294,6 +296,33 @@ type ToolResult = github.com/hollis-labs/nanite/internal/tools.Result struct
 type ToolSet struct
   (*ToolSet) RemoveGroup(group string)
   (*ToolSet) SetGroup(group string, specs ...Tool) error
+type TraceRecord = github.com/hollis-labs/libs/agent/trace.Turn struct
+  field Version int
+  field At time.Time
+  field DurationMS int64
+  field ConversationID string
+  field RunID string
+  field TurnID string
+  field ParentConversationID string
+  field Role string
+  field Source github.com/hollis-labs/libs/agent/trace.Source
+  field Provider string
+  field Model string
+  field Slots []github.com/hollis-labs/libs/agent/trace.Slot
+  field Trimmed []string
+  field ToolsOffered []string
+  field ToolCalls []github.com/hollis-labs/libs/agent/trace.ToolCall
+  field Compactions []github.com/hollis-labs/libs/agent/trace.Compaction
+  field Usage github.com/hollis-labs/libs/agent/trace.Usage
+  field Outcome github.com/hollis-labs/libs/agent/trace.Outcome
+  field Situation encoding/json.RawMessage
+  field Classified encoding/json.RawMessage
+  field Why string
+  field Fired []string
+  field HooksRun []string
+  (TraceRecord) Attributes() []github.com/hollis-labs/libs/agent/trace.Attribute
+  (TraceRecord) MarshalJSON() ([]byte, error)
+  (TraceRecord) Validate() error
 type Usage = github.com/hollis-labs/nanite/internal/events.Usage struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field InputTokens int

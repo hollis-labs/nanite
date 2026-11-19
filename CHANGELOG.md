@@ -44,6 +44,13 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
 - `return_spec` and `context` are recorded and passed to the child; result
   validation and forked context come in later releases.
 
+- Every turn writes one trace record (`libs/agent/trace`, schema version 1),
+  however it ends. It holds identity and source, provider and model, slots
+  and trimmed entries, tools offered, tool calls with permission and error
+  kind, compactions, usage and outcome. The CLI appends records to
+  `.nanite/traces/YYYY-MM-DD.jsonl`, hosts receive them through
+  `agent.Options.TraceSink` (or `TraceFiles`), and the turn span carries
+  the summary as attributes.
 - Named providers. `providers.yaml` in the agent directory defines providers
   by wire (`anthropic`, `openai`, `openai-chat`, `openai-responses`), base
   URL, key reference, auth and headers, so any OpenAI-compatible server or a

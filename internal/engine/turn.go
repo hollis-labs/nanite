@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/libs/agent/core/loopdetect"
 	"github.com/hollis-labs/libs/agent/core/runloop"
 	"github.com/hollis-labs/libs/agent/core/turn"
+	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -54,6 +55,10 @@ type execution struct {
 	specs           []llmtypes.ToolDefinition
 	loop            *loopdetect.Detector
 	result          events.Result
+	// toolCalls and passes record the turn's tool calls and compaction
+	// passes for its trace record.
+	toolCalls []trace.ToolCall
+	passes    []trace.Compaction
 	// compactions counts compaction passes in this turn; stalled is set once
 	// a pass frees too little, so later steps stop retrying it.
 	compactions int
@@ -93,10 +98,14 @@ var errEmptySummary = errors.New("compaction summary is empty")
 func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) {
 	ctx, endSpan := events.TurnSpan(ctx)
 	var result events.Result
+	// Every turn writes one trace record, however it ends: it is written here,
+	// after the guard, so a panic anywhere in the turn is recorded as failed
+	// with its ref.
+	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil)}
 	// A panic while preparing the turn fails it with a ref; the host and the
 	// conversation stay usable.
 	err := e.panics.Call("turn", func() (err error) {
-		result, err = e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted)
+		result, err = e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted, tr)
 		return err
 	}, panics.With("conversation", info.ID), panics.With("run", r.id))
 	if err != nil {
@@ -104,6 +113,8 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 			err = errors.New(clean)
 		}
 	}
+	// Writing the record must never keep the run from finishing.
+	_ = e.panics.Call("trace", func() error { e.writeTrace(ctx, tr.rec, tr.x, result, err); return nil }, panics.With("conversation", info.ID), panics.With("run", r.id))
 	endSpan()
 	terminal := r.terminal(result, err)
 	r.report(context.WithoutCancel(ctx), terminal)
@@ -122,8 +133,18 @@ func (e *Engine) release(id string, r *Run, finish func()) {
 	finish()
 }
 
-func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) (_ events.Result, retErr error) {
+// turnTrace is what a turn contributes to its trace record: the record so far
+// and, once built, the execution with its tool calls and compactions.
+type turnTrace struct {
+	rec trace.Turn
+	x   *execution
+}
+
+func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn, tr *turnTrace) (_ events.Result, retErr error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
+	if e.testTurnHook != nil {
+		e.testTurnHook()
+	}
 	var resume recovery.Plan
 	if interrupted != nil {
 		rawHistory, err := e.cfg.Store.History(ctx, info.ID)
@@ -184,27 +205,30 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		use = definition.UseSubagent
 	}
 	var model llmcontracts.Provider
-	var modelName string
+	var sel definition.Selection
 	if variant.Provider != "" {
 		// A variant's own selection, resolved like a use in providers.yaml.
-		model, modelName, err = e.resolve(def, "variant "+variant.Name, definition.Selection{Provider: variant.Provider, Model: variant.Model})
+		model, sel, err = e.resolve(def, "variant "+variant.Name, definition.Selection{Provider: variant.Provider, Model: variant.Model})
 	} else {
-		model, modelName, err = e.provider(def, use)
+		model, sel, err = e.provider(def, use)
 		if variant.Model != "" {
 			// The subagent provider must serve this model.
-			modelName = variant.Model
+			sel.Model = variant.Model
 		}
 	}
 	if err != nil {
 		return events.Result{}, err
 	}
+	modelName := sel.Model
+	tr.rec.Provider, tr.rec.Model = e.scrub.Text(sel.Provider), e.scrub.Text(sel.Model)
 	// Compaction summaries use their own selection, or else the provider and
 	// model this turn runs on.
 	summaryProvider, summaryModel := model, modelName
 	if sel, ok := def.Use[definition.UseSummarizer]; ok {
-		if summaryProvider, summaryModel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
+		if summaryProvider, sel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
 			return events.Result{}, err
 		}
+		summaryModel = sel.Model
 	}
 	// The selected model is the one this turn asks for and reports in the
 	// environment slot.
@@ -233,12 +257,14 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
+	x := &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
 		variants: variants, variant: variant, chain: chain, depth: depth}
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)
 	}
+	tr.x = x
+	tr.rec.Slots, tr.rec.Trimmed = traceSlots(assembled, e.scrub.Text)
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
@@ -407,6 +433,7 @@ func (x *execution) generate(ctx context.Context) error {
 				saveErr := x.message("assistant", got.blocks)
 				if len(got.calls) > 0 && saveErr == nil {
 					saveErr = x.cancelledTools(got.calls)
+					x.traceCancelled(got.calls)
 				}
 				err = errors.Join(err, saveErr)
 			}
@@ -545,6 +572,11 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 				retErr = nil
 			}
 		}
+		pass := trace.Compaction{Before: before, After: after, Forced: force}
+		if failure != nil {
+			pass.Failed, pass.Error = true, x.engine.scrub.Text(failure.Error())
+		}
+		x.passes = append(x.passes, pass)
 		x.run.emit(context.WithoutCancel(ctx), func(meta events.EventMeta) events.Event {
 			if failure != nil {
 				return events.CompactionFailed{EventMeta: meta, Err: failure}

@@ -60,6 +60,30 @@ A rule that only some agents need belongs in their `agent.md`, not in the
 base prompt. An invariant that must hold, such as a claimed ID existing,
 belongs in a mechanism, not in prose.
 
+## Turn trace
+
+Every turn ends with one trace record (`agent.TraceRecord`, schema in
+`github.com/hollis-labs/libs/agent/trace`), however it ended. The engine
+builds it from what the turn already tracks:
+
+- identity and source (user, subagent, resume);
+- provider and model;
+- assembled slots with sizes and cache changes, and trimmed entries;
+- tools offered;
+- each tool call with its permission decision and error kind;
+- compaction passes;
+- usage;
+- the outcome.
+
+Error text goes through the engine's redactor, and the record never holds
+prompts, completions or tool arguments.
+
+Sinks: `Options.TraceFiles` appends to `DataDir/traces/YYYY-MM-DD.jsonl` (the
+CLI turns it on), `Options.TraceSink` receives each record in process, and the
+turn span gets the summary as OpenTelemetry GenAI attributes. The fields for
+the situation, classifier, selector reason, reflexes and hooks are reserved
+and stay empty until those layers exist.
+
 ## Permission flow
 
 The engine combines any host policy decision point with the authored

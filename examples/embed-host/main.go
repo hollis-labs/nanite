@@ -55,7 +55,7 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) (retErr er
 	}
 	// An application seat does not need a shell or the ability to write files:
 	// name the built-in groups it gets, and the rest are never shown to the model.
-	builtins := []agent.BuiltinGroup{agent.BuiltinFilesRead, agent.BuiltinSkills, agent.BuiltinNotes, agent.BuiltinSubagents, agent.BuiltinQuestions}
+	builtins := []agent.BuiltinGroup{agent.BuiltinFilesRead, agent.BuiltinSkills, agent.BuiltinNotes, agent.BuiltinSubtasks, agent.BuiltinQuestions}
 	opts := agent.Options{Dir: dir, GlobalSkillsDir: "-", Builtins: builtins, Gateway: agent.Gateway{
 		BaseURL: os.Getenv("NANITE_GATEWAY_URL"), KeyRef: os.Getenv("NANITE_GATEWAY_KEY_REF"),
 		Auth: os.Getenv("NANITE_GATEWAY_AUTH"),

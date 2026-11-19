@@ -42,6 +42,35 @@ func TestRootHasCommands(t *testing.T) {
 	if strings.TrimSpace(out.String()) != "assistant" {
 		t.Fatalf("validate output %q", out.String())
 	}
+
+	// Authored subtask variants are validated too.
+	if err := os.MkdirAll(filepath.Join(dir, "variants"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "lead.md"), []byte("---\ncan_spawn: true\n---\nYou lead.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(out.String(), "variants: lead") {
+		t.Fatalf("validate with a variant: %q, %v", out.String(), err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "broken.md"), []byte("---\ncan_spawm: true\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "variants/broken.md") {
+		t.Fatalf("validate accepted a bad variant: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "variants", "broken.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "remote.md"), []byte("---\nprovider: nowhere\nmodel: m\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warnings bytes.Buffer
+	root.SetErr(&warnings)
+	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(warnings.String(), `provider "nowhere" is not defined here; it must come from the embedding host`) {
+		t.Fatalf("validate with a host-only variant provider: %v, warnings %q", err, warnings.String())
+	}
 }
 
 func TestPromptViaLocalGateway(t *testing.T) {

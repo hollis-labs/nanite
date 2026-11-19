@@ -91,28 +91,31 @@ type Question struct {
 	Schema     json.RawMessage
 }
 
-// SubagentStarted reports the launch of a child conversation.
+// SubagentStarted reports the launch of a subtask's child conversation.
 type SubagentStarted struct {
 	EventMeta
-	ID, Role string
+	ID, Variant, Goal string
+	Background        bool
 }
 
-// SubagentFinished reports the outcome of a child conversation. Limit is the
-// child's stop reason when it stopped at a step, token or context limit
-// before finishing; the child did not fail, but its work is incomplete.
+// SubagentFinished reports the outcome of a foreground subtask. Status is
+// ok, partial, limit, error or cancelled. Limit is the child's stop reason
+// when it stopped at a step, token, time or context limit before finishing;
+// the child did not fail, but its work is incomplete.
 type SubagentFinished struct {
 	EventMeta
-	ID     string
-	Result Result
-	Err    error
-	Limit  string
+	ID, Variant string
+	Status      string
+	Result      Result
+	Err         error
+	Limit       string
 }
 
 // LimitReason returns stop when it reports that a turn stopped at a step,
 // token or context limit, and "" for a finished turn.
 func LimitReason(stop string) string {
 	switch stop {
-	case StopMaxSteps, llmtypes.StopReasonMaxTokens, StopContextWindowExceeded:
+	case StopMaxSteps, StopTokenBudget, StopWallBudget, llmtypes.StopReasonMaxTokens, StopContextWindowExceeded:
 		return stop
 	}
 	return ""
@@ -121,6 +124,12 @@ func LimitReason(stop string) string {
 const (
 	// StopMaxSteps is the stop reason of a turn that reached its step limit.
 	StopMaxSteps = "max_steps"
+	// StopTokenBudget is the stop reason of a subtask that spent its
+	// variant's token budget.
+	StopTokenBudget = "token_budget"
+	// StopWallBudget is the stop reason of a subtask that ran past its
+	// variant's wall-clock budget.
+	StopWallBudget = "wall_time"
 	// StopContextWindowExceeded is the provider stop reason for a response
 	// cut off because the context window is full.
 	StopContextWindowExceeded = "model_context_window_exceeded"
@@ -150,6 +159,14 @@ type Compacted struct {
 type Usage struct {
 	EventMeta
 	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int
+	// Subtask is set when this is a finished subtask's usage: the child
+	// conversation's id.
+	Subtask string
+	// Background marks a background subtask's usage, reported on whatever
+	// parent turn is running when the subtask finishes. It is not part of
+	// that turn's total: summing a turn's Usage events without Background
+	// gives the turn's total, foreground subtasks included.
+	Background bool
 }
 
 // RunFinished marks successful termination.

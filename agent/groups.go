@@ -51,7 +51,7 @@ const (
 	BuiltinFilesWrite = tools.BuiltinFilesWrite // write_file, edit_file
 	BuiltinShell      = tools.BuiltinShell      // bash
 	BuiltinBackground = tools.BuiltinBackground // background_start, background_status, background_cancel
-	BuiltinSubagents  = tools.BuiltinSubagents  // subagent_spawn, subagent_status, subagent_cancel
+	BuiltinSubtasks   = tools.BuiltinSubtasks   // subtask
 	BuiltinSkills     = tools.BuiltinSkills     // skill_list, skill_get
 	BuiltinNotes      = tools.BuiltinNotes      // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  = tools.BuiltinQuestions  // ask_user

@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+Breaking (next minor version): the subagent tools are replaced by `subtask`.
+
+- New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
+  context?, background?})`. `variant` is required; the model chooses and
+  there is no default. Results carry `status` (`ok`, `partial`, `limit`,
+  `error` or `cancelled`), the child's text, steps and token usage.
+- Variants: built-in `code`, `research`, `worker` and `planner` (read-only,
+  and denying `mcp__*` tools, since MCP `readOnlyHint` is not trusted),
+  plus authored `variants/<name>.md` in the agent directory, re-read every
+  turn. Frontmatter sets tool allow and deny patterns, `read_only`, `model`,
+  `budgets` (steps, tokens, wall, cost), `last_n`, `result_cap` and
+  `can_spawn`, plus an optional `provider` with `model`, resolved like a
+  `providers.yaml` use (`model` alone stays on the subagent provider). A
+  variant only narrows tools. `nanite validate` checks them, rejects
+  `read_only` with `can_spawn`, and checks that a variant's provider exists.
+- Depth is one level; a `can_spawn` variant (a lead) may go one level
+  further. A lead's children get a tool only when the lead allows it too.
+- Budgets only narrow: `budgets.steps` lowers `max_steps`, never raises it.
+  The token budget counts input, output and cache tokens, and a lead's
+  includes its finished children. The wall budget is a deadline on the child
+  and stops a step in progress. New stop reasons `token_budget` and
+  `wall_time`, both reported as limits.
+- A child's token usage rolls into the parent turn: `Usage` gains `Subtask`,
+  the child conversation id, on the rolled-up event.
+- Background subtasks: only a root chat starts them, and the `background`
+  field is offered only alongside `background_status`. Their notice and
+  `background_status` use the subtask statuses; a cancelled one is an error.
+  The notice carries the child's token usage, and a parent turn still running
+  at completion gets a `Usage` event with `Subtask` set and the new
+  `Background` flag. Background usage is not part of that turn's total;
+  chatrunner forwards it as `nanite.subagent` activity (state `usage`)
+  instead of a usage delta.
+- Removed `subagent_spawn`, `subagent_status` and `subagent_cancel`, with no
+  alias. `background_status` and `background_cancel` now also serve
+  background subtasks. The built-in group `BuiltinSubagents` ("subagents") is
+  now `BuiltinSubtasks` ("subtasks").
+- `SubagentStarted` replaces `Role` with `Variant`, `Goal` and `Background`;
+  `SubagentFinished` gains `Variant` and `Status`. The `nanite.subagent`
+  activity carries `variant` (and `status` when done) instead of `role`.
+- `return_spec` and `context` are recorded and passed to the child; result
+  validation and forked context come in later releases.
+
 - Named providers. `providers.yaml` in the agent directory defines providers
   by wire (`anthropic`, `openai`, `openai-chat`, `openai-responses`), base
   URL, key reference, auth and headers, so any OpenAI-compatible server or a

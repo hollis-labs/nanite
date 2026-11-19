@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
@@ -28,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
@@ -56,6 +58,22 @@ type execution struct {
 	// a pass frees too little, so later steps stop retrying it.
 	compactions int
 	stalled     bool
+	// variants are the subtask variants this turn offers; variant is this
+	// conversation's own when it is a child, and depth is 0 for a root chat.
+	variants map[string]subagent.Variant
+	variant  subagent.Variant
+	chain    []subagent.Variant
+	depth    int
+	// deadline is the child's wall-clock budget, checked between steps.
+	deadline time.Time
+	// usageMu guards result.Usage, which subtask handlers add child usage to.
+	usageMu sync.Mutex
+}
+
+// canSpawn reports whether this conversation may run subtask: a root chat
+// always may, a depth-1 child only when its variant has can_spawn.
+func (x *execution) canSpawn() bool {
+	return x.depth == 0 || (x.depth == 1 && x.variant.CanSpawn)
 }
 
 // Compaction limits for one turn. After a pass that frees less than
@@ -127,11 +145,56 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
+	variants, variantErr := subagent.Load(e.cfg.Dir)
+	variantWarning := ""
+	if variantErr != nil {
+		// A bad authored variant is skipped, not fatal; nanite validate reports it.
+		variantWarning = "Some subtask variants did not load: " + variantErr.Error()
+	}
+	var variant subagent.Variant
+	var chain []subagent.Variant
+	depth := 0
+	if info.ParentID != "" {
+		depth = 1
+		parentInfo, err := e.cfg.Store.Conversation(ctx, info.ParentID)
+		if err != nil {
+			return events.Result{}, err
+		}
+		if parentInfo.ParentID != "" {
+			// A depth-2 child is also bound by the lead variant that started it.
+			depth = 2
+			lead, ok := variants[parentInfo.Role]
+			if !ok {
+				return events.Result{}, fmt.Errorf("subtask variant %q is not defined", parentInfo.Role)
+			}
+			chain = append(chain, lead)
+		}
+		var ok bool
+		if variant, ok = variants[info.Role]; !ok {
+			return events.Result{}, fmt.Errorf("subtask variant %q is not defined", info.Role)
+		}
+		chain = append(chain, variant)
+		// A budget only narrows the agent's own limit.
+		if steps := variant.Budgets.Steps; steps > 0 && steps < def.Runtime.MaxSteps {
+			def.Runtime.MaxSteps = steps
+		}
+	}
 	use := definition.UseChat
 	if info.ParentID != "" {
 		use = definition.UseSubagent
 	}
-	model, modelName, err := e.provider(def, use)
+	var model llmcontracts.Provider
+	var modelName string
+	if variant.Provider != "" {
+		// A variant's own selection, resolved like a use in providers.yaml.
+		model, modelName, err = e.resolve(def, "variant "+variant.Name, definition.Selection{Provider: variant.Provider, Model: variant.Model})
+	} else {
+		model, modelName, err = e.provider(def, use)
+		if variant.Model != "" {
+			// The subagent provider must serve this model.
+			modelName = variant.Model
+		}
+	}
 	if err != nil {
 		return events.Result{}, err
 	}
@@ -151,6 +214,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	defer lease.Close()
 	mcpTools, discoveryWarnings := lease.Tools(ctx)
 	warnings = append(warnings, discoveryWarnings...)
+	if variantWarning != "" {
+		warnings = append(warnings, variantWarning)
+	}
 	for i, warning := range warnings {
 		warnings[i] = e.scrub.Text(warning)
 		e.cfg.Logger.WarnContext(ctx, warnings[i])
@@ -163,12 +229,16 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if !e.cfg.Builtins.Has(tools.BuiltinSkills) {
 		skillListing = "" // Without the skill tools a listing would name things the agent cannot load.
 	}
-	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, skillListing, pdp.Mode(), warnings, pending)
+	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, skillListing, variant.Prompt, pdp.Mode(), warnings, pending)
 	if err != nil {
 		return events.Result{}, err
 	}
 	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
-		summaryProvider: summaryProvider, summaryModel: summaryModel}
+		summaryProvider: summaryProvider, summaryModel: summaryModel,
+		variants: variants, variant: variant, chain: chain, depth: depth}
+	if variant.Budgets.Wall > 0 {
+		x.deadline = time.Now().Add(variant.Budgets.Wall)
+	}
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
@@ -366,6 +436,10 @@ func (x *execution) generate(ctx context.Context) error {
 		}
 		if x.result.Steps >= x.definition.Runtime.MaxSteps {
 			x.result.StopReason = events.StopMaxSteps
+			return runloop.Finish
+		}
+		if stop := x.budgetStop(); stop != "" {
+			x.result.StopReason = stop
 			return runloop.Finish
 		}
 		if runErr = x.compact(ctx, false); runErr != nil {
@@ -631,10 +705,12 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 				continue
 			}
 			u := ev.Usage
+			x.usageMu.Lock()
 			x.result.Usage.InputTokens += u.InputTokens
 			x.result.Usage.OutputTokens += u.OutputTokens
 			x.result.Usage.CacheReadTokens += u.CacheReadTokens
 			x.result.Usage.CacheWriteTokens += u.CacheCreationTokens
+			x.usageMu.Unlock()
 			if u.StopReason != "" {
 				x.result.StopReason = u.StopReason
 			}
@@ -655,4 +731,24 @@ func appendStepText(all *strings.Builder, text string) {
 		all.WriteString("\n\n")
 	}
 	all.WriteString(text)
+}
+
+// budgetStop is the stop reason when a child has spent its variant's token
+// or wall-clock budget, checked between steps; "" while within budget.
+func (x *execution) budgetStop() string {
+	if limit := x.variant.Budgets.Tokens; limit > 0 {
+		// Every token counts, cached ones included, and a lead's spend
+		// includes the usage its finished children rolled up into it.
+		x.usageMu.Lock()
+		u := x.result.Usage
+		x.usageMu.Unlock()
+		spent := u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
+		if spent >= limit {
+			return events.StopTokenBudget
+		}
+	}
+	if !x.deadline.IsZero() && !time.Now().Before(x.deadline) {
+		return events.StopWallBudget
+	}
+	return ""
 }

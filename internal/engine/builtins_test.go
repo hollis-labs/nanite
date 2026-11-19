@@ -65,7 +65,7 @@ func TestNilBuiltinsOfferEverything(t *testing.T) {
 	// bash and background_start, which need one, are absent here.
 	want := strings.Fields("ask_user background_cancel background_status edit_file fetch_tool_result find_files list_dir read_file " +
 		"scratchpad_read scratchpad_write search_files search_tool_result skill_get skill_list " +
-		"subagent_cancel subagent_spawn subagent_status todo_list todo_write write_file")
+		"subtask todo_list todo_write write_file")
 	if got := offered(p.requests[0]); !slices.Equal(got, want) {
 		t.Fatalf("default tool list changed:\n got %v\nwant %v", got, want)
 	}

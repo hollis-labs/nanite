@@ -12,7 +12,7 @@ slots. Each conversation admits one active run.
 | `chatrunner` | Runs an agent behind the `libs/agent/chat` conversation handler |
 | `cmd/nanite`, `internal/repl` | Substrate startup and CLI commands, interactive terminal |
 | `internal/definition`, `internal/slots`, `internal/skills` | Authored input reload, slot selection, skill catalog |
-| `internal/engine`, `internal/events` | Turn loop, subagents, background jobs, and event contract |
+| `internal/engine`, `internal/events` | Turn loop, subtasks, background jobs, and event contract |
 | `internal/provider`, `internal/mcpclient` | Native model adapters, gateway configuration, MCP lifecycle |
 | `internal/tools`, `internal/selftools`, `internal/permission`, `internal/shell` | Tool registrations, built-ins, policy evaluation, shell execution |
 | `internal/store`, `internal/transcript`, `internal/recovery` | SQLite projections, durable JSONL journal, interruption recovery |
@@ -109,13 +109,67 @@ existing values or schema defaults. Repaired arguments pass schema validation
 and authorization before execution. Set `NANITE_AUTO_REPAIR=false` to turn off
 repair calls.
 
-## Subagents and background jobs
+## Subtasks and background jobs
 
-A chat conversation can start a worker or planner child as a foreground tool
-call or background job. Worker tools use the same permission check as chat
-tools. Planners see read-only tools. Children cannot start another child, and
-up to four children can run per agent. Cancelling a parent turn cancels its
-foreground child. Background children run until completion or job cancellation.
+A conversation delegates with the `subtask` tool:
+`subtask({goal, return_spec, variant, inputs?, context?, background?})`. The
+model must name a variant; there is no default. The child is a separate
+conversation that starts from the variant's role prompt and one message
+holding the goal, the inputs and the return spec. The parent gets back a
+result with a status (`ok`, `partial`, `limit`, `error` or `cancelled`), the
+child's final text, its steps and its token usage, which also rolls into the
+parent turn's usage.
+
+Variants are `code`, `research`, `worker` and `planner`, built in, plus any
+the agent authors as `variants/<name>.md`, re-read every turn. The
+frontmatter sets `description`, `tools.allow` / `tools.deny` (names or globs),
+`read_only`, `provider`, `model`, `budgets` (`steps`, `tokens`, `wall`,
+`cost`), `last_n`, `result_cap` and `can_spawn`; the body is the role prompt.
+A variant only narrows the tools the agent already has, and every call still
+passes the agent's permission check. `nanite validate` checks authored
+variants, including that a `provider` is `anthropic`, `openai` or one defined
+in `providers.yaml`.
+
+A variant with `provider` and `model` runs its children on that selection,
+resolved like a use in `providers.yaml` (a host-defined provider name works
+too). `model` without `provider` keeps the agent's subagent provider (the
+`subagent` use, else `chat`), which must serve that model. Compaction
+summaries in a child use the `summarizer` use when `providers.yaml` sets one,
+and otherwise the provider and model the child runs on.
+
+The built-in `planner` is read-only and also denies every `mcp__*` tool: an
+MCP server's `readOnlyHint` is the server's own claim, which Nanite does not
+take as proof that a tool is safe for a read-only planner. An authored
+variant may allow MCP tools explicitly, for example `tools.allow:
+["read_file", "mcp__notes__search"]`.
+
+Budgets only narrow. `budgets.steps` lowers the agent's `max_steps` and never
+raises it. A child that spends a budget ends with status `limit` and the
+reason: `max_steps`, `token_budget` or `wall_time`. The token budget counts
+input, output, cache-read and cache-write tokens, checked between steps; a
+lead's spend includes the usage of the children it has finished. The wall
+budget is a deadline on the child, so it also stops a step in progress.
+`cost` is validated but not yet enforced.
+
+Subtasks run one level deep. A variant with `can_spawn: true` (a "lead") may
+start subtasks one more level down; nothing deeper. A lead's children get a
+tool only when both the lead and their own variant allow it, so a lead cannot
+hand its children a tool it lacks, and `read_only` cannot be combined with
+`can_spawn`. A lead with an allow list must list `subtask` itself. Up to four
+children run per agent. Cancelling a parent turn cancels its foreground
+child.
+
+Only a root chat starts background subtasks, and only when it is also offered
+`background_status`; otherwise the `background` field is not in the tool's
+schema. A background subtask runs until it finishes or is cancelled with
+`background_cancel`. Its completion notice and `background_status` report the
+subtask status (`ok`, `partial`, `limit`, `error` or `cancelled`), and the
+notice carries its token usage. If the parent conversation has a turn running
+when the subtask finishes, that turn also gets a `Usage` event with `Subtask`
+set and `Background` true. Background usage is never part of a turn's
+totals: summing a turn's `Usage` events without `Background` gives the turn's
+usage, foreground subtasks included. chatrunner forwards background usage as
+`nanite.subagent` activity with state `usage`, not as a usage delta.
 
 Background Bash uses the same permission check, environment, and denylist as
 foreground Bash. A job can outlive its turn and streams bounded, redacted output

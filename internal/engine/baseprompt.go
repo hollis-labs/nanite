@@ -11,8 +11,8 @@ package engine
 //   - agent.md (the Agent slot) holds the agent's own job, persona, voice,
 //     domain and any rule specific to it. It is more specific, so it wins
 //     where the two differ.
-//   - Subagent role prompts (subagent.Prompt, the Mode slot) hold only what
-//     the role changes: what a worker or planner returns to its parent.
+//   - Subtask variant prompts (subagent.Variant.Prompt, the Mode slot) hold
+//     only what the variant changes: what that child returns to its parent.
 //   - Facts that vary per turn or per host (environment, permission mode,
 //     skills, notices) belong in their own slots, never here.
 //

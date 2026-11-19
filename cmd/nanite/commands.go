@@ -17,7 +17,10 @@ import (
 	hotel "github.com/hollis-labs/libs/core/util/otel"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/definition"
+	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/repl"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/substrate/module"
 	"github.com/hollis-labs/substrate/modules/cli"
 	"github.com/hollis-labs/substrate/modules/database"
@@ -226,7 +229,33 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name)
+			variants, err := subagent.Load(path)
+			if err != nil {
+				return err
+			}
+			def, err := definition.Load(path, "-")
+			if err != nil {
+				return err
+			}
+			for _, name := range subagent.Names(variants) {
+				p := variants[name].Provider
+				if _, named := def.Providers[p]; p != "" && !named && p != provider.BuiltinAnthropic && p != provider.BuiltinOpenAI {
+					// An embedding host can define providers this directory does not.
+					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "warning: variants/%s.md: provider %q is not defined here; it must come from the embedding host\n", name, p); err != nil {
+						return err
+					}
+				}
+			}
+			var authored []string
+			for _, name := range subagent.Names(variants) {
+				if !variants[name].Builtin {
+					authored = append(authored, name)
+				}
+			}
+			if _, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name); err != nil || len(authored) == 0 {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "variants: "+strings.Join(authored, ", "))
 			return err
 		}},
 		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) (retErr error) {

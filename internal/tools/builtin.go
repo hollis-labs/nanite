@@ -13,7 +13,7 @@ const (
 	BuiltinFilesWrite BuiltinGroup = "files-write" // write_file, edit_file
 	BuiltinShell      BuiltinGroup = "shell"       // bash
 	BuiltinBackground BuiltinGroup = "background"  // background_start, background_status, background_cancel
-	BuiltinSubagents  BuiltinGroup = "subagents"   // subagent_spawn, subagent_status, subagent_cancel
+	BuiltinSubtasks   BuiltinGroup = "subtasks"    // subtask
 	BuiltinSkills     BuiltinGroup = "skills"      // skill_list, skill_get
 	BuiltinNotes      BuiltinGroup = "notes"       // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  BuiltinGroup = "questions"   // ask_user
@@ -24,7 +24,7 @@ var builtinGroups = map[string]BuiltinGroup{
 	"write_file": BuiltinFilesWrite, "edit_file": BuiltinFilesWrite,
 	"bash":             BuiltinShell,
 	"background_start": BuiltinBackground, "background_status": BuiltinBackground, "background_cancel": BuiltinBackground,
-	"subagent_spawn": BuiltinSubagents, "subagent_status": BuiltinSubagents, "subagent_cancel": BuiltinSubagents,
+	"subtask":    BuiltinSubtasks,
 	"skill_list": BuiltinSkills, "skill_get": BuiltinSkills,
 	"todo_list": BuiltinNotes, "todo_write": BuiltinNotes, "scratchpad_read": BuiltinNotes, "scratchpad_write": BuiltinNotes,
 	"ask_user": BuiltinQuestions,
@@ -32,7 +32,7 @@ var builtinGroups = map[string]BuiltinGroup{
 
 // AllBuiltins lists every built-in group.
 func AllBuiltins() []BuiltinGroup {
-	return []BuiltinGroup{BuiltinFilesRead, BuiltinFilesWrite, BuiltinShell, BuiltinBackground, BuiltinSubagents, BuiltinSkills, BuiltinNotes, BuiltinQuestions}
+	return []BuiltinGroup{BuiltinFilesRead, BuiltinFilesWrite, BuiltinShell, BuiltinBackground, BuiltinSubtasks, BuiltinSkills, BuiltinNotes, BuiltinQuestions}
 }
 
 // Builtins is the set of groups an agent is offered. A nil set offers all of

@@ -54,7 +54,7 @@ func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	check := execution{engine: e, info: store.Conversation{ID: id}}
 	for {
-		status, err := check.jobStatus(t.Context(), "shell", started.ID)
+		status, err := check.jobStatus(t.Context(), started.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,11 +106,20 @@ func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 	}
 }
 
+func subtaskCall(variant, goal string, background bool) fake.Response {
+	spawn := toolResponse("subtask")
+	spawn.Events[0].ToolUse.Input = map[string]any{"variant": variant, "goal": goal, "return_spec": "a short report"}
+	if background {
+		// background is only in the schema where the caller can poll the job.
+		spawn.Events[0].ToolUse.Input["background"] = true
+	}
+	return spawn
+}
+
 func TestChildRolesAndPermissionBoundary(t *testing.T) {
 	for _, role := range []string{"worker", "planner"} {
 		t.Run(role, func(t *testing.T) {
-			spawn := toolResponse("subagent_spawn")
-			spawn.Events[0].ToolUse.Input = map[string]any{"role": role, "task": "inspect"}
+			spawn := subtaskCall(role, "inspect", false)
 			p := &watchedProvider{Provider: fake.New(spawn, toolResponse("sensitive"), fake.Text("child done"), fake.Text("parent done"))}
 			e, db, id := setupEngine(t, p, "")
 			if err := os.WriteFile(filepath.Join(e.cfg.Dir, "permissions.yaml"), []byte("permissions:\n  rules:\n    - tool: sensitive\n      behavior: deny\n"), 0600); err != nil {
@@ -150,7 +159,7 @@ func TestChildRolesAndPermissionBoundary(t *testing.T) {
 				t.Fatalf("%s sees non-read-only tool: %v", role, show)
 			}
 			for _, tool := range childRequest.Tools {
-				if tool.Name == "ask_user" || strings.HasPrefix(tool.Name, "subagent_") {
+				if tool.Name == "ask_user" || tool.Name == "subtask" || (role == "planner" && (tool.Name == "write_file" || tool.Name == "edit_file" || tool.Name == "bash")) {
 					t.Fatalf("child sees %q", tool.Name)
 				}
 			}
@@ -179,7 +188,7 @@ type promptProvider struct {
 }
 
 func (p *promptProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
-	if len(req.Messages) > 0 && len(req.Messages[0].ContentBlocks) > 0 && req.Messages[0].ContentBlocks[0].Text == "child work" {
+	if len(req.Messages) > 0 && len(req.Messages[0].ContentBlocks) > 0 && strings.HasPrefix(req.Messages[0].ContentBlocks[0].Text, "Goal: child work") {
 		p.requests.Add(1)
 		return p.child.StreamChat(ctx, req)
 	}
@@ -195,8 +204,7 @@ func (*promptProvider) Capabilities() llmtypes.ProviderCapabilities {
 }
 
 func TestBackgroundChildFinishesAndPostsResult(t *testing.T) {
-	spawn := toolResponse("subagent_spawn")
-	spawn.Events[0].ToolUse.Input = map[string]any{"role": "worker", "task": "child work", "background": true}
+	spawn := subtaskCall("worker", "child work", true)
 	p := &promptProvider{parent: fake.New(spawn, fake.Text("parent finished")), child: fake.New(fake.Text("child output"))}
 	e, db, id := setupEngine(t, p, "")
 	run, err := e.Send(t.Context(), id, Input{Text: "parent work"})
@@ -237,8 +245,7 @@ func TestBackgroundChildFinishesAndPostsResult(t *testing.T) {
 }
 
 func TestParentCancellationCancelsForegroundChild(t *testing.T) {
-	spawn := toolResponse("subagent_spawn")
-	spawn.Events[0].ToolUse.Input = map[string]any{"role": "worker", "task": "child work"}
+	spawn := subtaskCall("worker", "child work", false)
 	p := &promptProvider{parent: fake.New(spawn), child: fake.New(fake.Response{Stall: true})}
 	e, db, id := setupEngine(t, p, "")
 	run, err := e.Send(t.Context(), id, Input{Text: "parent work"})
@@ -290,8 +297,7 @@ func TestParentCancellationCancelsForegroundChild(t *testing.T) {
 func TestChildAtStepLimitReportsLimit(t *testing.T) {
 	for _, background := range []bool{false, true} {
 		t.Run(map[bool]string{false: "foreground", true: "background"}[background], func(t *testing.T) {
-			spawn := toolResponse("subagent_spawn")
-			spawn.Events[0].ToolUse.Input = map[string]any{"role": "worker", "task": "child work", "background": background}
+			spawn := subtaskCall("worker", "child work", background)
 			// The child calls a tool on its only step, so it stops at max_steps.
 			p := &promptProvider{parent: fake.New(spawn), child: fake.New(toolResponse("unknown"))}
 			e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
@@ -313,7 +319,10 @@ func TestChildAtStepLimitReportsLimit(t *testing.T) {
 				t.Fatalf("history %+v, %v", history, err)
 			}
 			result := history[2].Blocks[0]
-			var launched struct{ ID, Status, Reason string }
+			var launched struct {
+				ID, Status, Reason string
+				ChildID            string `json:"child_id"`
+			}
 			if err := json.Unmarshal([]byte(result.Content), &launched); err != nil {
 				t.Fatal(err)
 			}
@@ -339,9 +348,9 @@ func TestChildAtStepLimitReportsLimit(t *testing.T) {
 				t.Fatalf("job %+v, %v", job, err)
 			}
 			check := execution{engine: e, info: store.Conversation{ID: id}}
-			status, err := check.jobStatus(t.Context(), "subagent", launched.ID)
+			status, err := check.jobStatus(t.Context(), launched.ID)
 			if err != nil || !status.IsError || !strings.Contains(status.Text, `"status":"limit"`) {
-				t.Fatalf("subagent_status %+v, %v", status, err)
+				t.Fatalf("background_status %+v, %v", status, err)
 			}
 		})
 	}

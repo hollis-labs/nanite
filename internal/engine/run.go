@@ -19,6 +19,9 @@ type Run struct {
 	questionMu sync.Mutex
 	questions  map[string]*pendingQuestion
 	seq        uint64
+	// closing is set once the terminal event is made; emit drops anything
+	// after it, so the terminal event is always the last one reported.
+	closing    bool
 	result     events.Result
 	err        error
 	finishOnce sync.Once
@@ -58,6 +61,9 @@ func (r *Run) Cancel() { r.cancel() }
 func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closing {
+		return
+	}
 	// Reserve one buffer position for the terminal event even on cancellation.
 	for len(r.events) >= cap(r.events)-1 {
 		select {
@@ -82,6 +88,9 @@ func (r *Run) report(ctx context.Context, event events.Event) {
 }
 
 func (r *Run) terminal(result events.Result, err error) events.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closing = true
 	r.seq++
 	meta := events.EventMeta{RunID: r.id, Seq: r.seq}
 	if err != nil {

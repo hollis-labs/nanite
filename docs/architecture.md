@@ -123,10 +123,19 @@ parent turn's usage.
 Variants are `code`, `research`, `worker` and `planner`, built in, plus any
 the agent authors as `variants/<name>.md`, re-read every turn. The
 frontmatter sets `description`, `tools.allow` / `tools.deny` (names or globs),
-`read_only`, `model`, `budgets` (`steps`, `tokens`, `wall`, `cost`), `last_n`,
-`result_cap` and `can_spawn`; the body is the role prompt. A variant only
-narrows the tools the agent already has, and every call still passes the
-agent's permission check. `nanite validate` checks authored variants.
+`read_only`, `provider`, `model`, `budgets` (`steps`, `tokens`, `wall`,
+`cost`), `last_n`, `result_cap` and `can_spawn`; the body is the role prompt.
+A variant only narrows the tools the agent already has, and every call still
+passes the agent's permission check. `nanite validate` checks authored
+variants, including that a `provider` is `anthropic`, `openai` or one defined
+in `providers.yaml`.
+
+A variant with `provider` and `model` runs its children on that selection,
+resolved like a use in `providers.yaml` (a host-defined provider name works
+too). `model` without `provider` keeps the agent's subagent provider (the
+`subagent` use, else `chat`), which must serve that model. Compaction
+summaries in a child use the `summarizer` use when `providers.yaml` sets one,
+and otherwise the provider and model the child runs on.
 
 The built-in `planner` is read-only and also denies every `mcp__*` tool: an
 MCP server's `readOnlyHint` is the server's own claim, which Nanite does not
@@ -156,8 +165,11 @@ schema. A background subtask runs until it finishes or is cancelled with
 `background_cancel`. Its completion notice and `background_status` report the
 subtask status (`ok`, `partial`, `limit`, `error` or `cancelled`), and the
 notice carries its token usage. If the parent conversation has a turn running
-when the subtask finishes, that turn also gets a `Usage` event with
-`Subtask` set; background usage is never added to a turn's own totals.
+when the subtask finishes, that turn also gets a `Usage` event with `Subtask`
+set and `Background` true. Background usage is never part of a turn's
+totals: summing a turn's `Usage` events without `Background` gives the turn's
+usage, foreground subtasks included. chatrunner forwards background usage as
+`nanite.subagent` activity with state `usage`, not as a usage delta.
 
 Background Bash uses the same permission check, environment, and denylist as
 foreground Bash. A job can outlive its turn and streams bounded, redacted output

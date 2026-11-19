@@ -60,6 +60,15 @@ func TestRootHasCommands(t *testing.T) {
 	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "variants/broken.md") {
 		t.Fatalf("validate accepted a bad variant: %v", err)
 	}
+	if err := os.Remove(filepath.Join(dir, "variants", "broken.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "remote.md"), []byte("---\nprovider: nowhere\nmodel: m\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), `provider "nowhere"`) {
+		t.Fatalf("validate accepted an unknown variant provider: %v", err)
+	}
 }
 
 func TestPromptViaLocalGateway(t *testing.T) {

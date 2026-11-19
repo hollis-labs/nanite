@@ -13,6 +13,7 @@ import (
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/events"
+	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -581,7 +582,7 @@ func TestBackgroundSubtaskReportsInSubtaskTerms(t *testing.T) {
 	}
 	n := <-notices
 	launched := childOf(t, db, id)
-	if len(rolled) != 1 || rolled[0].Subtask != launched.ID || rolled[0].InputTokens != 30 {
+	if len(rolled) != 1 || rolled[0].Subtask != launched.ID || rolled[0].InputTokens != 30 || !rolled[0].Background {
 		t.Fatalf("background usage events %+v", rolled)
 	}
 	if !strings.Contains(n.Body, "ended ok") || !strings.Contains(n.Body, "30 input") {
@@ -620,6 +621,104 @@ func TestCancelledBackgroundSubtaskIsAnError(t *testing.T) {
 	}
 	status, err := check.jobStatus(t.Context(), launched.ID)
 	if err != nil || !status.IsError || !strings.Contains(status.Text, `"status":"cancelled"`) {
+		t.Fatalf("background_status %+v, %v", status, err)
+	}
+}
+
+// A background subtask's usage can arrive while its parent's turn is ending.
+// The terminal event must stay the last one reported, with no race on the
+// run's sequence. Run with -race.
+func TestBackgroundUsageRacesTheTerminalEvent(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(), "")
+	for range 50 {
+		var mu sync.Mutex
+		var seen []events.Event
+		r := &Run{id: "turn", events: make(chan events.Event, 65), done: make(chan struct{}), cancel: func() {}}
+		r.observe = func(_ context.Context, ev events.Event) { mu.Lock(); seen = append(seen, ev); mu.Unlock() }
+		e.mu.Lock()
+		e.active[id] = r
+		e.mu.Unlock()
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				e.reportUsage(t.Context(), id, "child", events.Usage{InputTokens: 1})
+			}()
+		}
+		terminal := r.terminal(events.Result{}, nil)
+		r.report(t.Context(), terminal)
+		wg.Wait()
+		e.mu.Lock()
+		delete(e.active, id)
+		e.mu.Unlock()
+		mu.Lock()
+		last := seen[len(seen)-1]
+		mu.Unlock()
+		if _, ok := last.(events.RunFinished); !ok {
+			t.Fatalf("an event followed the terminal event: %+v", seen)
+		}
+		for _, ev := range seen {
+			if u, ok := ev.(events.Usage); ok && (!u.Background || u.Subtask != "child") {
+				t.Fatalf("usage %+v", u)
+			}
+		}
+	}
+}
+
+func TestVariantSelectsItsOwnProvider(t *testing.T) {
+	srv, models := streamingCompatServer(t, "variant")
+	p := &routedProvider{root: fake.New(subtaskCall("local", "child work", false), subtaskCall("named", "other work", false), fake.Text("parent done")),
+		children: map[string]*fake.Provider{"other work": fake.New(fake.Text("named done"))}}
+	e, db, id := setupEngine(t, p, "")
+	e.cfg.Providers = map[string]provider.Spec{"small": {Name: "small", Wire: provider.WireOpenAIChat, BaseURL: srv.URL + "/v1", Auth: provider.AuthNone}}
+	writeVariant(t, e.cfg.Dir, "local", "---\nprovider: small\nmodel: tiny-model\n---\nRun small.\n")
+	writeVariant(t, e.cfg.Dir, "named", "---\nmodel: other-model\n---\nModel only.\n")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := models(); len(got) != 1 || got[0] != "tiny-model" {
+		t.Fatalf("the variant's provider saw models %v", got)
+	}
+	results := toolResults(t, db, id)
+	if len(results) != 2 || !strings.Contains(results[0].Content, "hello from variant") {
+		t.Fatalf("results %+v", results)
+	}
+	// Model alone stays on the subagent provider (here the host's injected one).
+	if got := p.requests["other work"][0].Model; got != "other-model" {
+		t.Fatalf("model-only variant asked for %q", got)
+	}
+}
+
+func TestBackgroundSubtaskEndingPartial(t *testing.T) {
+	refusal := fake.Text("I will not")
+	refusal.Events = append([]llmtypes.StreamEvent{{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: "refusal"}}}, refusal.Events...)
+	p := &routedProvider{root: fake.New(subtaskCall("worker", "child work", true), fake.Text("parent finished")),
+		children: map[string]*fake.Provider{"child work": fake.New(refusal)}}
+	e, db, id := setupEngine(t, p, "")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-e.Notices():
+		if !strings.Contains(n.Body, "ended partial (refusal)") {
+			t.Fatalf("notice %q", n.Body)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("no notice")
+	}
+	launched := childOf(t, db, id)
+	check := execution{engine: e, info: store.Conversation{ID: id}}
+	status, err := check.jobStatus(t.Context(), launched.ID)
+	if err != nil || !status.IsError || !strings.Contains(status.Text, `"status":"partial"`) || !strings.Contains(status.Text, `"reason":"refusal"`) {
 		t.Fatalf("background_status %+v, %v", status, err)
 	}
 }

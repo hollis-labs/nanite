@@ -17,6 +17,8 @@ import (
 	hotel "github.com/hollis-labs/libs/core/util/otel"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/definition"
+	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/repl"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/substrate/module"
@@ -230,6 +232,16 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			variants, err := subagent.Load(path)
 			if err != nil {
 				return err
+			}
+			def, err := definition.Load(path, "-")
+			if err != nil {
+				return err
+			}
+			for _, name := range subagent.Names(variants) {
+				p := variants[name].Provider
+				if _, named := def.Providers[p]; p != "" && !named && p != provider.BuiltinAnthropic && p != provider.BuiltinOpenAI {
+					return fmt.Errorf("variants/%s.md: provider %q is not anthropic, openai or a provider in providers.yaml", name, p)
+				}
 			}
 			var authored []string
 			for _, name := range subagent.Names(variants) {

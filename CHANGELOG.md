@@ -13,8 +13,10 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   plus authored `variants/<name>.md` in the agent directory, re-read every
   turn. Frontmatter sets tool allow and deny patterns, `read_only`, `model`,
   `budgets` (steps, tokens, wall, cost), `last_n`, `result_cap` and
-  `can_spawn`. A variant only narrows tools. `nanite validate` checks them
-  and rejects `read_only` with `can_spawn`.
+  `can_spawn`, plus an optional `provider` with `model`, resolved like a
+  `providers.yaml` use (`model` alone stays on the subagent provider). A
+  variant only narrows tools. `nanite validate` checks them, rejects
+  `read_only` with `can_spawn`, and checks that a variant's provider exists.
 - Depth is one level; a `can_spawn` variant (a lead) may go one level
   further. A lead's children get a tool only when the lead allows it too.
 - Budgets only narrow: `budgets.steps` lowers `max_steps`, never raises it.
@@ -28,7 +30,10 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   field is offered only alongside `background_status`. Their notice and
   `background_status` use the subtask statuses; a cancelled one is an error.
   The notice carries the child's token usage, and a parent turn still running
-  at completion gets a `Usage` event with `Subtask` set.
+  at completion gets a `Usage` event with `Subtask` set and the new
+  `Background` flag. Background usage is not part of that turn's total;
+  chatrunner forwards it as `nanite.subagent` activity (state `usage`)
+  instead of a usage delta.
 - Removed `subagent_spawn`, `subagent_status` and `subagent_cancel`, with no
   alias. `background_status` and `background_cancel` now also serve
   background subtasks. The built-in group `BuiltinSubagents` ("subagents") is

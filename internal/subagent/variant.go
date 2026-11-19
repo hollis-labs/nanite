@@ -31,8 +31,11 @@ type Variant struct {
 	// a path.Match glob such as "mcp__*". A variant only ever narrows the
 	// tools the parent agent has; it cannot add one.
 	Allow, Deny []string
-	Model       string
-	Budgets     Budgets
+	// Provider and Model select what the child runs on, like a use in
+	// providers.yaml. Model alone keeps the agent's subagent provider (the
+	// "subagent" use, else chat), which must serve that model.
+	Provider, Model string
+	Budgets         Budgets
 	// LastN is how many parent messages the child sees (applied in B2).
 	LastN int
 	// ResultCap is the result size cap in tokens (applied in B3).
@@ -130,6 +133,7 @@ type frontmatter struct {
 		Deny  []string `yaml:"deny"`
 	} `yaml:"tools"`
 	ReadOnly bool   `yaml:"read_only"`
+	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
 	Budgets  struct {
 		Steps  int     `yaml:"steps"`
@@ -161,11 +165,14 @@ func parse(name, file string) (Variant, error) {
 		return Variant{}, fmt.Errorf("frontmatter: %w", err)
 	}
 	v := Variant{Name: name, Description: strings.TrimSpace(meta.Description), Prompt: strings.TrimSpace(body),
-		ReadOnly: meta.ReadOnly, Allow: meta.Tools.Allow, Deny: meta.Tools.Deny, Model: strings.TrimSpace(meta.Model),
+		ReadOnly: meta.ReadOnly, Allow: meta.Tools.Allow, Deny: meta.Tools.Deny, Provider: strings.TrimSpace(meta.Provider), Model: strings.TrimSpace(meta.Model),
 		Budgets: Budgets{Steps: meta.Budgets.Steps, Tokens: meta.Budgets.Tokens, Cost: meta.Budgets.Cost},
 		LastN:   meta.LastN, ResultCap: meta.ResultCap, CanSpawn: meta.CanSpawn}
 	if v.Prompt == "" {
 		return Variant{}, fmt.Errorf("the body (the role prompt) is empty")
+	}
+	if v.Provider != "" && v.Model == "" {
+		return Variant{}, fmt.Errorf("provider %q needs a model", v.Provider)
 	}
 	if v.ReadOnly && v.CanSpawn {
 		// subtask is not read-only, and its children could do what this one cannot.

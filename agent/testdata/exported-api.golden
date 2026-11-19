@@ -301,3 +301,4 @@ type Usage = github.com/hollis-labs/nanite/internal/events.Usage struct
   field CacheReadTokens int
   field CacheWriteTokens int
   field Subtask string
+  field Background bool

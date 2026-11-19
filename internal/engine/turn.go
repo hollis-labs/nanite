@@ -145,44 +145,11 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	use := definition.UseChat
-	if info.ParentID != "" {
-		use = definition.UseSubagent
-	}
-	model, modelName, err := e.provider(def, use)
-	if err != nil {
-		return events.Result{}, err
-	}
-	// Compaction summaries use their own selection, or else the provider and
-	// model this turn runs on.
-	summaryProvider, summaryModel := model, modelName
-	if sel, ok := def.Use[definition.UseSummarizer]; ok {
-		if summaryProvider, summaryModel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
-			return events.Result{}, err
-		}
-	}
-	// The selected model is the one this turn asks for and reports in the
-	// environment slot.
-	def.Runtime.Model = modelName
-	catalog := skills.NewCatalog(def.Skills, hostSkills)
-	lease, warnings := e.mcp.Reconcile(ctx, def.Snapshot.MCP)
-	defer lease.Close()
-	mcpTools, discoveryWarnings := lease.Tools(ctx)
-	warnings = append(warnings, discoveryWarnings...)
-	for i, warning := range warnings {
-		warnings[i] = e.scrub.Text(warning)
-		e.cfg.Logger.WarnContext(ctx, warnings[i])
-	}
-	pending, err := e.cfg.Store.PendingNotices(ctx, info.ID)
-	if err != nil {
-		return events.Result{}, err
-	}
 	variants, variantErr := subagent.Load(e.cfg.Dir)
+	variantWarning := ""
 	if variantErr != nil {
 		// A bad authored variant is skipped, not fatal; nanite validate reports it.
-		warning := e.scrub.Text("Some subtask variants did not load: " + variantErr.Error())
-		e.cfg.Logger.WarnContext(ctx, warning)
-		warnings = append(warnings, warning)
+		variantWarning = "Some subtask variants did not load: " + variantErr.Error()
 	}
 	var variant subagent.Variant
 	var chain []subagent.Variant
@@ -207,13 +174,56 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 			return events.Result{}, fmt.Errorf("subtask variant %q is not defined", info.Role)
 		}
 		chain = append(chain, variant)
-		if variant.Model != "" {
-			def.Runtime.Model = variant.Model
-		}
 		// A budget only narrows the agent's own limit.
 		if steps := variant.Budgets.Steps; steps > 0 && steps < def.Runtime.MaxSteps {
 			def.Runtime.MaxSteps = steps
 		}
+	}
+	use := definition.UseChat
+	if info.ParentID != "" {
+		use = definition.UseSubagent
+	}
+	var model llmcontracts.Provider
+	var modelName string
+	if variant.Provider != "" {
+		// A variant's own selection, resolved like a use in providers.yaml.
+		model, modelName, err = e.resolve(def, "variant "+variant.Name, definition.Selection{Provider: variant.Provider, Model: variant.Model})
+	} else {
+		model, modelName, err = e.provider(def, use)
+		if variant.Model != "" {
+			// The subagent provider must serve this model.
+			modelName = variant.Model
+		}
+	}
+	if err != nil {
+		return events.Result{}, err
+	}
+	// Compaction summaries use their own selection, or else the provider and
+	// model this turn runs on.
+	summaryProvider, summaryModel := model, modelName
+	if sel, ok := def.Use[definition.UseSummarizer]; ok {
+		if summaryProvider, summaryModel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
+			return events.Result{}, err
+		}
+	}
+	// The selected model is the one this turn asks for and reports in the
+	// environment slot.
+	def.Runtime.Model = modelName
+	catalog := skills.NewCatalog(def.Skills, hostSkills)
+	lease, warnings := e.mcp.Reconcile(ctx, def.Snapshot.MCP)
+	defer lease.Close()
+	mcpTools, discoveryWarnings := lease.Tools(ctx)
+	warnings = append(warnings, discoveryWarnings...)
+	if variantWarning != "" {
+		warnings = append(warnings, variantWarning)
+	}
+	for i, warning := range warnings {
+		warnings[i] = e.scrub.Text(warning)
+		e.cfg.Logger.WarnContext(ctx, warnings[i])
+	}
+	pending, err := e.cfg.Store.PendingNotices(ctx, info.ID)
+	if err != nil {
+		return events.Result{}, err
 	}
 	skillListing := catalog.Listing()
 	if !e.cfg.Builtins.Has(tools.BuiltinSkills) {

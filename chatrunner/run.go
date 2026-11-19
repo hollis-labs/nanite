@@ -21,7 +21,9 @@ const (
 	ActivitySlots = "nanite.slots"
 	// ActivitySubagent reports a subtask's child conversation. Value: state
 	// ("start", "done" or "limit"), id and variant; when done, status (ok,
-	// partial, limit, error or cancelled) and error or limit.
+	// partial, limit, error or cancelled) and error or limit. State "usage"
+	// is a finished background subtask's token use, which is not part of the
+	// turn's usage deltas.
 	ActivitySubagent = "nanite.subagent"
 	// ActivityCompact reports history compaction. Value: state ("start",
 	// "done" or "failed"), with before, after or error.
@@ -350,6 +352,11 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 		return []chatstream.Event{activity(ActivityCompact, v)}
 
 	case agent.Usage:
+		if e.Background {
+			// Not this turn's spend, so not a delta toward its final usage.
+			return []chatstream.Event{activity(ActivitySubagent, map[string]any{"state": "usage", "id": e.Subtask,
+				"uncached_input": e.InputTokens, "cache_read": e.CacheReadTokens, "cache_write": e.CacheWriteTokens, "output": e.OutputTokens})}
+		}
 		return []chatstream.Event{{Verb: chatstream.VerbUsage, Usage: usage(chatstream.UsageDelta, e)}}
 
 	case agent.RunFinished:

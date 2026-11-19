@@ -192,19 +192,22 @@ func parenthesize(reason string) string {
 }
 
 // reportUsage reports a finished background subtask's usage as a Usage event
-// on the parent conversation's running turn, if it has one. Background usage
-// is never added to a turn's own totals; the completion notice carries it too.
+// marked Background on the parent conversation's running turn, if it has
+// one. Background usage is never part of a turn's totals; the completion
+// notice carries it too.
 func (e *Engine) reportUsage(ctx context.Context, parent, child string, u events.Usage) {
+	e.mu.Lock()
+	r := e.active[parent]
+	e.mu.Unlock()
+	if r == nil {
+		return
+	}
+	// A run that finishes meanwhile drops the event (Run.emit after terminal).
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	// Holding the lock keeps the run from finishing while the event is sent.
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if r := e.active[parent]; r != nil {
-		r.emit(ctx, func(meta events.EventMeta) events.Event {
-			return events.Usage{EventMeta: meta, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, Subtask: child}
-		})
-	}
+	r.emit(ctx, func(meta events.EventMeta) events.Event {
+		return events.Usage{EventMeta: meta, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens, Subtask: child, Background: true}
+	})
 }
 
 // rollUp adds a finished child's usage to this turn's usage and reports it.

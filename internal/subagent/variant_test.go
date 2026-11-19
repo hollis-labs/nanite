@@ -68,6 +68,7 @@ func TestLoadRejectsBadVariantsButKeepsGoodOnes(t *testing.T) {
 		"open.md":     "---\nmodel: x\nBody\n",
 		"glob.md":     "---\ntools:\n  allow: [\"[\"]\n---\nBody\n",
 		"lookout.md":  "---\nread_only: true\ncan_spawn: true\n---\nBody\n",
+		"nomodel.md":  "---\nprovider: small\n---\nBody\n",
 	} {
 		write(t, dir, name, body)
 	}
@@ -75,7 +76,7 @@ func TestLoadRejectsBadVariantsButKeepsGoodOnes(t *testing.T) {
 	if err == nil {
 		t.Fatal("bad variants loaded without error")
 	}
-	for _, file := range []string{"typo", "empty", "Bad_Name", "worker", "wall", "neg", "open", "glob", "lookout"} {
+	for _, file := range []string{"typo", "empty", "Bad_Name", "worker", "wall", "neg", "open", "glob", "lookout", "nomodel"} {
 		if !strings.Contains(err.Error(), "variants/"+file+".md") {
 			t.Errorf("no error for %s: %v", file, err)
 		}

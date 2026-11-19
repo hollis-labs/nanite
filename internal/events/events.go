@@ -159,10 +159,14 @@ type Compacted struct {
 type Usage struct {
 	EventMeta
 	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int
-	// Subtask is set when this is a finished subtask's usage rolled into the
-	// parent turn: the child conversation's id. Summing every Usage event of a
-	// turn gives the turn's total, children included.
+	// Subtask is set when this is a finished subtask's usage: the child
+	// conversation's id.
 	Subtask string
+	// Background marks a background subtask's usage, reported on whatever
+	// parent turn is running when the subtask finishes. It is not part of
+	// that turn's total: summing a turn's Usage events without Background
+	// gives the turn's total, foreground subtasks included.
+	Background bool
 }
 
 // RunFinished marks successful termination.

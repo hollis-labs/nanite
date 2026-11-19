@@ -25,6 +25,7 @@ func TestSlotInvariantsAcrossRoles(t *testing.T) {
 	catalog := skills.NewCatalog(nil, []skills.Skill{
 		{Name: "lookup", Description: "Find a note", Body: "Skill instructions loaded on demand"},
 	})
+	universal := make(map[string]string)
 	for _, tt := range []struct {
 		role, modeText string
 		hostMode       bool
@@ -86,10 +87,21 @@ func TestSlotInvariantsAcrossRoles(t *testing.T) {
 				t.Fatal(err)
 			}
 			initial, next := first.Blocks[0], second.Blocks[0]
+			if !strings.HasPrefix(initial.Content, basePrompt) {
+				t.Errorf("universal block does not open with the base prompt: %q", initial.Content)
+			}
+			universal[name] = initial.Content
 			if next.SlotName != string(slots.Universal) || initial.Content == "" ||
 				initial.Content != next.Content || initial.CacheKey != next.CacheKey || next.Changed {
 				t.Errorf("universal block changed across turns: first = %+v, next = %+v", initial, next)
 			}
 		})
+	}
+	// The base prompt opens every request's cacheable prefix, so it must not
+	// vary by role or host mode either.
+	for name, content := range universal {
+		if content != universal["chat"] {
+			t.Errorf("universal block for %s differs from chat", name)
+		}
 	}
 }

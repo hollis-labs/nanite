@@ -333,7 +333,7 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	}
 	updates := []slots.Update{
 		{Slot: slots.System, Entry: slots.Entry{Owner: "engine", Key: "environment", Content: environment}},
-		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: "Use the available tools when needed. Respect the workspace and tool permissions."}},
+		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: basePrompt}},
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: permissions}},
 		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},

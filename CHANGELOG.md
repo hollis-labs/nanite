@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Every agent now gets a base prompt in the Universal slot, replacing the
+  one-line rule. It frames tool results as the record of what happened,
+  reporting actions only from their results, persistence, permissions and
+  checking work. `nanite init` writes a shorter `agent.md` that no longer
+  repeats it. See "The base prompt" in `docs/architecture.md`.
 - A subagent that stops at its step, token or context limit now finishes
   with status `limit` and the stop reason instead of `succeeded`. The
   `subagent_spawn` and `subagent_status` results are flagged as errors, and

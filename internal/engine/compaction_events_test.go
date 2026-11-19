@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
+	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -99,23 +101,43 @@ func TestCompactionReportsFailure(t *testing.T) {
 }
 
 func TestCompactionWithoutProgressIsNotRetried(t *testing.T) {
-	// A window this small always needs compaction, and a one-turn history
-	// has nothing a summary can replace, so no pass frees anything.
-	p := &watchedProvider{Provider: fake.New(toolResponse("unknown"), toolResponse("unknown"), toolResponse("unknown"), fake.Text("done"))}
+	// A window this small always needs compaction, and a history of one
+	// plain user message gives no stage anything to free.
+	p := &watchedProvider{Provider: fake.New()}
 	e, _, id := setupEngine(t, p, "runtime:\n  context_window: 200\n")
-	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := compactionEvents(t, run)
-	if _, err := run.Wait(); err != nil {
+	assembled, err := e.assemble(t.Context(), Input{}, slots.TurnInfo{ConversationID: id, Role: "chat"}, def, e.cfg.Slots.Snapshot(), nil, "", "", nil, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0] != "started" || !strings.HasPrefix(got[1], "failed: ") {
+	r := &Run{id: "run", events: make(chan events.Event, 16), done: make(chan struct{})}
+	x := execution{engine: e, run: r, info: store.Conversation{ID: id, Role: "chat"}, definition: def, provider: p, assembled: assembled,
+		messages: []llmtypes.ChatMessage{{Role: "user", ContentBlocks: []llmtypes.ContentBlock{{Type: "text", Text: "go"}}}}, messageIDs: []string{"m1"}}
+	for range 3 {
+		if err := x.compact(t.Context(), false); err != nil {
+			t.Fatalf("step compaction returned %v", err)
+		}
+	}
+	close(r.events)
+	var got []string
+	for event := range r.events {
+		switch e := event.(type) {
+		case events.CompactionStarted:
+			got = append(got, "started")
+		case events.Compacted:
+			got = append(got, "done")
+		case events.CompactionFailed:
+			got = append(got, "failed: "+e.Err.Error())
+		}
+	}
+	if len(got) != 2 || got[0] != "started" || got[1] != "failed: "+errCompactionNoProgress.Error() {
 		t.Fatalf("compaction events: %q", got)
 	}
-	if p.summaries > 1 {
-		t.Fatalf("summarizer called %d times", p.summaries)
+	if p.summaries != 0 || !x.stalled {
+		t.Fatalf("summaries=%d stalled=%v", p.summaries, x.stalled)
 	}
 }
 

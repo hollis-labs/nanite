@@ -33,6 +33,29 @@ package work in an ordinary Go process.
 4. The engine records the terminal status and closes the run event stream.
    The caller reads the final response and error with `Run.Wait`.
 
+## The base prompt
+
+The Universal slot comes first in every request and holds the engine's base
+prompt (`internal/engine/baseprompt.go`). It is the same text, byte for
+byte, for every agent, role, host and turn, so it opens the cacheable
+prefix. It frames what holds for any agent: a tool result is the record of
+what happened, an action is reported only from its result, the agent keeps
+going on clear work, a permission denial is an answer, and work is checked
+before it is reported.
+
+The other layers add to it:
+
+| Layer | Slot | Holds |
+|---|---|---|
+| Base prompt | Universal | Principles for every agent. Engine-owned. |
+| `agent.md` body | Agent | The agent's job, persona, voice, domain and its own rules. More specific, so it wins where they differ. |
+| Role prompt | Mode | What a worker or planner subagent returns to its parent. |
+| Environment, permissions, skills, notices | System, Permissions, Skills, Session | Facts that change by host or turn. |
+
+A rule that only some agents need belongs in their `agent.md`, not in the
+base prompt. An invariant that must hold, such as a claimed ID existing,
+belongs in a mechanism, not in prose.
+
 ## Permission flow
 
 The engine combines any host policy decision point with the authored

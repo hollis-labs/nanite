@@ -281,7 +281,9 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 		// still end the run, or Wait would block and the conversation would
 		// stay busy.
 		r.cancel()
-		e.release(id, r, func() { r.finish(events.Result{}, pe, events.RunFailed{EventMeta: events.EventMeta{RunID: r.id}, Err: pe}) })
+		e.release(id, r, func() {
+			r.finish(events.Result{}, pe, events.RunFailed{EventMeta: events.EventMeta{RunID: r.id}, Err: pe})
+		})
 	}, panics.With("conversation", id), panics.With("run", runID))
 	return r, nil
 }

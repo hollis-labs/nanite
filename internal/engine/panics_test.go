@@ -135,13 +135,18 @@ func TestPanickingEventSinkIsContained(t *testing.T) {
 
 type panicPDP struct{}
 
-func (panicPDP) Evaluate(context.Context, policy.Request) (policy.Decision, error) { panic("pdp exploded") }
+func (panicPDP) Evaluate(context.Context, policy.Request) (policy.Decision, error) {
+	panic("pdp exploded")
+}
 
 func TestPanickingPDPDenies(t *testing.T) {
 	e, db, id := setupEngine(t, fake.New(toolResponse("explode"), fake.Text("done")), "")
 	e.cfg.PDP = panicPDP{}
 	if err := e.cfg.Tools.SetGroup("host", tools.Tool{Name: "explode", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`),
-		Handler: func(context.Context, tools.Call) (tools.Result, error) { t.Error("tool ran after a panicking PDP"); return tools.Result{}, nil }}); err != nil {
+		Handler: func(context.Context, tools.Call) (tools.Result, error) {
+			t.Error("tool ran after a panicking PDP")
+			return tools.Result{}, nil
+		}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sendAndWait(t, e, id, "go"); err != nil {

@@ -333,7 +333,7 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	}
 	updates := []slots.Update{
 		{Slot: slots.System, Entry: slots.Entry{Owner: "engine", Key: "environment", Content: environment}},
-		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: "Use the available tools when needed. Respect the workspace and tool permissions."}},
+		{Slot: slots.Universal, Entry: slots.Entry{Owner: "engine", Key: "rules", Content: basePrompt}},
 		{Slot: slots.Agent, Entry: slots.Entry{Owner: "file", Key: "instructions", Content: def.Snapshot.Definition.Body}},
 		{Slot: slots.Permissions, Entry: slots.Entry{Owner: "engine", Key: "mode", Content: permissions}},
 		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},
@@ -386,6 +386,7 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	for name, size := range ctxpkg.DefaultBudgets() {
 		budgets[slots.Name(name)] = size
 	}
+	budgets[slots.Universal] = universalBudget
 	var plan slots.Plan
 	err = e.panics.Call("slot selector", func() (err error) {
 		plan, err = e.cfg.SlotSelector.Select(ctx, info, snap, budgets)
@@ -394,7 +395,7 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	if err != nil {
 		return slots.Assembled{}, err
 	}
-	return slots.Assemble(ctx, snap, plan, prev, def.Runtime.ContextWindow, nil)
+	return slots.Assemble(ctx, snap, plan, prev, def.Runtime.ContextWindow, nil, budgets)
 }
 
 func (e *Engine) Maintain(ctx context.Context, fn func(context.Context) error) error {

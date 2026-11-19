@@ -35,7 +35,7 @@ counts vary with the lengths of the workspace paths.
 
 ```text
 Turn 1 slots:
-  universal: 20 tokens, changed yes
+  universal: 625 tokens, changed yes
     engine/rules: ship
   system: 72 tokens, changed yes
     engine/environment: ship
@@ -51,7 +51,7 @@ Tools offered: ask_user, fetch_tool_result, find_files, list_dir, notes_search, 
 Tool called: notes_search
 The notes mention a planning meeting.
 Turn 2 slots:
-  universal: 20 tokens, changed no
+  universal: 625 tokens, changed no
     engine/rules: ship
   system: 72 tokens, changed no
     engine/environment: ship
@@ -67,7 +67,7 @@ Tools offered: ask_user, fetch_tool_result, files_list, find_files, list_dir, re
 Tool called: files_list
 The workspace contains agenda.md.
 Turn 3 slots:
-  universal: 20 tokens, changed no
+  universal: 625 tokens, changed no
     engine/rules: ship
   system: 72 tokens, changed no
     engine/environment: ship

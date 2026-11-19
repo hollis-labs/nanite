@@ -41,23 +41,23 @@ func (x *execution) startShell(ctx context.Context, raw json.RawMessage) (string
 	return jobJSON(job, "")
 }
 
-func (x *execution) spawn(ctx context.Context, request subagent.Start) (string, error) {
+func (x *execution) spawn(ctx context.Context, request subagent.Start) (tools.Result, error) {
 	if x.info.ParentID != "" {
-		return "", fmt.Errorf("subagent depth limit reached")
+		return tools.Result{}, fmt.Errorf("subagent depth limit reached")
 	}
 	if err := request.Validate(); err != nil {
-		return "", err
+		return tools.Result{}, err
 	}
 	e := x.engine
 	release, err := e.children.Acquire()
 	if err != nil {
-		return "", err
+		return tools.Result{}, err
 	}
 	now := time.Now().UTC()
 	child := store.Conversation{ID: store.NewID(now), ParentID: x.info.ID, Role: request.Role, Title: "Subagent", Status: "active", CreatedAt: now, UpdatedAt: now}
 	if err := e.cfg.Store.CreateConversation(ctx, child); err != nil {
 		release()
-		return "", err
+		return tools.Result{}, err
 	}
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: request.Task}) }
 	if request.Background {
@@ -71,31 +71,41 @@ func (x *execution) spawn(ctx context.Context, request subagent.Start) (string, 
 				return background.Task{Wait: func() background.Outcome {
 					defer release()
 					result, err := run.Wait()
-					return background.Outcome{Output: result.Text, Err: err}
+					return background.Outcome{Output: result.Text, Err: err, Limit: events.LimitReason(result.StopReason)}
 				}}, nil
 			})
 		if err != nil {
 			// The release is idempotent if the job already joined the child.
 			release()
-			return "", err
+			return tools.Result{}, err
 		}
 		x.emitSubagentStarted(ctx, child)
-		return jobJSON(job, "")
+		text, err := jobJSON(job, "")
+		return tools.Result{Text: text}, err
 	}
 	defer release()
 	run, err := start(ctx)
 	if err != nil {
-		return "", err
+		return tools.Result{}, err
 	}
 	x.emitSubagentStarted(ctx, child)
 	result, err := run.Wait()
+	limit := ""
+	if err == nil {
+		limit = events.LimitReason(result.StopReason)
+	}
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Result: result, Err: err}
+		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Result: result, Err: err, Limit: limit}
 	})
 	if err != nil {
-		return "", err
+		return tools.Result{}, err
 	}
-	return jobJSON(store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: "subagent", Status: "succeeded"}, result.Text)
+	job := store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: "subagent", Status: "succeeded"}
+	if limit != "" {
+		job.Status, job.Reason = "limit", limit
+	}
+	text, err := jobJSON(job, result.Text)
+	return tools.Result{Text: text, IsError: limit != ""}, err
 }
 
 func (x *execution) emitSubagentStarted(ctx context.Context, child store.Conversation) {
@@ -104,11 +114,19 @@ func (x *execution) emitSubagentStarted(ctx context.Context, child store.Convers
 	})
 }
 
-func (x *execution) jobStatus(ctx context.Context, kind, id string) (string, error) {
+func (x *execution) jobStatus(ctx context.Context, kind, id string) (tools.Result, error) {
 	job, err := x.engine.cfg.Store.Job(ctx, x.info.ID, kind, id)
 	if err != nil {
-		return "", err
+		return tools.Result{}, err
 	}
+	text, err := x.jobOutput(job)
+	// A subagent that failed or stopped short is an error the model must
+	// notice; a shell job's exit status is already in the body.
+	failed := kind == "subagent" && (job.Status == "limit" || job.Status == "failed" || job.Status == "lost")
+	return tools.Result{Text: text, IsError: failed}, err
+}
+
+func (x *execution) jobOutput(job store.Job) (string, error) {
 	output := ""
 	if job.OutputPath != "" {
 		file, err := os.Open(job.OutputPath)

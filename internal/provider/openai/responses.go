@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"io"
+	"strings"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/toolargs"
@@ -28,7 +29,7 @@ func (c *Client) completeResponse(ctx context.Context, req llmtypes.ChatRequest)
 	if err := responseFailure(*response); err != nil {
 		return "", err
 	}
-	if text := response.OutputText(); text != "" {
+	if text := response.OutputText(); strings.TrimSpace(text) != "" {
 		return text, nil
 	}
 	return "", errEmptyResponse

@@ -19,6 +19,8 @@ type Job struct {
 	PID             int    `json:"-"`
 	OutputPath      string `json:"output_path,omitempty"`
 	ExitCode        *int   `json:"exit_code,omitempty"`
+	// Reason is the stop reason of a subagent job whose status is "limit".
+	Reason string `json:"reason,omitempty"`
 }
 
 func (s *Store) JobDir() string { return filepath.Join(filepath.Dir(s.transcripts), "jobs") }
@@ -34,9 +36,9 @@ func (s *Store) StartJob(ctx context.Context, job Job) error {
 func (s *Store) Job(ctx context.Context, conversation, kind, id string) (Job, error) {
 	job := Job{ID: id, ConversationID: conversation, Kind: kind}
 	var code sql.NullInt64
-	err := s.db.Reader().QueryRowContext(ctx, `SELECT status,spec_json,COALESCE(pid,0),COALESCE(output_path,''),exit_code
+	err := s.db.Reader().QueryRowContext(ctx, `SELECT status,spec_json,COALESCE(pid,0),COALESCE(output_path,''),exit_code,reason
  FROM jobs WHERE conversation_id=? AND kind=? AND id=?`, conversation, kind, id).
-		Scan(&job.Status, &job.Spec, &job.PID, &job.OutputPath, &code)
+		Scan(&job.Status, &job.Spec, &job.PID, &job.OutputPath, &code, &job.Reason)
 	if code.Valid {
 		value := int(code.Int64)
 		job.ExitCode = &value
@@ -46,8 +48,8 @@ func (s *Store) Job(ctx context.Context, conversation, kind, id string) (Job, er
 
 func (s *Store) CompleteJob(ctx context.Context, job Job, notice Notice) error {
 	return s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE jobs SET status=?,exit_code=?,ended_at=? WHERE id=? AND status='running'`,
-			job.Status, job.ExitCode, format(time.Now()), job.ID)
+		result, err := tx.ExecContext(ctx, `UPDATE jobs SET status=?,exit_code=?,reason=?,ended_at=? WHERE id=? AND status='running'`,
+			job.Status, job.ExitCode, job.Reason, format(time.Now()), job.ID)
 		if err != nil {
 			return err
 		}

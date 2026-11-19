@@ -10,9 +10,11 @@ import (
 
 type JobTools struct {
 	StartShell func(context.Context, json.RawMessage) (string, error)
-	Spawn      func(context.Context, subagent.Start) (string, error)
-	Status     func(context.Context, string, string) (string, error)
-	Cancel     func(context.Context, string, string) (string, error)
+	// Spawn and Status set Result.IsError when a subagent stopped at a limit
+	// or failed, so the model reads the outcome as structural, not prose.
+	Spawn  func(context.Context, subagent.Start) (tools.Result, error)
+	Status func(context.Context, string, string) (tools.Result, error)
+	Cancel func(context.Context, string, string) (string, error)
 }
 
 func (t JobTools) Tools() []tools.Tool {
@@ -29,13 +31,13 @@ func (t JobTools) Tools() []tools.Tool {
 		})
 	}
 	if t.Spawn != nil {
-		out = append(out, spec("subagent_spawn", "Give a worker or planner a focused task.", `{"role":{"enum":["worker","planner"]},"task":{"type":"string"},"background":{"type":"boolean"}}`,
+		out = append(out, specResult("subagent_spawn", "Give a worker or planner a focused task. A result with status \"limit\" means the subagent stopped at a step, token or context limit before finishing; its output is partial.", `{"role":{"enum":["worker","planner"]},"task":{"type":"string"},"background":{"type":"boolean"}}`,
 			[]string{"role", "task"}, false, t.Spawn))
 	}
 	for _, entry := range []struct{ prefix, kind string }{{"background", "shell"}, {"subagent", "subagent"}} {
 		out = append(out,
-			spec(entry.prefix+"_status", "Read a job's status and available output.", idProperties, []string{"id"}, true,
-				func(ctx context.Context, args struct{ ID string }) (string, error) {
+			specResult(entry.prefix+"_status", "Read a job's status and available output.", idProperties, []string{"id"}, true,
+				func(ctx context.Context, args struct{ ID string }) (tools.Result, error) {
 					return t.Status(ctx, entry.kind, args.ID)
 				}),
 			spec(entry.prefix+"_cancel", "Cancel a running job.", idProperties, []string{"id"}, false,

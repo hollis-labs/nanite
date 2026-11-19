@@ -218,6 +218,10 @@ func finishReason(stop string) chatstream.FinishReason {
 		return chatstream.FinishTurnLimit
 	case llmtypes.StopReasonMaxTokens:
 		return chatstream.FinishLength
+	case "model_context_window_exceeded":
+		return chatstream.FinishContextExceeded
+	case llmtypes.StopReasonRefusal:
+		return chatstream.FinishRefusal
 	}
 	return chatstream.FinishStop
 }
@@ -326,6 +330,8 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 		v := map[string]string{"state": "done", "id": e.ID}
 		if e.Err != nil {
 			v["error"] = e.Err.Error()
+		} else if e.Limit != "" {
+			v["state"], v["limit"] = "limit", e.Limit
 		}
 		return []chatstream.Event{activity(ActivitySubagent, v)}
 

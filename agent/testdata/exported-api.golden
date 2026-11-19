@@ -228,6 +228,7 @@ type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFi
   field ID string
   field Result github.com/hollis-labs/nanite/internal/events.Result
   field Err error
+  field Limit string
 type SubagentStarted = github.com/hollis-labs/nanite/internal/events.SubagentStarted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string

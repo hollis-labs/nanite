@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
@@ -78,8 +79,9 @@ func (c *Client) Capabilities() llmtypes.ProviderCapabilities {
 }
 
 // Complete runs a non-streaming chat completion. Returns the assistant
-// message text concatenated from the first choice. Tool calls are not
-// surfaced through Complete — use StreamChat for tool-using turns.
+// message text of the first choice. Tool calls are not surfaced through
+// Complete — use StreamChat for tool-using turns. No choices, or a choice
+// with no text or only whitespace, returns errEmptyResponse.
 func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	if useResponses(ctx, req) {
 		return c.completeResponse(ctx, req)
@@ -96,7 +98,7 @@ func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string
 	if err != nil {
 		return "", translateError(err)
 	}
-	if len(resp.Choices) == 0 {
+	if len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
 		return "", errEmptyResponse
 	}
 	return resp.Choices[0].Message.Content, nil

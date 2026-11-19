@@ -12,6 +12,9 @@ func TestFinishReasons(t *testing.T) {
 		"":           chatstream.FinishStop,
 		"max_steps":  chatstream.FinishTurnLimit,
 		"max_tokens": chatstream.FinishLength,
+		"refusal":    chatstream.FinishRefusal,
+
+		"model_context_window_exceeded": chatstream.FinishContextExceeded,
 	} {
 		if got := finishReason(stop); got != want {
 			t.Errorf("stop reason %q maps to %q, want %q", stop, got, want)

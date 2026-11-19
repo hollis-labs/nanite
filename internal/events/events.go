@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/tools"
@@ -96,13 +97,34 @@ type SubagentStarted struct {
 	ID, Role string
 }
 
-// SubagentFinished reports the outcome of a child conversation.
+// SubagentFinished reports the outcome of a child conversation. Limit is the
+// child's stop reason when it stopped at a step, token or context limit
+// before finishing; the child did not fail, but its work is incomplete.
 type SubagentFinished struct {
 	EventMeta
 	ID     string
 	Result Result
 	Err    error
+	Limit  string
 }
+
+// LimitReason returns stop when it reports that a turn stopped at a step,
+// token or context limit, and "" for a finished turn.
+func LimitReason(stop string) string {
+	switch stop {
+	case StopMaxSteps, llmtypes.StopReasonMaxTokens, StopContextWindowExceeded:
+		return stop
+	}
+	return ""
+}
+
+const (
+	// StopMaxSteps is the stop reason of a turn that reached its step limit.
+	StopMaxSteps = "max_steps"
+	// StopContextWindowExceeded is the provider stop reason for a response
+	// cut off because the context window is full.
+	StopContextWindowExceeded = "model_context_window_exceeded"
+)
 
 // CompactionStarted reports that the conversation history is about to be
 // compacted. Exactly one Compacted or CompactionFailed follows it.

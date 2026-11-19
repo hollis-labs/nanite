@@ -54,10 +54,11 @@ func TestBackgroundShellOutlivesTurnAndPostsNotice(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	check := execution{engine: e, info: store.Conversation{ID: id}}
 	for {
-		body, err := check.jobStatus(t.Context(), "shell", started.ID)
+		status, err := check.jobStatus(t.Context(), "shell", started.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
+		body := status.Text
 		if strings.Contains(body, "first-line") {
 			if !strings.Contains(body, `"status":"running"`) {
 				t.Errorf("output appeared after job stopped: %s", body)
@@ -283,5 +284,65 @@ func TestParentCancellationCancelsForegroundChild(t *testing.T) {
 	}
 	if status, err := db.TurnStatus(t.Context(), h[0].TurnID); err != nil || status != "cancelled" {
 		t.Fatalf("child status %q, %v", status, err)
+	}
+}
+
+func TestChildAtStepLimitReportsLimit(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(map[bool]string{false: "foreground", true: "background"}[background], func(t *testing.T) {
+			spawn := toolResponse("subagent_spawn")
+			spawn.Events[0].ToolUse.Input = map[string]any{"role": "worker", "task": "child work", "background": background}
+			// The child calls a tool on its only step, so it stops at max_steps.
+			p := &promptProvider{parent: fake.New(spawn), child: fake.New(toolResponse("unknown"))}
+			e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
+			run, err := e.Send(t.Context(), id, Input{Text: "parent work"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var finished *events.SubagentFinished
+			for event := range run.Events() {
+				if f, ok := event.(events.SubagentFinished); ok {
+					finished = &f
+				}
+			}
+			if _, err := run.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			history, err := db.History(t.Context(), id)
+			if err != nil || len(history) < 3 {
+				t.Fatalf("history %+v, %v", history, err)
+			}
+			result := history[2].Blocks[0]
+			var launched struct{ ID, Status, Reason string }
+			if err := json.Unmarshal([]byte(result.Content), &launched); err != nil {
+				t.Fatal(err)
+			}
+			if !background {
+				if launched.Status != "limit" || launched.Reason != "max_steps" || !result.IsError {
+					t.Fatalf("foreground result %+v is_error=%v", launched, result.IsError)
+				}
+				if finished == nil || finished.Limit != "max_steps" || finished.Err != nil {
+					t.Fatalf("finished event %+v", finished)
+				}
+				return
+			}
+			select {
+			case n := <-e.Notices():
+				if !strings.Contains(n.Body, "limit (max_steps)") {
+					t.Fatalf("notice %+v", n)
+				}
+			case <-time.After(4 * time.Second):
+				t.Fatal("background child did not notify parent")
+			}
+			job, err := db.Job(t.Context(), id, "subagent", launched.ID)
+			if err != nil || job.Status != "limit" || job.Reason != "max_steps" {
+				t.Fatalf("job %+v, %v", job, err)
+			}
+			check := execution{engine: e, info: store.Conversation{ID: id}}
+			status, err := check.jobStatus(t.Context(), "subagent", launched.ID)
+			if err != nil || !status.IsError || !strings.Contains(status.Text, `"status":"limit"`) {
+				t.Fatalf("subagent_status %+v, %v", status, err)
+			}
+		})
 	}
 }

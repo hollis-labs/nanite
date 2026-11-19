@@ -2,6 +2,8 @@
 
 Nanite runs an authored agent directory as a local CLI or an embedded Go library. It assembles per-turn context, calls model and MCP providers, and keeps a durable conversation transcript.
 
+> **Status: building in public.** Nanite is under active development and not yet officially released. `0.x` versions can change the CLI, the agent-directory format and the Go API without notice or a migration path. Use it to follow along or experiment, not to depend on. See [SECURITY.md](SECURITY.md) for the trust model and how to report a vulnerability.
+
 ```sh
 go install github.com/hollis-labs/nanite/cmd/nanite@latest
 nanite init ./my-agent

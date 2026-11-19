@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/libs/agent/core/loopdetect"
 	"github.com/hollis-labs/libs/agent/core/runloop"
 	"github.com/hollis-labs/libs/agent/core/turn"
+	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/libs/security/policy"
@@ -70,7 +71,13 @@ var errEmptySummary = errors.New("compaction summary is empty")
 
 func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) {
 	ctx, endSpan := events.TurnSpan(ctx)
-	result, err := e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted)
+	var result events.Result
+	// A panic while preparing the turn fails it with a ref; the host and the
+	// conversation stay usable.
+	err := e.panics.Call("turn", func() (err error) {
+		result, err = e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted)
+		return err
+	}, panics.With("conversation", info.ID), panics.With("run", r.id))
 	if err != nil {
 		if clean := e.scrub.Text(err.Error()); clean != err.Error() {
 			err = errors.New(clean)
@@ -185,8 +192,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		r.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.SlotsAssembled{EventMeta: meta, Report: assembled.Report}
 		})
-		// Mark delivery only after a model request has received the session slot.
-		err = x.generate(ctx)
+		// Mark delivery only after a model request has received the session
+		// slot. A panic in the model loop records the turn as failed.
+		err = e.panics.Call("model loop", func() error { return x.generate(ctx) }, panics.With("conversation", info.ID), panics.With("run", r.id))
 		if x.submitted {
 			err = errors.Join(err, e.cfg.Store.MarkNoticesDelivered(context.WithoutCancel(ctx), info.ID, r.id, deliveredNoticeIDs(assembled.Report, pending)))
 		}

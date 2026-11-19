@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/libs/core/panics"
 	"net/url"
 	"slices"
 	"strings"
@@ -83,8 +84,16 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 	principal := "urn:nanite:agent:" + url.PathEscape(x.definition.Snapshot.Definition.DefinitionID)
 	req := permission.PermissionRequest{ID: call.ID, ConversationID: x.info.ID, TurnID: x.run.id, Tool: t.Name,
 		Input: x.engine.scrub.Bytes(raw), ReadOnly: t.ReadOnly, Destructive: t.Destructive}
-	effect, err := permission.Evaluate(ctx, x.engine.cfg.Logger, x.engine.cfg.PDP, x.policy, principal, x.info.Role, req, call.Input)
+	// A panic while deciding fails closed: the call is denied.
+	var effect policy.Decision
+	err := x.engine.panics.Call("permission policy", func() (err error) {
+		effect, err = permission.Evaluate(ctx, x.engine.cfg.Logger, x.engine.cfg.PDP, x.policy, principal, x.info.Role, req, call.Input)
+		return err
+	}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
 	decision := permission.PermissionDecision{Allow: effect.Effect == policy.Allow && err == nil, Reason: effect.Reason}
+	if err != nil {
+		decision.Reason = "permission check failed: " + err.Error()
+	}
 	if effect.Effect == policy.Ask && err == nil {
 		e := x.engine
 		e.mu.Lock()
@@ -97,7 +106,10 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 			x.run.emit(ctx, func(meta events.EventMeta) events.Event { return events.PermissionAsked{EventMeta: meta, Request: req} })
 			gateReq := req
 			gateReq.Input = raw
-			decision, err = e.cfg.Gate.Decide(ctx, gateReq)
+			err = e.panics.Call("approval gate", func() (err error) {
+				decision, err = e.cfg.Gate.Decide(ctx, gateReq)
+				return err
+			}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
 			if err != nil {
 				decision = permission.PermissionDecision{Reason: "approval gate failed"}
 			}
@@ -188,7 +200,12 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		toolCtx, endSpan := events.ToolSpan(ctx, x.engine.scrub.Text(call.Name))
 		defer endSpan()
 
-		result, err := x.catalog[call.Name].Handler(x.askContext(toolCtx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+		var result tools.Result
+		// A panicking tool yields an error result carrying the panic ref.
+		err := x.engine.panics.Call("tool "+call.Name, func() (err error) {
+			result, err = x.catalog[call.Name].Handler(x.askContext(toolCtx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+			return err
+		}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
 		if err != nil {
 			result = tools.Result{Text: err.Error(), IsError: true}
 		}

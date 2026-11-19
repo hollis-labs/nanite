@@ -4,6 +4,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,9 @@ type Response struct {
 	Events []llmtypes.StreamEvent
 	Err    error
 	Stall  bool
+	// Panic, when set, makes the stream goroutine panic with this value
+	// after sending Events, to exercise panic containment.
+	Panic any
 }
 
 type Provider struct {
@@ -57,8 +61,9 @@ func (p *Provider) StreamChat(ctx context.Context, _ llmtypes.ChatRequest) (<-ch
 		return nil, response.Err
 	}
 	out := make(chan llmtypes.StreamEvent)
-	go func() {
+	failure.Guard(nil).Go("fake stream", func() {
 		defer close(out)
+		defer failure.RecoverStream(ctx, nil, "fake stream", out)
 		for _, ev := range response.Events {
 			select {
 			case out <- ev:
@@ -69,10 +74,13 @@ func (p *Provider) StreamChat(ctx context.Context, _ llmtypes.ChatRequest) (<-ch
 				return
 			}
 		}
+		if response.Panic != nil {
+			panic(response.Panic)
+		}
 		if response.Stall {
 			<-ctx.Done()
 		}
-	}()
+	}, nil)
 	return out, nil
 }
 

@@ -102,6 +102,17 @@ type Options struct
   field SlotSelector SlotSelector
   field Builtins []BuiltinGroup
   field Secrets *github.com/hollis-labs/libs/security/secrets.Resolver
+  field PanicReporter PanicReporter
+type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
+  field Ref string
+  field At time.Time
+  field Where string
+  field Value string
+  field Stack string
+  field Attrs map[string]string
+func PanicRef(err error) (string, bool)
+type PanicReporter = github.com/hollis-labs/libs/core/panics.Reporter interface
+  (PanicReporter) Report(github.com/hollis-labs/libs/core/panics.Record)
 type PermissionAsked = github.com/hollis-labs/nanite/internal/events.PermissionAsked struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Request github.com/hollis-labs/nanite/internal/permission.PermissionRequest

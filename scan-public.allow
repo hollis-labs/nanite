@@ -1,0 +1,3 @@
+# scan-public allowlist: RULE-ID PATH-GLOB REASON
+#
+# One line per reviewed finding; allowlisted findings are still printed and counted.

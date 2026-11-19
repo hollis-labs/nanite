@@ -1,0 +1,62 @@
+# lefthook.yml — shared pre-commit/pre-push hooks for the hollis-labs portfolio.
+#
+# CANONICAL COPY: folio preset `go-baseline` —
+# `presets/go-baseline/files/lefthook.yml.tmpl` in hollis-labs/folio.
+# `presets/base`, `nanite-plugin` and `app-dashboard` still carry hand-synced copies
+# (they have not yet composed `go-baseline`); keep the shared commands identical
+# to `presets/base/files/lefthook.yml.tmpl` — they are not auto-derived.
+# Change it there and re-render. Editing this file in a generated project
+# forks it: the previous shared copy claimed an upstream that no longer
+# existed, and drifted into four different versions across the portfolio
+# before anyone noticed.
+#
+# Target: all checks complete in <15 seconds on staged files only.
+#
+# THIS FILE ENFORCES NOTHING UNTIL `lefthook install` HAS RUN IN THE CLONE.
+# A tracked lefthook.yml installs no git hooks by itself. Fresh clones must
+# run `lefthook install` once.
+#
+# No frontend hook lives here by design: `go-baseline` scaffolds Go modules
+# and has no frontend toolchain to lint.
+
+pre-commit:
+  parallel: true
+  commands:
+
+    # ── Go parallel group ─────────────────────────────────────────────
+    # These three run simultaneously on staged .go files.
+
+    go-format:
+      # Fail if any staged Go file is not gofmt + goimports clean.
+      glob: "*.go"
+      skip_empty: true
+      run: |
+        unformatted=$(gofmt -l {staged_files} 2>/dev/null)
+        if command -v goimports >/dev/null 2>&1; then
+          unformatted="$unformatted$(goimports -l {staged_files} 2>/dev/null)"
+        fi
+        if [ -n "$unformatted" ]; then
+          echo "Unformatted files:"
+          echo "$unformatted" | sort -u
+          exit 1
+        fi
+
+    go-lint:
+      # Only lints new/modified code so existing warnings don't block commits.
+      glob: "*.go"
+      skip_empty: true
+      run: golangci-lint run --new --timeout 30s
+
+    go-vet:
+      glob: "*.go"
+      skip_empty: true
+      run: go vet ./...
+
+pre-push:
+  commands:
+
+    go-test:
+      # Full test suite gate before code reaches the remote.
+      glob: "*.go"
+      skip_empty: true
+      run: go test ./...

@@ -1,0 +1,16 @@
+schema: project/1
+id: nanite
+name: Nanite
+description: Run an authored agent locally or embed it in a Go application.
+class: 2
+lifecycle: experimental
+visibility: public
+owner: user:owner
+org: hollis-labs
+repo: https://github.com/hollis-labs/nanite
+location: .
+interfaces:
+  - type: cli
+    name: nanite
+    auth: none
+substrate: { variant: cli, profile: minimal, version: v0.1.1-0.20261118181415-ea679652a9db }

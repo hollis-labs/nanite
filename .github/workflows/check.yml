@@ -1,0 +1,48 @@
+name: nanite check
+# Local CLI checks. The build step compiles packages without publishing an artifact.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: nanite-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the public-hygiene scan reads the full history
+      # go.mod is the single Go pin: the `go` line is the floor; an optional `toolchain` line, if
+      # present, wins (setup-go v6+ only).
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run
+      - run: go vet ./...
+      - name: vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - name: pins match the Substrate BOM
+        env:
+          GOWORK: "off"
+        run: go run github.com/hollis-labs/substrate/cmd/substrate pins check --app .
+      - name: generated wiring is current
+        run: |
+          go run github.com/hollis-labs/substrate/cmd/substrate generate -f cmd/nanite/substrate.yaml
+          git diff --exit-code -- cmd/nanite/substrate_wiring.go
+      - name: compile for darwin/arm64 and linux/amd64
+        run: |
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build ./...
+      - run: go test -race -count=1 ./...
+      - run: go run ./examples/embed-host --offline
+      - name: public hygiene (tree and history)
+        run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --ref HEAD

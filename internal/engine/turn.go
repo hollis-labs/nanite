@@ -98,10 +98,14 @@ var errEmptySummary = errors.New("compaction summary is empty")
 func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) {
 	ctx, endSpan := events.TurnSpan(ctx)
 	var result events.Result
+	// Every turn writes one trace record, however it ends: it is written here,
+	// after the guard, so a panic anywhere in the turn is recorded as failed
+	// with its ref.
+	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil)}
 	// A panic while preparing the turn fails it with a ref; the host and the
 	// conversation stay usable.
 	err := e.panics.Call("turn", func() (err error) {
-		result, err = e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted)
+		result, err = e.turn(station.WithSessionID(ctx, info.ID), r, info, input, state, prev, hostTools, hostSkills, interrupted, tr)
 		return err
 	}, panics.With("conversation", info.ID), panics.With("run", r.id))
 	if err != nil {
@@ -109,6 +113,7 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 			err = errors.New(clean)
 		}
 	}
+	e.writeTrace(ctx, tr.rec, tr.x, result, err)
 	endSpan()
 	terminal := r.terminal(result, err)
 	r.report(context.WithoutCancel(ctx), terminal)
@@ -127,12 +132,18 @@ func (e *Engine) release(id string, r *Run, finish func()) {
 	finish()
 }
 
-func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) (result events.Result, retErr error) {
+// turnTrace is what a turn contributes to its trace record: the record so far
+// and, once built, the execution with its tool calls and compactions.
+type turnTrace struct {
+	rec trace.Turn
+	x   *execution
+}
+
+func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn, tr *turnTrace) (_ events.Result, retErr error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
-	// Every turn writes one trace record, however it ends.
-	rec := newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil)
-	var x *execution
-	defer func() { e.writeTrace(ctx, rec, x, result, retErr) }()
+	if e.testTurnHook != nil {
+		e.testTurnHook()
+	}
 	var resume recovery.Plan
 	if interrupted != nil {
 		rawHistory, err := e.cfg.Store.History(ctx, info.ID)
@@ -208,7 +219,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		return events.Result{}, err
 	}
 	modelName := sel.Model
-	rec.Provider, rec.Model = e.scrub.Text(sel.Provider), e.scrub.Text(sel.Model)
+	tr.rec.Provider, tr.rec.Model = e.scrub.Text(sel.Provider), e.scrub.Text(sel.Model)
 	// Compaction summaries use their own selection, or else the provider and
 	// model this turn runs on.
 	summaryProvider, summaryModel := model, modelName
@@ -245,13 +256,14 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	x = &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
+	x := &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
 		variants: variants, variant: variant, chain: chain, depth: depth}
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)
 	}
-	rec.Slots, rec.Trimmed = traceSlots(assembled)
+	tr.x = x
+	tr.rec.Slots, tr.rec.Trimmed = traceSlots(assembled, e.scrub.Text)
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
@@ -420,6 +432,7 @@ func (x *execution) generate(ctx context.Context) error {
 				saveErr := x.message("assistant", got.blocks)
 				if len(got.calls) > 0 && saveErr == nil {
 					saveErr = x.cancelledTools(got.calls)
+					x.traceCancelled(got.calls)
 				}
 				err = errors.Join(err, saveErr)
 			}

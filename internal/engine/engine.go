@@ -86,6 +86,8 @@ type Engine struct {
 	panics *panics.Guard
 	// traceMu serializes appends to the trace file.
 	traceMu sync.Mutex
+	// testTurnHook, set only by tests, runs at the start of every turn.
+	testTurnHook func()
 }
 
 func New(cfg Config) (*Engine, error) {

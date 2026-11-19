@@ -12,6 +12,7 @@ import (
 
 	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -33,7 +34,7 @@ func newTraceRecord(at time.Time, run string, info store.Conversation, resumed b
 
 // traceSlots lists the shipped slots in request order, and the entries the
 // selector cut or replaced with a pointer as "slot/owner/key".
-func traceSlots(assembled slots.Assembled) ([]trace.Slot, []string) {
+func traceSlots(assembled slots.Assembled, scrub func(string) string) ([]trace.Slot, []string) {
 	out := []trace.Slot{}
 	for _, block := range assembled.Blocks {
 		report := assembled.Report[slots.Name(block.SlotName)]
@@ -43,7 +44,7 @@ func traceSlots(assembled slots.Assembled) ([]trace.Slot, []string) {
 	for _, name := range slots.Names() {
 		for _, d := range assembled.Report[name].Decisions {
 			if d.Disposition != slots.Ship {
-				trimmed = append(trimmed, string(name)+"/"+d.Owner+"/"+d.Key)
+				trimmed = append(trimmed, scrub(string(name)+"/"+d.Owner+"/"+d.Key))
 			}
 		}
 	}
@@ -62,6 +63,16 @@ func (e *Engine) writeTrace(ctx context.Context, rec trace.Turn, x *execution, r
 		slices.Sort(rec.ToolsOffered)
 		rec.ToolCalls = append(rec.ToolCalls, x.toolCalls...)
 		rec.Compactions = append(rec.Compactions, x.passes...)
+	}
+	// A malformed call (a provider sent no ID or name) is kept, not allowed
+	// to invalidate the whole record.
+	for i := range rec.ToolCalls {
+		if rec.ToolCalls[i].ToolCallID == "" {
+			rec.ToolCalls[i].ToolCallID = fmt.Sprintf("unidentified-%d", i+1)
+		}
+		if rec.ToolCalls[i].Tool == "" {
+			rec.ToolCalls[i].Tool = "unnamed"
+		}
 	}
 	u := result.Usage
 	rec.Usage = trace.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens}
@@ -109,4 +120,12 @@ func (e *Engine) appendTrace(rec trace.Turn) error {
 		return fmt.Errorf("append trace: %w", err)
 	}
 	return file.Close()
+}
+
+// traceCancelled records calls the model made in a step the turn abandoned
+// before running them.
+func (x *execution) traceCancelled(calls []llmtypes.ToolUseBlock) {
+	for _, call := range calls {
+		x.toolCalls = append(x.toolCalls, trace.ToolCall{ToolCallID: call.ID, Tool: x.engine.scrub.Text(call.Name), Permission: trace.PermissionNone, ErrorKind: trace.ErrorCancelled})
+	}
 }

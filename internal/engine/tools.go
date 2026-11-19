@@ -204,7 +204,9 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			results[i].Content = "repeated identical tool call; try another approach"
 			continue
 		}
-		traced[i].ErrorKind = ""
+		// A ready call stays "cancelled" until it runs, and "panic" while it
+		// runs, so a call that never finishes is not recorded as a success.
+		traced[i].ErrorKind = trace.ErrorCancelled
 		jobs[i] = tooluse.Job{Ready: true, Concurrent: t.ReadOnly}
 	}
 	tooluse.Batch(ctx, jobs, x.definition.Runtime.ToolConcurrency, func(i int, _ bool) {
@@ -215,6 +217,8 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			return
 		}
 		started := time.Now()
+		traced[i].ErrorKind = trace.ErrorPanic
+		var kind trace.ErrorKind
 		defer func() { traced[i].DurationMS = time.Since(started).Milliseconds() }()
 		toolCtx, endSpan := events.ToolSpan(ctx, x.engine.scrub.Text(call.Name))
 		defer endSpan()
@@ -230,9 +234,9 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		}
 		switch _, panicked := panics.Ref(err); {
 		case panicked:
-			traced[i].ErrorKind = trace.ErrorPanic
+			kind = trace.ErrorPanic
 		case result.IsError:
-			traced[i].ErrorKind = trace.ErrorTool
+			kind = trace.ErrorTool
 		}
 		result.Text = x.engine.scrub.Text(result.Text)
 		view, err := x.engine.cache.Present(ctx, x.info.ID, toolresult.Meta{Tool: call.Name, CallID: call.ID, IsError: result.IsError}, result.Text, 0)
@@ -240,13 +244,14 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			result.Text = view.Content
 		}
 		if ctx.Err() != nil {
-			traced[i].ErrorKind = trace.ErrorCancelled
+			kind = trace.ErrorCancelled
 			result = tools.Result{Text: "cancelled", IsError: true}
 		}
 		results[i].Content, results[i].IsError = result.Text, result.IsError
 		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.ToolCallFinished{EventMeta: meta, CallID: call.ID, Result: result, IsError: result.IsError, Duration: time.Since(started)}
 		})
+		traced[i].ErrorKind = kind
 	}, func(i int) { results[i].Content, traced[i].ErrorKind = "cancelled", trace.ErrorCancelled }, nil)
 	for i, job := range jobs {
 		if job.Ready {

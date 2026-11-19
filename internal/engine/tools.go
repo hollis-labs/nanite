@@ -91,8 +91,8 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 		return err
 	}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
 	decision := permission.PermissionDecision{Allow: effect.Effect == policy.Allow && err == nil, Reason: effect.Reason}
-	if err != nil {
-		decision.Reason = "permission check failed: " + err.Error()
+	if ref, ok := panics.Ref(err); ok {
+		decision.Reason = "permission check failed (ref " + ref + ")"
 	}
 	if effect.Effect == policy.Ask && err == nil {
 		e := x.engine

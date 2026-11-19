@@ -276,7 +276,13 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	hostTools, hostSkills := e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot()
 	e.panics.Go("turn", func() {
 		e.execute(ctx, r, info, input, state, prev, hostTools, hostSkills, interrupted)
-	}, nil, panics.With("conversation", id), panics.With("run", runID))
+	}, func(pe *panics.Error) {
+		// A panic after the guarded turn (while finalizing the run) must
+		// still end the run, or Wait would block and the conversation would
+		// stay busy.
+		r.cancel()
+		e.release(id, r, func() { r.finish(events.Result{}, pe, events.RunFailed{EventMeta: events.EventMeta{RunID: r.id}, Err: pe}) })
+	}, panics.With("conversation", id), panics.With("run", runID))
 	return r, nil
 }
 
@@ -346,12 +352,13 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		updates = append(updates, slots.Update{Slot: slots.Context, Entry: slots.Entry{Owner: "file", Key: file.Name, Content: file.Text}})
 	}
 	for _, source := range e.cfg.SlotSources {
-		owner := source.Name()
-		if owner == "engine" || owner == "file" || owner == "" {
-			return slots.Assembled{}, fmt.Errorf("invalid slot source owner %q", owner)
-		}
+		var owner string
 		var sourceUpdates []slots.Update
-		err := e.panics.Call("slot source "+owner, func() (err error) {
+		err := e.panics.Call("slot source", func() (err error) {
+			owner = source.Name()
+			if owner == "engine" || owner == "file" || owner == "" {
+				return fmt.Errorf("invalid slot source owner %q", owner)
+			}
 			sourceUpdates, err = source.Slots(ctx, info)
 			return err
 		}, panics.With("conversation", info.ConversationID))

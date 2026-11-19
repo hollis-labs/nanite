@@ -21,6 +21,7 @@ type Run struct {
 	seq        uint64
 	result     events.Result
 	err        error
+	finishOnce sync.Once
 }
 
 // ID returns the turn identifier shared by its events.
@@ -89,9 +90,13 @@ func (r *Run) terminal(result events.Result, err error) events.Event {
 	return events.RunFinished{EventMeta: meta, Result: result}
 }
 
+// finish ends the run once; a later call, from the turn goroutine's panic
+// handler, does nothing.
 func (r *Run) finish(result events.Result, err error, event events.Event) {
-	r.result, r.err = result, err
-	r.events <- event
-	close(r.events)
-	close(r.done)
+	r.finishOnce.Do(func() {
+		r.result, r.err = result, err
+		r.events <- event
+		close(r.events)
+		close(r.done)
+	})
 }

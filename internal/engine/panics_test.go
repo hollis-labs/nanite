@@ -10,6 +10,7 @@ import (
 
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
+	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
@@ -129,5 +130,47 @@ func TestPanickingEventSinkIsContained(t *testing.T) {
 	e.runtime = events.NewRuntime(runtimeevents.SinkFunc(func(context.Context, runtimeevents.Event) error { panic("sink exploded") }), e.cfg.Logger)
 	if err := sendAndWait(t, e, id, "go"); err != nil {
 		t.Fatalf("turn failed: %v", err)
+	}
+}
+
+type panicPDP struct{}
+
+func (panicPDP) Evaluate(context.Context, policy.Request) (policy.Decision, error) { panic("pdp exploded") }
+
+func TestPanickingPDPDenies(t *testing.T) {
+	e, db, id := setupEngine(t, fake.New(toolResponse("explode"), fake.Text("done")), "")
+	e.cfg.PDP = panicPDP{}
+	if err := e.cfg.Tools.SetGroup("host", tools.Tool{Name: "explode", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(context.Context, tools.Call) (tools.Result, error) { t.Error("tool ran after a panicking PDP"); return tools.Result{}, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sendAndWait(t, e, id, "go"); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	history, err := db.History(t.Context(), id)
+	if err != nil || len(history) < 3 {
+		t.Fatalf("history %+v, %v", history, err)
+	}
+	if content := history[2].Blocks[0].Content; !strings.Contains(content, "permission denied") || !strings.Contains(content, "ref pnc_") || strings.Contains(content, "exploded") {
+		t.Fatalf("tool result %q", content)
+	}
+}
+
+type panicSelector struct{}
+
+func (panicSelector) Select(context.Context, slots.TurnInfo, slots.Snapshot, map[slots.Name]int) (slots.Plan, error) {
+	panic("selector exploded")
+}
+
+func TestPanickingSelectorFailsTheTurnOnly(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(fake.Text("next turn")), "")
+	e.cfg.SlotSelector = panicSelector{}
+	err := sendAndWait(t, e, id, "go")
+	if _, ok := panics.Ref(err); !ok {
+		t.Fatalf("turn error %v", err)
+	}
+	e.cfg.SlotSelector = slots.DefaultSelector(nil)
+	if err := sendAndWait(t, e, id, "again"); err != nil {
+		t.Fatalf("next turn failed: %v", err)
 	}
 }

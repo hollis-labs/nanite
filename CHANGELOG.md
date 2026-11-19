@@ -25,7 +25,8 @@
   turn; a panicking gate or PDP denies the call; a panicking event sink is
   ignored; a panicking background job is marked failed. Errors carry only a
   `pnc_` reference. `Options.PanicReporter` receives the redacted record.
-  The CLI exits with status 70 and a reference on an uncontained panic.
+  The CLI exits with status 70 (`EX_SOFTWARE`) and the reference when a
+  run ends in a panic, whether contained in the turn or not.
 
 ## 0.5.0
 

@@ -87,10 +87,18 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	terminal := r.terminal(result, err)
 	r.report(context.WithoutCancel(ctx), terminal)
 	r.cancel()
+	e.release(info.ID, r, func() { r.finish(result, err, terminal) })
+}
+
+// release removes r from the active runs and runs finish while holding the
+// engine lock, unlocking even if finish panics.
+func (e *Engine) release(id string, r *Run, finish func()) {
 	e.mu.Lock()
-	delete(e.active, info.ID)
-	r.finish(result, err, terminal)
-	e.mu.Unlock()
+	defer e.mu.Unlock()
+	if e.active[id] == r {
+		delete(e.active, id)
+	}
+	finish()
 }
 
 func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) (_ events.Result, retErr error) {

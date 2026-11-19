@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/nanite/internal/tools"
 	"log/slog"
@@ -73,6 +74,13 @@ type Options struct {
 	Builtins []BuiltinGroup
 	// Secrets defaults to the standard secrets resolver.
 	Secrets *secrets.Resolver
+	// TraceFiles writes every turn's trace record to DataDir/traces as one
+	// JSONL file per day (YYYY-MM-DD.jsonl). The CLI turns it on.
+	TraceFiles bool
+	// TraceSink, when set, receives every turn's trace record: one per turn,
+	// however it ended, after the turn finishes. Error text in it is
+	// redacted. A panic in the sink is contained.
+	TraceSink func(context.Context, TraceRecord)
 	// PanicReporter also receives each panic the agent contains. Nanite
 	// contains panics in host tools, slot sources, the selector, the
 	// approval gate, the PDP, the event sink, provider streams and its own
@@ -82,6 +90,10 @@ type Options struct {
 	// logged to Logger and handed to this reporter. Nil logs only.
 	PanicReporter PanicReporter
 }
+
+// TraceRecord is one turn's trace record. Its schema is documented in
+// github.com/hollis-labs/libs/agent/trace.
+type TraceRecord = trace.Turn
 
 // PanicReporter receives the record of a contained panic.
 type PanicReporter = panics.Reporter
@@ -144,6 +156,10 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if err := nanitestore.PreparePrivateDir(data); err != nil {
 		return nil, fmt.Errorf("create agent data directory: %w", err)
 	}
+	traceDir := ""
+	if opts.TraceFiles {
+		traceDir = filepath.Join(data, "traces")
+	}
 	lock, err := os.OpenFile(filepath.Join(data, "agent.lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600) // #nosec G304 -- The caller selects the private agent state directory.
 	if err != nil {
 		return nil, fmt.Errorf("open agent lock: %w", err)
@@ -197,6 +213,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
+		TraceSink: opts.TraceSink, TraceDir: traceDir,
 	})
 	if err != nil {
 		_ = db.Close()

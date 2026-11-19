@@ -15,6 +15,7 @@ import (
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
+	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/policy"
@@ -54,6 +55,11 @@ type Config struct {
 	// Providers are named providers the host defines. They take precedence
 	// over providers.yaml entries with the same name.
 	Providers map[string]provider.Spec
+	// TraceDir, when set, receives one JSONL file per day of turn trace
+	// records (YYYY-MM-DD.jsonl).
+	TraceDir string
+	// TraceSink, when set, receives every turn's trace record.
+	TraceSink func(context.Context, trace.Turn)
 	// PanicReporter also receives each contained panic. The engine always
 	// logs one; this adds the host's own record.
 	PanicReporter panics.Reporter
@@ -78,6 +84,8 @@ type Engine struct {
 	// in every goroutine it starts. It is per engine: a library never sets
 	// the process-wide default.
 	panics *panics.Guard
+	// traceMu serializes appends to the trace file.
+	traceMu sync.Mutex
 }
 
 func New(cfg Config) (*Engine, error) {
@@ -324,7 +332,7 @@ const toolResultBudget = 24 << 10
 // names a provider the host itself defined (Config.Providers), so an agent
 // directory cannot route a host's traffic around it. Otherwise a named
 // provider comes from the host's definitions, then providers.yaml.
-func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.Provider, string, error) {
+func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.Provider, definition.Selection, error) {
 	sel, ok := def.Use[use]
 	if !ok {
 		sel, ok = def.Use[definition.UseChat]
@@ -335,27 +343,27 @@ func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.P
 	return e.resolve(def, use, sel)
 }
 
-func (e *Engine) resolve(def definition.Definition, use string, sel definition.Selection) (llmcontracts.Provider, string, error) {
+func (e *Engine) resolve(def definition.Definition, use string, sel definition.Selection) (llmcontracts.Provider, definition.Selection, error) {
 	hostSpec, hostDefined := e.cfg.Providers[sel.Provider]
 	if e.cfg.Provider != nil && !hostDefined {
-		return e.cfg.Provider, sel.Model, nil
+		return e.cfg.Provider, sel, nil
 	}
 	if sel.Provider == provider.BuiltinAnthropic || sel.Provider == provider.BuiltinOpenAI {
 		cfg := e.cfg.ProviderConfig
 		cfg.Provider = sel.Provider
 		p, err := provider.New(cfg)
-		return p, sel.Model, err
+		return p, sel, err
 	}
 	spec, ok := hostSpec, hostDefined
 	if !ok {
 		spec, ok = def.Providers[sel.Provider]
 	}
 	if !ok {
-		return nil, "", fmt.Errorf("providers: %s names unknown provider %q", use, sel.Provider)
+		return nil, sel, fmt.Errorf("providers: %s names unknown provider %q", use, sel.Provider)
 	}
 	spec.Name = sel.Provider
 	p, err := provider.NewNamed(spec, e.cfg.ProviderConfig)
-	return p, sel.Model, err
+	return p, sel, err
 }
 
 func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing, rolePrompt, mode string, warnings []string, pending []store.Notice) (slots.Assembled, error) {

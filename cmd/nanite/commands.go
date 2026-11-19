@@ -99,7 +99,7 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate,
 	value, _ := app.Value(logging.Key)
 	logger, _ := value.(*slog.Logger)
 	// The terminal agent gets every built-in group, whatever kind its directory declares.
-	return agent.Open(cmd.Context(), agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger, Events: sink, Builtins: agent.AllBuiltins(),
+	return agent.Open(cmd.Context(), agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger, Events: sink, Builtins: agent.AllBuiltins(), TraceFiles: true,
 		Secrets: secrets.Resolver(app), PDP: appPDP{policy.From(app)}, Gateway: agent.Gateway{BaseURL: base, Headers: headers, KeyRef: ref, Auth: auth},
 	})
 }

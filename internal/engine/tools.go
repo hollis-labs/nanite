@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
 	"net/url"
 	"slices"
@@ -80,7 +81,9 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 	return nil
 }
 
-func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.ToolUseBlock, raw json.RawMessage) permission.PermissionDecision {
+// authorize decides a call. asked reports that the decision came from the
+// approval gate or an earlier approval in this conversation, not a rule.
+func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.ToolUseBlock, raw json.RawMessage) (_ permission.PermissionDecision, asked bool) {
 	principal := "urn:nanite:agent:" + url.PathEscape(x.definition.Snapshot.Definition.DefinitionID)
 	req := permission.PermissionRequest{ID: call.ID, ConversationID: x.info.ID, TurnID: x.run.id, Tool: t.Name,
 		Input: x.engine.scrub.Bytes(raw), ReadOnly: t.ReadOnly, Destructive: t.Destructive}
@@ -95,6 +98,7 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 		decision.Reason = "permission check failed (ref " + ref + ")"
 	}
 	if effect.Effect == policy.Ask && err == nil {
+		asked = true
 		e := x.engine
 		e.mu.Lock()
 		granted := e.grants[x.info.ID][t.Name]
@@ -135,13 +139,19 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 		return events.PermissionResolved{EventMeta: meta, ID: call.ID, Decision: decision}
 	})
-	return decision
+	return decision, asked
 }
 
 func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock) error {
 	results := make([]llmtypes.ContentBlock, len(calls))
 	jobs := make([]tooluse.Job, len(calls))
 	args := make([]json.RawMessage, len(calls))
+	// traced records each call for the turn's trace, in model order.
+	traced := make([]trace.ToolCall, len(calls))
+	for i, call := range calls {
+		traced[i] = trace.ToolCall{ToolCallID: call.ID, Tool: x.engine.scrub.Text(call.Name), Permission: trace.PermissionNone, ErrorKind: trace.ErrorCancelled}
+	}
+	defer func() { x.toolCalls = append(x.toolCalls, traced...) }()
 	// Resolve approvals in model order so interactive prompts cannot overlap.
 	for i, call := range calls {
 		results[i] = llmtypes.ContentBlock{Type: "tool_result", ToolUseID: call.ID, Content: "tool did not complete", IsError: true}
@@ -159,12 +169,14 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.ToolCallStarted{EventMeta: meta, CallID: call.ID, Name: x.engine.scrub.Text(call.Name), Input: started}
 		})
+		traced[i].ErrorKind = trace.ErrorInvalidArgs
 		if err != nil {
 			results[i].Content = "invalid tool arguments"
 			continue
 		}
 		t, ok := x.catalog[call.Name]
 		if !ok {
+			traced[i].ErrorKind = trace.ErrorUnknownTool
 			results[i].Content = "tool unavailable: " + call.Name
 			continue
 		}
@@ -180,23 +192,30 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			}
 		}
 
-		if d := x.authorize(ctx, t, call, raw); !d.Allow {
+		d, asked := x.authorize(ctx, t, call, raw)
+		traced[i].Permission = tracePermission(d, asked)
+		if !d.Allow {
+			traced[i].ErrorKind = trace.ErrorDenied
 			results[i].Content = "permission denied: " + d.Reason
 			continue
 		}
 		if _, loop := x.loop.Record(loopdetect.Signal{SessionID: x.info.ID, TurnID: x.run.id, ToolName: call.Name, Args: raw, Timestamp: time.Now()}); loop {
+			traced[i].ErrorKind = trace.ErrorLoop
 			results[i].Content = "repeated identical tool call; try another approach"
 			continue
 		}
+		traced[i].ErrorKind = ""
 		jobs[i] = tooluse.Job{Ready: true, Concurrent: t.ReadOnly}
 	}
 	tooluse.Batch(ctx, jobs, x.definition.Runtime.ToolConcurrency, func(i int, _ bool) {
 		call := calls[i]
 		if ctx.Err() != nil {
+			traced[i].ErrorKind = trace.ErrorCancelled
 			results[i].Content = "cancelled"
 			return
 		}
 		started := time.Now()
+		defer func() { traced[i].DurationMS = time.Since(started).Milliseconds() }()
 		toolCtx, endSpan := events.ToolSpan(ctx, x.engine.scrub.Text(call.Name))
 		defer endSpan()
 
@@ -209,19 +228,26 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		if err != nil {
 			result = tools.Result{Text: err.Error(), IsError: true}
 		}
+		switch _, panicked := panics.Ref(err); {
+		case panicked:
+			traced[i].ErrorKind = trace.ErrorPanic
+		case result.IsError:
+			traced[i].ErrorKind = trace.ErrorTool
+		}
 		result.Text = x.engine.scrub.Text(result.Text)
 		view, err := x.engine.cache.Present(ctx, x.info.ID, toolresult.Meta{Tool: call.Name, CallID: call.ID, IsError: result.IsError}, result.Text, 0)
 		if err == nil {
 			result.Text = view.Content
 		}
 		if ctx.Err() != nil {
+			traced[i].ErrorKind = trace.ErrorCancelled
 			result = tools.Result{Text: "cancelled", IsError: true}
 		}
 		results[i].Content, results[i].IsError = result.Text, result.IsError
 		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.ToolCallFinished{EventMeta: meta, CallID: call.ID, Result: result, IsError: result.IsError, Duration: time.Since(started)}
 		})
-	}, func(i int) { results[i].Content = "cancelled" }, nil)
+	}, func(i int) { results[i].Content, traced[i].ErrorKind = "cancelled", trace.ErrorCancelled }, nil)
 	for i, job := range jobs {
 		if job.Ready {
 			continue
@@ -235,6 +261,17 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		return err
 	}
 	return ctx.Err()
+}
+
+// tracePermission maps a permission decision to the trace vocabulary.
+func tracePermission(d permission.PermissionDecision, asked bool) trace.Permission {
+	switch {
+	case !d.Allow:
+		return trace.PermissionDeny
+	case asked:
+		return trace.PermissionApproved
+	}
+	return trace.PermissionAllow
 }
 
 func (x *execution) cancelledTools(calls []llmtypes.ToolUseBlock) error {

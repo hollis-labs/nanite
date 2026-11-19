@@ -5,10 +5,13 @@ go 1.26.11
 require (
 	github.com/hollis-labs/libs/agent/agentdir v0.1.0
 	github.com/hollis-labs/libs/agent/chat v0.1.0
+	github.com/hollis-labs/libs/agent/trace v0.1.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/ui/ui-go v0.4.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261118181415-ea679652a9db
+	github.com/hollis-labs/substrate v0.1.1-0.20261119234216-69cc75f4b360
 	github.com/spf13/cobra v1.10.2
+	go.opentelemetry.io/otel v1.47.0
+	go.opentelemetry.io/otel/trace v1.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -21,7 +24,6 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.66.0 // indirect
-	go.opentelemetry.io/otel v1.47.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.21.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.45.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 // indirect
@@ -31,9 +33,8 @@ require (
 	go.opentelemetry.io/otel/sdk v1.45.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v0.21.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.45.0 // indirect
-	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/grpc v1.84.0 // indirect
@@ -71,7 +72,7 @@ require (
 	github.com/hollis-labs/libs/agent/core v0.5.0
 	github.com/hollis-labs/libs/core/panics v0.1.0
 	github.com/hollis-labs/libs/core/store v0.1.0
-	github.com/hollis-labs/libs/core/util v0.6.0
+	github.com/hollis-labs/libs/core/util v0.11.1
 	github.com/hollis-labs/libs/harness/core v0.17.1-0.20261115212742-8f2ed31176b0
 	github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0
 	github.com/hollis-labs/libs/mesh/core v0.11.0

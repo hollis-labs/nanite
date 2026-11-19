@@ -174,9 +174,9 @@ func TestSubagentSummarizerFallsBackToTheSubagentSelection(t *testing.T) {
 	e.cfg.Providers = map[string]provider.Spec{"sub": {Name: "sub", Wire: provider.WireOpenAIChat, BaseURL: "http://127.0.0.1:1/v1", Auth: provider.AuthNone}}
 	def := definition.Definition{Runtime: agentdir.Runtime{Provider: "anthropic", Model: "claude-sonnet-5-5"},
 		Use: map[string]definition.Selection{definition.UseSubagent: {Provider: "sub", Model: "small-model"}}}
-	_, model, err := e.provider(def, definition.UseSubagent)
-	if err != nil || model != "small-model" {
-		t.Fatalf("subagent selection %q, %v", model, err)
+	_, sel, err := e.provider(def, definition.UseSubagent)
+	if err != nil || sel.Model != "small-model" || sel.Provider != "sub" {
+		t.Fatalf("subagent selection %+v, %v", sel, err)
 	}
 	if _, _, err := e.provider(definition.Definition{Use: map[string]definition.Selection{definition.UseChat: {Provider: "nowhere", Model: "m"}}}, definition.UseChat); err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("unknown provider: %v", err)

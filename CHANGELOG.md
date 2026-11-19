@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Named providers. `providers.yaml` in the agent directory defines providers
+  by wire (`anthropic`, `openai`, `openai-chat`, `openai-responses`), base
+  URL, key reference, auth and headers, so any OpenAI-compatible server or a
+  model gateway can be used. Its `use` section picks a provider and model for
+  chat, compaction summaries and subagents. Hosts can add providers with
+  `agent.Options.Providers`.
 - Every agent now gets a base prompt in the Universal slot, replacing the
   one-line rule. It frames tool results as the record of what happened,
   reporting actions only from their results, persistence, permissions and

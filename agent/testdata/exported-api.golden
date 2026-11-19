@@ -93,6 +93,7 @@ type Options struct
   field GlobalSkillsDir string
   field Provider github.com/hollis-labs/libs/llm/core/llmcontracts.Provider
   field Gateway Gateway
+  field Providers []ProviderSpec
   field Store *github.com/hollis-labs/libs/core/store.Store
   field Logger *log/slog.Logger
   field Events EventSink
@@ -134,6 +135,17 @@ type PermissionResolved = github.com/hollis-labs/nanite/internal/events.Permissi
   field ID string
   field Decision github.com/hollis-labs/nanite/internal/permission.PermissionDecision
 type PermissionScope = github.com/hollis-labs/nanite/internal/permission.PermissionScope uint8
+type ProviderSpec = github.com/hollis-labs/nanite/internal/provider.Spec struct
+  field Name string
+  field Wire string
+  field BaseURL string
+  field KeyRef string
+  field KeyEnv string
+  field Auth string
+  field Headers map[string]string
+  field DisableAnthropicBeta bool
+  field DisableCacheControl bool
+  (ProviderSpec) Validate() error
 type Question = github.com/hollis-labs/nanite/internal/events.Question struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string

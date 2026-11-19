@@ -44,6 +44,10 @@ type Options struct {
 	Provider llmcontracts.Provider
 	// Gateway optionally directs requests through a model gateway. Its zero value uses the provider endpoint.
 	Gateway Gateway
+	// Providers are named providers the host defines, in addition to any in
+	// the agent directory's providers.yaml; a host entry wins over a file
+	// entry with the same name. providers.yaml's use section selects them.
+	Providers []ProviderSpec
 	// Store defaults to SQLite at DataDir/nanite.db. The caller retains ownership of a supplied store.
 	Store *store.Store
 	// Logger defaults to slog.Default().
@@ -88,6 +92,11 @@ func PanicRef(err error) (string, bool) { return panics.Ref(err) }
 
 // Gateway configures the model gateway.
 type Gateway = provider.Gateway
+
+// ProviderSpec describes a named provider: its wire (anthropic, openai,
+// openai-chat or openai-responses), base URL, key reference, auth scheme
+// and headers. Any OpenAI-compatible server uses the openai-chat wire.
+type ProviderSpec = provider.Spec
 
 // Agent owns one authored agent directory and its mutable host contributions.
 type Agent struct {
@@ -172,10 +181,19 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
+	providers := make(map[string]provider.Spec, len(opts.Providers))
+	for _, spec := range opts.Providers {
+		if err := spec.Validate(); err != nil {
+			_ = db.Close()
+			_ = lock.Close()
+			return nil, err
+		}
+		providers[spec.Name] = spec
+	}
 	a.engine, err = engine.New(engine.Config{
 		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
-		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets},
-		Slots:          a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
+		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
+		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
 	})
 	if err != nil {

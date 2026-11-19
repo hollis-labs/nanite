@@ -51,6 +51,9 @@ type Config struct {
 	Tools          *tools.Groups
 	Skills         *skills.Groups
 	WorkspaceRoots []string
+	// Providers are named providers the host defines. They take precedence
+	// over providers.yaml entries with the same name.
+	Providers map[string]provider.Spec
 	// PanicReporter also receives each contained panic. The engine always
 	// logs one; this adds the host's own record.
 	PanicReporter panics.Reporter
@@ -312,13 +315,38 @@ func (e *Engine) Close() {
 // larger result is cached and shown as a preview the model pages through.
 const toolResultBudget = 24 << 10
 
-func (e *Engine) provider(def definition.Definition) (llmcontracts.Provider, error) {
-	if e.cfg.Provider != nil {
-		return e.cfg.Provider, nil
+// provider returns the adapter and model for one use (chat, summarizer or
+// subagent). A use without its own selection in providers.yaml falls back to
+// chat, and chat without one uses host.yaml's runtime.provider and model.
+// A built-in provider name uses the host's Provider when it supplied one;
+// a named provider comes from the host's Providers, then providers.yaml.
+func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.Provider, string, error) {
+	sel, ok := def.Use[use]
+	if !ok {
+		sel, ok = def.Use[definition.UseChat]
 	}
-	cfg := e.cfg.ProviderConfig
-	cfg.Provider = def.Runtime.Provider
-	return provider.New(cfg)
+	if !ok {
+		sel = definition.Selection{Provider: def.Runtime.Provider, Model: def.Runtime.Model}
+	}
+	if sel.Provider == provider.BuiltinAnthropic || sel.Provider == provider.BuiltinOpenAI {
+		if e.cfg.Provider != nil {
+			return e.cfg.Provider, sel.Model, nil
+		}
+		cfg := e.cfg.ProviderConfig
+		cfg.Provider = sel.Provider
+		p, err := provider.New(cfg)
+		return p, sel.Model, err
+	}
+	spec, ok := e.cfg.Providers[sel.Provider]
+	if !ok {
+		spec, ok = def.Providers[sel.Provider]
+	}
+	if !ok {
+		return nil, "", fmt.Errorf("%s: unknown provider %q", use, sel.Provider)
+	}
+	spec.Name = sel.Provider
+	p, err := provider.NewNamed(spec, e.cfg.ProviderConfig)
+	return p, sel.Model, err
 }
 
 func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing, mode string, warnings []string, pending []store.Notice) (slots.Assembled, error) {

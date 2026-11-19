@@ -113,7 +113,8 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 			err = errors.New(clean)
 		}
 	}
-	e.writeTrace(ctx, tr.rec, tr.x, result, err)
+	// Writing the record must never keep the run from finishing.
+	_ = e.panics.Call("trace", func() error { e.writeTrace(ctx, tr.rec, tr.x, result, err); return nil }, panics.With("conversation", info.ID), panics.With("run", r.id))
 	endSpan()
 	terminal := r.terminal(result, err)
 	r.report(context.WithoutCancel(ctx), terminal)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"slices"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -294,8 +295,9 @@ func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, inter
 //
 // The API also refuses anyOf, oneOf and allOf at the top level, so those are
 // not forwarded. Their branches' properties are folded into properties
-// (first definition of a name wins, none of them required), which keeps the
-// fields visible to the model; the tool still validates its own input.
+// (declared names win, then allOf, anyOf, oneOf in branch order), which keeps
+// the fields visible to the model. Only allOf's required names stay required;
+// the tool still validates its own input.
 func buildInputSchema(schema map[string]any) sdk.ToolInputSchemaParam {
 	param := sdk.ToolInputSchemaParam{
 		Properties: extractSchemaProperties(schema),
@@ -303,16 +305,30 @@ func buildInputSchema(schema map[string]any) sdk.ToolInputSchemaParam {
 	}
 	for k, v := range schema {
 		switch k {
-		case "type", "properties", "required":
-			continue
-		case "anyOf", "oneOf", "allOf":
-			param.Properties = foldBranchProperties(param.Properties, v)
+		case "type", "properties", "required", "anyOf", "oneOf", "allOf":
 			continue
 		}
 		if param.ExtraFields == nil {
 			param.ExtraFields = make(map[string]any, len(schema))
 		}
 		param.ExtraFields[k] = v
+	}
+	// A fixed order keeps the tool block byte-stable for the prompt cache.
+	for _, k := range []string{"allOf", "anyOf", "oneOf"} {
+		if v, ok := schema[k]; ok {
+			param.Properties = foldBranchProperties(param.Properties, v)
+		}
+	}
+	// Every allOf branch must hold, so its required names stay required.
+	if list, ok := schema["allOf"].([]any); ok {
+		for _, b := range list {
+			branch, _ := b.(map[string]any)
+			for _, name := range extractSchemaRequired(branch) {
+				if !slices.Contains(param.Required, name) {
+					param.Required = append(param.Required, name)
+				}
+			}
+		}
 	}
 	return param
 }
@@ -364,7 +380,7 @@ func extractSchemaRequired(schema map[string]any) []string {
 	}
 	switch v := raw.(type) {
 	case []string:
-		return v
+		return slices.Clone(v)
 	case []any:
 		out := make([]string, 0, len(v))
 		for _, x := range v {

@@ -702,3 +702,29 @@ func TestBuildTools_SchemaWithPropertiesKeepsOtherKeywords(t *testing.T) {
 		t.Fatalf("$ref lost: %v", in)
 	}
 }
+
+func TestBuildTools_AllOfRequiredStaysRequiredAndFoldIsStable(t *testing.T) {
+	c := New()
+	schema := map[string]any{
+		"required": []any{"a"},
+		"allOf":    []any{map[string]any{"properties": map[string]any{"b": map[string]any{"type": "string"}}, "required": []any{"b", "a"}}},
+		"anyOf":    []any{map[string]any{"properties": map[string]any{"c": map[string]any{"type": "string"}}, "required": []any{"c"}}},
+		"oneOf":    []any{map[string]any{"properties": map[string]any{"b": map[string]any{"type": "integer"}}}},
+	}
+	tools := []llmtypes.ToolDefinition{{Name: "t", InputSchema: schema}}
+	first, _ := json.Marshal(c.buildTools(tools, cachePlan{})[0])
+	for range 50 {
+		again, _ := json.Marshal(c.buildTools(tools, cachePlan{})[0])
+		if string(again) != string(first) {
+			t.Fatalf("tool JSON not stable:\n%s\n%s", first, again)
+		}
+	}
+	in := inputSchemaOf(t, c.buildTools(tools, cachePlan{})[0])
+	req, _ := in["required"].([]any)
+	if len(req) != 2 || req[0] != "a" || req[1] != "b" {
+		t.Fatalf("required = %v, want [a b]", in["required"])
+	}
+	if b := in["properties"].(map[string]any)["b"].(map[string]any); b["type"] != "string" {
+		t.Fatalf("allOf definition of b should win over oneOf: %v", b)
+	}
+}

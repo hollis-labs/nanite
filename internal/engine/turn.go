@@ -411,13 +411,17 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	//     compaction is opportunistic, so the turn continues. A forced pass,
 	//     made to recover from an overflow, returns the error so the request
 	//     is not retried unchanged.
-	//   - A pass that changed the history emits Compacted, even when it freed
-	//     less than minCompactionGain; that small a gain only stops later
-	//     step-path passes.
+	//   - A pass that changed the history, or recorded a summary, emits
+	//     Compacted, even when it freed less than minCompactionGain; that
+	//     small a gain only stops later step-path passes.
+	//   - A store failure ends the turn on either path.
 	after := before
+	// recorded is set once a summary is durable; journalErr marks a store
+	// failure, which ends the turn on either path.
+	recorded, journalErr := false, false
 	defer func() {
 		failure := retErr
-		if failure == nil && after >= before {
+		if failure == nil && !recorded && after >= before {
 			failure = errCompactionNoProgress
 		}
 		if failure == nil && float64(before-after) < minCompactionGain*float64(before) {
@@ -425,7 +429,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		}
 		if failure != nil {
 			x.stalled = true
-			if force || ctx.Err() != nil {
+			if force || journalErr || ctx.Err() != nil {
 				retErr = failure
 			} else {
 				x.engine.cfg.Logger.WarnContext(ctx, "compaction skipped for the rest of the turn", "error", x.engine.scrub.Text(failure.Error()))
@@ -476,8 +480,10 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	if err := x.journal.RecordCompaction(store.NewID(now), now, store.Compaction{
 		TurnID: x.run.id, ThroughMessageID: through, Summary: summary, Before: before, After: shrunk,
 	}); err != nil {
+		journalErr = true
 		return err
 	}
+	recorded = true
 	x.messages = compacted
 	x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
 	after = shrunk

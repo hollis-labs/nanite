@@ -32,6 +32,32 @@ type Client struct {
 	gw *station.Settings
 	// panics contains a panic in a stream goroutine (SetPanicGuard).
 	panics *panics.Guard
+	// api pins the endpoint: "" chooses per request, APIChat or APIResponses
+	// always uses that one (SetAPI).
+	api string
+}
+
+// Endpoint choices for SetAPI.
+const (
+	APIAuto      = ""
+	APIChat      = "chat"
+	APIResponses = "responses"
+)
+
+// SetAPI pins the endpoint. An OpenAI-compatible server (llama.cpp, vLLM,
+// Ollama, OpenRouter) usually serves only Chat Completions, so it is pinned
+// to APIChat. APIAuto lets the request's reasoning needs decide.
+func (c *Client) SetAPI(api string) { c.api = api }
+
+// responses reports whether req goes to the Responses API.
+func (c *Client) responses(ctx context.Context, req llmtypes.ChatRequest) bool {
+	switch c.api {
+	case APIChat:
+		return false
+	case APIResponses:
+		return true
+	}
+	return useResponses(ctx, req)
 }
 
 // SetPanicGuard sets the guard that contains a panic in a stream goroutine.
@@ -91,7 +117,7 @@ func (c *Client) Capabilities() llmtypes.ProviderCapabilities {
 // Complete — use StreamChat for tool-using turns. No choices, or a choice
 // with no text or only whitespace, returns errEmptyResponse.
 func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
-	if useResponses(ctx, req) {
+	if c.responses(ctx, req) {
 		return c.completeResponse(ctx, req)
 	}
 	params, err := buildChatParams(req)

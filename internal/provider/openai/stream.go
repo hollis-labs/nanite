@@ -25,7 +25,7 @@ import (
 //
 // The channel is closed after the terminator event.
 func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
-	if useResponses(ctx, req) {
+	if c.responses(ctx, req) {
 		return c.streamResponse(ctx, req)
 	}
 	params, err := buildChatParams(req)

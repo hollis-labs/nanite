@@ -82,6 +82,74 @@ with `/v1` for OpenAI. Anthropic supports its default key header or
 enable fallback to `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. An embedding host
 configures these through `agent.Options.Gateway` or supplies a provider.
 
+### Named providers
+
+`providers.yaml` in the agent directory defines more providers and picks one
+per use. Any OpenAI-compatible server (llama.cpp, vLLM, Ollama, OpenRouter)
+works through the `openai-chat` wire, and a model gateway is one more entry.
+The file is optional.
+
+```yaml
+providers:
+  local:
+    wire: openai-chat               # Chat Completions only
+    base_url: http://127.0.0.1:8080/v1
+    auth: none                      # a local server without auth
+  router:
+    wire: openai-chat
+    base_url: https://openrouter.ai/api/v1
+    key_ref: keychain://nanite/provider/router
+  gateway:
+    wire: anthropic
+    base_url: https://gateway.example/api/llm-gateway
+    auth: bearer
+    headers: {X-Team: research}
+use:
+  chat:       {provider: local, model: llama-3.1-8b-instruct}
+  summarizer: {provider: anthropic, model: claude-haiku-5-5}
+  subagent:   {provider: gateway, model: claude-sonnet-5-5}
+```
+
+Each provider entry has:
+
+- `wire`: `anthropic` (Messages API), `openai` (chooses Chat Completions or
+  Responses per request, like the built-in), `openai-chat` or
+  `openai-responses`.
+- `base_url`: the endpoint root. Use it without `/v1` for `anthropic` and with
+  `/v1` for the OpenAI wires.
+- Optional `key_ref`: a secret reference. Without one the resolver checks
+  `keychain://nanite/provider/<name>`.
+- Optional `key_env`: an environment variable, read only when
+  `NANITE_PROVIDER_KEY_ENV=1`.
+- Optional `auth`: empty for the wire's own scheme, `bearer` for the
+  Anthropic wire, or `none` for a server without auth.
+- Optional `headers`: sent on every request. A header whose name looks like
+  a credential (containing `key`, `token`, `secret`, `auth`, `password` or
+  `credential`) is refused; put the credential behind `key_ref`.
+- Optional `disable_anthropic_beta` and `disable_cache_control`: for an
+  Anthropic-compatible endpoint that rejects them.
+
+The names `anthropic` and `openai` are the built-in providers above and cannot
+be redefined.
+
+`use` selects a provider and model for `chat` (the conversation and argument
+repair), `summarizer` (compaction summaries) and `subagent` (worker and
+planner conversations). A use without its own entry falls back to `chat`.
+Without `use.chat`, chat uses `runtime.provider` and `runtime.model` from
+`host.yaml`. `providers.yaml` is read again each turn, like the other authored
+files. A use may name a provider only the host defines.
+
+An embedding host can add providers with `agent.Options.Providers`, and a
+host entry wins over a file entry with the same name. When the host injects
+`agent.Options.Provider`, that provider serves every use except one that
+names a provider in `agent.Options.Providers`, so an agent directory cannot
+route the host's traffic elsewhere.
+
+A provider with a custom endpoint, whether named or the built-in one behind
+a gateway, receives only the key Nanite resolved. The SDKs' environment
+defaults (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_ORG_ID`,
+`OPENAI_PROJECT_ID`, `OPENAI_CUSTOM_HEADERS`) are not sent to it.
+
 ## MCP registrations
 
 ```json

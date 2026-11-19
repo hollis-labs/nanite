@@ -37,18 +37,21 @@ type execution struct {
 	info       store.Conversation
 	definition definition.Definition
 	provider   llmcontracts.Provider
-	assembled  slots.Assembled
-	policy     policy.PDP
-	journal    *store.Journal
-	submitted  bool
-	messageIDs []string
-	messages   []llmtypes.ChatMessage
-	parent     *string
-	validators map[string]recover.Validator
-	catalog    map[string]tools.Tool
-	specs      []llmtypes.ToolDefinition
-	loop       *loopdetect.Detector
-	result     events.Result
+	// summaryProvider and summaryModel serve compaction summaries.
+	summaryProvider llmcontracts.Provider
+	summaryModel    string
+	assembled       slots.Assembled
+	policy          policy.PDP
+	journal         *store.Journal
+	submitted       bool
+	messageIDs      []string
+	messages        []llmtypes.ChatMessage
+	parent          *string
+	validators      map[string]recover.Validator
+	catalog         map[string]tools.Tool
+	specs           []llmtypes.ToolDefinition
+	loop            *loopdetect.Detector
+	result          events.Result
 	// compactions counts compaction passes in this turn; stalled is set once
 	// a pass frees too little, so later steps stop retrying it.
 	compactions int
@@ -124,10 +127,25 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	model, err := e.provider(def)
+	use := definition.UseChat
+	if info.ParentID != "" {
+		use = definition.UseSubagent
+	}
+	model, modelName, err := e.provider(def, use)
 	if err != nil {
 		return events.Result{}, err
 	}
+	// Compaction summaries use their own selection, or else the provider and
+	// model this turn runs on.
+	summaryProvider, summaryModel := model, modelName
+	if sel, ok := def.Use[definition.UseSummarizer]; ok {
+		if summaryProvider, summaryModel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
+			return events.Result{}, err
+		}
+	}
+	// The selected model is the one this turn asks for and reports in the
+	// environment slot.
+	def.Runtime.Model = modelName
 	catalog := skills.NewCatalog(def.Skills, hostSkills)
 	lease, warnings := e.mcp.Reconcile(ctx, def.Snapshot.MCP)
 	defer lease.Close()
@@ -149,7 +167,8 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New()}
+	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
+		summaryProvider: summaryProvider, summaryModel: summaryModel}
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
@@ -459,7 +478,11 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			return events.Compacted{EventMeta: meta, Before: before, After: after}
 		})
 	}()
-	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(x.definition.Runtime.Model)}
+	summaryProvider, summaryModel := x.summaryProvider, x.summaryModel
+	if summaryProvider == nil {
+		summaryProvider, summaryModel = x.provider, x.definition.Runtime.Model
+	}
+	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(summaryProvider, summaryModel), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(summaryModel)}
 	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
 	if force {
 		_, err = pipeline.RunForce(ctx)

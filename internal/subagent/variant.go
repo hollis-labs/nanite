@@ -36,7 +36,8 @@ type Variant struct {
 	// "subagent" use, else chat), which must serve that model.
 	Provider, Model string
 	Budgets         Budgets
-	// LastN is how many parent messages the child sees (applied in B2).
+	// LastN is how many parent messages the child sees by default; zero
+	// means DefaultLastN.
 	LastN int
 	// ResultCap is the result size cap in tokens (applied in B3).
 	ResultCap int
@@ -188,6 +189,9 @@ func parse(name, file string) (Variant, error) {
 		if n < 0 {
 			return Variant{}, fmt.Errorf("%s must not be negative", field)
 		}
+	}
+	if v.LastN > MaxLastN {
+		return Variant{}, fmt.Errorf("last_n must be at most %d", MaxLastN)
 	}
 	for _, p := range slices.Concat(v.Allow, v.Deny) {
 		if _, err := path.Match(p, ""); err != nil || strings.TrimSpace(p) == "" {

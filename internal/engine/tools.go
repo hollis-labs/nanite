@@ -38,6 +38,10 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 	catalog = append(catalog, selftools.Skills(skillCatalog)...)
 	catalog = append(catalog, mcp...)
 	catalog = append(catalog, x.jobTools()...)
+	if x.info.ParentID != "" {
+		// Only a subtask child can read its parent's history.
+		catalog = append(catalog, x.parentHistory().Tools()...)
+	}
 	roots := x.engine.cfg.WorkspaceRoots
 	if len(roots) > 0 {
 		catalog = append(catalog, selftools.Bash(shell.Plain{}, roots[0], x.definition.Runtime.Env))

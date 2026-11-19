@@ -79,6 +79,18 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		return tools.Result{}, fmt.Errorf("a subtask cannot start a background subtask; run it in the foreground")
 	}
 	variant := x.variants[request.Variant]
+	spec, err := request.ContextSpec()
+	if err != nil {
+		return tools.Result{}, err
+	}
+	message := request.Message()
+	seed, err := x.forkedContext(ctx, spec, variant)
+	if err != nil {
+		return tools.Result{}, fmt.Errorf("subtask context: %w", err)
+	}
+	if seed != "" {
+		message += "\n\n" + seed
+	}
 	e := x.engine
 	release, err := e.children.Acquire()
 	if err != nil {
@@ -90,7 +102,6 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		release()
 		return tools.Result{}, err
 	}
-	message := request.Message()
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: message}) }
 	if request.Background {
 		spec, _ := json.Marshal(struct {

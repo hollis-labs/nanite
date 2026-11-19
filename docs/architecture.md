@@ -139,10 +139,40 @@ A conversation delegates with the `subtask` tool:
 `subtask({goal, return_spec, variant, inputs?, context?, background?})`. The
 model must name a variant; there is no default. The child is a separate
 conversation that starts from the variant's role prompt and one message
-holding the goal, the inputs and the return spec. The parent gets back a
+holding the goal, the inputs, the return spec and its forked context (below).
+The parent gets back a
 result with a status (`ok`, `partial`, `limit`, `error` or `cancelled`), the
 child's final text, its steps and its token usage, which also rolls into the
 parent turn's usage.
+
+### Forked context
+
+A child does not get the parent's whole conversation. Its first message
+copies the parent's last N messages, as numbered lines (`[#12 user] ...`),
+with each block shortened to about 2,000 characters. N is the call's
+`context.last_n`, else the variant's `last_n`, else 6; at most 50, and 0
+copies none. `context.full: true` copies every message instead. The window
+never starts on a tool result whose call fell outside it, and the parent's
+in-flight message (the one calling `subtask`) is left out.
+
+`context.include` copies parent state too, each item in its own tagged
+block: `todos` (the checklist), `plan` (the scratchpad entry `plan`),
+`handoff` (the `handoff` slot) and `scratchpad:<key>`. A missing item reads
+`(none)`.
+
+Every child is also offered two read-only tools over its parent conversation,
+which a root conversation never gets: `parent_history_search(query, k)`, a
+full-text search over the parent's messages (the store indexes message text,
+not thinking, in `messages_fts`), and `parent_history_get(from, to)`, which
+returns up to 20 messages by number. Their results are redacted and go
+through the tool-result cache like any other tool's, so a long one comes
+back as a page with a pointer. A lead's children read the lead's
+conversation. Both belong to the `subtasks` built-in group, and an authored
+variant with an allow list must list them to keep them. The copied context
+is redacted the same way. The child's own transcript is a normal child
+conversation.
+
+### Variants
 
 Variants are `code`, `research`, `worker` and `planner`, built in, plus any
 the agent authors as `variants/<name>.md`, re-read every turn. The

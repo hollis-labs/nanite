@@ -94,7 +94,7 @@ func (g *Groups) Snapshot() []Tool {
 func builtin(name string) bool {
 	switch name {
 	case "todo_write", "todo_list", "scratchpad_write", "scratchpad_read",
-		"skill_list", "skill_get", "subtask",
+		"skill_list", "skill_get", "subtask", "parent_history_search", "parent_history_get",
 		"background_start", "background_status", "background_cancel", "fetch_tool_result",
 		"search_tool_result", "ask_user", "read_file", "write_file", "edit_file", "list_dir", "find_files", "search_files", "bash":
 		return true

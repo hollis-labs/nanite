@@ -99,8 +99,16 @@ type Assembled struct {
 	Hashes map[string]string
 }
 
-func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]string, windowSize int, est ctxpkg.TokenEstimator) (Assembled, error) {
+// Assemble builds the slot blocks. budgets overrides the library's default
+// per-slot budget for the slots it names, and should be the map the selector
+// planned with; nil keeps the defaults.
+func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]string, windowSize int, est ctxpkg.TokenEstimator, budgets map[Name]int) (Assembled, error) {
 	window := ctxpkg.NewContextWindow(windowSize, est)
+	for name, size := range budgets {
+		if s := window.Slot(string(name)); s != nil && size > 0 {
+			s.MaxTokens = size
+		}
+	}
 	window.PrevHashes = maps.Clone(prev)
 	report := make(Report)
 	hashes := make(map[string]string)

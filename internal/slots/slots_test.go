@@ -87,7 +87,7 @@ func TestSelectionAndChanges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := Assemble(context.Background(), snap, plan, prev, 0, est)
+		got, err := Assemble(context.Background(), snap, plan, prev, 0, est, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestDynamicToolsBudgetAndHashLifecycle(t *testing.T) {
 		if got := plan.Decisions[Tools][0].Disposition; got != Ship {
 			t.Fatalf("tools disposition = %v", got)
 		}
-		assembled, err := Assemble(ctx, snap, plan, hashes, 0, nil)
+		assembled, err := Assemble(ctx, snap, plan, hashes, 0, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

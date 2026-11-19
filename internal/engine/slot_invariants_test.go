@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/skills"
@@ -103,5 +104,11 @@ func TestSlotInvariantsAcrossRoles(t *testing.T) {
 		if content != universal["chat"] {
 			t.Errorf("universal block for %s differs from chat", name)
 		}
+	}
+}
+
+func TestBasePromptFitsItsBudget(t *testing.T) {
+	if got := (ctxpkg.DefaultEstimator{}).Estimate(basePrompt); got > universalBudget {
+		t.Fatalf("base prompt is %d tokens, over the Universal budget of %d", got, universalBudget)
 	}
 }

@@ -358,7 +358,7 @@ func (e *Engine) resolve(def definition.Definition, use string, sel definition.S
 	return p, sel.Model, err
 }
 
-func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing, mode string, warnings []string, pending []store.Notice) (slots.Assembled, error) {
+func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo, def definition.Definition, state slots.Snapshot, prev map[string]string, skillListing, rolePrompt, mode string, warnings []string, pending []store.Notice) (slots.Assembled, error) {
 	permissions := "Permission mode: " + mode + ". File tools are confined to the workspace roots."
 	if len(e.cfg.WorkspaceRoots) > 0 {
 		permissions += " Workspace roots: " + strings.Join(e.cfg.WorkspaceRoots, ", ") + "."
@@ -376,8 +376,8 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 		{Slot: slots.Skills, Entry: slots.Entry{Owner: "engine", Key: "available-skills", Content: skillListing}},
 	}
 
-	if prompt := subagent.Prompt(info.Role); prompt != "" {
-		updates = append(updates, slots.Update{Slot: slots.Mode, Entry: slots.Entry{Owner: "engine", Key: "subagent-role", Content: prompt, Priority: 100}})
+	if rolePrompt != "" {
+		updates = append(updates, slots.Update{Slot: slots.Mode, Entry: slots.Entry{Owner: "engine", Key: "subtask-variant", Content: rolePrompt, Priority: 100}})
 	}
 
 	for _, notice := range pending {

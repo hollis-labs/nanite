@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+Breaking (next minor version): the subagent tools are replaced by `subtask`.
+
+- New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
+  context?, background?})`. `variant` is required; the model chooses and
+  there is no default. Results carry `status` (`ok`, `partial`, `limit`,
+  `error` or `cancelled`), the child's text, steps and token usage.
+- Variants: built-in `code`, `research`, `worker` and `planner` (read-only),
+  plus authored `variants/<name>.md` in the agent directory, re-read every
+  turn. Frontmatter sets tool allow and deny patterns, `read_only`, `model`,
+  `budgets` (steps, tokens, wall, cost), `last_n`, `result_cap` and
+  `can_spawn`. A variant only narrows tools. `nanite validate` checks them.
+- Depth is one level; a `can_spawn` variant may go one level further.
+- A child's token usage rolls into the parent turn: `Usage` gains `Subtask`,
+  the child conversation id, on the rolled-up event.
+- New stop reasons `token_budget` and `wall_time`, both reported as limits.
+- Removed `subagent_spawn`, `subagent_status` and `subagent_cancel`, with no
+  alias. `background_status` and `background_cancel` now also serve
+  background subtasks. The built-in group `BuiltinSubagents` ("subagents") is
+  now `BuiltinSubtasks` ("subtasks").
+- `SubagentStarted` replaces `Role` with `Variant`, `Goal` and `Background`;
+  `SubagentFinished` gains `Variant` and `Status`. The `nanite.subagent`
+  activity carries `variant` (and `status` when done) instead of `role`.
+- `return_spec` and `context` are recorded and passed to the child; result
+  validation and forked context come in later releases.
+
 - Named providers. `providers.yaml` in the agent directory defines providers
   by wire (`anthropic`, `openai`, `openai-chat`, `openai-responses`), base
   URL, key reference, auth and headers, so any OpenAI-compatible server or a

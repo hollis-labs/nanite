@@ -66,7 +66,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 	x.catalog = make(map[string]tools.Tool)
 	x.validators = make(map[string]recover.Validator)
 	for _, tool := range append(catalog, host...) {
-		if !subagent.AllowsTool(x.info.Role, tool.Name, tool.ReadOnly) {
+		if !subagent.AllowsTool(x.depth == 0, x.variant, x.canSpawn(), tool.Name, tool.ReadOnly) {
 			continue
 		}
 		var schema map[string]any

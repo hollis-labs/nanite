@@ -18,6 +18,7 @@ import (
 	libpolicy "github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/internal/repl"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/substrate/module"
 	"github.com/hollis-labs/substrate/modules/cli"
 	"github.com/hollis-labs/substrate/modules/database"
@@ -226,7 +227,20 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name)
+			variants, err := subagent.Load(path)
+			if err != nil {
+				return err
+			}
+			var authored []string
+			for _, name := range subagent.Names(variants) {
+				if !variants[name].Builtin {
+					authored = append(authored, name)
+				}
+			}
+			if _, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name); err != nil || len(authored) == 0 {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "variants: "+strings.Join(authored, ", "))
 			return err
 		}},
 		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) (retErr error) {

@@ -47,7 +47,7 @@ Turn 1 slots:
     demo/view: ship
   context: 4 tokens, changed yes
     demo/selection: ship
-Tools offered: ask_user, fetch_tool_result, find_files, list_dir, notes_search, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write
+Tools offered: ask_user, fetch_tool_result, find_files, list_dir, notes_search, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subtask, todo_list, todo_write
 Tool called: notes_search
 The notes mention a planning meeting.
 Turn 2 slots:
@@ -63,7 +63,7 @@ Turn 2 slots:
     demo/view: ship
   context: 4 tokens, changed yes
     demo/selection: ship
-Tools offered: ask_user, fetch_tool_result, files_list, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write
+Tools offered: ask_user, fetch_tool_result, files_list, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subtask, todo_list, todo_write
 Tool called: files_list
 The workspace contains agenda.md.
 Turn 3 slots:
@@ -77,7 +77,7 @@ Turn 3 slots:
     engine/mode: ship
   workspace: 0 tokens, changed yes
   context: 0 tokens, changed yes
-Tools offered: ask_user, fetch_tool_result, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subagent_cancel, subagent_spawn, subagent_status, todo_list, todo_write
+Tools offered: ask_user, fetch_tool_result, find_files, list_dir, read_file, scratchpad_read, scratchpad_write, search_files, search_tool_result, skill_get, skill_list, subtask, todo_list, todo_write
 The workspace context is clear.
 ```
 
@@ -102,7 +102,7 @@ a, err := agent.Open(ctx, agent.Options{
 | `BuiltinFilesWrite` | `write_file`, `edit_file` |
 | `BuiltinShell` | `bash` |
 | `BuiltinBackground` | `background_start`, `background_status`, `background_cancel` |
-| `BuiltinSubagents` | `subagent_spawn`, `subagent_status`, `subagent_cancel` |
+| `BuiltinSubtasks` | `subtask` (a background subtask is polled and cancelled with `background_status` and `background_cancel`, from `BuiltinBackground`) |
 | `BuiltinSkills` | `skill_list`, `skill_get`, and the skill listing in the prompt |
 | `BuiltinNotes` | `todo_list`, `todo_write`, `scratchpad_read`, `scratchpad_write` |
 | `BuiltinQuestions` | `ask_user` |
@@ -217,11 +217,12 @@ for the answer the Service delivers. Its `descriptor` carries `description`,
 `standing` (false for a `LevelConfirm` tool), `tool` and `input`. The scopes
 `conversation` and `always` both stand for the rest of the conversation in
 Nanite; keeping `always` beyond it is the application's `Granted` function. A
-tool call made inside a subagent cannot ask and is denied.
+tool call made inside a subtask cannot ask and is denied.
 
 **Events.** Each model step is a `step.start` / `step.finish` pair around one
 assistant message that holds the step's text, reasoning, tool calls and tool
-results. Activity kinds are `nanite.slots`, `nanite.subagent` and
+results. Activity kinds are `nanite.slots`, `nanite.subagent` (a subtask's
+child conversation, with `variant`, and `status` when done) and
 `nanite.compact` (`value.state` is `start`, `done` or `failed`). `run.finish`
 has reason `turn_limit` at the step limit and `length` at the model's output
 limit. A cancelled turn ends in `run.abort`, a failed one in `run.error` with

@@ -12,7 +12,7 @@ slots. Each conversation admits one active run.
 | `chatrunner` | Runs an agent behind the `libs/agent/chat` conversation handler |
 | `cmd/nanite`, `internal/repl` | Substrate startup and CLI commands, interactive terminal |
 | `internal/definition`, `internal/slots`, `internal/skills` | Authored input reload, slot selection, skill catalog |
-| `internal/engine`, `internal/events` | Turn loop, subagents, background jobs, and event contract |
+| `internal/engine`, `internal/events` | Turn loop, subtasks, background jobs, and event contract |
 | `internal/provider`, `internal/mcpclient` | Native model adapters, gateway configuration, MCP lifecycle |
 | `internal/tools`, `internal/selftools`, `internal/permission`, `internal/shell` | Tool registrations, built-ins, policy evaluation, shell execution |
 | `internal/store`, `internal/transcript`, `internal/recovery` | SQLite projections, durable JSONL journal, interruption recovery |
@@ -109,13 +109,33 @@ existing values or schema defaults. Repaired arguments pass schema validation
 and authorization before execution. Set `NANITE_AUTO_REPAIR=false` to turn off
 repair calls.
 
-## Subagents and background jobs
+## Subtasks and background jobs
 
-A chat conversation can start a worker or planner child as a foreground tool
-call or background job. Worker tools use the same permission check as chat
-tools. Planners see read-only tools. Children cannot start another child, and
-up to four children can run per agent. Cancelling a parent turn cancels its
-foreground child. Background children run until completion or job cancellation.
+A conversation delegates with the `subtask` tool:
+`subtask({goal, return_spec, variant, inputs?, context?, background?})`. The
+model must name a variant; there is no default. The child is a separate
+conversation that starts from the variant's role prompt and one message
+holding the goal, the inputs and the return spec. The parent gets back a
+result with a status (`ok`, `partial`, `limit`, `error` or `cancelled`), the
+child's final text, its steps and its token usage, which also rolls into the
+parent turn's usage.
+
+Variants are `code`, `research`, `worker` and `planner` (read-only), built in,
+plus any the agent authors as `variants/<name>.md`, re-read every turn. The
+frontmatter sets `description`, `tools.allow` / `tools.deny` (names or globs),
+`read_only`, `model`, `budgets` (`steps`, `tokens`, `wall`, `cost`), `last_n`,
+`result_cap` and `can_spawn`; the body is the role prompt. A variant only
+narrows the tools the agent already has, and every call still passes the
+agent's permission check. A child that spends its step, token or wall-clock
+budget ends with status `limit` and the reason (`max_steps`, `token_budget`
+or `wall_time`); token and wall budgets are checked between steps. `cost` is
+validated but not yet enforced. `nanite validate` checks authored variants.
+
+Subtasks run one level deep. A variant with `can_spawn: true` (a "lead") may
+start subtasks one more level down; nothing deeper. Up to four children run
+per agent. Cancelling a parent turn cancels its foreground child. A background
+subtask runs until it finishes or is cancelled with `background_cancel`, and
+its completion arrives as a notice; its usage is not part of any parent turn.
 
 Background Bash uses the same permission check, environment, and denylist as
 foreground Bash. A job can outlive its turn and streams bounded, redacted output

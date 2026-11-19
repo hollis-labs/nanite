@@ -19,8 +19,9 @@ const (
 	// ActivitySlots reports the turn's assembled context. Value: slots, a
 	// list of name, tokens and changed.
 	ActivitySlots = "nanite.slots"
-	// ActivitySubagent reports a child conversation. Value: state ("start"
-	// or "done"), id, and role or error.
+	// ActivitySubagent reports a subtask's child conversation. Value: state
+	// ("start", "done" or "limit"), id and variant; when done, status (ok,
+	// partial, limit, error or cancelled) and error or limit.
 	ActivitySubagent = "nanite.subagent"
 	// ActivityCompact reports history compaction. Value: state ("start",
 	// "done" or "failed"), with before, after or error.
@@ -324,10 +325,10 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 		return nil
 
 	case agent.SubagentStarted:
-		return []chatstream.Event{activity(ActivitySubagent, map[string]string{"state": "start", "id": e.ID, "role": e.Role})}
+		return []chatstream.Event{activity(ActivitySubagent, map[string]string{"state": "start", "id": e.ID, "variant": e.Variant})}
 
 	case agent.SubagentFinished:
-		v := map[string]string{"state": "done", "id": e.ID}
+		v := map[string]string{"state": "done", "id": e.ID, "variant": e.Variant, "status": e.Status}
 		if e.Err != nil {
 			v["error"] = e.Err.Error()
 		} else if e.Limit != "" {

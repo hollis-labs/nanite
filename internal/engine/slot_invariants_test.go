@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 func TestSlotInvariantsAcrossRoles(t *testing.T) {
@@ -33,8 +34,8 @@ func TestSlotInvariantsAcrossRoles(t *testing.T) {
 	}{
 		{role: "chat"},
 		{role: "chat", modeText: "Host-selected mode", hostMode: true},
-		{role: "worker", modeText: "You are a worker subagent."},
-		{role: "planner", modeText: "You are a planner subagent."},
+		{role: "worker", modeText: "You are a worker subtask."},
+		{role: "planner", modeText: "You are a planner subtask."},
 	} {
 		name := tt.role
 		if tt.hostMode {
@@ -51,8 +52,12 @@ func TestSlotInvariantsAcrossRoles(t *testing.T) {
 				})
 			}
 			info := slots.TurnInfo{Role: tt.role, TurnID: "first"}
+			rolePrompt := ""
+			if !tt.hostMode {
+				rolePrompt = subagent.Builtins()[tt.role].Prompt
+			}
 			state := e.cfg.Slots.Snapshot()
-			first, err := e.assemble(t.Context(), input, info, def, state, nil, catalog.Listing(), pdp.Mode(), nil, nil)
+			first, err := e.assemble(t.Context(), input, info, def, state, nil, catalog.Listing(), rolePrompt, pdp.Mode(), nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +88,7 @@ func TestSlotInvariantsAcrossRoles(t *testing.T) {
 				t.Errorf("skill listing = %q, want %q", content[slots.Skills], want)
 			}
 			info.TurnID = "second"
-			second, err := e.assemble(t.Context(), input, info, def, state, first.Hashes, catalog.Listing(), pdp.Mode(), nil, nil)
+			second, err := e.assemble(t.Context(), input, info, def, state, first.Hashes, catalog.Listing(), rolePrompt, pdp.Mode(), nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

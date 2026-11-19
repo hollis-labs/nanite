@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
@@ -28,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
@@ -56,6 +58,21 @@ type execution struct {
 	// a pass frees too little, so later steps stop retrying it.
 	compactions int
 	stalled     bool
+	// variants are the subtask variants this turn offers; variant is this
+	// conversation's own when it is a child, and depth is 0 for a root chat.
+	variants map[string]subagent.Variant
+	variant  subagent.Variant
+	depth    int
+	// deadline is the child's wall-clock budget, checked between steps.
+	deadline time.Time
+	// usageMu guards result.Usage, which subtask handlers add child usage to.
+	usageMu sync.Mutex
+}
+
+// canSpawn reports whether this conversation may run subtask: a root chat
+// always may, a depth-1 child only when its variant has can_spawn.
+func (x *execution) canSpawn() bool {
+	return x.depth == 0 || (x.depth == 1 && x.variant.CanSpawn)
 }
 
 // Compaction limits for one turn. After a pass that frees less than
@@ -159,16 +176,49 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
+	variants, variantErr := subagent.Load(e.cfg.Dir)
+	if variantErr != nil {
+		// A bad authored variant is skipped, not fatal; nanite validate reports it.
+		warning := e.scrub.Text("Some subtask variants did not load: " + variantErr.Error())
+		e.cfg.Logger.WarnContext(ctx, warning)
+		warnings = append(warnings, warning)
+	}
+	var variant subagent.Variant
+	depth := 0
+	if info.ParentID != "" {
+		depth = 1
+		parentInfo, err := e.cfg.Store.Conversation(ctx, info.ParentID)
+		if err != nil {
+			return events.Result{}, err
+		}
+		if parentInfo.ParentID != "" {
+			depth = 2
+		}
+		var ok bool
+		if variant, ok = variants[info.Role]; !ok {
+			return events.Result{}, fmt.Errorf("subtask variant %q is not defined", info.Role)
+		}
+		if variant.Model != "" {
+			def.Runtime.Model = variant.Model
+		}
+		if variant.Budgets.Steps > 0 {
+			def.Runtime.MaxSteps = variant.Budgets.Steps
+		}
+	}
 	skillListing := catalog.Listing()
 	if !e.cfg.Builtins.Has(tools.BuiltinSkills) {
 		skillListing = "" // Without the skill tools a listing would name things the agent cannot load.
 	}
-	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, skillListing, pdp.Mode(), warnings, pending)
+	assembled, err := e.assemble(ctx, input, slots.TurnInfo{ConversationID: info.ID, TurnID: r.id, UserText: input.Text, Role: info.Role}, def, state, prev, skillListing, variant.Prompt, pdp.Mode(), warnings, pending)
 	if err != nil {
 		return events.Result{}, err
 	}
 	x := execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
-		summaryProvider: summaryProvider, summaryModel: summaryModel}
+		summaryProvider: summaryProvider, summaryModel: summaryModel,
+		variants: variants, variant: variant, depth: depth}
+	if variant.Budgets.Wall > 0 {
+		x.deadline = time.Now().Add(variant.Budgets.Wall)
+	}
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
@@ -366,6 +416,10 @@ func (x *execution) generate(ctx context.Context) error {
 		}
 		if x.result.Steps >= x.definition.Runtime.MaxSteps {
 			x.result.StopReason = events.StopMaxSteps
+			return runloop.Finish
+		}
+		if stop := x.budgetStop(); stop != "" {
+			x.result.StopReason = stop
 			return runloop.Finish
 		}
 		if runErr = x.compact(ctx, false); runErr != nil {
@@ -631,10 +685,12 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 				continue
 			}
 			u := ev.Usage
+			x.usageMu.Lock()
 			x.result.Usage.InputTokens += u.InputTokens
 			x.result.Usage.OutputTokens += u.OutputTokens
 			x.result.Usage.CacheReadTokens += u.CacheReadTokens
 			x.result.Usage.CacheWriteTokens += u.CacheCreationTokens
+			x.usageMu.Unlock()
 			if u.StopReason != "" {
 				x.result.StopReason = u.StopReason
 			}
@@ -655,4 +711,21 @@ func appendStepText(all *strings.Builder, text string) {
 		all.WriteString("\n\n")
 	}
 	all.WriteString(text)
+}
+
+// budgetStop is the stop reason when a child has spent its variant's token
+// or wall-clock budget, checked between steps; "" while within budget.
+func (x *execution) budgetStop() string {
+	if limit := x.variant.Budgets.Tokens; limit > 0 {
+		x.usageMu.Lock()
+		spent := x.result.Usage.InputTokens + x.result.Usage.OutputTokens
+		x.usageMu.Unlock()
+		if spent >= limit {
+			return events.StopTokenBudget
+		}
+	}
+	if !x.deadline.IsZero() && !time.Now().Before(x.deadline) {
+		return events.StopWallBudget
+	}
+	return ""
 }

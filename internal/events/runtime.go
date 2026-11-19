@@ -72,9 +72,9 @@ func (r *Runtime) Observe(ctx context.Context, conversation, turn string, event 
 	case ToolCallFinished:
 		emit(runtimeevents.KindAgentToolResult, map[string]any{"call_id": e.CallID, "output": e.Result.Text, "is_error": e.IsError, "duration_ms": e.Duration.Milliseconds()})
 	case SubagentStarted:
-		emit(runtimeevents.KindAgentSubagentSpawn, map[string]any{"child_id": e.ID, "role": e.Role})
+		emit(runtimeevents.KindAgentSubagentSpawn, map[string]any{"child_id": e.ID, "variant": e.Variant, "background": e.Background})
 	case SubagentFinished:
-		payload := map[string]any{"child_id": e.ID, "is_error": e.Err != nil || e.Limit != ""}
+		payload := map[string]any{"child_id": e.ID, "variant": e.Variant, "status": e.Status, "is_error": e.Status != "ok"}
 		if e.Limit != "" {
 			payload["limit"] = e.Limit
 		}

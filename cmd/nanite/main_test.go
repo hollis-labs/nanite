@@ -42,6 +42,24 @@ func TestRootHasCommands(t *testing.T) {
 	if strings.TrimSpace(out.String()) != "assistant" {
 		t.Fatalf("validate output %q", out.String())
 	}
+
+	// Authored subtask variants are validated too.
+	if err := os.MkdirAll(filepath.Join(dir, "variants"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "lead.md"), []byte("---\ncan_spawn: true\n---\nYou lead.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(out.String(), "variants: lead") {
+		t.Fatalf("validate with a variant: %q, %v", out.String(), err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "broken.md"), []byte("---\ncan_spawm: true\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "variants/broken.md") {
+		t.Fatalf("validate accepted a bad variant: %v", err)
+	}
 }
 
 func TestPromptViaLocalGateway(t *testing.T) {

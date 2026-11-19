@@ -109,7 +109,7 @@ func TestCompactionWithoutProgressIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assembled, err := e.assemble(t.Context(), Input{}, slots.TurnInfo{ConversationID: id, Role: "chat"}, def, e.cfg.Slots.Snapshot(), nil, "", "", nil, nil)
+	assembled, err := e.assemble(t.Context(), Input{}, slots.TurnInfo{ConversationID: id, Role: "chat"}, def, e.cfg.Slots.Snapshot(), nil, "", "", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

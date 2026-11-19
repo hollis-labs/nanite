@@ -3,6 +3,7 @@ package selftools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
@@ -10,11 +11,15 @@ import (
 
 type JobTools struct {
 	StartShell func(context.Context, json.RawMessage) (string, error)
-	// Spawn and Status set Result.IsError when a subagent stopped at a limit
-	// or failed, so the model reads the outcome as structural, not prose.
-	Spawn  func(context.Context, subagent.Start) (tools.Result, error)
-	Status func(context.Context, string, string) (tools.Result, error)
-	Cancel func(context.Context, string, string) (string, error)
+	// Subtask sets Result.IsError when a subtask did not end ok, so the model
+	// reads the outcome as structural, not prose. Variants are the choices
+	// offered for its required variant field.
+	Subtask  func(context.Context, subagent.Request) (tools.Result, error)
+	Variants map[string]subagent.Variant
+	// Status and Cancel serve background shell commands and background
+	// subtasks alike, by job id.
+	Status func(context.Context, string) (tools.Result, error)
+	Cancel func(context.Context, string) (string, error)
 }
 
 func (t JobTools) Tools() []tools.Tool {
@@ -30,21 +35,39 @@ func (t JobTools) Tools() []tools.Tool {
 			},
 		})
 	}
-	if t.Spawn != nil {
-		out = append(out, specResult("subagent_spawn", "Give a worker or planner a focused task. A result with status \"limit\" means the subagent stopped at a step, token or context limit before finishing; its output is partial.", `{"role":{"enum":["worker","planner"]},"task":{"type":"string"},"background":{"type":"boolean"}}`,
-			[]string{"role", "task"}, false, t.Spawn))
+	if t.Subtask != nil {
+		out = append(out, subtaskTool(t.Subtask, t.Variants))
 	}
-	for _, entry := range []struct{ prefix, kind string }{{"background", "shell"}, {"subagent", "subagent"}} {
+	if t.StartShell != nil || t.Subtask != nil {
 		out = append(out,
-			specResult(entry.prefix+"_status", "Read a job's status and available output.", idProperties, []string{"id"}, true,
+			specResult("background_status", "Read a background job's status and available output: a command from background_start or a subtask started with background true.", idProperties, []string{"id"}, true,
 				func(ctx context.Context, args struct{ ID string }) (tools.Result, error) {
-					return t.Status(ctx, entry.kind, args.ID)
+					return t.Status(ctx, args.ID)
 				}),
-			spec(entry.prefix+"_cancel", "Cancel a running job.", idProperties, []string{"id"}, false,
-				func(ctx context.Context, args struct{ ID string }) (string, error) {
-					return t.Cancel(ctx, entry.kind, args.ID)
-				}),
+			spec("background_cancel", "Cancel a running background job.", idProperties, []string{"id"}, false,
+				func(ctx context.Context, args struct{ ID string }) (string, error) { return t.Cancel(ctx, args.ID) }),
 		)
 	}
 	return out
+}
+
+func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, error), variants map[string]subagent.Variant) tools.Tool {
+	names := subagent.Names(variants)
+	var listing strings.Builder
+	for _, name := range names {
+		listing.WriteString("\n- " + name)
+		if d := variants[name].Description; d != "" {
+			listing.WriteString(": " + d)
+		}
+	}
+	enum, _ := json.Marshal(names)
+	properties := `{"goal":{"type":"string","description":"What the subtask must achieve."},` +
+		`"return_spec":{"description":"What to return: prose, or a JSON Schema object.","anyOf":[{"type":"string"},{"type":"object"}]},` +
+		`"variant":{"type":"string","enum":` + string(enum) + `,"description":"Which kind of subtask runs it. Required; choose deliberately."},` +
+		`"inputs":{"type":"object","description":"Values the subtask needs verbatim."},` +
+		`"context":{"type":"object","description":"Parent context to share (last_n, include, full)."},` +
+		`"background":{"type":"boolean","description":"Run in the background and get a job id; completion arrives as a notice."}}`
+	description := "Delegate a focused goal to a child conversation and get back its result, not its tool traffic. " +
+		"The result has a status: ok, partial, limit (stopped at a step, token or time budget; the result is incomplete), error or cancelled. Variants:" + listing.String()
+	return specResult(subagent.ToolName, description, properties, []string{"goal", "return_spec", "variant"}, false, run)
 }

@@ -22,7 +22,7 @@ const BuiltinNotes github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinQuestions github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinShell github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinSkills github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
-const BuiltinSubagents github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinSubtasks github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 type Compacted = github.com/hollis-labs/nanite/internal/events.Compacted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int
@@ -249,13 +249,17 @@ type SlotsAssembled = github.com/hollis-labs/nanite/internal/events.SlotsAssembl
 type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFinished struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
+  field Variant string
+  field Status string
   field Result github.com/hollis-labs/nanite/internal/events.Result
   field Err error
   field Limit string
 type SubagentStarted = github.com/hollis-labs/nanite/internal/events.SubagentStarted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
-  field Role string
+  field Variant string
+  field Goal string
+  field Background bool
 type TextDelta = github.com/hollis-labs/nanite/internal/events.TextDelta struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Text string
@@ -296,3 +300,4 @@ type Usage = github.com/hollis-labs/nanite/internal/events.Usage struct
   field OutputTokens int
   field CacheReadTokens int
   field CacheWriteTokens int
+  field Subtask string

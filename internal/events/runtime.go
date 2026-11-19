@@ -74,7 +74,11 @@ func (r *Runtime) Observe(ctx context.Context, conversation, turn string, event 
 	case SubagentStarted:
 		emit(runtimeevents.KindAgentSubagentSpawn, map[string]any{"child_id": e.ID, "role": e.Role})
 	case SubagentFinished:
-		emit(runtimeevents.KindAgentSubagentStop, map[string]any{"child_id": e.ID, "is_error": e.Err != nil})
+		payload := map[string]any{"child_id": e.ID, "is_error": e.Err != nil || e.Limit != ""}
+		if e.Limit != "" {
+			payload["limit"] = e.Limit
+		}
+		emit(runtimeevents.KindAgentSubagentStop, payload)
 	case PermissionAsked:
 		emit(runtimeevents.KindAgentPermissionRequested, map[string]any{"id": e.Request.ID, "tool": e.Request.Tool, "reason": e.Request.Reason})
 	case PermissionResolved:

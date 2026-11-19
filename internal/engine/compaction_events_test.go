@@ -97,3 +97,46 @@ func TestCompactionReportsFailure(t *testing.T) {
 		t.Fatalf("compaction events: %q", got)
 	}
 }
+
+func TestCompactionWithoutProgressIsNotRetried(t *testing.T) {
+	// A window this small always needs compaction, and a one-turn history
+	// has nothing a summary can replace, so no pass frees anything.
+	p := &watchedProvider{Provider: fake.New(toolResponse("unknown"), toolResponse("unknown"), toolResponse("unknown"), fake.Text("done"))}
+	e, _, id := setupEngine(t, p, "runtime:\n  context_window: 200\n")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := compactionEvents(t, run)
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "started" || !strings.HasPrefix(got[1], "failed: ") {
+		t.Fatalf("compaction events: %q", got)
+	}
+	if p.summaries > 1 {
+		t.Fatalf("summarizer called %d times", p.summaries)
+	}
+}
+
+type emptySummaries struct{ *watchedProvider }
+
+func (emptySummaries) Complete(context.Context, llmtypes.ChatRequest) (string, error) {
+	return "  ", nil
+}
+
+func TestEmptySummaryIsNotACompaction(t *testing.T) {
+	e, db, id := setupEngine(t, emptySummaries{overflowThen(fake.Text("unused"))}, "")
+	seedLongHistory(t, db, id)
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := compactionEvents(t, run)
+	if len(got) != 2 || got[0] != "started" || !strings.Contains(got[1], "summary is empty") {
+		t.Fatalf("compaction events: %q", got)
+	}
+	if summary, _, _, err := db.ModelHistory(t.Context(), id); err != nil || summary != "" {
+		t.Fatalf("recorded summary %q, %v", summary, err)
+	}
+}

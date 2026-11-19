@@ -5,6 +5,7 @@ package anthropic
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,9 +36,9 @@ const DefaultBreakerThreshold = 3
 var ErrModelRequired = errors.New("anthropic: ChatRequest.Model is required (set runtime.model)")
 
 // InterleavedThinkingBetaHeader is the beta header value that enables
-// interleaved thinking (thinking_delta blocks). Supported on Claude
-// Opus/Sonnet/Haiku 4.x models with a release-date suffix on or after
-// 20250514. Mirrors the constant the deleted adapter exported.
+// interleaved thinking (thinking_delta blocks). Supported on Claude 4.x
+// models released on or after 20250514 and on every later major version;
+// see modelSupportsInterleavedThinking.
 const InterleavedThinkingBetaHeader = "interleaved-thinking-2025-05-14"
 
 // Client wraps the Messages API with rate tracking and a circuit breaker.
@@ -218,7 +219,10 @@ func (c *Client) RateLimitTPM() int {
 	return limit
 }
 
-// Capabilities reports supported message and tool features.
+// Capabilities reports supported message and tool features. MaxTokens and
+// ContextWindowSize are a conservative floor shared by every Claude model;
+// the engine sizes requests from the agent's runtime.max_output_tokens and
+// runtime.context_window, not from these values.
 func (c *Client) Capabilities() llmtypes.ProviderCapabilities {
 	return llmtypes.ProviderCapabilities{
 		SupportsStreamJSON:          true,   // streaming with tool use
@@ -234,37 +238,57 @@ func (c *Client) Capabilities() llmtypes.ProviderCapabilities {
 }
 
 // modelSupportsInterleavedThinking reports whether the given model ID
-// supports the interleaved-thinking-2025-05-14 beta. Accepts the canonical
-// Anthropic naming pattern claude-{opus|sonnet|haiku}-4[-<minor>]-<YYYYMMDD>
-// with the trailing date on or after minInterleavedThinkingModelDate.
+// supports the interleaved-thinking-2025-05-14 beta. Claude model IDs have
+// the shape claude-<family>-<major>[-<minor>][-<YYYYMMDD>]:
 //
-// Mirrors the helper from the deleted adapter; release-date-bare model
-// aliases (e.g. claude-sonnet-4-5) are not gated here — callers using a
-// dated model string get the precise check.
+//   - major 5 and later: supported, dated or not (claude-sonnet-5-5,
+//     claude-opus-5-20261001).
+//   - major 4: supported. A dated ID must be on or after 20250514, the
+//     beta's release; an undated alias (claude-sonnet-4-5) names a model
+//     from that release or later.
+//   - anything else, including Claude 3.x and non-Claude IDs: not supported.
 func modelSupportsInterleavedThinking(model string) bool {
 	parts := strings.Split(strings.ToLower(model), "-")
-	if len(parts) != 4 && len(parts) != 5 {
+	if len(parts) < 3 || len(parts) > 5 || parts[0] != "claude" || !allLetters(parts[1]) {
 		return false
 	}
-	if parts[0] != "claude" {
+	date := ""
+	if last := parts[len(parts)-1]; len(last) == 8 && allDigits(last) {
+		date, parts = last, parts[:len(parts)-1]
+	}
+	if len(parts) < 3 || len(parts) > 4 {
 		return false
 	}
-	switch parts[1] {
-	case "opus", "sonnet", "haiku":
-	default:
+	for _, version := range parts[2:] {
+		if len(version) > 2 || !allDigits(version) {
+			return false
+		}
+	}
+	major, err := strconv.Atoi(parts[2])
+	if err != nil {
 		return false
 	}
-	if parts[2] != "4" {
+	switch {
+	case major >= 5:
+		return true
+	case major == 4:
+		// Fixed 8-digit width makes the string compare a date compare.
+		return date == "" || date >= "20250514"
+	}
+	return false
+}
+
+// allLetters reports whether s is a non-empty run of ASCII letters.
+func allLetters(s string) bool {
+	if s == "" {
 		return false
 	}
-	dateStr := parts[len(parts)-1]
-	if !allDigits(dateStr) || len(dateStr) != 8 {
-		return false
+	for _, r := range s {
+		if r < 'a' || r > 'z' {
+			return false
+		}
 	}
-	// Compare lexicographically — fixed 8-digit width makes string compare
-	// semantically equivalent to numeric compare for valid YYYYMMDD. Min
-	// release date is 2025-05-14 (interleaved-thinking-2025-05-14 GA).
-	return dateStr >= "20250514"
+	return true
 }
 
 // allDigits reports whether s consists entirely of decimal digits.

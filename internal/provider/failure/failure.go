@@ -12,6 +12,11 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
+// ErrEmptyResponse is the error every adapter's Complete returns, wrapped,
+// when the model produced no text: no choices, no text blocks, or only
+// whitespace. See the provider package doc for the full contract.
+var ErrEmptyResponse = errors.New("provider: model returned an empty response")
+
 type Class string
 
 const (

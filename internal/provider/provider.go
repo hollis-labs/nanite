@@ -1,4 +1,21 @@
 // Package provider wires native model adapters and gateway credentials.
+//
+// # Empty output
+//
+// Every adapter follows one contract for a model that produces nothing:
+//
+//   - Complete returns an error wrapping failure.ErrEmptyResponse when the
+//     response has no usable text: no choices, no text blocks, or only
+//     whitespace. It never returns "" with a nil error. This holds for the
+//     Anthropic Messages adapter and both OpenAI paths (Chat Completions and
+//     Responses). Callers that can tolerate emptiness test for it with
+//     errors.Is.
+//   - StreamChat reports a stream that ends normally with no text and no
+//     tool calls the same way on every adapter: a usage event (when the
+//     provider sends one) and then EventDone, with no error. An empty step is
+//     not a failure on the streaming path, because a model may legitimately
+//     end its turn with nothing to add after a tool result. The engine
+//     finishes such a turn with an empty reply.
 package provider
 
 import (

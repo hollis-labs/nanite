@@ -21,6 +21,9 @@ type Outcome struct {
 	Output   string
 	ExitCode *int
 	Err      error
+	// Limit is set when the task stopped at a step, token or context limit
+	// rather than finishing its work. The job ends with status "limit".
+	Limit string
 }
 type Task struct {
 	PID  int
@@ -112,6 +115,8 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 		job.Status = "cancelled"
 	} else if got.Err != nil || (got.ExitCode != nil && *got.ExitCode != 0) {
 		job.Status = "failed"
+	} else if got.Limit != "" {
+		job.Status, job.Reason = "limit", got.Limit
 	}
 	output := got.Output
 	if got.Err != nil {
@@ -125,8 +130,12 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 			job.Status = "failed"
 		}
 	}
+	status := job.Status
+	if job.Status == "limit" {
+		status = "stopped at a limit (" + job.Reason + ") before finishing"
+	}
 	n := store.Notice{ID: store.NewID(time.Now()), ConversationID: job.ConversationID, Kind: job.Kind,
-		Body: fmt.Sprintf("%s job %s %s. Output: %s", job.Kind, job.ID, job.Status, job.OutputPath)}
+		Body: fmt.Sprintf("%s job %s %s. Output: %s", job.Kind, job.ID, status, job.OutputPath)}
 	n.Body = m.scrub.Text(n.Body)
 	if err := m.db.CompleteJob(context.WithoutCancel(ctx), job, n); err != nil {
 		m.logger.Warn("persist background job completion failed", "job", job.ID, "error", m.scrub.Text(err.Error()))

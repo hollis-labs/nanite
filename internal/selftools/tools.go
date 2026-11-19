@@ -60,6 +60,14 @@ func New(db *store.Store, conversation string, roots []string) []tools.Tool {
 }
 
 func spec[Args any](name, description, properties string, required []string, readOnly bool, handle func(context.Context, Args) (string, error)) tools.Tool {
+	return specResult(name, description, properties, required, readOnly, func(ctx context.Context, args Args) (tools.Result, error) {
+		text, err := handle(ctx, args)
+		return tools.Result{Text: text}, err
+	})
+}
+
+// specResult is spec for a handler that sets the result's error flag itself.
+func specResult[Args any](name, description, properties string, required []string, readOnly bool, handle func(context.Context, Args) (tools.Result, error)) tools.Tool {
 	fields, _ := json.Marshal(required)
 	schema := `{"type":"object","properties":` + properties + `,"additionalProperties":false`
 	if len(required) > 0 {
@@ -72,8 +80,7 @@ func spec[Args any](name, description, properties string, required []string, rea
 			if err := json.Unmarshal(call.Input, &args); err != nil {
 				return tools.Result{}, err
 			}
-			text, err := handle(ctx, args)
-			return tools.Result{Text: text}, err
+			return handle(ctx, args)
 		},
 	}
 }

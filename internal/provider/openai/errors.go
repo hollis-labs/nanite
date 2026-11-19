@@ -10,7 +10,7 @@ import (
 	sdk "github.com/openai/openai-go/v3"
 )
 
-var errEmptyResponse = errors.New("openai: empty response")
+var errEmptyResponse = fmt.Errorf("openai: %w", failure.ErrEmptyResponse)
 
 func translateError(err error) error {
 	if err == nil {

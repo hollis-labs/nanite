@@ -130,15 +130,28 @@ func TestModelSupportsInterleavedThinking(t *testing.T) {
 		model string
 		want  bool
 	}{
+		// 4.x dated
 		{"claude-opus-4-20250514", true},
 		{"claude-sonnet-4-5-20250930", true},
 		{"claude-haiku-4-5-20251001", true},
-		{"claude-sonnet-4-20250101", false}, // pre-min date
-		{"claude-opus-4-0", false},          // no date
+		{"claude-sonnet-4-20250101", false}, // before the beta's release
+		// 4.x undated aliases
+		{"claude-opus-4-0", true},
+		{"claude-sonnet-4-5", true},
+		// 5.x dated and undated
+		{"claude-sonnet-5-5", true},
+		{"claude-opus-5", true},
+		{"claude-haiku-5-5-20261001", true},
+		{"claude-fable-5-2", true},
+		{"CLAUDE-SONNET-5-5", true},
+		// not supported
 		{"claude-opus-3-5-20250514", false}, // wrong major
-		{"claude-opus-40-20250514", false},  // false-prefix
-		{"claude-sonnet-4-5", false},        // no date suffix
-		{"gpt-4-turbo-20240414", false},     // wrong family
+		{"claude-3-5-sonnet-20241022", false},
+		{"claude-opus-40-20250514", true}, // major 40 is a later major
+		{"claude-opus-400-20250514", false},
+		{"claude-sonnet-5-5-preview", false},
+		{"claude-sonnet", false},
+		{"gpt-4-turbo-20240414", false}, // not Claude
 		{"", false},
 	}
 	for _, tc := range cases {

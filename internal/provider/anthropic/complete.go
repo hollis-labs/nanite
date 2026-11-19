@@ -7,14 +7,14 @@ import (
 
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 )
 
 // Complete implements llmcontracts.Provider.Complete. Non-streaming
 // completion. Returns the concatenated text from all "text" content blocks.
 //
-// Mirrors the deleted adapter's behavior: returns an error when the
-// response had no text blocks (rather than an empty string) so callers
-// can distinguish "no content" from "tool_use only".
+// A response with no text, or only whitespace, returns an error wrapping
+// failure.ErrEmptyResponse rather than an empty string.
 func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
 	api, err := c.client(ctx)
 	if err != nil {
@@ -41,8 +41,8 @@ func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string,
 			b.WriteString(block.Text)
 		}
 	}
-	if b.Len() == 0 {
-		return "", fmt.Errorf("anthropic complete: response had no text blocks")
+	if strings.TrimSpace(b.String()) == "" {
+		return "", fmt.Errorf("anthropic complete: %w", failure.ErrEmptyResponse)
 	}
 	return b.String(), nil
 }

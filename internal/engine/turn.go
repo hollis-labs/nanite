@@ -48,7 +48,25 @@ type execution struct {
 	specs      []llmtypes.ToolDefinition
 	loop       *loopdetect.Detector
 	result     events.Result
+	// compactions counts compaction passes in this turn; stalled is set once
+	// a pass frees too little, so later steps stop retrying it.
+	compactions int
+	stalled     bool
 }
+
+// Compaction limits for one turn. A pass that frees less than
+// minCompactionGain of the estimate does not count as progress.
+const (
+	maxCompactionsPerTurn = 3
+	minCompactionGain     = 0.10
+)
+
+// errCompactionNoProgress reports a compaction pass that freed too little
+// context to be worth repeating.
+var errCompactionNoProgress = errors.New("compaction freed too little context")
+
+// errEmptySummary reports a summarizer that returned no text.
+var errEmptySummary = errors.New("compaction summary is empty")
 
 func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, input Input, state slots.Snapshot, prev map[string]string, hostTools []tools.Tool, hostSkills []skills.Skill, interrupted *store.InterruptedTurn) {
 	ctx, endSpan := events.TurnSpan(ctx)
@@ -312,7 +330,7 @@ func (x *execution) generate(ctx context.Context) error {
 			return runloop.Terminate
 		}
 		if x.result.Steps >= x.definition.Runtime.MaxSteps {
-			x.result.StopReason = "max_steps"
+			x.result.StopReason = events.StopMaxSteps
 			return runloop.Finish
 		}
 		if runErr = x.compact(ctx, false); runErr != nil {
@@ -372,25 +390,45 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	}
 	window := x.assembled.Window
 	window.SetContent(ctxpkg.SlotConversation, string(raw))
-	if !force && !window.NeedsCompaction() {
+	if !force && (x.stalled || !window.NeedsCompaction()) {
 		return nil
 	}
+	if x.compactions >= maxCompactionsPerTurn {
+		x.stalled = true
+		if !force {
+			return nil
+		}
+		return errCompactionNoProgress
+	}
+	x.compactions++
 	before := est.Estimate(string(raw))
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 		return events.CompactionStarted{EventMeta: meta, Before: before}
 	})
-	// Every start is followed by exactly one outcome. Paths that end without
-	// a durable summary report the estimate unchanged.
-	reported := false
+	// Every start is followed by exactly one outcome. A pass that fails or
+	// frees too little stops further passes in this turn. On the step path
+	// compaction is opportunistic: the turn continues without it. A forced
+	// pass, made to recover from an overflow, returns the error so the request
+	// is not retried unchanged.
+	after := before
 	defer func() {
-		if reported {
-			return
+		failure := retErr
+		if failure == nil && float64(before-after) < minCompactionGain*float64(before) {
+			failure = errCompactionNoProgress
+		}
+		if failure != nil {
+			x.stalled = true
+			if force || ctx.Err() != nil {
+				retErr = failure
+			} else {
+				x.engine.cfg.Logger.WarnContext(ctx, "compaction skipped for the rest of the turn", "error", x.engine.scrub.Text(failure.Error()))
+			}
 		}
 		x.run.emit(context.WithoutCancel(ctx), func(meta events.EventMeta) events.Event {
-			if retErr != nil {
-				return events.CompactionFailed{EventMeta: meta, Err: retErr}
+			if failure != nil {
+				return events.CompactionFailed{EventMeta: meta, Err: failure}
 			}
-			return events.Compacted{EventMeta: meta, Before: before, After: before}
+			return events.Compacted{EventMeta: meta, Before: before, After: after}
 		})
 	}()
 	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(x.provider, x.definition.Runtime.Model), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(x.definition.Runtime.Model)}
@@ -408,6 +446,9 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		// carry a message ID so future turns can reconstruct exactly its coverage.
 		if len(pipeline.ConversationMessages) == len(x.messageIDs) {
 			x.messages = pipeline.ConversationMessages
+			if remaining, err := json.Marshal(x.messages); err == nil {
+				after = est.Estimate(string(remaining))
+			}
 		}
 		return nil
 	}
@@ -422,19 +463,16 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	if err != nil {
 		return err
 	}
-	after := est.Estimate(string(remaining))
+	shrunk := est.Estimate(string(remaining))
 	now := time.Now().UTC()
 	if err := x.journal.RecordCompaction(store.NewID(now), now, store.Compaction{
-		TurnID: x.run.id, ThroughMessageID: through, Summary: summary, Before: before, After: after,
+		TurnID: x.run.id, ThroughMessageID: through, Summary: summary, Before: before, After: shrunk,
 	}); err != nil {
 		return err
 	}
 	x.messages = compacted
 	x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
-	reported = true
-	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.Compacted{EventMeta: meta, Before: before, After: after}
-	})
+	after = shrunk
 	return nil
 }
 
@@ -459,6 +497,10 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 	spanCtx, endSpan := events.ModelSpan(ctx, s.model)
 	defer endSpan()
 	summary, err := s.Summarizer.Summarize(spanCtx, prompt, span[:end])
+	if err == nil && strings.TrimSpace(summary) == "" {
+		// An empty summary would drop the span with nothing in its place.
+		err = errEmptySummary
+	}
 	if err == nil {
 		s.count, s.summary = end, summary
 	}

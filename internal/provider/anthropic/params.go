@@ -97,11 +97,8 @@ func (c *Client) buildTools(tools []llmtypes.ToolDefinition, plan cachePlan) []s
 	out := make([]sdk.ToolUnionParam, len(tools))
 	for i, t := range tools {
 		toolParam := sdk.ToolParam{
-			Name: t.Name,
-			InputSchema: sdk.ToolInputSchemaParam{
-				Properties: extractSchemaProperties(t.InputSchema),
-				Required:   extractSchemaRequired(t.InputSchema),
-			},
+			Name:        t.Name,
+			InputSchema: buildInputSchema(t.InputSchema),
 		}
 		if t.Description != "" {
 			toolParam.Description = sdk.String(t.Description)
@@ -288,18 +285,38 @@ func (c *Client) buildMessageParams(in llmtypes.ChatRequest, model string, inter
 	return params
 }
 
-// extractSchemaProperties pulls the "properties" map out of a JSON-schema
-// document (passed as map[string]any) for use in ToolInputSchemaParam.
-// Returns nil when properties are absent — Anthropic accepts an empty
-// properties object.
-func extractSchemaProperties(schema map[string]any) any {
-	if schema == nil {
-		return nil
+// buildInputSchema carries a tool's whole JSON-schema document into
+// ToolInputSchemaParam. Properties and required go to their typed fields;
+// every other keyword ($defs, anyOf, additionalProperties, description and
+// so on) goes through ExtraFields so nothing the tool declared is dropped.
+// "type" is always "object", which is all the Messages API accepts.
+func buildInputSchema(schema map[string]any) sdk.ToolInputSchemaParam {
+	param := sdk.ToolInputSchemaParam{
+		Properties: extractSchemaProperties(schema),
+		Required:   extractSchemaRequired(schema),
 	}
-	if p, ok := schema["properties"]; ok {
+	for k, v := range schema {
+		switch k {
+		case "type", "properties", "required":
+			continue
+		}
+		if param.ExtraFields == nil {
+			param.ExtraFields = make(map[string]any, len(schema))
+		}
+		param.ExtraFields[k] = v
+	}
+	return param
+}
+
+// extractSchemaProperties pulls the "properties" map out of a JSON-schema
+// document. A schema without one (a no-argument tool, or one built from
+// anyOf/$ref) gets an empty object, so the request always carries
+// "properties" rather than a bare {"type":"object"}.
+func extractSchemaProperties(schema map[string]any) any {
+	if p, ok := schema["properties"]; ok && p != nil {
 		return p
 	}
-	return nil
+	return map[string]any{}
 }
 
 // extractSchemaRequired pulls the "required" array out of a JSON-schema

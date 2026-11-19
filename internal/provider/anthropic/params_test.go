@@ -589,3 +589,73 @@ func TestNonStreamingRequest_CapsUnsetMaxTokens(t *testing.T) {
 }
 
 // The value reaches the wire params for the streaming path.
+
+// A tool whose schema has no "properties" key must still reach the API with
+// its schema intact: an empty properties object plus every other keyword.
+func TestBuildTools_SchemaWithoutPropertiesIsKept(t *testing.T) {
+	c := New()
+	schema := map[string]any{
+		"type":                 "object",
+		"description":          "pick one shape",
+		"additionalProperties": false,
+		"anyOf": []any{
+			map[string]any{"properties": map[string]any{"id": map[string]any{"type": "string"}}, "required": []any{"id"}},
+			map[string]any{"properties": map[string]any{"name": map[string]any{"type": "string"}}, "required": []any{"name"}},
+		},
+	}
+	out := c.buildTools([]llmtypes.ToolDefinition{{Name: "lookup", InputSchema: schema}}, cachePlan{})
+	data, err := json.Marshal(out[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		InputSchema map[string]any `json:"input_schema"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	in := got.InputSchema
+	if in["type"] != "object" {
+		t.Fatalf("type = %v, want object: %s", in["type"], data)
+	}
+	if p, ok := in["properties"].(map[string]any); !ok || len(p) != 0 {
+		t.Fatalf("properties = %v, want empty object: %s", in["properties"], data)
+	}
+	for _, k := range []string{"anyOf", "additionalProperties", "description"} {
+		if _, ok := in[k]; !ok {
+			t.Fatalf("input_schema lost %q: %s", k, data)
+		}
+	}
+	if branches, _ := in["anyOf"].([]any); len(branches) != 2 {
+		t.Fatalf("anyOf = %v, want 2 branches", in["anyOf"])
+	}
+}
+
+func TestBuildTools_EmptySchemaGetsObjectWithProperties(t *testing.T) {
+	c := New()
+	for _, schema := range []map[string]any{nil, {}, {"type": "object"}} {
+		out := c.buildTools([]llmtypes.ToolDefinition{{Name: "ping", InputSchema: schema}}, cachePlan{})
+		data, _ := json.Marshal(out[0])
+		if !strings.Contains(string(data), `"input_schema":{"properties":{},"type":"object"}`) {
+			t.Fatalf("schema %v: got %s", schema, data)
+		}
+	}
+}
+
+func TestBuildTools_SchemaWithPropertiesKeepsOtherKeywords(t *testing.T) {
+	c := New()
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"q": map[string]any{"$ref": "#/$defs/query"}},
+		"required":             []any{"q"},
+		"$defs":                map[string]any{"query": map[string]any{"type": "string"}},
+		"additionalProperties": false,
+	}
+	out := c.buildTools([]llmtypes.ToolDefinition{{Name: "search", InputSchema: schema}}, cachePlan{})
+	data, _ := json.Marshal(out[0])
+	for _, want := range []string{`"$defs":{"query":{"type":"string"}}`, `"additionalProperties":false`, `"required":["q"]`, `"$ref":"#/$defs/query"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("missing %s in %s", want, data)
+		}
+	}
+}

@@ -323,3 +323,8 @@ notice, not counted into whichever turn happens to be running.
   because usage doesn't carry a price yet.
 - A child can't yet search the parent's tool catalog for tools it wasn't
   given (CM-4), and there is no long-lived companion subtask (CM-7).
+
+## Measuring it
+
+The Code Mode evals compare direct tool use with `subtask`, and settings such
+as `last_n` and the result cap, on six tasks, from the trace records. See [evals/code-mode.md](evals/code-mode.md).

@@ -1,0 +1,8 @@
+For the release notes later: the release codename is Cedar and the ship date is 2026-12-05.
+Correction: the codename is Juniper, not Cedar. The ship date stays the same.
+The release owner is Dana Reyes.
+Unrelated: what's a good way to keep a meeting to time?
+And how long should a status update be?
+Should agendas go out the day before?
+Who usually takes notes in a design review?
+What is a good default length for a retro?

@@ -106,6 +106,14 @@ NANITE_LIVE_TEST=1 go test ./cmd/nanite -run '^TestLiveGatewayToolTurn$' -count=
 It opens a temporary agent, verifies one real `read_file` tool call, and
 checks the model's reply for the fixture content.
 
+The Code Mode evals have a live run too. It uses the same credentials, spends
+money under a dollar cap, and never runs in CI. See
+[evals/code-mode.md](evals/code-mode.md):
+
+```sh
+go run ./cmd/nanite-eval -live -model claude-sonnet-5-5 -max-usd 10 -turn-tokens 150000 -out docs/evals/live-YYYY-MM-DD
+```
+
 ## Manual end-to-end check
 
 Start at the repository root. For the model turns, configure credentials and

@@ -1,0 +1,313 @@
+{
+  "results": [
+    {
+      "scenario": "code-search",
+      "arm": "direct",
+      "mode": "direct",
+      "success": true,
+      "parent_context_tokens": 10491,
+      "total_tokens": 10575,
+      "cost_usd": 0.163665,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 4,
+      "subtasks": 0,
+      "compactions": 0,
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "code-search",
+      "arm": "subtask",
+      "mode": "subtask",
+      "success": true,
+      "parent_context_tokens": 5073,
+      "total_tokens": 17767,
+      "cost_usd": 0.276825,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "research"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "read_file",
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "research",
+      "arm": "direct",
+      "mode": "direct",
+      "success": true,
+      "parent_context_tokens": 8125,
+      "total_tokens": 8192,
+      "cost_usd": 0.1269,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 3,
+      "subtasks": 0,
+      "compactions": 0,
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "research",
+      "arm": "subtask",
+      "mode": "subtask",
+      "success": true,
+      "parent_context_tokens": 5043,
+      "total_tokens": 15384,
+      "cost_usd": 0.24072,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "research"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "read_file",
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "chore",
+      "arm": "direct",
+      "mode": "direct",
+      "success": true,
+      "parent_context_tokens": 11889,
+      "total_tokens": 12870,
+      "cost_usd": 0.25191,
+      "wall_ms": 0,
+      "approvals": 6,
+      "parent_tool_calls": 13,
+      "subtasks": 0,
+      "compactions": 0,
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "chore",
+      "arm": "subtask",
+      "mode": "subtask",
+      "success": true,
+      "parent_context_tokens": 5262,
+      "total_tokens": 20798,
+      "cost_usd": 0.37527,
+      "wall_ms": 0,
+      "approvals": 6,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "worker"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "list_dir",
+        "read_file",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "council",
+      "arm": "direct",
+      "mode": "direct",
+      "success": true,
+      "parent_context_tokens": 4240,
+      "total_tokens": 4288,
+      "cost_usd": 0.0672,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 1,
+      "subtasks": 0,
+      "compactions": 0,
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "council",
+      "arm": "subtask",
+      "mode": "subtask",
+      "success": true,
+      "parent_context_tokens": 5141,
+      "total_tokens": 29196,
+      "cost_usd": 0.46404,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 1,
+      "subtasks": 4,
+      "variants": [
+        "council",
+        "reviewer"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "read_file",
+        "return_result",
+        "subtask"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "history",
+      "arm": "direct",
+      "mode": "direct",
+      "success": true,
+      "parent_context_tokens": 5201,
+      "total_tokens": 5250,
+      "cost_usd": 0.08169,
+      "wall_ms": 0,
+      "approvals": 1,
+      "parent_tool_calls": 1,
+      "subtasks": 0,
+      "compactions": 0,
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "history",
+      "arm": "subtask",
+      "mode": "subtask",
+      "last_n": 6,
+      "success": true,
+      "parent_context_tokens": 6159,
+      "total_tokens": 14772,
+      "cost_usd": 0.2304,
+      "wall_ms": 0,
+      "approvals": 1,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "scribe"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "parent_history_search",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "history",
+      "arm": "subtask last_n=1",
+      "mode": "subtask",
+      "last_n": 1,
+      "success": true,
+      "parent_context_tokens": 6159,
+      "total_tokens": 14638,
+      "cost_usd": 0.22839,
+      "wall_ms": 0,
+      "approvals": 1,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "scribe"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "parent_history_search",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "history",
+      "arm": "subtask last_n=20",
+      "mode": "subtask",
+      "last_n": 20,
+      "success": true,
+      "parent_context_tokens": 6159,
+      "total_tokens": 15153,
+      "cost_usd": 0.236115,
+      "wall_ms": 0,
+      "approvals": 1,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "scribe"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "parent_history_search",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "inventory",
+      "arm": "direct",
+      "mode": "direct",
+      "success": true,
+      "parent_context_tokens": 7022,
+      "total_tokens": 7044,
+      "cost_usd": 0.10698,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 1,
+      "subtasks": 0,
+      "compactions": 0,
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "inventory",
+      "arm": "subtask",
+      "mode": "subtask",
+      "success": true,
+      "parent_context_tokens": 7783,
+      "total_tokens": 18962,
+      "cost_usd": 0.45423,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 1,
+      "subtasks": 1,
+      "variants": [
+        "research"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 0
+    },
+    {
+      "scenario": "inventory",
+      "arm": "subtask result_cap=1500",
+      "mode": "subtask",
+      "result_cap": 1500,
+      "success": true,
+      "parent_context_tokens": 11289,
+      "total_tokens": 22482,
+      "cost_usd": 0.50787,
+      "wall_ms": 0,
+      "approvals": 0,
+      "parent_tool_calls": 2,
+      "subtasks": 1,
+      "variants": [
+        "research"
+      ],
+      "compactions": 0,
+      "subtask_tools": [
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 1
+    }
+  ],
+  "model": "scripted",
+  "price": {
+    "Input": 15,
+    "Output": 75,
+    "CacheRead": 1.5,
+    "CacheWrite": 18.75
+  },
+  "spent_usd": 5.084445
+}

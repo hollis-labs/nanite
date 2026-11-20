@@ -78,6 +78,10 @@ type Config struct {
 	// tokens and estimated compaction summaries count. Reaching it stops
 	// running subtasks mid-step and the turn at its next step.
 	TurnTokenBudget int
+	// CompactAt, when positive, is the estimated request size in tokens
+	// (system blocks, tool schemas and conversation together) at which the
+	// conversation is compacted. Zero uses 80% of the runtime context window.
+	CompactAt int
 }
 
 type Engine struct {

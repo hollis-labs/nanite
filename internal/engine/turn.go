@@ -56,6 +56,15 @@ type execution struct {
 	specs           []llmtypes.ToolDefinition
 	loop            *loopdetect.Detector
 	result          events.Result
+	// lastRequestTokens is the input the provider reported for the latest
+	// request and lastRequestEstimate what Nanite estimated for it; their
+	// ratio calibrates the compaction check.
+	lastRequestTokens, lastRequestEstimate int
+	// schemaTokens is the estimated size of this turn's tool schemas.
+	schemaTokens int
+	// warnedStatic is set once the turn has warned that fixed content alone
+	// fills the compaction budget.
+	warnedStatic bool
 	// toolCalls and passes record the turn's tool calls and compaction
 	// passes for its trace record.
 	toolCalls []trace.ToolCall
@@ -305,6 +314,11 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
+	x.sizeWindow()
+	if x.schemaTokens > 0 {
+		// The trace shows the tool schemas' share of the request.
+		tr.rec.Slots = append(tr.rec.Slots, trace.Slot{Name: "tool_schemas", Tokens: x.schemaTokens})
+	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)
 	if err != nil {
 		return events.Result{}, err
@@ -451,6 +465,7 @@ func (x *execution) generate(ctx context.Context) error {
 		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)
 		callCtx, cancelCall := context.WithCancel(spanCtx)
 		cancel := func() { cancelCall(); endSpan() }
+		x.estimateRequest()
 		stream, err := x.provider.StreamChat(callCtx, req)
 		if err != nil {
 			cancel()
@@ -570,7 +585,8 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	}
 	window := x.assembled.Window
 	window.SetContent(ctxpkg.SlotConversation, string(raw))
-	if !force && (x.stalled || !window.NeedsCompaction()) {
+	defer x.calibrate(window)()
+	if !force && (x.stalled || !x.needsCompaction(window)) {
 		return nil
 	}
 	if x.compactions >= maxCompactionsPerTurn {
@@ -807,6 +823,12 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			x.ownUsage.CacheWriteTokens += u.CacheCreationTokens
 			x.usageMu.Unlock()
 			x.shared.add(u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens)
+			// What the provider counted for the request just sent: its input,
+			// cached or not. Compaction checks it against the budget too,
+			// since a size estimate can be well off.
+			if in := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens; in > 0 {
+				x.lastRequestTokens = in
+			}
 			if u.StopReason != "" {
 				x.result.StopReason = u.StopReason
 			}

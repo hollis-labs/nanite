@@ -121,6 +121,12 @@ type Options struct {
 	// runtime.turn_token_budget, else no shared budget": an embedder cannot
 	// turn off a host.yaml budget through Options, only set its own.
 	TurnTokenBudget int
+	// CompactAt, when positive, is the request size in tokens at which the
+	// conversation is compacted. The size counts everything a request
+	// carries: system blocks, tool schemas and conversation. The provider's
+	// reported input for the last request is checked against it too. Zero
+	// uses 80% of host.yaml's runtime.context_window (200,000 when unset).
+	CompactAt int
 }
 
 // TraceRecord is one turn's trace record. Its schema is documented in
@@ -176,6 +182,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("nanite: agent directory required")
+	}
+	if opts.CompactAt < 0 {
+		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
 	}
 	if opts.SubtaskResultCap < 0 {
 		return nil, fmt.Errorf("nanite: SubtaskResultCap must not be negative")
@@ -258,7 +267,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt,
 	})
 	if err != nil {
 		_ = db.Close()

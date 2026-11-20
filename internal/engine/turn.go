@@ -605,9 +605,7 @@ func (x *execution) generate(ctx context.Context) error {
 			return attempt{}, runloop.Terminate
 		}
 		req := llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens,
-			SlotBlocks: blocks, Messages: requestMessages(x.messages, x.messageIDs), Tools: x.specs, CacheHints: []llmtypes.CacheHint{
-				{Position: "system", TTL: x.definition.Runtime.CacheTTL}, {Position: "tools", TTL: x.definition.Runtime.CacheTTL}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
-			}}
+			SlotBlocks: blocks, Messages: requestMessages(x.messages, x.messageIDs), Tools: x.specs, CacheHints: x.cacheHints()}
 		lastRequest = req
 		safeModel := x.engine.scrub.Text(req.Model)
 		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)
@@ -688,7 +686,7 @@ func (x *execution) generate(ctx context.Context) error {
 	if runErr == nil && err == nil && (x.result.StopReason == events.StopMaxSteps || x.result.StopReason == llmtypes.StopReasonTurnLimit) && x.budgetStop() == "" {
 		if lastRequest.Model == "" {
 			lastRequest = llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens, SlotBlocks: blocks, Tools: x.specs,
-				CacheHints: []llmtypes.CacheHint{{Position: "system"}, {Position: "tools"}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1}}}
+				CacheHints: x.cacheHints()}
 		}
 		if closeErr := x.engine.panics.Call("closing reply", func() error { return x.closingReply(ctx, lastRequest, &allText) }); closeErr != nil {
 			x.engine.cfg.Logger.WarnContext(ctx, "closing reply failed; preserving limit result", "error", x.engine.scrub.Text(closeErr.Error()))
@@ -1162,4 +1160,11 @@ func dispositionName(d slots.Disposition) string {
 	case slots.Skip:
 	}
 	return "skip"
+}
+
+// cacheHints marks the system prompt, tools and two most recent user messages
+// for prompt caching; host.yaml's runtime.cache_ttl applies to system and tools.
+func (x *execution) cacheHints() []llmtypes.CacheHint {
+	ttl := x.definition.Runtime.CacheTTL
+	return []llmtypes.CacheHint{{Position: "system", TTL: ttl}, {Position: "tools", TTL: ttl}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1}}
 }

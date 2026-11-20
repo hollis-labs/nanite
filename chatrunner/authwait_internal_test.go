@@ -4,12 +4,13 @@ import "testing"
 
 func TestAuthDecidedValidatesBeforeTakingWait(t *testing.T) {
 	r := openRunner(t)
-	for _, status := range []string{"", "pending", "granted", "approve", "APPROVED", "unknown", "approved", "denied", "expired", "withdrawn"} {
+	for _, status := range []string{"", "pending", "granted", "approve", "APPROVED", " Granted ", " DENIED ", " pending ", "unknown", "approved", "denied", "expired", "withdrawn"} {
 		t.Run(status, func(t *testing.T) {
 			wait := &authWait{RequestID: "req-status", Chats: map[string]string{}}
 			r.auth.waits = map[string]*authWait{wait.RequestID: wait}
 			r.auth.watching = map[string]bool{wait.RequestID: true}
-			valid := status == "approved" || status == "denied" || status == "expired" || status == "withdrawn"
+			normalized := normalizeAuthStatus(status)
+			valid := normalized == "approved" || normalized == "denied" || normalized == "expired" || normalized == "withdrawn"
 			err := r.AuthDecided(t.Context(), wait.RequestID, status)
 			if (err == nil) != valid {
 				t.Fatalf("status %q: error %v", status, err)

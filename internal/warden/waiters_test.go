@@ -1,10 +1,14 @@
 package warden
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type waiterMemory struct {
@@ -102,16 +106,104 @@ func TestWaiterRefusalPersistsAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestWaiterStateRejectsUnknownVersion(t *testing.T) {
-	_, srv := newFake(t)
-	for _, raw := range []string{`{"version":2,"entries":{}}`, `broken`} {
-		s := source(t, srv.URL, credential(t, "parent-0"), nil, nil)
-		state := &waiterMemory{value: raw}
-		if err := s.UseWaiterStore(t.Context(), state); err == nil {
-			t.Fatal("invalid waiter state accepted")
-		}
-		if state.value != raw {
-			t.Fatal("invalid waiter state overwritten")
-		}
+func TestBadWaiterStateDoesNotPreventStartup(t *testing.T) {
+	for i, raw := range []string{`{"version":2,"entries":{}}`, `broken`} {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			_, srv := newFake(t)
+			s := source(t, srv.URL, credential(t, "parent-0"), nil, nil)
+			var logs bytes.Buffer
+			s.cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+			state := &waiterMemory{value: raw}
+			if err := s.UseWaiterStore(t.Context(), state); err != nil {
+				t.Fatal(err)
+			}
+			if len(s.tokens) != 0 || !strings.Contains(logs.String(), "ignoring saved waiters") {
+				t.Fatalf("bad state was not ignored: %s", logs.String())
+			}
+			if _, err := s.Token(WithConversation(t.Context(), "chat"), "mcp-gateway", nil); err == nil {
+				t.Fatal("missing grant succeeded")
+			}
+			if state.value == raw || !strings.Contains(state.value, "req-1") {
+				t.Fatalf("next save did not replace bad state: %s", state.value)
+			}
+		})
+	}
+}
+
+func TestPendingRequestSurvivesSourceRestart(t *testing.T) {
+	f, srv := newFake(t)
+	file := credential(t, "parent-0")
+	state := &waiterMemory{}
+	first := source(t, srv.URL, file, nil, nil)
+	if err := first.UseWaiterStore(t.Context(), state); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithConversation(t.Context(), "chat")
+	if _, err := first.Token(ctx, "mcp-gateway", nil); err == nil {
+		t.Fatal("missing grant succeeded")
+	}
+	second := source(t, srv.URL, file, nil, nil)
+	if err := second.UseWaiterStore(t.Context(), state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Token(ctx, "mcp-gateway", nil); err == nil {
+		t.Fatal("pending request succeeded")
+	}
+	f.mu.Lock()
+	filed := f.requests
+	f.mu.Unlock()
+	if filed != 1 {
+		t.Fatalf("restart filed %d requests, want 1", filed)
+	}
+}
+
+func TestApprovedWaitersAgeOutOnLoadAndSave(t *testing.T) {
+	for _, reload := range []bool{false, true} {
+		t.Run(fmt.Sprint(reload), func(t *testing.T) {
+			f, srv := newFake(t)
+			clock := &clock{now: time.Unix(1800000000, 0)}
+			file := credential(t, "parent-0")
+			state := &waiterMemory{}
+			s := source(t, srv.URL, file, clock, nil)
+			if err := s.UseWaiterStore(t.Context(), state); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Token(WithConversation(t.Context(), "abandoned-chat"), "mcp-gateway", nil); err == nil {
+				t.Fatal("missing grant succeeded")
+			}
+			s.Decided("req-1", "approved")
+			clock.add(24*time.Hour + time.Second)
+			if reload {
+				s = source(t, srv.URL, file, clock, nil)
+				if err := s.UseWaiterStore(t.Context(), state); err != nil {
+					t.Fatal(err)
+				}
+				if len(s.entry("mcp-gateway", nil).waiters) != 0 {
+					t.Fatal("load retained old waiter")
+				}
+			}
+			// A different request causes a save while the approved chat never retries.
+			if _, err := s.Token(WithConversation(t.Context(), "new-chat"), "another-service", nil); err == nil {
+				t.Fatal("missing grant succeeded")
+			}
+			raw, _ := state.Setting(t.Context(), "", waiterStateKey)
+			if strings.Contains(raw, "abandoned-chat") || !strings.Contains(raw, "new-chat") {
+				t.Fatalf("bad saved waiters: %s", raw)
+			}
+			if len(s.entry("mcp-gateway", nil).waiters) != 0 {
+				t.Fatal("save retained old in-memory waiter")
+			}
+			f.mu.Lock()
+			f.allowed["mcp-gateway"] = true
+			f.mu.Unlock()
+			granted := false
+			s.cfg.OnGranted = func(Waiting) { granted = true }
+			if _, err := s.Token(WithConversation(t.Context(), "abandoned-chat"), "mcp-gateway", nil); err != nil {
+				t.Fatal(err)
+			}
+			if granted {
+				t.Fatal("expired waiter emitted a grant callback")
+			}
+		})
 	}
 }

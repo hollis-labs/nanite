@@ -48,10 +48,11 @@ Also in this release:
   so fast jobs cannot leave accepted plans waiting forever. Concurrent pumps
   and explicit flushes publish each chat’s releases in order.
 
-- Auth decisions accept only `approved`, `denied`, `expired` or `withdrawn`;
-  unknown poll statuses keep watching. Warden conversation waiters persist
-  across restarts, so a successful owner retry still suppresses the later
-  approval notice and automatic retry.
+- Auth decisions normalize case and whitespace, accepting `approved`, `denied`,
+  `expired` or `withdrawn`, with `granted` as an approval alias. Unknown poll
+  statuses keep watching. Warden waiters and pending request IDs persist in
+  engine-owned state across restarts; successful retries suppress later notices.
+  Waiters expire after 24 hours. Bad saved state warns and starts empty.
 
 - Compaction protects both host context slots and checks the threshold before
   a root turn’s first model request, including text-only conversations.

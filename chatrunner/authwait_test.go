@@ -372,7 +372,7 @@ func TestAuthWaitingPushRacingThePollTellsOnce(t *testing.T) {
 			case <-release:
 			case <-ctx.Done():
 			}
-			return "approved", nil
+			return " GRANTED ", nil
 		}
 	})
 	w.waitForGrant(t)
@@ -422,6 +422,9 @@ func TestAuthOwnerRetryAfterRestartSuppressesApproval(t *testing.T) {
 		raw, err := first.runner.Agent().HostState(t.Context(), "auth.waits")
 		return err == nil && strings.Contains(raw, "req-1")
 	})
+	if err := first.runner.Agent().SetHostState(t.Context(), "auth.source-waiters", "host-written garbage"); err != nil {
+		t.Fatal(err)
+	}
 	if err := first.runner.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -444,8 +447,8 @@ func TestAuthOwnerRetryAfterRestartSuppressesApproval(t *testing.T) {
 		return err == nil && raw == ""
 	})
 	raw, err := second.runner.Agent().HostState(t.Context(), "auth.source-waiters")
-	if err != nil || raw != "" {
-		t.Fatalf("source still waits: %q, %v", raw, err)
+	if err != nil || raw != "host-written garbage" {
+		t.Fatalf("source changed host-owned data: %q, %v", raw, err)
 	}
 	notices := second.runner.Agent().SubscribeNotices(t.Context())
 	if err := second.runner.AuthDecided(t.Context(), "req-1", "approved"); err != nil {
@@ -467,7 +470,7 @@ func TestAuthUnknownPollStatusKeepsWatching(t *testing.T) {
 			if polls.Add(1) == 1 {
 				return "unexpected", nil
 			}
-			return "approved", nil
+			return " GRANTED ", nil
 		}
 	})
 	w.waitForGrant(t)

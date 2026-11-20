@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/tools"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
@@ -314,7 +315,7 @@ func (a *Agent) Close() error {
 
 // UseDesk names the providers.yaml use for the front desk's planner. Like
 // every use, it falls back to chat when the file does not select it.
-const UseDesk = "desk"
+const UseDesk = authored.UseDesk
 
 // Complete makes one model request outside any conversation: the provider
 // and model providers.yaml selects for use (UseDesk, or "chat",

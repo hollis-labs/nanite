@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/hollis-labs/nanite/internal/authored"
 )
 
 // DefaultLastN is how many parent messages a child starts with when neither
@@ -13,9 +15,6 @@ const DefaultLastN = 6
 
 // MaxInclude bounds how many context.include items one subtask may ask for.
 const MaxInclude = 8
-
-// MaxLastN bounds last_n; context.full asks for the whole history instead.
-const MaxLastN = 50
 
 // ContextSpec is a subtask's context argument: what the child starts with
 // from its parent conversation.
@@ -43,8 +42,8 @@ func (r Request) ContextSpec() (ContextSpec, error) {
 	if err := dec.Decode(&spec); err != nil {
 		return spec, fmt.Errorf("subtask context: %w", err)
 	}
-	if spec.LastN != nil && (*spec.LastN < 0 || *spec.LastN > MaxLastN) {
-		return spec, fmt.Errorf("subtask context.last_n must be between 0 and %d; use context.full for the whole history", MaxLastN)
+	if spec.LastN != nil && (*spec.LastN < 0 || *spec.LastN > authored.MaxLastN) {
+		return spec, fmt.Errorf("subtask context.last_n must be between 0 and %d; use context.full for the whole history", authored.MaxLastN)
 	}
 	if len(spec.Include) > MaxInclude {
 		return spec, fmt.Errorf("subtask context.include takes at most %d items", MaxInclude)

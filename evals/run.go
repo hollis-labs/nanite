@@ -125,6 +125,9 @@ type Result struct {
 	// StubCalls counts the calls to each of the scenario's stub tools,
 	// subtasks' calls included.
 	StubCalls map[string]int `json:"stub_calls,omitempty"`
+	// HostActions records task host actions and answers, including HostTriggers;
+	// prelude actions are excluded, like StubCalls.
+	HostActions []HostAction `json:"host_actions,omitempty"`
 	// Skipped says why the run did not happen.
 	Skipped string `json:"skipped,omitempty"`
 	// cancelled is set when the run ended with Run's context already
@@ -165,6 +168,9 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 	var jobs []job
 	for _, s := range scenarios {
 		if err := checkStubs(s.Stubs); err != nil {
+			return Report{}, fmt.Errorf("%s: %w", s.Name, err)
+		}
+		if err := checkHostTriggers(s.HostTriggers); err != nil {
 			return Report{}, fmt.Errorf("%s: %w", s.Name, err)
 		}
 	}
@@ -341,12 +347,20 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	if err != nil {
 		return res, err
 	}
+	var hostActions []HostAction
 	send := func(text string) (agent.Result, error) {
 		run, err := conv.Send(runCtx, agent.Input{Text: text})
 		if err != nil {
 			return agent.Result{}, err
 		}
 		for ev := range run.Events() {
+			if steered, ok := ev.(agent.Steered); ok {
+				source := "turn"
+				if steered.Event != "" {
+					source = "event:" + steered.Event
+				}
+				hostActions = append(hostActions, s.HostStubs.record(source, steered.Fired, steered.Actions)...)
+			}
 			if q, ok := ev.(agent.Question); ok {
 				_ = run.Answer(q.ID, agent.Answer{Value: json.RawMessage("null")})
 			}
@@ -364,7 +378,24 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	mu.Unlock()
 	gate.n.Store(0)
 	stubs.reset()
+	hostActions = nil
 	start := time.Now()
+	if runErr == nil {
+		for _, trigger := range s.HostTriggers {
+			var fired agent.HostFired
+			source := "event:" + trigger.Event
+			if trigger.Event != "" {
+				fired, runErr = conv.SteerEvent(runCtx, trigger.Event)
+			} else {
+				source = "focus:" + trigger.Focus
+				fired, runErr = conv.SteerFocus(runCtx, trigger.Focus)
+			}
+			if runErr != nil {
+				break
+			}
+			hostActions = append(hostActions, s.HostStubs.record(source, fired.Fired, fired.Actions)...)
+		}
+	}
 	var result agent.Result
 	if runErr == nil {
 		result, runErr = send(task)
@@ -373,6 +404,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	res.WallMS = time.Since(start).Milliseconds()
 	res.Approvals = int(gate.n.Load())
 	res.StubCalls = stubs.counts()
+	res.HostActions = hostActions
 
 	mu.Lock()
 	recs := append([]agent.TraceRecord(nil), records[first:]...)

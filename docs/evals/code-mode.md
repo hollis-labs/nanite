@@ -78,9 +78,21 @@ call asks for approval depends on the permission mode). `Result.StubCalls` (JSON
 stub's calls in the task turn, subtasks' included. Bad stubs are refused before any run starts. The
 checked-in scenarios use none.
 
+**Steering host actions:** `Scenario.HostStubs.Commands` and `.Tools` map names to
+`evals.HostResult{Text, IsError}` for `run_command` (`command`, `args`) and `call_tool`
+(`tool`, `input`) reflex actions. Configure `Options.Steering` through an arm, then optionally
+set `Scenario.HostTriggers` to ordered `{Event: "topic"}` or `{Focus: "view"}` entries;
+these fire through `SteerEvent`/`SteerFocus` after the prelude and before the task. Actions
+from normal task steering and compaction are also captured. `Result.HostActions` (JSON
+`host_actions`) records the source, fired reflex names, original action, decoded name/input,
+matched-stub flag, and result for assertions. Prelude actions are excluded. Unmatched actions
+are recorded with an error result, allowing record-only scenarios; they do not fail the grader
+automatically. No real command or tool runs, and host-action results are evidence only, not
+model tool responses. Use `Scenario.Stubs` for model-callable tools.
+
 ## Metrics
 
-All of these come from the task turn's trace records (libs `agent/trace` v0.2.0), except approvals
+All of these come from the task turn's trace records (libs `agent/trace` v0.2.0), except approvals, stub counts, host-action evidence,
 and wall time. A prelude's turns are left out.
 - **Parent context tokens:** the input plus cache tokens of the root turn's own requests.
 - **Total tokens:** the whole tree, which is the root turn's own usage plus each `subtasks[].usage`.

@@ -47,7 +47,9 @@ host write. Placement compiles them into the request, in one of two places:
   that message. The system blocks and the earlier messages stay
   byte-identical, so the cache holds when only the per-turn context
   changes. Each message keeps the context it was written in, as a person
-  would remember it.
+  would remember it. A slot is added only on the turns where it changed,
+  so context a host keeps in the slot store is not repeated in every
+  message.
 
 By default only `user_context` (the per-turn context a host passes, such
 as chatrunner's turn context) goes in the turn. `agent.Options.SlotPlacement`

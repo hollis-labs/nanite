@@ -11,6 +11,7 @@ import (
 
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/slots"
 )
 
 // ScriptedModel is the model name an offline run reports.
@@ -172,7 +173,7 @@ func goalOf(msgs []llmtypes.ChatMessage) string {
 		}
 		text := m.Content
 		for _, b := range m.ContentBlocks {
-			if b.Type == "text" {
+			if b.Type == "text" && b.Name != slots.TurnContextBlock {
 				text += b.Text
 			}
 		}

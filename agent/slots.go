@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"github.com/hollis-labs/nanite/internal/engine"
 	"regexp"
 
 	"github.com/hollis-labs/nanite/internal/slots"
@@ -117,7 +116,7 @@ const (
 // TurnContextBlock is the Name of the text block, at the front of a user
 // message, that carries the slots placed in the turn. A host showing
 // history can leave it out.
-const TurnContextBlock = engine.TurnContextBlock
+const TurnContextBlock = slots.TurnContextBlock
 
 // Slots manages host contributions to the next turn's context.
 type Slots struct{ store *slots.Store }

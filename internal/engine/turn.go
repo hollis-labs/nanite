@@ -365,6 +365,15 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		if block, ok := e.turnContext(assembled); ok {
 			message.Blocks = append([]llmtypes.ContentBlock{block}, message.Blocks...)
 		}
+		// In-turn slots now travel in the messages; drop them from the
+		// window's accounting so compaction does not count them twice.
+		for _, name := range slots.Names() {
+			if e.placement(name) == slots.InTurn {
+				if s := assembled.Window.Slot(string(name)); s != nil {
+					assembled.Window.SetContent(string(name), "")
+				}
+			}
+		}
 		err = x.append(message)
 	}
 	if err == nil {

@@ -281,6 +281,9 @@ func renderMessages(messages []store.Message, before *store.Message, limit int, 
 		for _, block := range m.Blocks {
 			switch block.Type {
 			case "text":
+				if block.Name == TurnContextBlock {
+					continue // the host's context for that turn, not what was said
+				}
 				b.WriteString(" " + cut(scrub(block.Text), limit, hint))
 			case "tool_use":
 				input := "{}"

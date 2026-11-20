@@ -18,6 +18,11 @@ const (
 	InTurn
 )
 
+// TurnContextBlock is the Name of the text block, at the front of the user
+// message that starts a turn, that carries the slots placed in the turn.
+// Code that reads what the user said skips it.
+const TurnContextBlock = "nanite.turn_context"
+
 // DefaultPlacement is where a slot goes unless a host says otherwise.
 // UserContext, the per-turn context a host passes with a message, goes in
 // the turn; every other slot is in the system prefix.

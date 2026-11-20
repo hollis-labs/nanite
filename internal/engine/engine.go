@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/libs/llm/core/llmtypes"
-	"github.com/hollis-labs/nanite/internal/recovery"
 	"log/slog"
 	"maps"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/recovery"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
@@ -552,17 +553,18 @@ func (e *Engine) placement(name slots.Name) slots.Placement {
 }
 
 // TurnContextBlock is the Name of the text block that carries a turn's
-// in-turn slots in front of the user's message. Hosts that show history
-// can leave it out.
-const TurnContextBlock = "nanite.turn_context"
+// in-turn slots in front of the user's message.
+const TurnContextBlock = slots.TurnContextBlock
 
-// turnContext renders the assembled slots placed in the turn as one text
-// block for the front of the user's message, or reports false when there
-// are none.
+// turnContext renders the slots placed in the turn that changed since the
+// last turn as one text block for the front of the user's message, or
+// reports false when there are none. An unchanged slot is already in the
+// history, with the message it last changed for, so it is not repeated.
 func (e *Engine) turnContext(assembled slots.Assembled) (llmtypes.ContentBlock, bool) {
 	var b strings.Builder
 	for _, block := range assembled.Blocks {
-		if e.placement(slots.Name(block.SlotName)) != slots.InTurn || strings.TrimSpace(block.Content) == "" {
+		name := slots.Name(block.SlotName)
+		if e.placement(name) != slots.InTurn || strings.TrimSpace(block.Content) == "" || !assembled.Report[name].Changed {
 			continue
 		}
 		fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n", block.SlotName, block.Content, block.SlotName)

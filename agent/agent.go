@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/libs/agent/trace"
-	"github.com/hollis-labs/libs/core/panics"
-	"github.com/hollis-labs/nanite/internal/tools"
 	"log/slog"
 	"maps"
 	"os"
@@ -15,6 +12,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/hollis-labs/libs/agent/trace"
+	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/nanite/internal/tools"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/libs/core/store"

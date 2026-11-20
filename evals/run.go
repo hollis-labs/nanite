@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/slots"
 )
 
 // Price is a model's price in US dollars per million tokens.
@@ -398,7 +399,7 @@ func firstUser(msgs []llmtypes.ChatMessage) string {
 		}
 		text := m.Content
 		for _, b := range m.ContentBlocks {
-			if b.Type == "text" {
+			if b.Type == "text" && b.Name != slots.TurnContextBlock {
 				text += b.Text
 			}
 		}

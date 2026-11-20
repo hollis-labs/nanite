@@ -2,10 +2,11 @@ package events
 
 import (
 	"context"
+	"os"
+
 	"github.com/hollis-labs/libs/agent/trace"
 	"go.opentelemetry.io/otel/attribute"
 	oteltrace "go.opentelemetry.io/otel/trace"
-	"os"
 
 	hotel "github.com/hollis-labs/libs/core/util/otel"
 	"github.com/hollis-labs/libs/core/util/otel/genai"

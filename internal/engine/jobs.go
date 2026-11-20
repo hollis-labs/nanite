@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/libs/agent/trace"
 	"io"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/libs/agent/trace"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/background"

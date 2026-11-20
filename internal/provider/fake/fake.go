@@ -4,10 +4,11 @@ package fake
 import (
 	"context"
 	"fmt"
-	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"

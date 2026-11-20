@@ -10,6 +10,7 @@ import (
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/shell"
+	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -70,7 +71,7 @@ func ResumePlan(history []store.Message, turn store.InterruptedTurn) (Plan, erro
 			if m.ID == turn.UserMessageID {
 				userFound = true
 				for _, b := range m.Blocks {
-					if b.Type == "text" {
+					if b.Type == "text" && b.Name != slots.TurnContextBlock {
 						out.UserText += b.Text
 					}
 				}

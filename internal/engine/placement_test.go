@@ -86,3 +86,41 @@ func TestSlotPlacementOverride(t *testing.T) {
 		t.Fatalf("context not in the turn: %+v", first)
 	}
 }
+
+func TestStoredContextIsNotRepeated(t *testing.T) {
+	// Context a host keeps in the slot store (not passed per turn) goes in
+	// the turn when it changes, not on every message.
+	p := &watchedProvider{Provider: fake.New(fake.Text("one"), fake.Text("two"), fake.Text("three"))}
+	e, _, id := setupEngine(t, p, "")
+	put := func(content string) {
+		t.Helper()
+		if err := e.cfg.Slots.Put(slots.UserContext, slots.Entry{Owner: "host", Key: "desk", Content: content}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := func(text string) {
+		t.Helper()
+		run, err := e.Send(t.Context(), id, Input{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("STORED-ONE")
+	send("first")
+	send("second")
+	put("STORED-TWO")
+	send("third")
+	contextOf := func(r llmtypes.ChatRequest) string {
+		newest := r.Messages[len(r.Messages)-1]
+		if len(newest.ContentBlocks) > 0 && newest.ContentBlocks[0].Name == TurnContextBlock {
+			return newest.ContentBlocks[0].Text
+		}
+		return ""
+	}
+	if !strings.Contains(contextOf(p.requests[0]), "STORED-ONE") || contextOf(p.requests[1]) != "" || !strings.Contains(contextOf(p.requests[2]), "STORED-TWO") {
+		t.Fatalf("turn contexts: %q / %q / %q", contextOf(p.requests[0]), contextOf(p.requests[1]), contextOf(p.requests[2]))
+	}
+}

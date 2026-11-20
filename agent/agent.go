@@ -97,8 +97,9 @@ type Options struct {
 	// logged to Logger and handed to this reporter. Nil logs only.
 	PanicReporter PanicReporter
 	// SubtaskResultCap is the size cap, in tokens, on the whole result a
-	// subtask hands back. Zero means host.yaml's runtime.subtask_result_cap,
-	// else the effective default of about 5,900. A variant's result_cap
+	// subtask hands back. Zero means "use host.yaml's
+	// runtime.subtask_result_cap, else the effective default of about
+	// 5,900"; it cannot unset a host.yaml value. A variant's result_cap
 	// overrides it, and either is clamped to what one tool result shows in
 	// full (about 5,900 tokens). A larger result is stored for 30 days and
 	// the parent gets a pointer it can read with fetch_tool_result.
@@ -106,8 +107,8 @@ type Options struct {
 	// SubtaskLimit is how many subtasks may run at once across the agent,
 	// counting every conversation and background subtasks. Leads (can_spawn
 	// variants) and other subtasks each get this many slots, so a lead never
-	// competes with its own children. Zero means host.yaml's
-	// runtime.subtask_limit, else 4; at most 8. A foreground
+	// competes with its own children. Zero means "use host.yaml's
+	// runtime.subtask_limit, else 4"; at most 8. A foreground
 	// subtask over the limit waits for a slot while its turn lasts; a
 	// background one is refused and the model is told why.
 	SubtaskLimit int
@@ -116,8 +117,9 @@ type Options struct {
 	// tokens and (estimated) compaction summaries included. Reaching it stops
 	// running subtasks mid-step and the turn at its next step, with a token
 	// limit. Background subtasks have only their variant's budget; a resumed
-	// turn starts a fresh budget. Zero means host.yaml's
-	// runtime.turn_token_budget, else no shared budget.
+	// turn starts a fresh budget. Zero means "use host.yaml's
+	// runtime.turn_token_budget, else no shared budget": an embedder cannot
+	// turn off a host.yaml budget through Options, only set its own.
 	TurnTokenBudget int
 }
 

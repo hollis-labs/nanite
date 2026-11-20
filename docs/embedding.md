@@ -338,11 +338,48 @@ plans needs the `subtasks` and `background` builtin groups.
 
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
-`runner_ref` on the chat conversation record. A turn the previous process
-left unfinished is discarded when the conversation is next used: the chat
-Service has already ended that run on the stream, so there is no stream to
-resume it on. The owner sends the message again; front-desk work is not lost
-(see *Restarts* above).
+`runner_ref` on the chat conversation record. The runner records which chat
+each Nanite conversation serves (host state `chat`), so a restarted runner can
+find its interrupted turns.
+
+**Interrupted turns.** A turn the previous process left unfinished (it was
+killed mid-turn) is kept until the owner decides. **Hosts upgrading should
+call `Runner.RecoverTurns(ctx)` once the chat Service starts**; without it
+the owner is not offered the turn, and it waits out its hold.
+
+- `Runner.RecoverTurns(ctx)` handles all of them. Call it once the chat
+  Service the runner serves is running; `Open` cannot, because the Service is
+  built on the runner and resuming publishes through `Options.Observe`. With
+  `Options.ResumeInterrupted` it resumes each. Otherwise it offers each to
+  the owner as a `nanite.interrupted` activity (`turn`, and `actions`:
+  `resume`, `discard`) on a run of its own.
+- `Runner.Resume(ctx, chatID)` continues the turn from its stored message as a
+  new run published through `Options.Observe`, with no new user message (the
+  owner's message is already in the chat). The front desk does not plan it
+  again. The first `Resume` claims the turn; another before the resumed run
+  ends fails with "no interrupted turn" and publishes nothing. `Resume`
+  returns once `Observe` accepts the run, which waits while another run holds
+  the chat.
+- `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
+  `Record`, also discards it: the owner has moved on.
+- `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report
+  them. A conversation is found by the chat the runner records for it on
+  first use (host state `chat`) or by front-desk state; one last used by an
+  older version with neither is not listed.
+- **The hold.** An interrupted turn waits `Options.InterruptedHold` (default
+  15 minutes; negative waits indefinitely), counted from when the runner
+  first found it; the start is saved, so a restart does not reset the clock.
+  When it runs out the runner discards the turn.
+- Every discard says so on the wire: a `nanite.interrupted` activity with
+  `disposition: discarded` and `reason` `new message`, `timeout` or
+  `requested`, so an offer card can close.
+
+While a turn is interrupted, the front desk's dispatches on that chat wait,
+as for any held conversation, and the owner gets one desk item saying work
+is waiting (once the Service is known to run: after `RecoverTurns` or an
+owner's turn). The work starts when the resumed turn ends, the turn is
+discarded, or the hold runs out. A notice turn on that chat only announces
+its notice.
 
 **The turn's context.** `Turn.Context` goes into one slot entry
 (`SlotUserContext` unless `Options.ContextSlot` names another) for that turn

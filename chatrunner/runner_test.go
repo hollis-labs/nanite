@@ -57,6 +57,18 @@ func messageText(m llmtypes.ChatMessage) string {
 	return text
 }
 
+// scriptText is a user message's text without its turn-context block (a
+// named text block the engine puts in front): what the owner wrote.
+func scriptText(m llmtypes.ChatMessage) string {
+	text := m.Content
+	for _, b := range m.ContentBlocks {
+		if b.Type == "text" && b.Name == "" {
+			text += b.Text
+		}
+	}
+	return text
+}
+
 func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -65,7 +77,7 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 	for _, m := range req.Messages {
 		switch {
 		case m.Role == "user" && !isToolResult(m):
-			script, steps = messageText(m), 0
+			script, steps = scriptText(m), 0
 		case m.Role == "assistant":
 			steps++
 		}
@@ -106,6 +118,13 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 		variant, goal, _ := strings.Cut(strings.TrimPrefix(script, "subtask:"), ":")
 		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-sub", Name: "subtask",
 			Input: map[string]any{"variant": variant, "goal": goal, "return_spec": "a line"}}}, {Type: llmtypes.EventDone}}}
+	case strings.HasPrefix(script, "resumable:"):
+		// "resumable:<text>" stalls while hang is set (so the process can be
+		// killed mid-turn), else answers <text>.
+		if b.hang {
+			return fake.Response{Stall: true, Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "working"}}}
+		}
+		return fake.Text(strings.TrimPrefix(script, "resumable:"))
 	case script == "long":
 		return fake.Response{Stall: true, Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "working"}}}
 	case script == "overflow" && !b.overflowed:

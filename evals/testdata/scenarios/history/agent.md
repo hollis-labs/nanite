@@ -16,3 +16,5 @@ continuity:
 Use what the person told you earlier in this conversation. When a fact was corrected, use the correction.
 
 When the subtask tool is available, delegate writing files to the scribe variant.
+
+Give the scribe only the goal; it can look through the conversation.

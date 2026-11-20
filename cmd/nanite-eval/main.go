@@ -44,6 +44,28 @@ const (
 	minPrice = 0.01
 )
 
+// listPrices are list prices in dollars per million input and output tokens
+// (Anthropic's model table, cached 2026-11-03). A configured price below one
+// of them makes the cap stop late, so the run warns.
+var listPrices = map[string][2]float64{
+	"claude-fable-5-2":  {8, 40},
+	"claude-opus-5-5":   {4, 20},
+	"claude-sonnet-5-5": {2, 10},
+	"claude-haiku-5-5":  {0.10, 0.50},
+}
+
+// priceWarning says, loudly, when a price is below the model's list price.
+func priceWarning(model string, p evals.Price) string {
+	list, ok := listPrices[model]
+	if !ok {
+		return fmt.Sprintf("WARNING: no list price is known for %s; check -price-in and -price-out are at least its real prices, or the dollar cap will stop late", model)
+	}
+	if p.Input < list[0] || p.Output < list[1] {
+		return fmt.Sprintf("WARNING: the prices given ($%g in, $%g out per million tokens) are below %s's list prices ($%g in, $%g out): the cost estimates and the dollar cap will run low", p.Input, p.Output, model, list[0], list[1])
+	}
+	return ""
+}
+
 // modelName is what a -model may look like.
 var modelName = regexp.MustCompile(`^[a-z0-9.-]+$`)
 
@@ -103,6 +125,9 @@ func run(ctx context.Context, args []string, w, status io.Writer) error {
 		}
 		cfg.Provider = func(evals.Scenario, evals.Arm) (llmcontracts.Provider, error) { return p, nil }
 		if status != nil {
+			if w := priceWarning(*model, price); w != "" {
+				fmt.Fprintln(status, "nanite-eval: "+w)
+			}
 			fmt.Fprintf(status, "nanite-eval: live run: provider %s, model %s; price per million tokens $%g in, $%g out, $%g cache read, $%g cache write; cap $%.2f total, %d tokens a run\n",
 				*providerName, *model, price.Input, price.Output, price.CacheRead, price.CacheWrite, *maxUSD, *turnTokens)
 		}

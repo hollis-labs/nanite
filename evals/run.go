@@ -334,14 +334,14 @@ func invalid(s Scenario, arm Arm, r Result, p *probe) string {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.override {
+	if p.override && (arm.VariesLastN || len(arm.SeedLacks) > 0) {
 		return "a subtask call set context.last_n or context.full, so the arm's last_n did not apply"
 	}
 	if p.seeded != "" {
 		return fmt.Sprintf("a subtask's first message already held %q, so it never had to look for it", p.seeded)
 	}
-	if arm.NeedsStored && (!p.stored || r.ParentFetches == 0) {
-		return "no subtask result was stored and fetched, so the result cap was not exercised"
+	if arm.NeedsStored && !p.stored {
+		return "no subtask result was stored, so the result cap was not exercised"
 	}
 	return ""
 }
@@ -517,7 +517,7 @@ type meter struct {
 func (m *meter) reserve(cost float64) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.max > 0 && m.spent+m.reserved+cost > m.max {
+	if m.refused || (m.max > 0 && m.spent+m.reserved+cost > m.max) {
 		m.refused = true
 		return false
 	}
@@ -560,17 +560,23 @@ const defaultMaxOutput = 16384
 // worst is a request's most expensive outcome: its whole input, estimated
 // generously at three characters a token, and its whole output allowance.
 func (m *meter) worst(req llmtypes.ChatRequest) float64 {
+	out := req.MaxTokens
+	if out <= 0 {
+		out = defaultMaxOutput
+	}
+	return m.price.usage(inputTokens(req), out, 0, 0)
+}
+
+// inputTokens estimates a request's input generously, at three characters a
+// token, for pricing requests that report no usage.
+func inputTokens(req llmtypes.ChatRequest) int {
 	n := len(req.SystemPrompt)
 	for _, s := range req.SlotBlocks {
 		n += len(s.Content)
 	}
 	msgs, _ := json.Marshal(req.Messages)
 	tools, _ := json.Marshal(req.Tools)
-	out := req.MaxTokens
-	if out <= 0 {
-		out = defaultMaxOutput
-	}
-	return m.price.usage((n+len(msgs)+len(tools))/3+1, out, 0, 0)
+	return (n+len(msgs)+len(tools))/3 + 1
 }
 
 var errCapped = errors.New("evals: dollar cap reached")
@@ -644,8 +650,9 @@ func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-c
 }
 
 // Complete serves compaction summaries and argument repair. It reports no
-// usage, so a call that returns is charged an estimate of four characters a
-// token, and one that fails is charged its reservation.
+// usage, so a call that returns is charged an estimate (its input at three
+// characters a token and its answer at four), and one that fails is charged
+// its reservation.
 func (p *metered) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	hold := p.meter.worst(req)
 	if !p.meter.reserve(hold) {
@@ -657,6 +664,6 @@ func (p *metered) Complete(ctx context.Context, req llmtypes.ChatRequest) (strin
 		p.meter.settle(hold, hold)
 		return text, err
 	}
-	p.meter.settle(hold, p.meter.price.usage(requestTokens(req, nil), len(text)/4+1, 0, 0))
+	p.meter.settle(hold, p.meter.price.usage(inputTokens(req), len(text)/4+1, 0, 0))
 	return text, nil
 }

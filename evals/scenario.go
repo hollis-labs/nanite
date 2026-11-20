@@ -59,6 +59,9 @@ type Arm struct {
 	// Options adjusts the agent's options, for example SubtaskResultCap. It
 	// may not add named providers: every request must go through the meter.
 	Options func(*agent.Options)
+	// VariesLastN marks an arm testing last_n: a run where a subtask call
+	// chose its own context (context.last_n or context.full) is invalid.
+	VariesLastN bool
 	// SeedLacks are facts a subtask must not be given in its first message:
 	// a run where it was given one is invalid, because the subtask never had
 	// to look for it (a last_n arm testing history retrieval).
@@ -227,6 +230,23 @@ func answerLine(answer string) (string, bool) {
 	return "", false
 }
 
+// fields splits an ANSWER line on ";" into trimmed fields.
+func fields(line string) []string {
+	parts := strings.Split(line, ";")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+// need checks that a line has at least n fields.
+func need(f []string, n int) (bool, string) {
+	if len(f) < n {
+		return false, fmt.Sprintf("ANSWER line has %d of %d fields", len(f), n)
+	}
+	return true, ""
+}
+
 // graded runs check on the answer line.
 func graded(check func(line string) (bool, string)) func(string, string) (bool, string) {
 	return func(answer, _ string) (bool, string) {
@@ -257,7 +277,21 @@ func codeSearch() Scenario {
 		Name:  "code-search",
 		Files: files("code-search"),
 		Grade: graded(func(line string) (bool, string) {
-			return mentions(line, []string{"config.go", "loadMode", "server.go", "startServer", "dev", "prod", "test"}, "describeMode", "legacyModes")
+			f := fields(line)
+			if ok, why := need(f, 2); !ok {
+				return ok, why
+			}
+			// A decoy anywhere on the line is a wrong answer.
+			if ok, why := mentions(line, nil, "describeMode", "legacyModes", "docs.go"); !ok {
+				return ok, why
+			}
+			if ok, why := mentions(f[0], []string{"config.go", "loadMode", "server.go", "startServer"}); !ok {
+				return false, "functions: " + why
+			}
+			if ok, why := mentions(f[1], []string{"dev", "prod", "test"}); !ok {
+				return false, "modes: " + why
+			}
+			return true, ""
 		}),
 		Script: func(arm Arm) Script {
 			work := []Step{
@@ -286,7 +320,23 @@ func research() Scenario {
 		Files: files("research"),
 		// The superseded policy's decider is the decoy.
 		Grade: graded(func(line string) (bool, string) {
-			return mentions(line, []string{"30 days", "Data Council", "2026-03-04", "policy-2026.md"}, "Finance Operations")
+			f := fields(line)
+			if ok, why := need(f, 4); !ok {
+				return ok, why
+			}
+			if !thirtyDays.MatchString(f[0]) {
+				return false, fmt.Sprintf("period %q is not 30 days", f[0])
+			}
+			if ok, why := mentions(f[1], []string{"Data Council"}, "Finance Operations"); !ok {
+				return false, "decider: " + why
+			}
+			if ok, why := mentions(f[2], []string{"2026-03-04"}); !ok {
+				return false, "date: " + why
+			}
+			if ok, why := mentions(f[3], []string{"policy-2026.md"}, "policy-2024.md"); !ok {
+				return false, "source: " + why
+			}
+			return true, ""
 		}),
 		Script: func(arm Arm) Script {
 			work := []Step{
@@ -306,6 +356,8 @@ func research() Scenario {
 		},
 	}
 }
+
+var thirtyDays = regexp.MustCompile(`(?i)\b30[- ]?(days?|calendar days)\b|\bthirty days\b`)
 
 var choreNotes = []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"}
 
@@ -363,15 +415,21 @@ func council() Scenario {
 		Files:    files("council"),
 		Requires: []string{"council"},
 		Grade: graded(func(line string) (bool, string) {
-			if ok, why := mentions(line, []string{"17", "25"}); !ok {
-				return ok, why
+			loop, refund := false, false
+			for _, f := range fields(line) {
+				lower := strings.ToLower(f)
+				if loopLine.MatchString(f) && loopBug.MatchString(lower) {
+					loop = true
+				}
+				if refundLine.MatchString(f) && refundBug.MatchString(lower) && !strings.Contains(lower, "fine") && !strings.Contains(lower, "missing test") {
+					refund = true
+				}
 			}
-			lower := strings.ToLower(line)
-			if !strings.Contains(lower, "negative") {
-				return false, "answer does not name the negative refund"
-			}
-			if !strings.Contains(lower, "off-by-one") && !strings.Contains(lower, "off by one") && !strings.Contains(line, "< len(items)") {
-				return false, "answer does not name the off-by-one loop"
+			switch {
+			case !loop:
+				return false, "no field names the line-17 loop running past the end"
+			case !refund:
+				return false, "no field names the negative refund (lines 23-26)"
 			}
 			return true, ""
 		}),
@@ -404,6 +462,13 @@ func council() Scenario {
 	}
 }
 
+var (
+	loopLine   = regexp.MustCompile(`(?i)(^|[^\d])L?17([^\d]|$)`)
+	loopBug    = regexp.MustCompile(`off[- ]by[- ]one|<=\s*len|out of range|out of bounds`)
+	refundLine = regexp.MustCompile(`(?i)(^|[^\d])L?2[3-6]([^\d]|$)`)
+	refundBug  = regexp.MustCompile(`negative|below zero|<\s*0`)
+)
+
 // history needs facts from early in the conversation: a subtask sees the
 // last last_n messages, so the arms vary the scribe variant's last_n.
 func history() Scenario {
@@ -416,9 +481,9 @@ func history() Scenario {
 	// test retrieval. With 20 they are given.
 	facts := []string{"Juniper", "Dana Reyes"}
 	s.Arms = []Arm{
-		{Name: "subtask", Mode: Subtask, LastN: 6, SeedLacks: facts},
-		{Name: "subtask last_n=1", Mode: Subtask, LastN: 1, Prepare: setLastN("variants/scribe.md", 1), SeedLacks: facts},
-		{Name: "subtask last_n=20", Mode: Subtask, LastN: 20, Prepare: setLastN("variants/scribe.md", 20)},
+		{Name: "subtask", Mode: Subtask, LastN: 6, VariesLastN: true, SeedLacks: facts},
+		{Name: "subtask last_n=1", Mode: Subtask, LastN: 1, VariesLastN: true, Prepare: setLastN("variants/scribe.md", 1), SeedLacks: facts},
+		{Name: "subtask last_n=20", Mode: Subtask, LastN: 20, VariesLastN: true, Prepare: setLastN("variants/scribe.md", 20)},
 	}
 	s.Grade = func(a, ws string) (bool, string) {
 		data, err := os.ReadFile(filepath.Join(ws, "notes", "release.md")) //nolint:gosec // a file of the run's own copy of the workspace
@@ -511,10 +576,17 @@ func inventory() Scenario {
 	total := len(list)
 	answer := fmt.Sprintf("%s has %d of them.\nANSWER: %d; %s", top, counts[top], total, top)
 	s.Grade = graded(func(line string) (bool, string) {
-		if ok, why := says(line, total, ""); !ok {
+		f := fields(line)
+		if ok, why := need(f, 2); !ok {
 			return ok, why
 		}
-		return mentions(line, []string{top})
+		if ok, why := says(f[0], total, ""); !ok {
+			return ok, why
+		}
+		if !strings.EqualFold(strings.Trim(f[1], " .*`"), top) {
+			return false, fmt.Sprintf("owner %q is not %s", f[1], top)
+		}
+		return true, ""
 	})
 	s.Script = func(arm Arm) Script {
 		search := Calls(Call("search_files", "pattern", `TODO\(`, "path", "src"))

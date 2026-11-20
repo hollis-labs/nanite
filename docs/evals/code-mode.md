@@ -31,9 +31,17 @@ The prompts are the same in every arm. Only whether `subtask` is offered, and th
 differ.
 
 Every task asks for a final line in a fixed form, such as
-`ANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2026.md`. The graders check facts and
-decoys on that line only, so an answer may name a decoy in its explanation to rule it out. An
-answer with no such line fails.
+`ANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2026.md`. The graders split that line on
+`;` and check each field. An answer may name a decoy in its explanation to rule it out; a decoy on
+the ANSWER line fails it, and so does an answer with no such line. Each field accepts the
+reasonable ways to say it:
+- **`research` period:** "30 days", "30-day", "30 calendar days" or "thirty days".
+- **`council`:**
+  - The loop bug needs line 17 (or L17) and one of: off-by-one, `<= len`, out of range, out of
+    bounds.
+  - The refund bug needs a line from 23 to 26 and one of: negative, below zero, `< 0`. A refund
+    field calling it fine, or only asking for tests, does not count.
+- **`inventory` owner:** must be exactly the top owner.
 
 A subtask run that did not test what its arm is for is marked **invalid**, not a success. The report
 says why:
@@ -42,10 +50,10 @@ says why:
 - **Facts already given (`history`, `last_n` 6 and 1):** a subtask's first message already held one
   of the facts it was meant to find, for example because the parent put them in the goal. Every
   request is checked as it goes to the model.
-- **Context chosen by the parent:** a `subtask` call set `context.last_n` or `context.full`, so the
-  arm's `last_n` never applied.
-- **Nothing stored (`inventory`, small cap):** no subtask result was stored behind a pointer and
-  fetched by the parent.
+- **Context chosen by the parent (`history` arms only):** a `subtask` call set `context.last_n` or
+  `context.full`, so the arm's `last_n` never applied. Other scenarios may set context freely.
+- **Nothing stored (`inventory`, small cap):** no subtask result was stored behind a pointer.
+  Whether the parent then fetched it is reported as data (parent fetches), not a validity rule.
 
 The graders are deterministic and check facts. The live run uses them too; there is no model
 grading.
@@ -115,7 +123,10 @@ parent and its subtasks use it whatever the environment's default. A model that 
 - Every `-price-*` at least $0.01 per million tokens. The defaults are deliberately high.
 - A `-model` made of lower-case letters, digits, dots and dashes.
 
-**Before it starts,** it prints the provider, the model, the prices and the caps.
+**Before it starts,** it prints the provider, the model, the prices and the caps. It also prints a
+loud warning when a price is below the model's list price (known for `claude-fable-5-2`,
+`claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`), or when no list price is known for
+the model. A low price makes the dollar cap stop late.
 
 **The dollar cap:**
 - Every model request, compaction summaries and argument repair included, first reserves its most
@@ -125,7 +136,9 @@ parent and its subtasks use it whatever the environment's default. A model that 
 - A stream that is cut off, cancelled or reports no usage is charged at least its reservation. A
   provider may bill more than it reported before the cut.
 - A failed request, or a failed summary or repair, is charged its reservation. A successful summary
-  or repair reports no usage, so it is charged an estimate of four characters a token.
+  or repair reports no usage, so it is charged an estimate: its input at three characters a token
+  and its answer at four.
+- Once the cap has refused a request, every later request is refused too.
 - A request that would pass the cap is refused. That ends the run in progress, and the rest are
   skipped.
 

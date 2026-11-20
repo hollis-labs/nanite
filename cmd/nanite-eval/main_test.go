@@ -81,3 +81,15 @@ func TestLiveNeedsBounds(t *testing.T) {
 		t.Errorf("the documented command is refused: %v", err)
 	}
 }
+
+func TestPriceWarning(t *testing.T) {
+	if w := priceWarning("claude-sonnet-5-5", evals.ConservativePrice); w != "" {
+		t.Errorf("the default prices warn: %s", w)
+	}
+	if w := priceWarning("claude-sonnet-5-5", evals.Price{Input: 1, Output: 10, CacheRead: 1, CacheWrite: 1}); !strings.Contains(w, "WARNING") {
+		t.Error("a price below the list price does not warn")
+	}
+	if w := priceWarning("claude-unknown-9", evals.ConservativePrice); !strings.Contains(w, "no list price") {
+		t.Error("an unknown model does not warn")
+	}
+}

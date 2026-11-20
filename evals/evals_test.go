@@ -192,8 +192,8 @@ func TestCompleteIsMetered(t *testing.T) {
 	if _, err := p.Complete(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	// About 1000 tokens in, and 1001 out for the 4000-character answer, at $1/M.
-	if got, want := m.spentUSD(), float64(requestTokens(req, nil)+1001)/1e6; math.Abs(got-want) > 1e-12 {
+	// The estimate: the prompt at three characters a token, the answer at four.
+	if got, want := m.spentUSD(), float64(inputTokens(req)+1001)/1e6; math.Abs(got-want) > 1e-12 {
 		t.Fatalf("Complete charged $%v", got)
 	}
 	m.max = m.spentUSD()
@@ -264,6 +264,49 @@ func TestGraders(t *testing.T) {
 	co := council()
 	if ok, why := co.Grade("**ANSWER: Line 17 has an Off-By-One loop; line 25 lets a NEGATIVE refund through.**", ""); !ok {
 		t.Errorf("council rejected a mixed-case answer: %s", why)
+	}
+	// The reviewer's accept and reject examples, field by field.
+	for answer, want := range map[string]bool{
+		"ANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2026.md":                   true,
+		"ANSWER: 30-day; the Data Council; 2026-03-04; policy-2026.md":                       true,
+		"ANSWER: thirty days; Data Council; 2026-03-04; corpus/policy-2026.md":               true,
+		"ANSWER: 30 calendar days; Data Council; 2026-03-04; policy-2026.md":                 true,
+		"ANSWER: 90 days; Data Council; 2026-03-04; corpus/policy-2026.md":                   false,
+		"ANSWER: 300 days; Data Council; 2026-03-04; corpus/policy-2026.md":                  false,
+		"ANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2024.md":                   false,
+		"ANSWER: 30 days; Data Council; 2026-03-04":                                          false, // a field missing
+		"ANSWER: 30 days; Data Council (not Finance Operations); 2026-03-04; policy-2026.md": false,
+	} {
+		if ok, why := rs.Grade(answer, ""); ok != want {
+			t.Errorf("research %q: %v (%s), want %v", answer, ok, why, want)
+		}
+	}
+	for answer, want := range map[string]bool{
+		"ANSWER: 17: off-by-one loop; 25: negative refund not refused":                    true,
+		"ANSWER: L17: i <= len(items) reads past the end; L25: refund below zero allowed": true,
+		"ANSWER: line 17: index out of range; line 24: Amount < 0 not checked":            true,
+		"ANSWER: 17: loop goes out of bounds; 26: negative amounts pass":                  true,
+		"ANSWER: 17: off-by-one loop; 25: refund is fine":                                 false, // no refund bug
+		"ANSWER: 17: off-by-one loop; 25: missing tests":                                  false,
+		"ANSWER: 17: off-by-one loop; 25: negative values are fine":                       false,
+		"ANSWER: 18: off-by-one loop; 25: negative refund":                                false, // wrong line
+		"ANSWER: 17: off-by-one loop":                                                     false, // refund missing
+	} {
+		if ok, why := co.Grade(answer, ""); ok != want {
+			t.Errorf("council %q: %v (%s), want %v", answer, ok, why, want)
+		}
+	}
+	inv := inventory()
+	for answer, want := range map[string]bool{
+		"ANSWER: 150; ana":         true,
+		"ANSWER: 150; Ana.":        true,
+		"ANSWER: 150; ana and ben": false, // the owner must be exactly the top owner
+		"ANSWER: 149; ana":         false,
+		"ANSWER: 150":              false,
+	} {
+		if ok, why := inv.Grade(answer, ""); ok != want {
+			t.Errorf("inventory %q: %v (%s), want %v", answer, ok, why, want)
+		}
 	}
 	hs := history()
 	hws := t.TempDir()
@@ -383,10 +426,12 @@ func TestProbeMarksRunsThatTestedNothing(t *testing.T) {
 		r    Result
 		want string
 	}{
-		"clean":          {[]llmtypes.ChatRequest{child("[#3 user] the owner is Dana")}, arm, ok, ""},
-		"seeded":         {[]llmtypes.ChatRequest{child("[#2 user] the codename is Juniper")}, arm, ok, `already held "Juniper"`},
-		"own context":    {[]llmtypes.ChatRequest{override}, arm, ok, "context.last_n"},
-		"nothing stored": {nil, Arm{Mode: Subtask, NeedsStored: true}, Result{Mode: Subtask, ParentFetches: 1}, "result cap"},
+		"clean":                          {[]llmtypes.ChatRequest{child("[#3 user] the owner is Dana")}, arm, ok, ""},
+		"seeded":                         {[]llmtypes.ChatRequest{child("[#2 user] the codename is Juniper")}, arm, ok, `already held "Juniper"`},
+		"own context":                    {[]llmtypes.ChatRequest{override}, arm, ok, "context.last_n"},
+		"own context, last_n arm":        {[]llmtypes.ChatRequest{override}, Arm{Mode: Subtask, VariesLastN: true}, ok, "context.last_n"},
+		"own context, other arm is fine": {[]llmtypes.ChatRequest{override}, Arm{Mode: Subtask}, ok, ""},
+		"nothing stored":                 {nil, Arm{Mode: Subtask, NeedsStored: true}, Result{Mode: Subtask, ParentFetches: 1}, "result cap"},
 	} {
 		p := &probe{seedLacks: tc.arm.SeedLacks}
 		for _, r := range tc.reqs {
@@ -414,6 +459,128 @@ func TestFillCountsCompactionsAndLeavesBackgroundOut(t *testing.T) {
 	r.fill(recs, "root", Price{Input: 1, Output: 1})
 	if r.Compactions != 3 || r.TotalTokens != 160 || r.ParentFetches != 1 || strings.Join(r.SubtaskTools, ",") != "read_file" || strings.Join(r.Variants, ",") != "research,worker" {
 		t.Fatalf("fill: %+v", r)
+	}
+}
+
+// failing is a provider whose requests fail.
+type failing struct{ fakeProvider }
+
+func (failing) StreamChat(context.Context, llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	return nil, errors.New("connection refused")
+}
+
+func (failing) Complete(context.Context, llmtypes.ChatRequest) (string, error) {
+	return "", errors.New("connection refused")
+}
+
+// lateUsage sends a usage report only after the reader has gone.
+type lateUsage struct{ fakeProvider }
+
+func (lateUsage) StreamChat(ctx context.Context, _ llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	ch := make(chan llmtypes.StreamEvent, 2)
+	go func() {
+		defer close(ch)
+		ch <- llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "x"}
+		<-ctx.Done()
+		ch <- llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 1000000}}
+	}()
+	return ch, nil
+}
+
+func settled(t *testing.T, m *meter, want float64) {
+	t.Helper()
+	for i := 0; i < 200 && math.Abs(m.spentUSD()-want) > 1e-9; i++ {
+		time.Sleep(time.Millisecond)
+	}
+	if got := m.spentUSD(); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("charged $%v, want $%v", got, want)
+	}
+}
+
+func TestMeterChargesFailuresAndLateUsage(t *testing.T) {
+	req := llmtypes.ChatRequest{SystemPrompt: strings.Repeat("y", 3000)}
+	price := Price{Input: 1, Output: 1}
+	m := &meter{price: price}
+	// The defaults: input at three characters a token, 16,384 output tokens.
+	// The request is 3,000 characters of prompt plus "null" for its messages
+	// and for its tools.
+	if got := inputTokens(req); got != (3000+8)/3+1 {
+		t.Fatalf("inputTokens = %d", got)
+	}
+	if got, want := m.worst(req), float64(inputTokens(req)+16384)/1e6; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("worst = %v, want %v", got, want)
+	}
+	t.Run("start failure", func(t *testing.T) {
+		m := &meter{price: price}
+		mp := &metered{Provider: failing{}, meter: m, cancel: func() {}}
+		if _, err := mp.StreamChat(context.Background(), req); err == nil {
+			t.Fatal("no error")
+		}
+		settled(t, m, m.worst(req))
+	})
+	t.Run("Complete failure", func(t *testing.T) {
+		m := &meter{price: price}
+		mp := &metered{Provider: failing{}, meter: m, cancel: func() {}}
+		if _, err := mp.Complete(context.Background(), req); err == nil {
+			t.Fatal("no error")
+		}
+		settled(t, m, m.worst(req))
+	})
+	t.Run("usage after the reader left", func(t *testing.T) {
+		m := &meter{price: price}
+		ctx, cancel := context.WithCancel(context.Background())
+		mp := &metered{Provider: lateUsage{}, meter: m, cancel: cancel}
+		ch, err := mp.StreamChat(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-ch
+		cancel()
+		for range ch {
+		}
+		// The late report ($1) is more than the reservation and is kept.
+		settled(t, m, 1)
+	})
+	t.Run("refused stays refused", func(t *testing.T) {
+		m := &meter{price: price, max: 1}
+		if m.reserve(2) || m.reserve(0.0001) {
+			t.Fatal("a reservation after a refusal was accepted")
+		}
+	})
+}
+
+// countingProvider counts the requests that reach it.
+type countingProvider struct {
+	*scripted
+	n *int
+}
+
+func (p countingProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	*p.n++
+	return p.scripted.StreamChat(ctx, req)
+}
+
+// TestArmProvidersAreMetered: a provider an arm sets is metered; named
+// providers, which would bypass the meter, are refused.
+func TestArmProvidersAreMetered(t *testing.T) {
+	s := codeSearch()
+	n := 0
+	s.Arms = []Arm{{Name: "direct", Mode: Direct, Options: func(o *agent.Options) {
+		sc := newScripted(s.Script(Arm{Mode: Direct}))
+		o.Provider = countingProvider{sc, &n}
+	}}}
+	rep, err := Run(context.Background(), Config{Modes: []Mode{Direct}}, []Scenario{s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 || rep.SpentUSD <= 0 {
+		t.Fatalf("the arm's provider was not metered: %d requests, $%v spent", n, rep.SpentUSD)
+	}
+	s.Arms = []Arm{{Name: "direct", Mode: Direct, Options: func(o *agent.Options) {
+		o.Providers = []agent.ProviderSpec{{Name: "other"}}
+	}}}
+	if _, err := Run(context.Background(), Config{Modes: []Mode{Direct}}, []Scenario{s}); err == nil || !strings.Contains(err.Error(), "named providers") {
+		t.Fatalf("named providers were not refused: %v", err)
 	}
 }
 

@@ -98,10 +98,17 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	if x.depth == 0 && variant.CanSpawn {
 		limit = e.leads
 	}
+	// The child's ID is chosen before its slot, so a subtask that has to
+	// wait can say so under the ID its start and progress will carry.
+	childID := store.NewID(time.Now().UTC())
 	var release func()
 	if request.Background {
 		release, err = limit.TryAcquire()
-	} else {
+	} else if release, err = limit.TryAcquire(); err != nil {
+		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
+			return events.SubtaskProgress{EventMeta: meta, ID: childID, ParentID: x.info.ID, Variant: variant.Name, Depth: x.depth + 1,
+				StatusLine: "waiting for a subtask slot"}
+		})
 		release, err = limit.Acquire(ctx)
 	}
 	if err != nil {
@@ -114,7 +121,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	}
 	now := time.Now().UTC()
 	// The goal is scrubbed before it is stored or reported anywhere.
-	child := store.Conversation{ID: store.NewID(now), ParentID: x.info.ID, Role: variant.Name, Title: subtaskTitle(e.scrub.Text(request.Goal)), Status: "active", CreatedAt: now, UpdatedAt: now}
+	child := store.Conversation{ID: childID, ParentID: x.info.ID, Role: variant.Name, Title: subtaskTitle(e.scrub.Text(request.Goal)), Status: "active", CreatedAt: now, UpdatedAt: now}
 	if err := e.cfg.Store.CreateConversation(ctx, child); err != nil {
 		release()
 		return tools.Result{}, err

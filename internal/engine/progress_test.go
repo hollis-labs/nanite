@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
@@ -712,4 +713,73 @@ func bgFinished(ctx context.Context, e *Engine, conversation string) bool {
 		return err == nil && job.Status != "" && job.Status != "running"
 	}
 	return false
+}
+
+// A foreground subtask that has to wait for a slot says so, under the ID it
+// then starts with.
+func TestSubtaskWaitingForASlotSaysSo(t *testing.T) {
+	// Whichever subtask gets the slot holds it in a tool until the other has
+	// said it is waiting.
+	seen := make(chan struct{})
+	var once sync.Once
+	children := map[string]*fake.Provider{
+		"one": fake.New(toolResponse("hold_slot"), returnCall("ok", "one")),
+		"two": fake.New(toolResponse("hold_slot"), returnCall("ok", "two")),
+	}
+	p := &routedProvider{root: fake.New(fanOut("worker", "one", "two"), fake.Text("parent done")), children: children}
+	e, _, id := setupEngine(t, p, "")
+	e.cfg.Gate = permission.AllowGate
+	first := true
+	var firstMu sync.Mutex
+	if err := e.cfg.Tools.SetGroup("host", tools.Tool{Name: "hold_slot", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(ctx context.Context, _ tools.Call) (tools.Result, error) {
+			firstMu.Lock()
+			holder := first
+			first = false
+			firstMu.Unlock()
+			if holder {
+				select {
+				case <-seen:
+				case <-ctx.Done():
+				case <-time.After(10 * time.Second):
+				}
+			}
+			return tools.Result{Text: "held"}, nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	e.children = subagent.NewLimit(1)
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waited := map[string]int{}
+	started := map[string]int{}
+	i := 0
+	for ev := range run.Events() {
+		i++
+		switch x := ev.(type) {
+		case events.SubtaskProgress:
+			if x.StatusLine == "waiting for a subtask slot" {
+				if x.ParentID != id || x.Depth != 1 || x.Variant != "worker" || x.ID == "" {
+					t.Errorf("waiting progress %+v", x)
+				}
+				waited[x.ID] = i
+				once.Do(func() { close(seen) })
+			}
+		case events.SubagentStarted:
+			started[x.ID] = i
+		}
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if len(waited) != 1 {
+		t.Fatalf("waiting events %v, want exactly one (limit 1, two subtasks)", waited)
+	}
+	for child, at := range waited {
+		if s, ok := started[child]; !ok || s < at {
+			t.Fatalf("the waiting subtask %s started at %d (waited at %d); starts %v", child, s, at, started)
+		}
+	}
 }

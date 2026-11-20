@@ -368,6 +368,8 @@ step count, whatever the provider reports), the tool it is calling and a
 short status line. They are rate-limited per subtask, at most one each
 500ms; a state that arrives sooner is held and sent when the interval
 passes, and anything held is sent before the subtask's `SubagentFinished`.
+A foreground subtask that has to wait for a slot first sends one with the
+status line "waiting for a subtask slot", under the ID it then starts with.
 They are for the host only: the parent model never sees them. A depth-2
 subtask's `SubagentStarted`, progress and `SubagentFinished` all reach the
 root's run through its lead, each with its parent (the lead) and depth 2. A

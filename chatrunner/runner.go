@@ -268,10 +268,7 @@ func ConversationID(chatID string) string {
 // Discard.
 func (r *Runner) conversation(ctx context.Context, chatID string) (*agent.Conversation, error) {
 	id := ConversationID(chatID)
-	c, err := r.agent.Conversation(ctx, id)
-	if errors.Is(err, agent.ErrNoConversation) {
-		c, err = r.agent.NewConversation(ctx, func(info *agent.ConversationInfo) { info.ID = id })
-	}
+	c, err := r.agent.EnsureConversation(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("chatrunner: open conversation: %w", err)
 	}

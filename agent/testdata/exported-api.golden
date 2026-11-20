@@ -7,6 +7,7 @@ type Agent struct
   (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
   (*Agent) ConversationHostStates(ctx context.Context, key string) (map[string]string, error)
   (*Agent) Conversations(ctx context.Context) ([]ConversationInfo, error)
+  (*Agent) EnsureConversation(ctx context.Context, id string, options ...ConversationOption) (*Conversation, error)
   (*Agent) HostState(ctx context.Context, key string) (string, error)
   (*Agent) Info(ctx context.Context) (Info, error)
   (*Agent) Latest(ctx context.Context) (*Conversation, error)

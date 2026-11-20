@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `Agent.EnsureConversation(ctx, id, options...)` opens a conversation by ID,
+  creating it on first use; concurrent first uses on one Agent create it once.
+  chatrunner uses it, so a turn start racing a host event (`SteerEvent`,
+  `SteerFocus`) on a new chat no longer fails with
+  "transcript: conversation already has a writer".
 - Breaking: tool-package approvals no longer use the agent-local database.
   Existing packages need approval again; old approvals are not migrated.
   Explicit host `DataDir` uses `DataDir/tool-approvals`; otherwise approvals

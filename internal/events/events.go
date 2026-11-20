@@ -97,8 +97,11 @@ type Question struct {
 // SubagentStarted reports the launch of a subtask's child conversation.
 type SubagentStarted struct {
 	EventMeta
-	ID, Variant, Goal string
-	Background        bool
+	// ParentID is the conversation that started it; Depth is 1 for a root's
+	// child and 2 under a lead.
+	ID, ParentID, Variant, Goal string
+	Depth                       int
+	Background                  bool
 }
 
 // SubagentFinished reports the outcome of a foreground subtask. Status is
@@ -107,11 +110,38 @@ type SubagentStarted struct {
 // the child did not fail, but its work is incomplete.
 type SubagentFinished struct {
 	EventMeta
-	ID, Variant string
-	Status      string
-	Result      Result
-	Err         error
-	Limit       string
+	// ParentID and Depth are as in SubagentStarted.
+	ID, ParentID, Variant string
+	Depth                 int
+	Status                string
+	Result                Result
+	Err                   error
+	Limit                 string
+}
+
+// SubtaskProgress reports where a running subtask is: its step, the tool it
+// is calling and a short status line. It is rate-limited per subtask and is
+// for the host only; the parent model never sees it. A depth-2 subtask's
+// progress, start and finish all reach the root's run.
+type SubtaskProgress struct {
+	EventMeta
+	// ID is the subtask's conversation; ParentID the conversation that
+	// started it, and Depth how far below the root it runs (1 for a root's
+	// child, 2 under a lead).
+	ID, ParentID, Variant string
+	Depth                 int
+	// Step is the step the subtask is in; Tool the tool it is calling, if
+	// any; StatusLine a short summary.
+	Step       int
+	Tool       string
+	StatusLine string
+	// Background marks a background subtask, whose progress lands in
+	// whatever turn its parent conversation is running. Its last progress
+	// event carries Status, how it ended; Status is empty while it runs. A
+	// foreground subtask that waited for a slot and never started also gets
+	// a last event with Status cancelled, refused or error.
+	Background bool
+	Status     string
 }
 
 // LimitReason returns stop when it reports that a turn stopped at a step,

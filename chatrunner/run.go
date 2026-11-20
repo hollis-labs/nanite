@@ -20,10 +20,14 @@ const (
 	// list of name, tokens and changed.
 	ActivitySlots = "nanite.slots"
 	// ActivitySubagent reports a subtask's child conversation. Value: state
-	// ("start", "done" or "limit"), id and variant; when done, status (ok,
-	// partial, limit, error or cancelled) and error or limit. State "usage"
-	// is a finished background subtask's token use, which is not part of the
-	// turn's usage deltas.
+	// ("start", "progress", "done" or "limit"), id, parent_id, depth (1 for a
+	// root's child, 2 under a lead) and variant; when done, status (ok,
+	// partial, limit, error, cancelled or denied) and error or limit.
+	// Progress carries step, tool and status_line, rate-limited per subtask.
+	// A background subtask's start and progress carry background: true, and
+	// its last progress carries its status. State "usage" is a finished
+	// background subtask's token use, which is not part of the turn's usage
+	// deltas.
 	ActivitySubagent = "nanite.subagent"
 	// ActivityCompact reports history compaction. Value: state ("start",
 	// "done" or "failed"), with before, after or error.
@@ -341,10 +345,25 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 		return nil
 
 	case agent.SubagentStarted:
-		return []chatstream.Event{activity(ActivitySubagent, map[string]string{"state": "start", "id": e.ID, "variant": e.Variant})}
+		v := map[string]any{"state": "start", "id": e.ID, "parent_id": e.ParentID, "depth": e.Depth, "variant": e.Variant}
+		if e.Background {
+			v["background"] = true
+		}
+		return []chatstream.Event{activity(ActivitySubagent, v)}
+
+	case agent.SubtaskProgress:
+		v := map[string]any{"state": "progress", "id": e.ID, "parent_id": e.ParentID, "depth": e.Depth, "variant": e.Variant,
+			"step": e.Step, "tool": e.Tool, "status_line": e.StatusLine}
+		if e.Background {
+			v["background"] = true
+		}
+		if e.Status != "" {
+			v["status"] = e.Status
+		}
+		return []chatstream.Event{activity(ActivitySubagent, v)}
 
 	case agent.SubagentFinished:
-		v := map[string]string{"state": "done", "id": e.ID, "variant": e.Variant, "status": e.Status}
+		v := map[string]any{"state": "done", "id": e.ID, "parent_id": e.ParentID, "depth": e.Depth, "variant": e.Variant, "status": e.Status}
 		if e.Err != nil {
 			v["error"] = e.Err.Error()
 		} else if e.Limit != "" {

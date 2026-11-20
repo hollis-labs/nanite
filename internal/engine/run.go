@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/events"
@@ -25,6 +26,8 @@ type Run struct {
 	result     events.Result
 	err        error
 	finishOnce sync.Once
+	// steps is the turn's step count so far, for a subtask's progress.
+	steps atomic.Int64
 }
 
 // ID returns the turn identifier shared by its events.
@@ -59,6 +62,17 @@ func (r *Run) Wait() (events.Result, error) {
 func (r *Run) Cancel() { r.cancel() }
 
 func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Event) {
+	r.send(ctx, event, true)
+}
+
+// forward emits an event that another run already reported to the runtime
+// sink, such as a depth-2 subtask's lifecycle passed up by its lead: the
+// host's stream gets it, telemetry does not count it twice.
+func (r *Run) forward(ctx context.Context, event func(events.EventMeta) events.Event) {
+	r.send(ctx, event, false)
+}
+
+func (r *Run) send(ctx context.Context, event func(events.EventMeta) events.Event, observe bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closing {
@@ -77,7 +91,9 @@ func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Even
 	}
 	r.seq++
 	value := event(events.EventMeta{RunID: r.id, Seq: r.seq})
-	r.report(ctx, value)
+	if observe {
+		r.report(ctx, value)
+	}
 	r.events <- value
 }
 

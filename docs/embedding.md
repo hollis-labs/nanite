@@ -234,7 +234,9 @@ the subtask with status `denied`; an expiry does not count as one.
 **Events.** Each model step is a `step.start` / `step.finish` pair around one
 assistant message that holds the step's text, reasoning, tool calls and tool
 results. Activity kinds are `nanite.slots`, `nanite.subagent` (a subtask's
-child conversation, with `variant`, and `status` when done) and
+child conversation, with `variant`, `parent_id` and `depth`, and `status`
+when done; state `progress` carries `step`, `tool` and `status_line` while
+it runs, and a background subtask's start and progress carry `background`) and
 `nanite.compact` (`value.state` is `start`, `done` or `failed`). `run.finish`
 has reason `turn_limit` at the step limit and `length` at the model's output
 limit. A cancelled turn ends in `run.abort`, a failed one in `run.error` with

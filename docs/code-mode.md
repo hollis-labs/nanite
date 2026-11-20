@@ -168,8 +168,9 @@ trust the result:
 
 Anything other than `ok` is incomplete work, and `reason` says why.
 
-The whole result is capped: the variant's `result_cap`, else the host's
-`agent.Options.SubtaskResultCap`, else the default. Every cap is clamped to
+The whole result is capped: the variant's `result_cap`, else the agent's
+cap (`agent.Options.SubtaskResultCap`, else `runtime.subtask_result_cap` in
+`host.yaml`), else the default. Every cap is clamped to
 what one tool result shows in full, about 5,900 tokens, so the effective
 default is about 5,900 tokens and a larger setting has no further effect.
 A return that doesn't fit is stored, scrubbed of secrets, for 30 days. The
@@ -233,39 +234,47 @@ budgets:
   wall: 30m
 last_n: 6
 ---
-You lead a council of three reviewers. Start three subtasks with variant
-"reviewer", each with the same goal and inputs, and give each a different
-angle in its goal: correctness, safety, and clarity. ...
+You lead a council of three reviewers. In one step, start three subtasks
+with variant "reviewer", each with the same goal and inputs, and give each a
+different angle in its goal: correctness, safety, and clarity. ...
 ```
 
 A lead's token budget includes the children it has finished, and its time
-limit bounds them too. The lead and its three reviewers take 4 subtask
-slots, the whole default limit, so a council can't run alongside other
-subtasks unless the host raises `agent.Options.SubtaskLimit`. The council
-prompt says what to do when a reviewer is refused over the limit.
+limit bounds them too. The lead takes a slot from the leads' pool and its
+three reviewers take three of the other pool's slots, so a lead never
+competes with its own children. The council prompt starts all three
+reviewers in one step, so they run side by side.
 
 ## Several subtasks at once
 
-> **To check once B5 (CW-20261119-0161) merges.** This section describes
-> fan-out as B5 specifies it. Until B5 lands, several `subtask` calls in one
-> step run one after another.
+A step's tool calls run in the order the model made them. Consecutive calls
+that may run side by side, read-only tools and `subtask`, run together,
+bounded by `runtime.tool_concurrency` (default 4); any other call runs alone,
+in its place. So a write made before a `subtask` call finishes before the
+subtask starts. Results come back in call order, each capped as above.
 
-Several `subtask` calls in one step run side by side, bounded by the host's
-`runtime.tool_concurrency` (default 4). They run before the step's other
-calls, and the results come back in call order, each capped as above.
+Subtasks share two agent-wide pools of slots, across every conversation: one
+for leads (`can_spawn` variants) and one for every other subtask. Each pool
+has `subtask_limit` slots: `agent.Options.SubtaskLimit`, else
+`runtime.subtask_limit` in `host.yaml`, else 4. The most is 8, and a larger
+`host.yaml` value is refused when the agent opens and by `nanite validate`.
+A foreground subtask over its limit waits for a slot while its turn lasts;
+cancelling the turn ends the wait. A background subtask over its limit is
+refused at once, since it must not hold up the turn that starts it.
 
-At most `agent.Options.SubtaskLimit` subtasks (default 4, at most 8) run at
-once across the whole agent: every conversation, background subtasks and a
-lead's own children count against it. A subtask over the limit is refused,
-not queued: the model is told how many are running and to wait or start
-fewer.
+A turn token budget is opt-in: `agent.Options.TurnTokenBudget`, else
+`runtime.turn_token_budget` in `host.yaml`; 0 means none. When set, one root
+turn shares it with every foreground subtask it starts, at any depth. Every
+model call counts, cached tokens included, and compaction summaries count as
+an estimate. When the total reaches the budget, every subtask still running
+stops at once, mid-step, and ends `limit` (`token_budget`); one that has
+already returned its result keeps it. The root stops at its next step, and no
+new foreground subtask starts. Background subtasks draw only on their
+variant's own budget, and a resumed turn starts a fresh budget. A cost (USD)
+budget is not enforced.
 
-`agent.Options.TurnTokenBudget` is opt-in. When a host sets it, one root turn
-shares that token ceiling with every foreground subtask it starts, at any
-depth; background subtasks draw only on their variant's own budget. A turn or
-child that reaches it ends with `limit` (`token_budget`), and no new
-foreground subtask starts once the budget is spent. A cost (USD) budget is
-not enforced.
+For each of these settings, a non-zero `agent.Options` value wins, then
+`host.yaml`, then the default.
 
 Cancelling the parent turn cancels every foreground subtask it started.
 
@@ -279,11 +288,7 @@ notice, not counted into whichever turn happens to be running.
 
 ## Not yet
 
-- `budgets.cost` is accepted but not enforced, because usage doesn't carry
-  a price yet.
-- The agent-wide result cap, the subtask limit and the turn token budget
-  can't be set in `host.yaml` yet; a host sets them with
-  `agent.Options.SubtaskResultCap`, `agent.Options.SubtaskLimit` and
-  `agent.Options.TurnTokenBudget`.
+- `budgets.cost` and any cost (USD) budget are accepted but not enforced,
+  because usage doesn't carry a price yet.
 - A child can't yet search the parent's tool catalog for tools it wasn't
   given (CM-4), and there is no long-lived companion subtask (CM-7).

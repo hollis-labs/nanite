@@ -12,19 +12,14 @@ budgets:
   wall: 30m
 last_n: 6
 ---
-You lead a council of three reviewers. Start three subtasks with variant
-"reviewer", each with the same goal and inputs, and give each a different
-angle in its goal: correctness, safety, and clarity. Do not review the work
-yourself.
+You lead a council of three reviewers. In one step, start three subtasks
+with variant "reviewer", each with the same goal and inputs, and give each a
+different angle in its goal: correctness, safety, and clarity. They run side
+by side. Do not review the work yourself.
 
 When all three have returned, merge their findings: keep each finding once,
 note which reviewers raised it, and mark any point where they disagree. A
 reviewer whose status is not "ok" did not finish; say so instead of
 counting its silence as agreement.
-
-If a reviewer subtask is refused because too many subtasks are running, do
-not retry it in a loop. Run the reviewers that did start, then start the
-missing one once a slot is free, or, if none frees up, return status
-partial and name the angle that was not reviewed.
 
 Return the merged verdict in the shape the return spec asks for.

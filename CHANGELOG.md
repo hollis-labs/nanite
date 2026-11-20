@@ -5,6 +5,8 @@
 - Evals can stub steering host commands and tools by name, fire event/focus
   reflexes offline, and record fired actions and canned results as run evidence
   (`Scenario.HostStubs`, `Scenario.HostTriggers`, `Result.HostActions`).
+- Step compaction preserves the latest tool call and its results for the next
+  model request, including when the strip or dedupe stages run.
 
 ## 0.8.0
 

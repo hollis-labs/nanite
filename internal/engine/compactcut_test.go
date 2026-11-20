@@ -427,3 +427,26 @@ func TestKeepRespectsTheConversationSlot(t *testing.T) {
 		t.Fatal("the slot's compactability was not restored")
 	}
 }
+
+func TestPreserveLatestToolStepStillCompactsOlderPairs(t *testing.T) {
+	original, _ := turns(2)
+	// Remove the final answer: the last tool step is awaiting generation.
+	original = original[:len(original)-1]
+	staged := cloneMessages(original)
+	for i := range staged {
+		staged[i].ContentBlocks = []llmtypes.ContentBlock{{Type: "text", Text: "compacted"}}
+	}
+	got := preserveLatestToolStep(original, staged)
+	for _, i := range []int{1, 2} {
+		if got[i].ContentBlocks[0].Type != "text" {
+			t.Fatal("older tool pair was restored")
+		}
+	}
+	if got[5].ContentBlocks[0].Type != "tool_use" || got[6].ContentBlocks[0].Type != "tool_result" || got[5].ContentBlocks[0].ID != got[6].ContentBlocks[0].ToolUseID {
+		t.Fatal("latest pair was not restored together")
+	}
+	got[6].ContentBlocks[0].Content = "changed"
+	if original[6].ContentBlocks[0].Content == "changed" {
+		t.Fatal("restored blocks alias the live history")
+	}
+}

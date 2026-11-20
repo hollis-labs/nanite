@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -109,5 +110,72 @@ func TestTextOnlyTurnCompactsBeforeFirstRequest(t *testing.T) {
 	total += est.Estimate(string(raw))
 	if total >= e.cfg.CompactAt {
 		t.Fatalf("first request estimate %d exceeds budget %d", total, e.cfg.CompactAt)
+	}
+}
+
+func TestStepCompactionPreservesLatestToolResults(t *testing.T) {
+	for _, keep := range []int{0, 800} {
+		t.Run(fmt.Sprintf("keep_%d", keep), func(t *testing.T) {
+			response := fake.Response{Events: []llmtypes.StreamEvent{
+				{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-1", Name: "large_result"}},
+				{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-2", Name: "large_result"}},
+				{Type: llmtypes.EventDone},
+			}}
+			p := &watchedProvider{Provider: fake.New(response, fake.Text("done"))}
+			e, _, id := setupEngine(t, p, "runtime:\n  context_window: 6000\n")
+			e.cfg.CompactKeepTokens = keep
+			want := strings.Repeat("CURRENT-RESULT ", 1000)
+			if err := e.cfg.Tools.SetGroup("app", tools.Tool{Name: "large_result", Description: "Read a document", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`), Handler: func(context.Context, tools.Call) (tools.Result, error) {
+				return tools.Result{Text: want}, nil
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			run, err := e.Send(t.Context(), id, Input{Text: "Read the document."})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var toolFinished, compactedAfterTool, noProgress bool
+			for ev := range run.Events() {
+				switch ev.(type) {
+				case events.ToolCallFinished:
+					toolFinished = true
+				case events.CompactionFailed:
+					noProgress = true
+				case events.CompactionStarted:
+					if !toolFinished {
+						t.Fatal("compaction ran before the tool")
+					}
+					compactedAfterTool = true
+				}
+			}
+			if _, err := run.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			if !compactedAfterTool || len(p.requests) != 2 {
+				t.Fatalf("step compaction=%v requests=%d", compactedAfterTool, len(p.requests))
+			}
+			for _, callID := range []string{"call-1", "call-2"} {
+				var useIndex, resultIndex = -1, -1
+				for i, m := range p.requests[1].Messages {
+					for _, b := range m.ContentBlocks {
+						if b.Type == "tool_use" && b.ID == callID {
+							useIndex = i
+						}
+						if b.Type == "tool_result" && b.ToolUseID == callID {
+							resultIndex = i
+							if b.Content != want {
+								t.Fatalf("latest result changed: %d bytes, want %d", len(b.Content), len(want))
+							}
+						}
+					}
+				}
+				if useIndex < 0 || resultIndex != useIndex+1 {
+					t.Fatalf("latest tool pair lost or separated: use=%d result=%d", useIndex, resultIndex)
+				}
+			}
+			if !noProgress {
+				t.Fatal("restored tool results were counted as compaction savings")
+			}
+		})
 	}
 }

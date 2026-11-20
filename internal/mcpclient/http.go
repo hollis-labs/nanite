@@ -42,7 +42,7 @@ func (c *Client) httpClient(headers map[string]string, timeoutSeconds int) *http
 		t.principal = c.auth.Principal
 		t.correlation = id.Correlation
 		if id.Audience != "" && c.auth.Warden != nil {
-			t.bearer = c.auth.Warden.Bearer(id.Audience, id.Scopes)
+			t.bearer = c.auth.Warden.BearerFor(id.Audience, id.Scopes, "MCP server "+server)
 		}
 	}
 	return &http.Client{Timeout: time.Duration(timeoutSeconds) * time.Second, Transport: t}

@@ -56,6 +56,8 @@ type Config struct {
 	// OnAuthWaiting sees each Warden grant request Nanite files or finds
 	// pending.
 	OnAuthWaiting func(warden.Waiting)
+	// OnAuthGranted sees a conversation that waited on a grant get its token.
+	OnAuthGranted func(warden.Waiting)
 	Store         *store.Store
 	Gate          permission.Gate
 	// AskWait bounds how long a subtask's relayed ask waits, in total, for
@@ -199,7 +201,7 @@ func New(cfg Config) (*Engine, error) {
 	cfg.ProviderConfig.Panics = guard
 	var mcpAuth *mcpclient.Auth
 	if cfg.Identity != nil {
-		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting)
+		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting, cfg.OnAuthGranted)
 		if err != nil {
 			return nil, err
 		}
@@ -418,7 +420,7 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 		runID = interrupted.ID
 	}
 
-	r, ctx := e.newRunLocked(ctx, id, runID)
+	r, ctx := e.newRunLocked(warden.WithConversation(ctx, id), id, runID)
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
 	hostTools, hostSkills := e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot()
@@ -679,3 +681,7 @@ func (e *Engine) forgetTurnContext(conversation string) {
 	}
 	e.previous[conversation] = hashes
 }
+
+// Warden is the agent's Warden token source, nil without identity.yaml's
+// warden section.
+func (e *Engine) Warden() *warden.Source { return e.cfg.ProviderConfig.Warden }

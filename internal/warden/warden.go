@@ -41,6 +41,7 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -58,6 +59,10 @@ import (
 // place a new parent credential and remove the <file>.inflight marker.
 var ErrReenroll = errors.New("warden: the parent credential needs re-enrollment")
 
+// ErrRequestGone means Warden no longer shows a grant request to this agent
+// (not found, or not its own): it will never be decided for it.
+var ErrRequestGone = errors.New("warden: the grant request is gone")
+
 // AuthWaitingActivity is the activity kind a host publishes for a Waiting
 // (see Config.OnWaiting).
 const AuthWaitingActivity = "nanite.auth.waiting"
@@ -70,6 +75,36 @@ type Waiting struct {
 	Tier      string   `json:"tier,omitempty"`
 	Audience  string   `json:"audience"`
 	Scopes    []string `json:"scopes,omitempty"`
+	// Conversation is the conversation whose request needed the grant
+	// (WithConversation), "" when none was set.
+	Conversation string `json:"conversation,omitempty"`
+	// For names what needed the grant: a provider or an MCP server
+	// (Source.BearerFor), "" when unnamed.
+	For string `json:"for,omitempty"`
+}
+
+type conversationKey struct{}
+
+type forKey struct{}
+
+// WithConversation tags ctx with the conversation a token is needed for, so
+// a grant request and its Waiting name it. An outer tag wins: a subtask's
+// requests stay with the conversation that started it.
+func WithConversation(ctx context.Context, id string) context.Context {
+	if id == "" || conversationFrom(ctx) != "" {
+		return ctx
+	}
+	return context.WithValue(ctx, conversationKey{}, id)
+}
+
+func conversationFrom(ctx context.Context) string {
+	id, _ := ctx.Value(conversationKey{}).(string)
+	return id
+}
+
+func forFrom(ctx context.Context) string {
+	label, _ := ctx.Value(forKey{}).(string)
+	return label
 }
 
 // MissingGrantError is returned while a grant request is pending. The turn
@@ -79,6 +114,25 @@ type MissingGrantError struct{ Waiting Waiting }
 
 func (e *MissingGrantError) Error() string {
 	return fmt.Sprintf("warden: no grant for audience %s yet; request %s is %s", e.Waiting.Audience, e.Waiting.RequestID, e.Waiting.Status)
+}
+
+var missingGrantText = regexp.MustCompile(`warden: no grant for audience (\S+) yet; request (\S+) is (\S+)`)
+
+// AsMissingGrant finds a MissingGrantError in err, or its text where a
+// provider or the engine carried the failure as a string.
+func AsMissingGrant(err error) (Waiting, bool) {
+	if err == nil {
+		return Waiting{}, false
+	}
+	var missing *MissingGrantError
+	if errors.As(err, &missing) {
+		return missing.Waiting, true
+	}
+	m := missingGrantText.FindStringSubmatch(err.Error())
+	if m == nil {
+		return Waiting{}, false
+	}
+	return Waiting{Audience: m[1], RequestID: m[2], Status: m[3]}, true
 }
 
 // Config configures a Source.
@@ -100,6 +154,9 @@ type Config struct {
 	Logger *slog.Logger
 	// OnWaiting sees each grant request filed or found still pending.
 	OnWaiting func(Waiting)
+	// OnGranted sees a conversation that waited on a grant request get its
+	// token (Waiting.Conversation; Status "granted").
+	OnGranted func(Waiting)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 }
@@ -117,7 +174,10 @@ type entry struct {
 	renewAt   time.Time
 	expiresAt time.Time
 	request   string // a pending grant request's ID
-	checked   time.Time
+	// waiters is the conversations a token request failed for while a
+	// grant request was pending, with that request's ID.
+	waiters map[string]string
+	checked time.Time
 	// After a failed mint, nothing is tried again before retryAt; the wait
 	// doubles from minBackoff to maxBackoff.
 	failed  error
@@ -200,16 +260,26 @@ type Bearer struct {
 	s        *Source
 	audience string
 	scopes   []string
+	label    string
 }
 
 // Bearer returns the token source for audience and scopes.
 func (s *Source) Bearer(audience string, scopes []string) *Bearer {
-	return &Bearer{s: s, audience: audience, scopes: slices.Clone(scopes)}
+	return s.BearerFor(audience, scopes, "")
+}
+
+// BearerFor is Bearer for a named user of the token ("provider gateway",
+// "MCP server tools"), which a grant request and its Waiting name.
+func (s *Source) BearerFor(audience string, scopes []string, label string) *Bearer {
+	return &Bearer{s: s, audience: audience, scopes: slices.Clone(scopes), label: label}
 }
 
 // Token returns a valid token, minting one when the cached token is past two
 // thirds of its life.
 func (b *Bearer) Token(ctx context.Context) (string, error) {
+	if b.label != "" && forFrom(ctx) == "" {
+		ctx = context.WithValue(ctx, forKey{}, b.label)
+	}
 	return b.s.Token(ctx, b.audience, b.scopes)
 }
 
@@ -236,6 +306,27 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 	e := s.entry(audience, scopes)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	tok, err := s.token(ctx, e, audience, scopes)
+	conversation := conversationFrom(ctx)
+	var missing *MissingGrantError
+	switch {
+	case err == nil && conversation != "" && e.waiters[conversation] != "":
+		// A conversation that waited got its token: it no longer waits.
+		id := e.waiters[conversation]
+		delete(e.waiters, conversation)
+		if s.cfg.OnGranted != nil {
+			s.cfg.OnGranted(Waiting{RequestID: id, Status: "granted", Audience: audience, Scopes: slices.Clone(scopes), Conversation: conversation, For: forFrom(ctx)})
+		}
+	case errors.As(err, &missing) && conversation != "":
+		if e.waiters == nil {
+			e.waiters = map[string]string{}
+		}
+		e.waiters[conversation] = missing.Waiting.RequestID
+	}
+	return tok, err
+}
+
+func (s *Source) token(ctx context.Context, e *entry, audience string, scopes []string) (string, error) {
 	now := s.cfg.Now()
 	if e.token != "" && now.Before(e.renewAt) {
 		return e.token, nil
@@ -250,6 +341,7 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 		w, done, err := s.pending(ctx, e, audience, scopes)
 		if err != nil || !done {
 			if err == nil {
+				w = s.waiting(ctx, w)
 				err = &MissingGrantError{Waiting: w}
 			}
 			return "", err
@@ -266,7 +358,7 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 			t, err = s.mint(ctx, audience, scopes)
 		} else {
 			e.request, e.checked = w.RequestID, s.cfg.Now()
-			s.waiting(w)
+			w = s.waiting(ctx, w)
 			return "", &MissingGrantError{Waiting: w}
 		}
 	}
@@ -315,10 +407,53 @@ func (s *Source) pending(ctx context.Context, e *entry, audience string, scopes 
 	}
 }
 
-func (s *Source) waiting(w Waiting) {
+// waiting tags w with ctx's conversation and user and reports it. It is
+// called for every token request that finds a grant missing, so OnWaiting
+// sees a pending request again on each attempt and should deduplicate.
+func (s *Source) waiting(ctx context.Context, w Waiting) Waiting {
+	w.Conversation, w.For = conversationFrom(ctx), forFrom(ctx)
 	s.cfg.Logger.Info("warden: waiting for a grant", "request", w.RequestID, "status", w.Status, "audience", w.Audience)
 	if s.cfg.OnWaiting != nil {
 		s.cfg.OnWaiting(w)
+	}
+	return w
+}
+
+// Request looks up a grant request's current status ("pending", "approved",
+// "denied", ...). A watcher uses it to learn the decision.
+func (s *Source) Request(ctx context.Context, id string) (Waiting, error) {
+	return s.lookup(ctx, id)
+}
+
+// Decided tells the source a grant request has been decided. On approval
+// ("approved" or "granted") the next token request looks it up at once
+// instead of waiting out the recheck interval; on any other decision the
+// request is forgotten, so the next token request files a new one.
+func (s *Source) Decided(id, status string) {
+	approved := status == "approved" || status == "granted"
+	s.mu.Lock()
+	entries := make([]*entry, 0, len(s.tokens))
+	for _, e := range s.tokens {
+		entries = append(entries, e)
+	}
+	s.mu.Unlock()
+	for _, e := range entries {
+		e.mu.Lock()
+		if e.request == id {
+			if approved {
+				e.checked = time.Time{}
+			} else {
+				e.request = ""
+			}
+		}
+		if !approved {
+			for c, req := range e.waiters {
+				if req == id {
+					delete(e.waiters, c)
+				}
+			}
+		}
+		e.mu.Unlock()
 	}
 }
 
@@ -460,7 +595,7 @@ func (s *Source) file(ctx context.Context, audience string, scopes []string) (Wa
 	if err != nil {
 		return Waiting{}, err
 	}
-	body, err := json.Marshal(map[string]any{"audience": audience, "scopes": scopes, "purpose": s.purpose()})
+	body, err := json.Marshal(map[string]any{"audience": audience, "scopes": scopes, "purpose": s.purpose(ctx)})
 	if err != nil {
 		return Waiting{}, err
 	}
@@ -488,17 +623,32 @@ func (s *Source) lookup(ctx context.Context, id string) (Waiting, error) {
 		Status string `json:"status"`
 		Tier   string `json:"tier"`
 	}
-	if _, err := s.do(ctx, http.MethodGet, "/api/v1/requests/"+url.PathEscape(id), "", nil, bearer, &r); err != nil {
+	if status, err := s.do(ctx, http.MethodGet, "/api/v1/requests/"+url.PathEscape(id), "", nil, bearer, &r); err != nil {
+		if status == http.StatusNotFound || status == http.StatusForbidden {
+			return Waiting{}, fmt.Errorf("%w (status %d)", ErrRequestGone, status)
+		}
 		return Waiting{}, err
 	}
 	return Waiting{RequestID: id, Status: r.Status, Tier: r.Tier}, nil
 }
 
-func (s *Source) purpose() string {
-	if s.cfg.Purpose != "" {
-		return s.cfg.Purpose
+// purpose explains a grant request to the approver: the configured purpose
+// or a default, plus what needed it and for which conversation.
+func (s *Source) purpose(ctx context.Context) string {
+	what := "a configured provider or MCP server"
+	if label := forFrom(ctx); label != "" {
+		what = label
 	}
-	return "Nanite agent " + s.cfg.Principal + " needs this grant for a configured provider or MCP server"
+	text := s.cfg.Purpose
+	if text == "" {
+		text = "Nanite agent " + s.cfg.Principal + " needs this grant for " + what
+	} else {
+		text += " (needed for " + what + ")"
+	}
+	if id := conversationFrom(ctx); id != "" {
+		text += "; conversation " + id
+	}
+	return text
 }
 
 func (s *Source) post(ctx context.Context, path, ctype string, body io.Reader, bearer string, out any) (int, error) {

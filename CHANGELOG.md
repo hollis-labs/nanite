@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Waiting for a Warden grant shows in the chat and continues on approval.
+  `agent.AuthWaiting` gains `Conversation` and `For` (`provider <name>` or
+  `MCP server <name>`), which the grant request's purpose names too;
+  `Agent.AuthRequest` and `Agent.AuthDecided` look a request up and mark it
+  decided; `agent.IsAuthWaiting` recognizes a turn that failed for one. The
+  chatrunner publishes a `nanite.auth.waiting` activity per request and chat,
+  ends the turn with a run error saying it is waiting, and watches the
+  request (`Options.AuthPoll`, default 30s doubling to 5m; kept in host
+  state across restarts). A decision posts a notice of kind `auth` to each
+  chat that waited, which on approval starts a notice turn to retry (with
+  `NoticeTurns`; otherwise it asks to send the message again). A chat whose
+  own later turn got the token is not told; retries to several chats are
+  spaced out. The watch stops on a request Warden no longer shows, without
+  a Warden identity, or after `Options.AuthWaitMax` (default 24h), telling
+  the chats. `Runner.AuthDecided` takes a pushed decision and
+  `Options.AuthStatus` replaces the lookup. `Agent.AuthDecided` takes the
+  status (a refusal forgets the request, so the next attempt files anew);
+  `Options.OnAuthGranted` and `agent.ErrAuthRequestGone` are new.
 - `agent/providers`: named providers with `auth: warden`. `NewWarden`
   builds a token source from an agent's identity (`WardenOptions` carries
   the redaction scope, a logger and `OnAuthWaiting`), and `Options.Warden`

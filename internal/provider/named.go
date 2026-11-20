@@ -206,7 +206,7 @@ func NewNamed(spec Spec, cfg Config) (llmcontracts.Provider, error) {
 		if cfg.Warden == nil {
 			return nil, fmt.Errorf("provider %s: auth warden needs identity.yaml with a warden section", spec.Name)
 		}
-		settings.Bearer = cfg.Warden.Bearer(spec.Audience, spec.Scopes)
+		settings.Bearer = cfg.Warden.BearerFor(spec.Audience, spec.Scopes, "provider "+spec.Name)
 		keyless = true
 	}
 	switch spec.Wire {

@@ -37,6 +37,8 @@ import (
 )
 
 type execution struct {
+	// toolPkgs are the agent's tool packages, read for this turn.
+	toolPkgs   map[string]authored.ToolPackage
 	engine     *Engine
 	run        *Run
 	info       store.Conversation
@@ -211,6 +213,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		// A bad authored variant is skipped, not fatal; nanite validate reports it.
 		variantWarning = "Some subtask variants did not load: " + variantErr.Error()
 	}
+	toolPkgs, toolWarning := e.toolPackages()
 	var variant subagent.Variant
 	var chain []subagent.Variant
 	depth := 0
@@ -281,10 +284,15 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	// environment slot.
 	def.Runtime.Model = modelName
 	catalog := skills.NewCatalog(def.Skills, hostSkills)
-	lease, warnings := e.mcp.Reconcile(ctx, def.Snapshot.MCP)
+	mcpConfig, toolWarnings := e.toolServers(ctx, def.Snapshot.MCP, toolPkgs)
+	lease, warnings := e.mcp.Reconcile(ctx, mcpConfig)
 	defer lease.Close()
 	mcpTools, discoveryWarnings := lease.Tools(ctx)
 	warnings = append(warnings, discoveryWarnings...)
+	warnings = append(warnings, toolWarnings...)
+	if toolWarning != "" {
+		warnings = append(warnings, toolWarning)
+	}
 	if variantWarning != "" {
 		warnings = append(warnings, variantWarning)
 	}
@@ -332,7 +340,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	e.warnCuts(ctx, info.ID, assembled.Report)
 	x := &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
-		variants: variants, variant: variant, chain: chain, depth: depth, root: root, lineage: lineage, source: input.Source}
+		variants: variants, variant: variant, chain: chain, depth: depth, root: root, lineage: lineage, source: input.Source, toolPkgs: toolPkgs}
 	if depth > 0 {
 		// The title's goal was scrubbed when the child was created.
 		x.origin = &permission.SubtaskOrigin{ChildID: info.ID, Variant: variant.Name, Goal: strings.TrimPrefix(info.Title, subtaskTitlePrefix),

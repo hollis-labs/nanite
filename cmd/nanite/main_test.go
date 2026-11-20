@@ -88,6 +88,28 @@ func TestRootHasCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Tool packages are validated too, entry included.
+	toolDir := filepath.Join(dir, "tools", "probe")
+	if err := os.MkdirAll(toolDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(toolDir, "tool.yaml"), []byte("description: Probe.\nkind: command\nentry: run.sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "tools/probe: entry run.sh") {
+		t.Fatalf("validate accepted a tool package without its entry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolDir, "run.sh"), []byte("#!/bin/sh\necho '{}'\n"), 0o700); err != nil { //nolint:gosec // G306: the entry must be executable
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(out.String(), "tools: probe") {
+		t.Fatalf("validate with a tool package: %q, %v", out.String(), err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "tools")); err != nil {
+		t.Fatal(err)
+	}
+
 	// identity.yaml is validated, and auth warden needs its warden section.
 	warden := "providers:\n  gateway:\n    wire: openai-chat\n    base_url: https://llm-gateway.example.test/v1\n    auth: warden\n    audience: llm-gateway\n"
 	if err := os.WriteFile(filepath.Join(dir, "providers.yaml"), []byte(warden), 0o600); err != nil {

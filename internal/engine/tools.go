@@ -39,6 +39,8 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 	catalog = append(catalog, selftools.Skills(skillCatalog)...)
 	catalog = append(catalog, mcp...)
 	catalog = append(catalog, x.jobTools()...)
+	catalog = append(catalog, x.packageTools()...)
+	catalog = append(catalog, x.toolValidate())
 	if x.info.ParentID != "" {
 		// Only a subtask child can read its parent's history.
 		catalog = append(catalog, x.parentHistory().Tools()...)

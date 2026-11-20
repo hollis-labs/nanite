@@ -1,6 +1,9 @@
 package tools
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // BuiltinGroup names a set of Nanite's own tools that a host can withhold
 // from an agent.
@@ -17,7 +20,13 @@ const (
 	BuiltinSkills     BuiltinGroup = "skills"      // skill_list, skill_get
 	BuiltinNotes      BuiltinGroup = "notes"       // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  BuiltinGroup = "questions"   // ask_user
+	// BuiltinTools offers the agent's tool packages (tools/<name>/, as
+	// tool__<name> and tool__<name>__<tool>) and tool_validate.
+	BuiltinTools BuiltinGroup = "tools"
 )
+
+// ToolPackagePrefix starts the name of every tool a tool package offers.
+const ToolPackagePrefix = "tool__"
 
 var builtinGroups = map[string]BuiltinGroup{
 	"read_file": BuiltinFilesRead, "list_dir": BuiltinFilesRead, "find_files": BuiltinFilesRead, "search_files": BuiltinFilesRead,
@@ -27,12 +36,13 @@ var builtinGroups = map[string]BuiltinGroup{
 	"subtask": BuiltinSubtasks, "parent_history_search": BuiltinSubtasks, "parent_history_get": BuiltinSubtasks,
 	"skill_list": BuiltinSkills, "skill_get": BuiltinSkills,
 	"todo_list": BuiltinNotes, "todo_write": BuiltinNotes, "scratchpad_read": BuiltinNotes, "scratchpad_write": BuiltinNotes,
-	"ask_user": BuiltinQuestions,
+	"ask_user":      BuiltinQuestions,
+	"tool_validate": BuiltinTools,
 }
 
 // AllBuiltins lists every built-in group.
 func AllBuiltins() []BuiltinGroup {
-	return []BuiltinGroup{BuiltinFilesRead, BuiltinFilesWrite, BuiltinShell, BuiltinBackground, BuiltinSubtasks, BuiltinSkills, BuiltinNotes, BuiltinQuestions}
+	return []BuiltinGroup{BuiltinFilesRead, BuiltinFilesWrite, BuiltinShell, BuiltinBackground, BuiltinSubtasks, BuiltinSkills, BuiltinNotes, BuiltinQuestions, BuiltinTools}
 }
 
 // Builtins is the set of groups an agent is offered. A nil set offers all of
@@ -64,6 +74,9 @@ func (b Builtins) Has(group BuiltinGroup) bool { return b == nil || b[group] }
 // Offers reports whether a built-in tool is offered. Names outside every
 // group, such as the cached-result tools and MCP tools, are always offered.
 func (b Builtins) Offers(tool string) bool {
+	if strings.HasPrefix(tool, ToolPackagePrefix) {
+		return b.Has(BuiltinTools)
+	}
 	group, grouped := builtinGroups[tool]
 	return !grouped || b.Has(group)
 }

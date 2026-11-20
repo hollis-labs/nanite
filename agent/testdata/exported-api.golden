@@ -35,6 +35,7 @@ const BuiltinQuestions github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinShell github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinSkills github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinSubtasks github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
+const BuiltinTools github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 type Compacted = github.com/hollis-labs/nanite/internal/events.Compacted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int

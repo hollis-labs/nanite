@@ -96,9 +96,10 @@ func builtin(name string) bool {
 	case "todo_write", "todo_list", "scratchpad_write", "scratchpad_read",
 		"skill_list", "skill_get", "subtask", "return_result", "parent_history_search", "parent_history_get",
 		"background_start", "background_status", "background_cancel", "fetch_tool_result",
-		"search_tool_result", "ask_user", "read_file", "write_file", "edit_file", "list_dir", "find_files", "search_files", "bash":
+		"search_tool_result", "ask_user", "read_file", "write_file", "edit_file", "list_dir", "find_files", "search_files", "bash",
+		"tool_validate":
 		return true
 	default:
-		return strings.HasPrefix(name, "mcp__")
+		return strings.HasPrefix(name, "mcp__") || strings.HasPrefix(name, ToolPackagePrefix)
 	}
 }

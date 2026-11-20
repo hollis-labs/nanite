@@ -63,24 +63,39 @@ func StartStreaming(ctx context.Context, command Command, writer io.Writer) (*Pr
 }
 
 func start(ctx context.Context, command Command, writer io.Writer) (*Process, error) {
-	runCtx, cancel := context.WithTimeout(ctx, command.Timeout)
-	cmd := exec.CommandContext(runCtx, "bash", "--noprofile", "--norc", "-c", command.Script) // #nosec G204 -- Bash executes an approved command after policy checks.
-	cmd.Dir = command.Dir
-	cmd.Env = processenv.List(processenv.Build(command.Env))
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return terminateGroup(cmd.Process.Pid) }
-	cmd.WaitDelay = 2 * time.Second
 	output := &cappedOutput{}
 	if writer == nil {
 		writer = output
 	}
-	cmd.Stdout, cmd.Stderr = writer, writer
-	if err := cmd.Start(); err != nil {
-		cancel()
+	process, err := startProcess(ctx, command.Timeout, command.Dir, processenv.List(processenv.Build(command.Env)), nil, writer, writer,
+		func(runCtx context.Context) *exec.Cmd {
+			return exec.CommandContext(runCtx, "bash", "--noprofile", "--norc", "-c", command.Script) // #nosec G204 -- Bash executes an approved command after policy checks.
+		})
+	if err != nil {
 		return nil, fmt.Errorf("start bash: %w", err)
 	}
+	process.output = output
+	return process, nil
+}
+
+// startProcess starts a command in its own process group, tied to this
+// process by a lifeline and ended (group and all) when ctx is done or
+// timeout passes.
+func startProcess(ctx context.Context, timeout time.Duration, dir string, env []string, stdin io.Reader, stdout, stderr io.Writer, build func(context.Context) *exec.Cmd) (*Process, error) {
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	cmd := build(runCtx)
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return terminateGroup(cmd.Process.Pid) }
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
 	stopLifeline := startLifeline(cmd.Process.Pid)
-	return &Process{cmd: cmd, ctx: runCtx, release: func() { stopLifeline(); cancel() }, output: output}, nil
+	return &Process{cmd: cmd, ctx: runCtx, release: func() { stopLifeline(); cancel() }, output: &cappedOutput{}}, nil
 }
 
 // lifelineScript terminates a process group once its standard input closes.

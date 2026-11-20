@@ -1,6 +1,7 @@
 // Package authored validates the Nanite-specific files an agent directory
 // may hold beside the libs agentdir files: subtask variants
-// (variants/<name>.md) and providers.yaml. The engine loads them through
+// (variants/<name>.md), providers.yaml and tool packages
+// (tools/<name>/tool.yaml). The engine loads them through
 // the same rules, so a tool that edits an agent directory (an editor, a
 // workbench, CI) applies exactly the rules Nanite will.
 //
@@ -94,3 +95,48 @@ func ParseProviders(data []byte) (Providers, error) { return authored.ParseProvi
 // LoadProviders reads and validates dir/providers.yaml. A missing file is
 // the zero Providers and no error.
 func LoadProviders(dir string) (Providers, error) { return authored.LoadProviders(dir) }
+
+// ToolPackage is an authored tool package, tools/<name>/tool.yaml: a tool an
+// agent (or a person) wrote for the agent, run as a command per call or as a
+// stdio MCP server.
+type ToolPackage = authored.ToolPackage
+
+// ToolNeed asks for a short-lived Warden token for a tool package.
+type ToolNeed = authored.ToolNeed
+
+// Tool package kinds and limits.
+const (
+	ToolCommand        = authored.ToolCommand
+	ToolMCP            = authored.ToolMCP
+	DefaultToolTimeout = authored.DefaultToolTimeout
+	MaxToolTimeout     = authored.MaxToolTimeout
+	MaxToolNeeds       = authored.MaxToolNeeds
+)
+
+// CheckToolName reports why name cannot name a tool package.
+func CheckToolName(name string) error { return authored.CheckToolName(name) }
+
+// ParseTool parses and validates the content of tools/<name>/tool.yaml. It
+// checks the manifest only; LoadTools also checks the entry file.
+// allowEnv names credential-like host variables the host lets packages pass
+// through (see CheckToolEnv).
+func ParseTool(name string, data []byte, allowEnv ...string) (ToolPackage, error) {
+	return authored.ParseTool(name, data, allowEnv...)
+}
+
+// LoadTools reads the tool packages in dir/tools. It returns every package
+// that loaded and, joined, an error for each that did not. A missing tools
+// directory is no packages.
+func LoadTools(dir string, allowEnv ...string) (map[string]ToolPackage, error) {
+	return authored.LoadTools(dir, allowEnv...)
+}
+
+// LoadTool reads one tool package, dir/tools/<name>, as LoadTools does.
+func LoadTool(dir, name string, allowEnv ...string) (ToolPackage, error) {
+	return authored.LoadTool(dir, name, allowEnv...)
+}
+
+// CheckToolEnv reports why a package may not pass the host variable name
+// through: a provider key variable Nanite reads, or a name that looks like a
+// credential, unless allow lists it.
+func CheckToolEnv(name string, allow []string) error { return authored.CheckToolEnv(name, allow) }

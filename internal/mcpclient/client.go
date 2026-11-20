@@ -282,8 +282,15 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 	}
 	readonly := spec.Annotations != nil && spec.Annotations.ReadOnlyHint
 	destructive := !readonly && (spec.Annotations == nil || spec.Annotations.DestructiveHint == nil || *spec.Annotations.DestructiveHint)
+	name := "mcp__" + modelName(reg.name) + "__" + modelName(spec.Name)
+	if pkg, ok := strings.CutPrefix(reg.name, ToolPackageServerPrefix); ok {
+		// A tool package's server is the agent's own code: its hints are not
+		// trusted, so its tools are never read-only to policy.
+		name = tools.ToolPackagePrefix + modelName(pkg) + "__" + modelName(spec.Name)
+		readonly, destructive = false, true
+	}
 	return tools.Tool{
-		Name: "mcp__" + modelName(reg.name) + "__" + modelName(spec.Name), Description: spec.Description, InputSchema: schema, ReadOnly: readonly, Destructive: destructive,
+		Name: name, Description: spec.Description, InputSchema: schema, ReadOnly: readonly, Destructive: destructive,
 		Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
 			var args map[string]any
 			if err := json.Unmarshal(call.Input, &args); err != nil {
@@ -305,6 +312,12 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 		},
 	}, nil
 }
+
+// ToolPackageServerPrefix starts the registration name of a tool package's
+// stdio MCP server ("tool:<package>"); its tools are named
+// tool__<package>__<tool> instead of mcp__<server>__<tool>. An authored
+// .mcp.json server cannot use the prefix.
+const ToolPackageServerPrefix = "tool:"
 
 func isUnknownTool(err error) bool {
 	var wire *jsonrpc.Error

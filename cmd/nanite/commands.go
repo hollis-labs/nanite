@@ -19,6 +19,7 @@ import (
 	hotel "github.com/hollis-labs/libs/core/util/otel"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/repl"
@@ -238,6 +239,10 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			toolPkgs, err := authored.LoadTools(path)
+			if err != nil {
+				return err
+			}
 			def, err := definition.Load(path, "-")
 			if err != nil {
 				return err
@@ -256,16 +261,28 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 					}
 				}
 			}
-			var authored []string
-			for _, name := range subagent.Names(variants) {
-				if !variants[name].Builtin {
-					authored = append(authored, name)
+			for _, name := range authored.ToolNames(toolPkgs) {
+				if len(toolPkgs[name].Needs) > 0 && (def.Identity == nil || def.Identity.Warden == nil) {
+					return fmt.Errorf("tools/%s: it needs Warden tokens, but identity.yaml has no warden section", name)
 				}
 			}
-			if _, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name); err != nil || len(authored) == 0 {
+			var own []string
+			for _, name := range subagent.Names(variants) {
+				if !variants[name].Builtin {
+					own = append(own, name)
+				}
+			}
+			if _, err = fmt.Fprintln(cmd.OutOrStdout(), info.Definition.Name); err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "variants: "+strings.Join(authored, ", "))
+			if len(own) > 0 {
+				if _, err = fmt.Fprintln(cmd.OutOrStdout(), "variants: "+strings.Join(own, ", ")); err != nil {
+					return err
+				}
+			}
+			if names := authored.ToolNames(toolPkgs); len(names) > 0 {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "tools: "+strings.Join(names, ", "))
+			}
 			return err
 		}},
 		&cobra.Command{Use: "conversations", Short: "List conversations", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) (retErr error) {

@@ -165,6 +165,7 @@ a, err := agent.Open(ctx, agent.Options{
 | `BuiltinSkills` | `skill_list`, `skill_get`, and the skill listing in the prompt |
 | `BuiltinNotes` | `todo_list`, `todo_write`, `scratchpad_read`, `scratchpad_write` |
 | `BuiltinQuestions` | `ask_user` |
+| `BuiltinTools` | the agent's tool packages (`tool__<name>`, `tool__<name>__<tool>`) and `tool_validate`; see "Tool packages" in [agent-directory.md](agent-directory.md) |
 
 Leaving `Builtins` nil gives the default for the agent's kind, as above.
 Pass `agent.AllBuiltins()` to give an embedded agent everything. An empty

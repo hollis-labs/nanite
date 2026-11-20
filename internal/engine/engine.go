@@ -43,6 +43,9 @@ type Config struct {
 	Events               events.Sink
 	Logger               *slog.Logger
 	Dir, GlobalSkillsDir string
+	// ToolPackageEnv names credential-like host variables tool packages may
+	// pass through (authored.CheckToolEnv).
+	ToolPackageEnv []string
 	// Builtins limits which of Nanite's own tool groups are offered. Nil offers all.
 	Builtins       tools.Builtins
 	Provider       llmcontracts.Provider
@@ -166,6 +169,8 @@ type Engine struct {
 	panics *panics.Guard
 	// traceMu serializes appends to the trace file.
 	traceMu sync.Mutex
+	// toolJobs holds a slot per running background tool-package job.
+	toolJobs chan struct{}
 	// testTurnHook, set only by tests, runs at the start of every turn.
 	testTurnHook func()
 }
@@ -216,7 +221,7 @@ func New(cfg Config) (*Engine, error) {
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(cfg.SubtaskLimit), leads: subagent.NewLimit(cfg.SubtaskLimit),
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
 		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval,
-		steerers: make(map[string]*steering)}
+		steerers: make(map[string]*steering), toolJobs: make(chan struct{}, MaxBackgroundToolJobs)}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	// Expired tool results, cached for an hour or stored subtask results for
 	// 30 days, share one table; clear them once when the agent opens.

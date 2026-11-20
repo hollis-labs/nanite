@@ -143,8 +143,8 @@ The names `anthropic` and `openai` are the built-in providers above and cannot
 be redefined.
 
 `use` selects a provider and model for `chat` (the conversation and argument
-repair), `summarizer` (compaction summaries) and `subagent` (worker and
-planner conversations). A use without its own entry falls back to `chat`.
+repair), `summarizer` (compaction summaries) and `subagent` (subtask
+conversations). A use without its own entry falls back to `chat`.
 Without `use.chat`, chat uses `runtime.provider` and `runtime.model` from
 `host.yaml`. `providers.yaml` is read again each turn, like the other authored
 files. A use may name a provider only the host defines.

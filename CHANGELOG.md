@@ -39,8 +39,7 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   5,900 tokens (6,000 clamped to what one tool result shows in full).
 - Code Mode guidance: the base prompt gains a short section on when to
   delegate with `subtask`, how to choose a variant, and how to read its
-  status (only `ok` is finished work). Its old sentence on subagent results
-  is gone. The built-in variant prompts state their contract more fully:
+  status (only `ok` is finished work). The built-in variant prompts state their contract more fully:
   `code` names the files it changed and what it checked, `research` gives a
   source for each finding, `planner` names what each step touches.
 - `nanite init` writes a commented example variant, `variants/reviewer.md`.

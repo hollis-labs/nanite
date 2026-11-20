@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/libs/security/policy"
+	"github.com/hollis-labs/nanite/agent/authored"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
@@ -246,15 +247,15 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 			def.Runtime.MaxSteps = steps
 		}
 	}
-	use := definition.UseChat
+	use := authored.UseChat
 	if info.ParentID != "" {
-		use = definition.UseSubtask
+		use = authored.UseSubtask
 	}
 	var model llmcontracts.Provider
-	var sel definition.Selection
+	var sel authored.Selection
 	if variant.Provider != "" {
 		// A variant's own selection, resolved like a use in providers.yaml.
-		model, sel, err = e.resolve(def, "variant "+variant.Name, definition.Selection{Provider: variant.Provider, Model: variant.Model})
+		model, sel, err = e.resolve(def, "variant "+variant.Name, authored.Selection{Provider: variant.Provider, Model: variant.Model})
 	} else {
 		model, sel, err = e.provider(def, use)
 		if variant.Model != "" {
@@ -270,8 +271,8 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	// Compaction summaries use their own selection, or else the provider and
 	// model this turn runs on.
 	summaryProvider, summaryModel := model, modelName
-	if sel, ok := def.Use[definition.UseSummarizer]; ok {
-		if summaryProvider, sel, err = e.resolve(def, definition.UseSummarizer, sel); err != nil {
+	if sel, ok := def.Use[authored.UseSummarizer]; ok {
+		if summaryProvider, sel, err = e.resolve(def, authored.UseSummarizer, sel); err != nil {
 			return events.Result{}, err
 		}
 		summaryModel = sel.Model

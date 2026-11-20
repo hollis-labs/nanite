@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/agent/authored"
 	"github.com/hollis-labs/nanite/internal/recovery"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
@@ -472,18 +473,18 @@ const toolResultBudget = 24 << 10
 // names a provider the host itself defined (Config.Providers), so an agent
 // directory cannot route a host's traffic around it. Otherwise a named
 // provider comes from the host's definitions, then providers.yaml.
-func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.Provider, definition.Selection, error) {
+func (e *Engine) provider(def definition.Definition, use string) (llmcontracts.Provider, authored.Selection, error) {
 	sel, ok := def.Use[use]
 	if !ok {
-		sel, ok = def.Use[definition.UseChat]
+		sel, ok = def.Use[authored.UseChat]
 	}
 	if !ok {
-		sel = definition.Selection{Provider: def.Runtime.Provider, Model: def.Runtime.Model}
+		sel = authored.Selection{Provider: def.Runtime.Provider, Model: def.Runtime.Model}
 	}
 	return e.resolve(def, use, sel)
 }
 
-func (e *Engine) resolve(def definition.Definition, use string, sel definition.Selection) (llmcontracts.Provider, definition.Selection, error) {
+func (e *Engine) resolve(def definition.Definition, use string, sel authored.Selection) (llmcontracts.Provider, authored.Selection, error) {
 	hostSpec, hostDefined := e.cfg.Providers[sel.Provider]
 	if e.cfg.Provider != nil && !hostDefined {
 		return e.cfg.Provider, sel, nil

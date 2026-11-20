@@ -162,6 +162,11 @@ a gateway, receives only the key Nanite resolved. The SDKs' environment
 defaults (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_ORG_ID`,
 `OPENAI_PROJECT_ID`, `OPENAI_CUSTOM_HEADERS`) are not sent to it.
 
+A tool that edits an agent directory can check `providers.yaml` with
+`github.com/hollis-labs/nanite/agent/authored`: `ParseProviders` takes the
+content, `LoadProviders` reads the file. Nanite loads it through the same
+functions, so they apply exactly the engine's rules.
+
 ## MCP registrations
 
 ```json
@@ -244,6 +249,9 @@ the Markdown body is its role prompt. Nanite reads the files again at the
 start of each turn, and `nanite validate` checks them. `nanite init` writes a
 commented example, `variants/reviewer.md`. The fields, the built-in variants
 and how subtasks work are in [code-mode.md](code-mode.md).
+`agent/authored` exports the same checks for editors: `ParseVariant(name,
+content)`, `LoadVariants(dir)` and `CheckVariantName`; Nanite loads variants
+through them.
 
 ## Generated state
 

@@ -1,17 +1,13 @@
 package definition
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
+	"github.com/hollis-labs/nanite/agent/authored"
 	"github.com/hollis-labs/nanite/internal/provider"
-	"gopkg.in/yaml.v3"
 )
 
 type Context struct{ Name, Text string }
@@ -27,73 +23,7 @@ type Definition struct {
 	// Use selects a provider and model per use (chat, summarizer, subtask, desk)
 	// from providers.yaml. A use not listed falls back to chat; chat not
 	// listed uses host.yaml's runtime.provider and runtime.model.
-	Use map[string]Selection
-}
-
-// Uses a provider can be selected for.
-const (
-	UseChat       = "chat"
-	UseSummarizer = "summarizer"
-	UseSubtask    = "subtask"
-	// UseDesk is the front desk's planner (chatrunner DeskOptions.PlanWithModel).
-	UseDesk = "desk"
-)
-
-// Selection names a provider (built in or named) and a model.
-type Selection struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-}
-
-// providersFile is the authored providers.yaml.
-type providersFile struct {
-	Providers map[string]provider.Spec `yaml:"providers"`
-	Use       map[string]Selection     `yaml:"use"`
-}
-
-// loadProviders reads and validates providers.yaml in dir. A missing file
-// is no providers and no selections.
-func loadProviders(dir string) (map[string]provider.Spec, map[string]Selection, error) {
-	// Read through a root so a symlink cannot reach outside the directory.
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = root.Close() }() // Read-only.
-	raw, err := root.ReadFile("providers.yaml")
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("providers.yaml: %w", err)
-	}
-	var file providersFile
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&file); err != nil && !errors.Is(err, io.EOF) {
-		return nil, nil, fmt.Errorf("providers.yaml: %w", err)
-	}
-	specs := make(map[string]provider.Spec, len(file.Providers))
-	for name, spec := range file.Providers {
-		spec.Name = name
-		if err := spec.Validate(); err != nil {
-			return nil, nil, fmt.Errorf("providers.yaml: %w", err)
-		}
-		specs[name] = spec
-	}
-	for use, sel := range file.Use {
-		switch use {
-		case UseChat, UseSummarizer, UseSubtask, UseDesk:
-		default:
-			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer, subtask or desk", use)
-		}
-		// A name not defined here may be one the host supplies; the engine
-		// reports a name nobody defines when the use is resolved.
-		if sel.Provider == "" || sel.Model == "" {
-			return nil, nil, fmt.Errorf("providers.yaml: use %s needs provider and model", use)
-		}
-	}
-	return specs, file.Use, nil
+	Use map[string]authored.Selection
 }
 
 func Load(dir, globalSkillsDir string) (Definition, error) {
@@ -102,9 +32,11 @@ func Load(dir, globalSkillsDir string) (Definition, error) {
 		return Definition{}, err
 	}
 	out := Definition{Snapshot: snap, Runtime: snap.Profile.Runtime, Skills: make(map[string]agentdir.SkillRef)}
-	if out.Providers, out.Use, err = loadProviders(dir); err != nil {
+	providers, err := authored.LoadProviders(dir)
+	if err != nil {
 		return Definition{}, err
 	}
+	out.Providers, out.Use = providers.Named, providers.Use
 	if out.Runtime.Provider == "" {
 		out.Runtime.Provider = "anthropic"
 	}

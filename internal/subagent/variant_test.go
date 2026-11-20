@@ -5,9 +5,12 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/nanite/agent/authored"
 )
 
 func write(t *testing.T, dir, name, body string) {
@@ -193,5 +196,13 @@ func TestResultReadersFollowDenyButNotAllow(t *testing.T) {
 		if AllowsTool(false, []Variant{denying, allowOnly}, false, tool, true) {
 			t.Errorf("a lead's deny did not remove %s from its child", tool)
 		}
+	}
+}
+
+// TestBuiltinNamesMatchAuthored: the names agent/authored refuses for an
+// authored variant are exactly the built-in variants.
+func TestBuiltinNamesMatchAuthored(t *testing.T) {
+	if got, want := Names(Builtins()), slices.Sorted(slices.Values(authored.BuiltinVariants)); !slices.Equal(got, want) {
+		t.Fatalf("built-in variants %v, authored.BuiltinVariants %v", got, want)
 	}
 }

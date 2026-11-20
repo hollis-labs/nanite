@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
+	"github.com/hollis-labs/nanite/agent/authored"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
@@ -173,12 +174,12 @@ func TestSubtaskSummarizerFallsBackToTheSubtaskSelection(t *testing.T) {
 	e.cfg.Provider = nil
 	e.cfg.Providers = map[string]provider.Spec{"sub": {Name: "sub", Wire: provider.WireOpenAIChat, BaseURL: "http://127.0.0.1:1/v1", Auth: provider.AuthNone}}
 	def := definition.Definition{Runtime: agentdir.Runtime{Provider: "anthropic", Model: "claude-sonnet-5-5"},
-		Use: map[string]definition.Selection{definition.UseSubtask: {Provider: "sub", Model: "small-model"}}}
-	_, sel, err := e.provider(def, definition.UseSubtask)
+		Use: map[string]authored.Selection{authored.UseSubtask: {Provider: "sub", Model: "small-model"}}}
+	_, sel, err := e.provider(def, authored.UseSubtask)
 	if err != nil || sel.Model != "small-model" || sel.Provider != "sub" {
 		t.Fatalf("subtask selection %+v, %v", sel, err)
 	}
-	if _, _, err := e.provider(definition.Definition{Use: map[string]definition.Selection{definition.UseChat: {Provider: "nowhere", Model: "m"}}}, definition.UseChat); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+	if _, _, err := e.provider(definition.Definition{Use: map[string]authored.Selection{authored.UseChat: {Provider: "nowhere", Model: "m"}}}, authored.UseChat); err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("unknown provider: %v", err)
 	}
 }

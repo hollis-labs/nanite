@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New public package `agent/authored`: the rules for the Nanite files in an
+  agent directory, for editors and CI. `ParseVariant`, `LoadVariants`,
+  `CheckVariantName`, `BuiltinVariants` and `MaxLastN` for `variants/*.md`;
+  `ParseProviders`, `LoadProviders`, `Providers`, `Selection`, the `Use*`
+  constants and `ProviderSpec` for `providers.yaml`. The engine loads both
+  through it, so there is one set of rules.
 - Steering (libs `agent/steer`), off unless `agent.Options.Steering` is set.
   A root turn gets the conversation's mode (a preset: instructions and output
   style in the `mode` slot), the work slots in front with their instructions

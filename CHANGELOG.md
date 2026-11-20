@@ -34,6 +34,27 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   `Background` flag. Background usage is not part of that turn's total;
   chatrunner forwards it as `nanite.subagent` activity (state `usage`)
   instead of a usage delta.
+- Forked context: a child's first message copies the parent's last N
+  messages (`context.last_n`, else the variant's `last_n`, else 6; at most
+  50), leaving out the in-flight `subtask` call and never starting on a tool
+  result without its call; calls and results pair by position, not by call
+  ID. `context.full` copies all of them. `context.include` copies up to 8
+  of `plan`, `todos`, `handoff` and `scratchpad:<key>`. Everything copied is
+  redacted before it is shortened, and the whole seed fits 32,000
+  characters: include items take at most half, and the newest messages fill
+  the rest, saying how many items and messages were left out.
+- Children get `parent_history_search` (full-text search over the parent's
+  messages; snippets are cut from the redacted message, never from the
+  index) and `parent_history_get` (messages by number, 20 at a time), in the
+  `subtasks` group; root conversations never get them. The store adds an
+  FTS5 index, `messages_fts`, kept in step with messages by insert, update
+  and delete triggers (migration 7 builds it for existing messages).
+- A child's `fetch_tool_result` and `search_tool_result` also read its
+  parent's and then the root's cached results (a depth-2 child: the lead's,
+  then the root's), so pointers in the copied context work. Never a
+  sibling's.
+- `agent.Message` gains `Seq`, the message's position in its conversation,
+  set on messages read back from history (additive).
 - Removed `subagent_spawn`, `subagent_status` and `subagent_cancel`, with no
   alias. `background_status` and `background_cancel` now also serve
   background subtasks. The built-in group `BuiltinSubagents` ("subagents") is

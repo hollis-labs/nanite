@@ -72,6 +72,9 @@ type Message struct {
 	ID, TurnID, Role string
 	Blocks           []llmtypes.ContentBlock
 	CreatedAt        time.Time
+	// Seq is the message's position in its conversation, from 1. It is set
+	// when a message is read back and ignored when one is appended.
+	Seq int
 }
 
 func NewID(now time.Time) string {

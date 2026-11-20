@@ -69,7 +69,10 @@ func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, erro
 		`"return_spec":{"description":"What to return: prose, or a JSON Schema object.","anyOf":[{"type":"string"},{"type":"object"}]},` +
 		`"variant":{"type":"string","enum":` + string(enum) + `,"description":"Which kind of subtask runs it. Required; choose deliberately."},` +
 		`"inputs":{"type":"object","description":"Values the subtask needs verbatim."},` +
-		`"context":{"type":"object","description":"Parent context to share (last_n, include, full)."}`
+		`"context":{"type":"object","additionalProperties":false,"description":"How much of this conversation the subtask starts with. By default it gets the last few messages and can search the rest itself.",` +
+		`"properties":{"last_n":{"type":"integer","minimum":0,"maximum":50,"description":"How many of the latest messages to copy; 0 for none."},` +
+		`"include":{"type":"array","items":{"type":"string"},"description":"State to copy: plan, todos, handoff, or scratchpad:<key>."},` +
+		`"full":{"type":"boolean","description":"Copy the whole conversation instead of the last messages."}}}`
 	if background {
 		properties += `,"background":{"type":"boolean","description":"Run in the background and get a job id for background_status; completion arrives as a notice."}`
 	}

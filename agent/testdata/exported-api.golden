@@ -81,6 +81,7 @@ type Message = github.com/hollis-labs/nanite/internal/store.Message struct
   field Role string
   field Blocks []github.com/hollis-labs/libs/llm/core/llmtypes.ContentBlock
   field CreatedAt time.Time
+  field Seq int
 type Notice = github.com/hollis-labs/nanite/internal/store.Notice struct
   field ID string
   field ConversationID string

@@ -13,7 +13,7 @@ const (
 	BuiltinFilesWrite BuiltinGroup = "files-write" // write_file, edit_file
 	BuiltinShell      BuiltinGroup = "shell"       // bash
 	BuiltinBackground BuiltinGroup = "background"  // background_start, background_status, background_cancel
-	BuiltinSubtasks   BuiltinGroup = "subtasks"    // subtask
+	BuiltinSubtasks   BuiltinGroup = "subtasks"    // subtask; parent_history_search, parent_history_get (children only)
 	BuiltinSkills     BuiltinGroup = "skills"      // skill_list, skill_get
 	BuiltinNotes      BuiltinGroup = "notes"       // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  BuiltinGroup = "questions"   // ask_user
@@ -24,7 +24,7 @@ var builtinGroups = map[string]BuiltinGroup{
 	"write_file": BuiltinFilesWrite, "edit_file": BuiltinFilesWrite,
 	"bash":             BuiltinShell,
 	"background_start": BuiltinBackground, "background_status": BuiltinBackground, "background_cancel": BuiltinBackground,
-	"subtask":    BuiltinSubtasks,
+	"subtask": BuiltinSubtasks, "parent_history_search": BuiltinSubtasks, "parent_history_get": BuiltinSubtasks,
 	"skill_list": BuiltinSkills, "skill_get": BuiltinSkills,
 	"todo_list": BuiltinNotes, "todo_write": BuiltinNotes, "scratchpad_read": BuiltinNotes, "scratchpad_write": BuiltinNotes,
 	"ask_user": BuiltinQuestions,

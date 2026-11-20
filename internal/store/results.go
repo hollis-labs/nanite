@@ -26,6 +26,16 @@ func (r ResultStore) Put(ctx context.Context, e toolresult.Entry) error {
 	})
 }
 
+// Has reports whether scope holds a cached result id, without reading its body.
+func (r ResultStore) Has(ctx context.Context, scope, id string) (bool, error) {
+	var one int
+	err := r.store.db.Reader().QueryRowContext(ctx, "SELECT 1 FROM tool_results WHERE scope=? AND id=?", scope, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (r ResultStore) Get(ctx context.Context, scope, id string) (toolresult.Entry, error) {
 	e := toolresult.Entry{ID: id, Scope: scope}
 	var body sql.NullString

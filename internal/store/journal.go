@@ -276,23 +276,29 @@ func (s *Store) History(ctx context.Context, id string) ([]Message, error) {
 }
 
 func (s *Store) historyAfter(ctx context.Context, id, after string) ([]Message, error) {
-	rows, err := s.db.Reader().QueryContext(ctx, `SELECT id,turn_id,role,blocks_json,created_at FROM messages
+	rows, err := s.db.Reader().QueryContext(ctx, `SELECT id,turn_id,role,blocks_json,created_at,seq FROM messages
  WHERE conversation_id=? AND seq>COALESCE((SELECT seq FROM messages WHERE conversation_id=? AND id=?),0)
  ORDER BY seq`, id, id, after)
 	if err != nil {
 		return nil, err
 	}
+	return scanMessages(rows)
+}
+
+// scanMessages reads rows of id, turn_id, role, blocks_json, created_at, seq.
+func scanMessages(rows *sql.Rows) ([]Message, error) {
 	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
 	var out []Message
 	for rows.Next() {
 		var m Message
 		var blocks, created string
-		if err := rows.Scan(&m.ID, &m.TurnID, &m.Role, &blocks, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.TurnID, &m.Role, &blocks, &created, &m.Seq); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(blocks), &m.Blocks); err != nil {
 			return nil, err
 		}
+		var err error
 		m.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
 			return nil, err

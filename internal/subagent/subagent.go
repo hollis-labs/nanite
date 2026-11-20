@@ -19,7 +19,8 @@ type Request struct {
 	ReturnSpec json.RawMessage `json:"return_spec"`
 	Variant    string          `json:"variant"`
 	Inputs     json.RawMessage `json:"inputs,omitempty"`
-	// Context is recorded but not yet applied; forked context is B2.
+	// Context says how much of the parent conversation the child starts
+	// with; see ContextSpec.
 	Context    json.RawMessage `json:"context,omitempty"`
 	Background bool            `json:"background,omitempty"`
 }
@@ -39,7 +40,8 @@ func (r Request) Validate(variants map[string]Variant) error {
 	if spec := strings.TrimSpace(string(r.ReturnSpec)); spec == "" || spec == "null" || spec == `""` {
 		return fmt.Errorf("subtask return_spec required")
 	}
-	return nil
+	_, err := r.ContextSpec()
+	return err
 }
 
 // Message is the child's first user message: the goal, its inputs and what

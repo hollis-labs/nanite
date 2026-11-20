@@ -15,6 +15,8 @@ import (
 )
 
 type Turn struct {
+	AgentDir                                     string            `json:",omitempty"`
+	Headers                                      map[string]string `json:",omitempty"`
 	ID, UserMessageID, Status, StopReason, Error string
 	Usage                                        json.RawMessage
 }
@@ -223,9 +225,13 @@ func projectEntry(ctx context.Context, tx core.Tx, conversation string, entry tr
 
 func projectTurn(ctx context.Context, tx core.Tx, conversation string, turn Turn, subtype string, at time.Time) error {
 	if subtype == "nanite.turn.start" {
-		_, err := tx.ExecContext(ctx, `INSERT INTO turns(id,conversation_id,seq,status,user_message_id,started_at)
-   VALUES(?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM turns WHERE conversation_id=?),'running',?,?)
-   ON CONFLICT(id) DO NOTHING`, turn.ID, conversation, conversation, turn.UserMessageID, format(at))
+		headers, err := json.Marshal(turn.Headers)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO turns(id,conversation_id,seq,status,user_message_id,started_at,agent_dir,headers_json)
+   VALUES(?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM turns WHERE conversation_id=?),'running',?,?,?,?)
+   ON CONFLICT(id) DO NOTHING`, turn.ID, conversation, conversation, turn.UserMessageID, format(at), turn.AgentDir, string(headers))
 		return err
 	}
 	if subtype == "nanite.turn.resume" {

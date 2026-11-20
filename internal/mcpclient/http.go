@@ -60,6 +60,9 @@ func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
+	for k, v := range station.Headers(req.Context()) {
+		req.Header.Set(k, v)
+	}
 	if t.correlation {
 		req.Header.Set(PrincipalHeader, t.principal)
 		if id, ok := station.SessionID(req.Context()); ok {

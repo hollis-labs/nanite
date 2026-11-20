@@ -15,6 +15,7 @@ import (
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/agent/authored"
 	"github.com/hollis-labs/nanite/agent/providers"
+	"github.com/hollis-labs/nanite/internal/provider/station"
 )
 
 // seen is what the server saw on the last request.
@@ -138,5 +139,40 @@ func TestNewNamed(t *testing.T) {
 	}
 	if !scrubs(t, scope, namedKey) {
 		t.Fatal("the resolved key is not in the caller's redaction scope")
+	}
+}
+
+func TestPerRequestGatewayHeadersDoNotLeak(t *testing.T) {
+	secretstest.Install(t)
+	t.Setenv("WORKBENCH_TEST_KEY", fixtureValue("gateway-key"))
+	for _, name := range []string{providers.OpenAI, providers.Anthropic} {
+		t.Run(name, func(t *testing.T) {
+			srv, last := server(t)
+			p, err := providers.New(providers.Config{Name: name, Gateway: agent.Gateway{KeyRef: "env://WORKBENCH_TEST_KEY", BaseURL: srv.URL, Headers: map[string]string{"X-Team": "default"}}, Options: providers.Options{Secrets: secrets.New(secrets.WithEnv())}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range []string{"alpha", "beta", ""} {
+				ctx := t.Context()
+				if value != "" {
+					ctx = station.WithHeaders(ctx, map[string]string{"X-Team": value})
+				}
+				req := request
+				req.MaxTokens = 16
+				if name == providers.Anthropic {
+					req.Model = "claude-sonnet-5-5"
+				}
+				if _, err := p.Complete(ctx, req); err != nil {
+					t.Fatal(err)
+				}
+				want := value
+				if want == "" {
+					want = "default"
+				}
+				if got := last().team; got != want {
+					t.Fatalf("team=%q want %q", got, want)
+				}
+			}
+		})
 	}
 }

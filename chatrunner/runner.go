@@ -21,6 +21,10 @@ import (
 
 // Options configures a Runner.
 type Options struct {
+	// TurnProfile selects a composed profile and non-credential request headers
+	// before a turn starts. Nil retains the agent defaults. Recovery uses the
+	// interrupted turn's persisted profile, without calling this hook.
+	TurnProfile func(context.Context, chat.Turn) (agentDir string, headers map[string]string, err error)
 	// Agent opens the Nanite agent. Dir is required. Gate is set by the
 	// runner and must be left nil; PDP, when set, is consulted before the
 	// runner's own checks. Builtins chooses Nanite's own tool groups as usual
@@ -328,6 +332,16 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 		return nil, err
 	}
 	in := agent.Input{Text: turn.Text, Source: source}
+	if r.opts.TurnProfile != nil {
+		in.AgentDir, in.Headers, err = r.opts.TurnProfile(ctx, turn)
+		if err != nil {
+			return nil, err
+		}
+		ctx, err = r.agent.TurnContext(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+	}
 	person := source == ""
 	if !person {
 		// Only the owner's new message replaces their interrupted turn. A
@@ -359,11 +373,11 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 			}
 		}
 		halted := false
-		if person && r.desk != nil && r.opts.Agent.Steering != nil {
+		if person && r.desk != nil && (r.opts.Agent.Steering != nil || in.AgentDir != "") {
 			// Steer first: a reflex that halts answers the message, and the
 			// desk must not plan it.
 			prepared, err := c.Steer(runCtx, in)
-			if err != nil {
+			if err != nil && !errors.Is(err, agent.ErrNoSteering) {
 				return nil, err
 			}
 			in.Steer, halted = prepared, prepared.Halted()

@@ -18,6 +18,7 @@ type Agent struct
   (*Agent) Slots() *Slots
   (*Agent) SubscribeNotices(ctx context.Context) <-chan NoticePosted
   (*Agent) Tools() *ToolSet
+  (*Agent) TurnContext(ctx context.Context, in Input) (context.Context, error)
 func AllBuiltins() []BuiltinGroup
 var AllowGate github.com/hollis-labs/nanite/internal/permission.Gate
 type Answer = github.com/hollis-labs/nanite/internal/events.Answer struct
@@ -132,6 +133,8 @@ type Info struct
   field Dir string
   field Definition github.com/hollis-labs/libs/agent/agentdir.Snapshot
 type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
+  field AgentDir string
+  field Headers map[string]string
   field Text string
   field Slots []github.com/hollis-labs/nanite/internal/slots.Update
   field Source string
@@ -140,6 +143,8 @@ type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
 type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
   field ID string
   field UserMessageID string
+  field AgentDir string
+  field Headers map[string]string
 func IsAuthWaiting(err error) (AuthWaiting, bool)
 const JobReasonProcessExit untyped string
 const JobReasonShutdown untyped string

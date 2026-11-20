@@ -11,6 +11,14 @@
   `Conversation.SearchHistory` and `Conversation.HistoryMessages`, scoped to
   that conversation; results are redacted. Cross-conversation search is left
   to the shared transcript service.
+- Per-turn composed profiles: `Input.AgentDir` selects instructions, context,
+  skills, variants, tool packages and `steering.json` without rewriting the
+  Open directory. Background descendants retain their starting snapshot.
+- `Input.Headers` supplies non-credential MCP HTTP and model gateway headers
+  for one turn and its descendants. Reserved transport/auth headers are refused.
+- Turn profiles and headers survive interrupted-turn recovery. chatrunner's
+  `TurnProfile` hook selects them; `Agent.TurnContext` shares the validated
+  snapshot with planning and host dispatch. See [turn profiles](docs/turn-profiles.md).
 
 ## 0.7.0
 

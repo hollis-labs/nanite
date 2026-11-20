@@ -13,7 +13,13 @@ import (
 // selects (falling back to chat as usual), a system prompt and one user
 // message. The prompt is scrubbed of secrets first.
 func (e *Engine) Complete(ctx context.Context, use, system, prompt string, maxTokens int) (string, error) {
-	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	var def definition.Definition
+	var err error
+	if p := profileFrom(ctx); p != nil {
+		def = p.definition
+	} else {
+		def, err = definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	}
 	if err != nil {
 		return "", err
 	}

@@ -49,10 +49,14 @@ func (c *Client) requestOptions(ctx context.Context) []option.RequestOption {
 	if gw == nil {
 		return nil
 	}
-	if id, ok := station.SessionID(ctx); ok {
-		return []option.RequestOption{option.WithHeader(station.SessionHeader, id)}
+	var opts []option.RequestOption
+	for name, value := range station.Headers(ctx) {
+		opts = append(opts, option.WithHeader(name, value))
 	}
-	return nil
+	if id, ok := station.SessionID(ctx); ok {
+		opts = append(opts, option.WithHeader(station.SessionHeader, id))
+	}
+	return opts
 }
 
 // withoutAmbientIdentity drops what the SDK's environment defaults add

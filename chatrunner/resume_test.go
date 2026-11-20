@@ -160,6 +160,17 @@ func TestResumeCrashFixture(t *testing.T) {
 	if withSteps {
 		tweak = withDesk(&messagePlanner{}, nil)
 	}
+	if profileDir := os.Getenv("NANITE_RESUME_PROFILE"); profileDir != "" {
+		prior := tweak
+		tweak = func(o *chatrunner.Options) {
+			if prior != nil {
+				prior(o)
+			}
+			o.TurnProfile = func(context.Context, chat.Turn) (string, map[string]string, error) {
+				return profileDir, map[string]string{"X-Profile": "original"}, nil
+			}
+		}
+	}
 	w := newWiredIn(t, dir, true, tweak)
 	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: resumeScript}); err != nil {
 		t.Fatal(err)

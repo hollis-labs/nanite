@@ -125,11 +125,14 @@ type Config struct {
 }
 
 type Engine struct {
-	cfg      Config
-	mu       sync.Mutex
-	active   map[string]*Run
-	previous map[string]map[string]string
-	grants   map[string]map[string]bool
+	profileMu   sync.Mutex
+	profiles    map[string]*turnProfile
+	profileBase definition.Definition
+	cfg         Config
+	mu          sync.Mutex
+	active      map[string]*Run
+	previous    map[string]map[string]string
+	grants      map[string]map[string]bool
 	// changed is closed and replaced each time a run starts or ends, so a
 	// subtask waiting to relay an ask to its root conversation can wait for
 	// the root's next run.
@@ -232,6 +235,11 @@ func New(cfg Config) (*Engine, error) {
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
 		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval,
 		steerers: make(map[string]*steering), toolJobs: make(chan struct{}, MaxBackgroundToolJobs)}
+	e.profiles = make(map[string]*turnProfile)
+	e.profileBase, err = definition.Load(cfg.Dir, cfg.GlobalSkillsDir)
+	if err != nil {
+		return nil, err
+	}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	// Expired tool results, cached for an hour or stored subtask results for
 	// 30 days, share one table; clear them once when the agent opens.
@@ -258,8 +266,12 @@ func newGuard(logger *slog.Logger, scrub *redact.Redactor, host panics.Reporter)
 }
 
 type Input struct {
-	Text  string
-	Slots []slots.Update
+	// AgentDir is a composed profile directory for this turn and its descendants.
+	AgentDir string
+	// Headers are non-credential request headers for MCP HTTP and model gateways.
+	Headers map[string]string
+	Text    string
+	Slots   []slots.Update
 	// Source says what started the turn: empty for a person's message,
 	// SourceNotice for a turn a host starts because a notice arrived,
 	// SourceAuto for a turn the host sends on its own, or ErrandSource(m)
@@ -473,6 +485,13 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if interrupted == nil && resume {
 		return nil, fmt.Errorf("conversation has no interrupted turn")
 	}
+	if interrupted != nil {
+		input.AgentDir, input.Headers = interrupted.AgentDir, interrupted.Headers
+	}
+	ctx, err = e.prepareProfile(ctx, &input)
+	if err != nil {
+		return nil, err
+	}
 	runID := store.NewID(time.Now())
 	if interrupted != nil {
 		runID = interrupted.ID
@@ -596,7 +615,7 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	permissions += " Approved Bash commands run with the user’s privileges and can access paths outside those roots."
 	environment := "Model: " + def.Runtime.Model + ". Platform: " + runtime.GOOS + "/" + runtime.GOARCH + ". Today's date: " + time.Now().Format("2006-01-02") + "."
 	if len(e.cfg.WorkspaceRoots) > 0 {
-		environment = "Working directory: " + e.cfg.WorkspaceRoots[0] + ". Relative paths resolve there. Agent directory: " + e.cfg.Dir + ". " + environment
+		environment = "Working directory: " + e.cfg.WorkspaceRoots[0] + ". Relative paths resolve there. Agent directory: " + e.profileDir(ctx) + ". " + environment
 	}
 	updates := []slots.Update{
 		{Slot: slots.System, Entry: slots.Entry{Owner: "engine", Key: "environment", Content: environment}},

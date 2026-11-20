@@ -167,6 +167,15 @@ type SubtaskProgress struct {
 type NoticePosted struct {
 	EventMeta
 	ID, ConversationID, Kind, Body string
+	// Chained marks a notice caused by work a notice turn started (a
+	// background subtask or job it began, or an ask one of those relayed).
+	// A host should not start another notice turn for it, so notice turns
+	// cannot keep themselves going.
+	Chained bool
+	// Dropped, on a subscriber's channel, counts the notices this subscriber
+	// lost just before this one because its queue was full (see
+	// NoticeQueueLimit); it is 0 on a run's event.
+	Dropped int
 }
 
 // LimitReason returns stop when it reports that a turn stopped at a step,

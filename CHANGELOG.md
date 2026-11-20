@@ -32,23 +32,32 @@
 Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
 - Host dispatch: `Conversation.Dispatch` starts subtasks for the host without
-  a model call, through the same path as a model's `subtask` call (variants,
+  a model call. It keeps the agent's gates: it needs the `subtask` tool (and
+  the background tools for a background start), and each start is evaluated
+  as a `subtask` call (a deny refuses it, an ask goes to the gate). It takes
+  the same path as a model's `subtask` call (variants,
   budgets, slot limits, the turn budget, forked context, the result contract,
   relayed approvals attributed `dispatched`, progress and trace links). It
   runs as a run holding the conversation; `Result.Dispatched` has one outcome
-  per start, in order. Its trace record has source `host`.
+  per start, in order. Its trace record has source `host` and lists each start
+  in `tool_calls[]`. `agent.DispatchStart` is a plain struct with the
+  `subtask` call's fields.
   `Conversation.Job` reads a background job, and `Conversation.PostNotice`
   posts a notice.
 - Breaking, notices: `Agent.Notices()` (a lossy channel of 64) is replaced by
-  `Agent.SubscribeNotices(ctx)`, which gives each subscriber every notice in
-  order with no loss. A posted notice is also reported as a `NoticePosted`
-  event on the conversation's running turn, if any. A turn started because of
-  a notice uses `Input.Source = agent.SourceNotice` (trace source `reflex`).
-  The `agent.Notice` alias is removed.
+  `Agent.SubscribeNotices(ctx)`: each subscriber gets every notice in order,
+  up to 1,024 unread; past that the oldest is dropped and counted in
+  `Dropped`. A posted notice is also reported as a `NoticePosted` event on the
+  conversation's running turn, if any. A turn started because of a notice
+  uses `Input.Source = agent.SourceNotice` with empty text; its user message is
+  `agent.NoticeTurnText` and the notice reaches the model in the session slot
+  only (trace source `reflex`). Notices caused by a notice turn's work are
+  `Chained`. The `agent.Notice` alias is removed.
 - chatrunner: notices reach the wire as a `nanite.notice` activity, on the
   running turn or, with `Options.Observe` set to the chat Service's `Observe`,
-  as a run of their own; `Options.NoticeTurns` makes such a notice start a
-  turn instead. `Runner.Dispatch` publishes a host dispatch on the wire, so
+  as a run of their own, per conversation; `Options.NoticeTurns` makes such a
+  notice start a notice turn instead, adopted by the Service before it starts,
+  never for a chained notice, and at most three in a row before a user turn. `Runner.Dispatch` publishes a host dispatch on the wire, so
   its relayed approvals are answered there. A relayed card from a dispatched
   subtask says it was started by the host.
 

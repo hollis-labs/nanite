@@ -7,14 +7,12 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 )
 
-// testNotices holds a notice subscription per engine, made when the engine is
-// created so a test sees every notice it posts.
+// testNotices holds a notice subscription per test engine, made by
+// setupEngine as soon as the engine exists, so a test sees every notice.
 var testNotices sync.Map
 
-func init() {
-	engineCreated = func(e *Engine) {
-		testNotices.Store(e, e.SubscribeNotices(context.Background()))
-	}
+func subscribeForTest(e *Engine) {
+	testNotices.Store(e, e.SubscribeNotices(context.Background()))
 }
 
 // Notices is every notice the engine has posted, in order (tests only).

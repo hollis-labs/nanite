@@ -62,6 +62,7 @@ func setupEngine(t *testing.T, model llmcontracts.Provider, runtime string) (*En
 	if err != nil {
 		t.Fatal(err)
 	}
+	subscribeForTest(e)
 	t.Cleanup(e.Close)
 	now := time.Now().UTC()
 	id := store.NewID(now)

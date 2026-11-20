@@ -206,9 +206,13 @@ chat wire. `r.Agent()` gives the agent for slots, skills and notices, and
 **Notices and host work.** Set `Options.Observe` to the chat Service's
 `Observe`. A notice posted while a turn runs reaches the wire on that turn as
 a `nanite.notice` activity (id, kind, body). With `Observe`, one posted while
-no turn runs is published as a short run of its own; with `NoticeTurns` it
-starts a turn instead (`agent.SourceNotice`), which opens with the
-`nanite.notice` activity. `r.Dispatch(ctx, chatID, starts)` starts subtasks
+no turn runs is published as a short run of its own, each conversation's
+notices in order and independently of other conversations. With
+`NoticeTurns` it starts a notice turn instead, whose user message is
+`agent.NoticeTurnText` and which opens with the `nanite.notice` activity. The
+turn starts only when the Service adopts it, so it never holds the
+conversation before it is published. A chained notice never starts one, and
+at most three notice turns follow one another before a user turn. `r.Dispatch(ctx, chatID, starts)` starts subtasks
 for the host without a model call and publishes the dispatch as a run on the
 wire, so the subtasks' activity and relayed approvals are seen and answered
 like a turn's; it returns the outcomes once every foreground start has ended.

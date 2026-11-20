@@ -3,6 +3,8 @@ package chatrunner_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +42,7 @@ func newWired(t *testing.T, noticeTurns bool) *wired {
 	w := &wired{brain: &brain{}}
 	var svc atomic.Pointer[chat.Service]
 	r, err := chatrunner.Open(t.Context(), chatrunner.Options{
-		Agent: agent.Options{Dir: dir, Provider: w.brain, GlobalSkillsDir: "-", Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks}},
+		Agent: agent.Options{Dir: dir, Provider: w.brain, GlobalSkillsDir: "-", Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks, agent.BuiltinBackground}},
 		Observe: func(ctx context.Context, conversationID string, turn chat.Turn, run chat.Run) error {
 			return svc.Load().Observe(ctx, conversationID, turn, run)
 		},
@@ -165,7 +167,97 @@ func TestNoticeStartsATurnWhenAsked(t *testing.T) {
 	if !answered || !announced || seen[len(seen)-1].Verb != chatstream.VerbRunFinish {
 		t.Fatalf("notice turn: answered %v, announced %v, events %+v", answered, announced, seen)
 	}
-	if text := w.brain.last(); !strings.Contains(text, "[notice host] the report is ready") {
+	// The user message is the fixed notice text; the notice itself is in the
+	// session slot, once.
+	text := w.brain.last()
+	if strings.Count(text, "the report is ready") != 1 || !strings.Contains(text, agent.NoticeTurnText) {
 		t.Fatalf("the notice turn's request: %s", text)
+	}
+}
+
+// Notice turns stop after three in a row before a user turn, and a chained
+// notice (from work a notice turn started) never starts one.
+func TestNoticeTurnsCannotKeepThemselvesGoing(t *testing.T) {
+	w := newWired(t, true)
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	w.until(t, "the first turn's end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	c, err := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(w.conv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns, announced := 0, 0
+	for i := range 5 {
+		if err := c.PostNotice(t.Context(), "host", fmt.Sprintf("result %d", i)); err != nil {
+			t.Fatal(err)
+		}
+		seen := w.until(t, "the notice's run end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+		model := false
+		for _, ev := range seen {
+			model = model || ev.Verb == chatstream.VerbStepStart
+		}
+		if model {
+			turns++
+		} else {
+			announced++
+		}
+	}
+	if turns != 3 || announced != 2 {
+		t.Fatalf("notice turns %d, announce-only runs %d", turns, announced)
+	}
+	// A user turn lets notice turns start again.
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "thanks"}); err != nil {
+		t.Fatal(err)
+	}
+	w.until(t, "the user turn's end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	if err := c.PostNotice(t.Context(), "host", "after the user"); err != nil {
+		t.Fatal(err)
+	}
+	seen := w.until(t, "a notice turn again", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	again := false
+	for _, ev := range seen {
+		again = again || ev.Verb == chatstream.VerbStepStart
+	}
+	if !again {
+		t.Fatal("a user turn did not reset the notice turn count")
+	}
+}
+
+// A user's submit right after a notice gets a clean answer: the notice turn
+// does not hold the conversation before the Service adopts it.
+func TestSubmitRightAfterANoticeIsClean(t *testing.T) {
+	w := newWired(t, true)
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	w.until(t, "the first turn's end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	c, err := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(w.conv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		if err := c.PostNotice(t.Context(), "host", "ping"); err != nil {
+			t.Fatal(err)
+		}
+		_, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "are you there"})
+		if err != nil && !errors.Is(err, chat.ErrBusy) {
+			t.Fatalf("submit after a notice: %v", err)
+		}
+		// Drain until both have ended, whichever ran.
+		ends := 0
+		want := 2
+		if err != nil {
+			want = 1
+		}
+		w.until(t, "the runs' ends", func(ev chatstream.Event) bool {
+			if ev.IsTerminal() {
+				if ev.Verb != chatstream.VerbRunFinish {
+					t.Fatalf("a run ended with %s %s", ev.Verb, ev.Message)
+				}
+				ends++
+			}
+			return ends == want
+		})
 	}
 }

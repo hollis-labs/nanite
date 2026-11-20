@@ -32,7 +32,7 @@ func TestPanickingJobFailsWithRef(t *testing.T) {
 	notices := make(chan store.Notice, 1)
 	var reported []panics.Record
 	guard := panics.New(panics.Config{Reporter: panics.ReporterFunc(func(r panics.Record) { reported = append(reported, r) }), Redact: scrub.Text})
-	m := New(db, scrub, func(n store.Notice) { notices <- n }, slog.New(slog.DiscardHandler), guard)
+	m := New(db, scrub, func(_ store.Job, n store.Notice) { notices <- n }, slog.New(slog.DiscardHandler), guard)
 	t.Cleanup(m.Close)
 
 	job, err := m.Start(t.Context(), store.Job{ID: store.NewID(now), ConversationID: conversation.ID, Kind: "subagent", Spec: "{}"},
@@ -66,7 +66,7 @@ func TestPanickingJobStartIsAnError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	scrub, _ := redact.New()
-	m := New(db, scrub, func(store.Notice) {}, slog.New(slog.DiscardHandler), panics.New(panics.Config{Reporter: panics.ReporterFunc(func(panics.Record) {})}))
+	m := New(db, scrub, func(store.Job, store.Notice) {}, slog.New(slog.DiscardHandler), panics.New(panics.Config{Reporter: panics.ReporterFunc(func(panics.Record) {})}))
 	t.Cleanup(m.Close)
 	_, err = m.Start(t.Context(), store.Job{ID: store.NewID(time.Now()), ConversationID: "c", Kind: "shell", Spec: "{}"},
 		func(context.Context, io.Writer) (Task, error) { panic("start exploded") })

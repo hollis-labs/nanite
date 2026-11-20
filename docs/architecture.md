@@ -195,14 +195,29 @@ A notice (a background job or subtask finishing, a relayed ask waiting for a
 turn, or one a host posts with `Conversation.PostNotice`) stays in SQLite until
 it appears in a later turn's session slot. When it is posted it is also
 announced: as a `NoticePosted` event on the conversation's running turn, if
-any, and to every `Agent.SubscribeNotices` channel. Each subscriber has its own
-unbounded queue, so none is lost; `EventMeta.RunID` names the turn that carried
-it, or is empty when none ran. A host can start a turn because of a notice
-with `Input.Source = agent.SourceNotice`; its trace record has source `reflex`.
+any, and to every `Agent.SubscribeNotices` channel. `EventMeta.RunID` names the
+turn that carried it, or is empty when none ran. Each subscriber has its own
+queue of up to `NoticeQueueLimit` (1,024) unread notices; past that the oldest
+is dropped, and the next notice delivered carries the count in `Dropped`. The
+store still holds every notice for the next turn.
+
+A host can start a turn because of a notice with `Input.Source =
+agent.SourceNotice` and empty text: its user message is always
+`agent.NoticeTurnText` ("A notice arrived."), and the notice reaches the model
+only in the session slot, so the notice text is never sent twice. Its trace
+record has source `reflex`, an automatic activation. A notice caused by work a
+notice turn started (a background subtask or job it began, or an ask one of
+those relayed) is marked `Chained`; a host should not start another notice
+turn for it.
 
 ## Host dispatch
 
 `Conversation.Dispatch` starts subtasks for the host without a model call.
+A host is not exempt from the agent's gates: Dispatch is refused when the
+agent does not offer `subtask`, and a background start when it does not offer
+`background_status`. Each start is evaluated as a `subtask` call by the
+conversation (the agent's rules and the host PDP): a deny refuses that start,
+and an ask goes to the gate on the dispatch run, attributed as dispatched.
 Each start has the subtask call's fields, and goes through the same path: the
 variant (required) and its budgets, the subtask slot limits, the agent's
 per-turn token budget, forked context, the result contract, relayed approvals
@@ -215,8 +230,11 @@ returned (a result contract, or a background job handle), or `Err` when it
 could not start. Every start is checked before anything runs. A dispatched
 subtask's forked context is the conversation's latest settled messages, and
 its relayed asks carry `subtask.dispatched: true`. The dispatch run's trace
-record has source `host`; its children's records link to it with
-`parent_turn_id` and a `parent_call_id` of the form `dispatch-<run>-<n>`.
+record has source `host`, lists each start in `tool_calls[]` as a `subtask`
+call (with its permission outcome) under the same `dispatch-<run>-<n>` ID its
+`subtasks[]` entry and child record carry, and makes no model request, so it
+names no provider or model. Its children's records link to it with
+`parent_turn_id` and that `parent_call_id`.
 `Conversation.Job` reads a background job as `background_status` reports it.
 
 Before running a tool, Nanite validates the arguments against its schema. For

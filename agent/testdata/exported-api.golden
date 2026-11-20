@@ -55,17 +55,13 @@ type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversatio
   field UpdatedAt time.Time
 type ConversationOption func(*ConversationInfo)
 var DenyGate github.com/hollis-labs/nanite/internal/permission.Gate
-type DispatchStart = github.com/hollis-labs/nanite/internal/subagent.Request struct
+type DispatchStart struct
   field Goal string
   field ReturnSpec encoding/json.RawMessage
   field Variant string
   field Inputs encoding/json.RawMessage
   field Context encoding/json.RawMessage
   field Background bool
-  (DispatchStart) ContextSpec() (github.com/hollis-labs/nanite/internal/subagent.ContextSpec, error)
-  (DispatchStart) Message() string
-  (DispatchStart) Schema() (*github.com/hollis-labs/nanite/internal/third_party/jsonschema.Resolved, error)
-  (DispatchStart) Validate(variants map[string]github.com/hollis-labs/nanite/internal/subagent.Variant) error
 type Dispatched = github.com/hollis-labs/nanite/internal/events.Dispatched struct
   field Result encoding/json.RawMessage
   field IsError bool
@@ -109,6 +105,9 @@ type NoticePosted = github.com/hollis-labs/nanite/internal/events.NoticePosted s
   field ConversationID string
   field Kind string
   field Body string
+  field Chained bool
+  field Dropped int
+const NoticeTurnText untyped string
 func Open(ctx context.Context, opts Options) (*Agent, error)
 type Options struct
   field Dir string

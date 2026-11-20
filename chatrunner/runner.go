@@ -42,9 +42,13 @@ type Options struct {
 	// can publish a host dispatch. Without it, such notices wait for the
 	// conversation's next turn.
 	Observe func(ctx context.Context, conversationID string, turn chat.Turn, run chat.Run) error
-	// NoticeTurns makes a notice posted while no turn runs start a turn
-	// (source notice) that tells the conversation about it, instead of only
-	// announcing it. It needs Observe. Off by default.
+	// NoticeTurns makes a notice posted while no turn runs start a notice
+	// turn (agent.SourceNotice; its user message is agent.NoticeTurnText and
+	// the notice reaches the model in the session slot), instead of only
+	// announcing it. A chained notice (caused by work a notice turn started)
+	// never starts one, and at most three notice turns follow one another
+	// before a user turn. The turn starts only once the Service adopts it.
+	// It needs Observe. Off by default.
 	NoticeTurns bool
 }
 
@@ -65,6 +69,9 @@ type Runner struct {
 	// has stopped.
 	stopNotices context.CancelFunc
 	noticesDone chan struct{}
+	// noticeTurns counts notice turns in a row per Nanite conversation;
+	// a user turn resets it.
+	noticeTurns map[string]int
 }
 
 var _ chat.Runner = (*Runner)(nil)
@@ -78,7 +85,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	if opts.ContextSlot == "" {
 		opts.ContextSlot = agent.SlotUserContext
 	}
-	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}}
+	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}}
 	ao := opts.Agent
 	ao.Gate = gate{r}
 	ao.PDP = pdp{runner: r, host: opts.Agent.PDP}
@@ -158,7 +165,15 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	if text := contextText(turn.Context); text != "" {
 		in.Slots = []agent.SlotUpdate{{Slot: r.opts.ContextSlot, Entry: agent.SlotEntry{Owner: "chat", Key: "turn-context", Content: text}}}
 	}
-	return r.begin(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) { return c.Send(runCtx, in) })
+	x, err := r.begin(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) { return c.Send(runCtx, in) })
+	if err != nil {
+		return nil, err
+	}
+	// A user turn lets notices start notice turns again.
+	r.mu.Lock()
+	delete(r.noticeTurns, x.nanite)
+	r.mu.Unlock()
+	return x, nil
 }
 
 // begin opens the chat conversation's Nanite conversation and starts a run
@@ -212,6 +227,8 @@ func (r *Runner) Dispatch(ctx context.Context, conversationID string, starts []a
 	if err != nil {
 		return nil, err
 	}
+	// A dispatch makes no model request: its run.start names no model.
+	x.provider, x.model = "", ""
 	if err := r.opts.Observe(ctx, conversationID, turn, x); err != nil {
 		// Nobody will read the run; stop it and let it finish.
 		x.Cancel()

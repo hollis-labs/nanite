@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"sync"
 	"time"
 
 	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/libs/security/policy"
+	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
+	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
@@ -32,6 +36,14 @@ import (
 //
 // A dispatched subtask's forked context is the conversation's latest settled
 // messages: there is no in-flight model call to leave out.
+//
+// A host is not exempt from the agent's gates. Dispatch is refused when the
+// agent does not offer the subtask tool, and a background start when it does
+// not offer background_status. Each start is evaluated as a subtask call by
+// the agent's rules and the host's PDP, as the root conversation: a deny
+// refuses that start, and an ask goes to the gate on the dispatch run,
+// attributed as dispatched. The host record lists each start as a tool call
+// to subtask with its permission outcome.
 
 // dispatchKey marks the context of a subtask a host started with Dispatch.
 type dispatchKey struct{}
@@ -48,8 +60,14 @@ func (e *Engine) Dispatch(ctx context.Context, id string, starts []subagent.Requ
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !e.cfg.Builtins.Offers(subagent.ToolName) {
+		return nil, fmt.Errorf("dispatch: this agent does not offer the subtask tool")
+	}
 	variants, loadErr := subagent.Load(e.cfg.Dir)
 	for i, start := range starts {
+		if start.Background && !e.cfg.Builtins.Offers("background_status") {
+			return nil, fmt.Errorf("dispatch start %d: background subtasks need the background tools, which this agent does not offer", i+1)
+		}
 		if err := checkStart(start, variants); err != nil {
 			if loadErr != nil {
 				err = fmt.Errorf("%w (some variants did not load: %w)", err, loadErr)
@@ -128,28 +146,58 @@ func (e *Engine) executeDispatch(ctx context.Context, r *Run, info store.Convers
 
 func (e *Engine) dispatch(ctx context.Context, r *Run, info store.Conversation, variants map[string]subagent.Variant, starts []subagent.Request, tr *turnTrace) (events.Result, error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
-	x := &execution{engine: e, run: r, info: info, variants: variants, root: info, lineage: []string{info.ID}}
+	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	if err != nil {
+		return events.Result{}, err
+	}
+	pdp, err := permission.Rules(def.Snapshot.Profile.Permissions.Mode, def.Rules)
+	if err != nil {
+		return events.Result{}, err
+	}
+	x := &execution{engine: e, run: r, info: info, definition: def, policy: pdp, variants: variants, root: info, lineage: []string{info.ID}}
 	x.shared = sharedBudget(ctx, 0, e.cfg.TurnTokenBudget)
 	tr.x = x
 	out := make([]events.Dispatched, len(starts))
+	calls := make([]trace.ToolCall, len(starts))
 	var wg sync.WaitGroup
 	for i, start := range starts {
 		wg.Add(1)
 		call := fmt.Sprintf("dispatch-%s-%d", r.id, i+1)
 		e.panics.Go("dispatch start", func() {
 			defer wg.Done()
+			started := time.Now()
+			calls[i] = trace.ToolCall{ToolCallID: call, Tool: subagent.ToolName, Permission: trace.PermissionNone, ErrorKind: trace.ErrorCancelled}
+			defer func() { calls[i].DurationMS = time.Since(started).Milliseconds() }()
+			decision, permit := x.authorizeStart(ctx, call, start)
+			calls[i].Permission = permit
+			if !decision.Allow {
+				calls[i].ErrorKind = trace.ErrorDenied
+				out[i] = events.Dispatched{Err: "denied: " + decision.Reason, IsError: true}
+				return
+			}
 			callCtx := context.WithValue(context.WithValue(ctx, callIDKey{}, call), dispatchKey{}, true)
 			var res tools.Result
 			err := e.panics.Call("subtask", func() (err error) {
 				res, err = x.subtask(callCtx, start)
 				return err
 			}, panics.With("conversation", info.ID), panics.With("call", call))
+			calls[i].ErrorKind = ""
 			switch {
 			case err != nil:
+				calls[i].ErrorKind = trace.ErrorTool
+				if _, ok := panics.Ref(err); ok {
+					calls[i].ErrorKind = trace.ErrorPanic
+				} else if errors.Is(err, context.Canceled) {
+					calls[i].ErrorKind = trace.ErrorCancelled
+				}
 				out[i] = events.Dispatched{Err: e.scrub.Text(err.Error()), IsError: true}
 			case json.Valid([]byte(res.Text)):
 				out[i] = events.Dispatched{Result: json.RawMessage(res.Text), IsError: res.IsError}
+				if res.IsError {
+					calls[i].ErrorKind = trace.ErrorTool
+				}
 			default:
+				calls[i].ErrorKind = trace.ErrorTool
 				out[i] = events.Dispatched{Err: "subtask returned no JSON result", IsError: true}
 			}
 		}, func(*panics.Error) {
@@ -157,10 +205,64 @@ func (e *Engine) dispatch(ctx context.Context, r *Run, info store.Conversation, 
 		}, panics.With("conversation", info.ID), panics.With("call", call))
 	}
 	wg.Wait()
+	x.toolCalls = append(x.toolCalls, calls...)
 	x.usageMu.Lock()
 	usage := x.result.Usage
 	x.usageMu.Unlock()
 	return events.Result{Usage: usage, Dispatched: out}, ctx.Err()
+}
+
+// authorizeStart evaluates one dispatched start as a subtask call by the root
+// conversation: the agent's rules and the host's PDP decide, and an ask goes
+// to the gate on the dispatch run, attributed as dispatched. permit is how
+// the decision is recorded in the trace.
+func (x *execution) authorizeStart(ctx context.Context, call string, start subagent.Request) (permission.PermissionDecision, trace.Permission) {
+	e := x.engine
+	raw, _ := json.Marshal(start)
+	var args map[string]any
+	_ = json.Unmarshal(raw, &args)
+	origin := &permission.SubtaskOrigin{Variant: start.Variant, Goal: e.scrub.Text(start.Goal), Depth: 1, CallID: call, Dispatched: true}
+	req := permission.PermissionRequest{ID: call, ConversationID: x.info.ID, TurnID: x.run.id, Tool: subagent.ToolName, Input: e.scrub.Bytes(raw), Subtask: origin}
+	principal := "urn:nanite:agent:" + url.PathEscape(x.definition.Snapshot.Definition.DefinitionID)
+	var effect policy.Decision
+	err := e.panics.Call("permission policy", func() (err error) {
+		effect, err = permission.Evaluate(ctx, e.cfg.Logger, e.cfg.PDP, x.policy, principal, x.info.Role, req, args, map[string]any{"dispatched": true})
+		return err
+	}, panics.With("conversation", x.info.ID), panics.With("call", call))
+	decision := permission.PermissionDecision{Allow: effect.Effect == policy.Allow && err == nil, Reason: effect.Reason}
+	if ref, ok := panics.Ref(err); ok {
+		decision.Reason = "permission check failed (ref " + ref + ")"
+	}
+	permit := trace.PermissionAllow
+	if effect.Effect == policy.Ask && err == nil {
+		permit = trace.PermissionApproved
+		if x.granted(subagent.ToolName) {
+			decision = permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "conversation approval"}
+		} else {
+			req.Reason = e.scrub.Text(effect.Reason)
+			gateReq := req
+			gateReq.Input = raw
+			release, err := e.askTurn(ctx, x.root.ID)
+			if err != nil {
+				decision = permission.PermissionDecision{Reason: "approval not asked: " + err.Error()}
+			} else {
+				x.run.emit(ctx, func(meta events.EventMeta) events.Event { return events.PermissionAsked{EventMeta: meta, Request: req} })
+				decision = x.decide(ctx, gateReq)
+				release()
+			}
+			if decision.Allow && decision.Scope == permission.ScopeConversation {
+				e.grant(x.info.ID, subagent.ToolName)
+			}
+		}
+	}
+	if !decision.Allow {
+		permit = trace.PermissionDeny
+	}
+	decision.Reason = e.scrub.Text(decision.Reason)
+	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
+		return events.PermissionResolved{EventMeta: meta, ID: call, Decision: decision}
+	})
+	return decision, permit
 }
 
 // dispatchedChain reports whether a host dispatch started the subtask chain

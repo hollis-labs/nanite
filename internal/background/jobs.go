@@ -49,7 +49,7 @@ type activeJob struct {
 type Manager struct {
 	db     *store.Store
 	scrub  *redact.Redactor
-	notify func(store.Notice)
+	notify func(store.Job, store.Notice)
 	logger *slog.Logger
 	panics *panics.Guard
 	mu     sync.Mutex
@@ -57,7 +57,7 @@ type Manager struct {
 	closed bool
 }
 
-func New(db *store.Store, scrub *redact.Redactor, notify func(store.Notice), logger *slog.Logger, guard *panics.Guard) *Manager {
+func New(db *store.Store, scrub *redact.Redactor, notify func(store.Job, store.Notice), logger *slog.Logger, guard *panics.Guard) *Manager {
 	return &Manager{db: db, scrub: scrub, notify: notify, logger: logger, panics: guard, active: make(map[string]activeJob)}
 }
 
@@ -168,7 +168,7 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 		m.logger.Warn("persist background job completion failed", "job", job.ID, "error", m.scrub.Text(err.Error()))
 		return
 	}
-	m.notify(n)
+	m.notify(job, n)
 }
 
 func (m *Manager) Cancel(id string) bool {

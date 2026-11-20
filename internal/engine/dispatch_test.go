@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -356,16 +358,25 @@ func TestNoticeSubscribersLoseNothing(t *testing.T) {
 	}
 }
 
-// A turn started because of a notice is recorded with source reflex; an
-// unknown source is refused.
+// A turn started because of a notice is recorded with source reflex. Its
+// user message is the fixed NoticeTurnText; the notice reaches the model only
+// in the session slot. An unknown source, or text on a notice turn, is
+// refused.
 func TestNoticeTurnSource(t *testing.T) {
-	e, _, id := setupEngine(t, fake.New(fake.Text("told")), "")
+	p := &watchedProvider{Provider: fake.New(fake.Text("told"))}
+	e, db, id := setupEngine(t, p, "")
 	var sunk []trace.Turn
 	e.cfg.TraceSink = func(_ context.Context, rec trace.Turn) { sunk = append(sunk, rec) }
 	if _, err := e.Send(t.Context(), id, Input{Text: "x", Source: "cron"}); err == nil {
 		t.Fatal("an unknown turn source was accepted")
 	}
-	run, err := e.Send(t.Context(), id, Input{Text: "[notice job] done", Source: SourceNotice})
+	if _, err := e.Send(t.Context(), id, Input{Text: "the job is done", Source: SourceNotice}); err == nil {
+		t.Fatal("a notice turn took host text")
+	}
+	if err := e.PostNotice(t.Context(), id, "job", "the build finished"); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.Send(t.Context(), id, Input{Source: SourceNotice})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,5 +385,201 @@ func TestNoticeTurnSource(t *testing.T) {
 	}
 	if len(sunk) != 1 || sunk[0].Source != trace.SourceReflex {
 		t.Fatalf("records %+v", sunk)
+	}
+	history, err := db.History(t.Context(), id)
+	if err != nil || len(history) < 1 || history[0].Role != "user" || history[0].Blocks[0].Text != NoticeTurnText {
+		t.Fatalf("history %+v, %v", history, err)
+	}
+	req := p.requests[0]
+	userText, inSlot := "", false
+	for _, m := range req.Messages {
+		if m.Role == "user" {
+			for _, b := range m.ContentBlocks {
+				userText += b.Text
+			}
+		}
+	}
+	for _, block := range req.SlotBlocks {
+		inSlot = inSlot || block.Name == "session" && strings.Contains(block.Content, "the build finished")
+	}
+	if strings.Contains(userText, "the build finished") || !inSlot {
+		t.Fatalf("user text %q, notice in the session slot %v", userText, inSlot)
+	}
+}
+
+// Dispatch is refused where the model could not start a subtask: without
+// the subtask tool, or a background start without the background tools.
+func TestDispatchKeepsTheBuiltinGates(t *testing.T) {
+	p := &routedProvider{root: fake.New(), children: map[string]*fake.Provider{"find x": fake.New(returnCall("ok", map[string]any{"answer": "x"}))}}
+	e, _, id := setupEngine(t, p, "")
+	e.cfg.Builtins = tools.Builtins{}
+	if _, err := e.Dispatch(t.Context(), id, []subagent.Request{researchStart("find x")}); err == nil || !strings.Contains(err.Error(), "subtask tool") {
+		t.Fatalf("dispatch without the subtask tool: %v", err)
+	}
+	e.cfg.Builtins = tools.Builtins{tools.BuiltinSubtasks: true}
+	bg := researchStart("find x")
+	bg.Background = true
+	if _, err := e.Dispatch(t.Context(), id, []subagent.Request{bg}); err == nil || !strings.Contains(err.Error(), "background") {
+		t.Fatalf("background dispatch without the background tools: %v", err)
+	}
+	run, err := e.Dispatch(t.Context(), id, []subagent.Request{researchStart("find x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, result := dispatchWait(t, run); result.Dispatched[0].IsError {
+		t.Fatalf("a foreground dispatch with the subtask tool: %+v", result.Dispatched)
+	}
+}
+
+// A rule denying subtask refuses a dispatched start, and the host record
+// lists it as a denied subtask call.
+func TestDispatchHonoursAPolicyDeny(t *testing.T) {
+	p := &routedProvider{root: fake.New(), children: map[string]*fake.Provider{"find x": fake.New(returnCall("ok", map[string]any{"answer": "x"}))}}
+	e, db, id := setupEngine(t, p, "")
+	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "permissions.yaml"), []byte("permissions:\n  rules:\n    - tool: subtask\n      behavior: deny\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sunk []trace.Turn
+	e.cfg.TraceSink = func(_ context.Context, rec trace.Turn) { sunk = append(sunk, rec) }
+	run, err := e.Dispatch(t.Context(), id, []subagent.Request{researchStart("find x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, result := dispatchWait(t, run)
+	if out := result.Dispatched[0]; !out.IsError || !strings.HasPrefix(out.Err, "denied") || len(out.Result) != 0 {
+		t.Fatalf("outcome %+v", out)
+	}
+	if conversations, _ := db.Conversations(t.Context()); len(conversations) != 1 {
+		t.Fatalf("a denied start created a child: %+v", conversations)
+	}
+	if len(sunk) != 1 || len(sunk[0].ToolCalls) != 1 || sunk[0].ToolCalls[0].Tool != "subtask" ||
+		sunk[0].ToolCalls[0].Permission != trace.PermissionDeny || sunk[0].ToolCalls[0].ErrorKind != trace.ErrorDenied || len(sunk[0].Subtasks) != 0 {
+		t.Fatalf("host record %+v", sunk)
+	}
+}
+
+// A rule that asks for subtask puts a dispatched start to the gate on the
+// dispatch run, attributed as dispatched; the record has a matching call.
+func TestDispatchAsksTheGateWhenTheRulesAsk(t *testing.T) {
+	p := &routedProvider{root: fake.New(), children: map[string]*fake.Provider{"find x": fake.New(returnCall("ok", map[string]any{"answer": "x"}))}}
+	e, _, id := setupEngine(t, p, "")
+	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "permissions.yaml"), []byte("permissions:\n  rules:\n    - tool: subtask\n      behavior: ask\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gate := &recordingGate{decide: allowFor(permission.ScopeOnce)}
+	e.cfg.Gate = gate
+	var sunk []trace.Turn
+	e.cfg.TraceSink = func(_ context.Context, rec trace.Turn) { sunk = append(sunk, rec) }
+	run, err := e.Dispatch(t.Context(), id, []subagent.Request{researchStart("find x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen, result := dispatchWait(t, run)
+	asked := gate.asked()
+	if len(asked) != 1 || asked[0].Tool != "subtask" || asked[0].Subtask == nil || !asked[0].Subtask.Dispatched || asked[0].ConversationID != id {
+		t.Fatalf("gate %+v", asked)
+	}
+	onRun := 0
+	for _, ev := range seen {
+		if a, ok := ev.(events.PermissionAsked); ok && a.Request.Tool == "subtask" {
+			onRun++
+		}
+	}
+	if onRun != 1 || result.Dispatched[0].IsError {
+		t.Fatalf("asked on the run %d, outcome %+v", onRun, result.Dispatched)
+	}
+	var host *trace.Turn
+	for i := range sunk {
+		if sunk[i].ConversationID == id {
+			host = &sunk[i]
+		}
+	}
+	if host == nil || len(host.ToolCalls) != 1 || host.ToolCalls[0].Permission != trace.PermissionApproved ||
+		host.ToolCalls[0].ToolCallID != host.Subtasks[0].ToolCallID || host.ToolCalls[0].ErrorKind != "" {
+		t.Fatalf("host record %+v", host)
+	}
+}
+
+// A notice caused by work a notice turn started is chained, so a host does
+// not start another notice turn for it.
+func TestNoticeTurnWorkIsChained(t *testing.T) {
+	start := subtaskCall("worker", "later", true)
+	p := &routedProvider{root: fake.New(start, fake.Text("started"), fake.Text("user turn"), subtaskCall("worker", "again", true), fake.Text("ok")),
+		children: map[string]*fake.Provider{"later": fake.New(returnCall("ok", "x")), "again": fake.New(returnCall("ok", "y"))}}
+	e, _, id := setupEngine(t, p, "")
+	run, err := e.Send(t.Context(), id, Input{Source: SourceNotice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if n := nextNotice(t, e); !n.Chained {
+		t.Fatalf("a notice from a notice turn's work was not chained: %+v", n)
+	}
+	run, err = e.Send(t.Context(), id, Input{Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	run, err = e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if n := nextNotice(t, e); n.Chained {
+		t.Fatalf("a notice from a user turn's work was chained: %+v", n)
+	}
+	e.mu.Lock()
+	left := len(e.noticeJobs)
+	e.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("notice-work marks left: %d", left)
+	}
+}
+
+func nextNotice(t *testing.T, e *Engine) events.NoticePosted {
+	t.Helper()
+	select {
+	case n := <-e.Notices():
+		return n
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notice")
+	}
+	return events.NoticePosted{}
+}
+
+// A subscriber that falls behind past its limit loses the oldest notices and
+// is told how many.
+func TestNoticeQueueDropsTheOldestAndSaysSo(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(), "")
+	e.noticeQueueLimit = 4
+	ch := e.SubscribeNotices(t.Context())
+	for i := range 10 {
+		if err := e.PostNotice(t.Context(), id, "host", strings.Repeat("n", i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The pump may already hold one notice it is offering; read what is there.
+	var got []events.NoticePosted
+	for len(got) < 5 {
+		select {
+		case n := <-ch:
+			got = append(got, n)
+		case <-time.After(300 * time.Millisecond):
+			goto done
+		}
+	}
+done:
+	dropped := 0
+	for _, n := range got {
+		dropped += n.Dropped
+	}
+	if last := got[len(got)-1]; last.Body != strings.Repeat("n", 10) || dropped+len(got) != 10 || dropped == 0 {
+		t.Fatalf("got %d notices, %d dropped: %+v", len(got), dropped, got)
 	}
 }

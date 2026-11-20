@@ -129,6 +129,10 @@ type Engine struct {
 	// noticeSubs are the notice subscribers, by subscription id (notices.go).
 	noticeSubs map[uint64]*noticeQueue
 	noticeSeq  uint64
+	// noticeQueueLimit bounds each subscriber's queue (NoticeQueueLimit).
+	noticeQueueLimit int
+	// noticeJobs marks background jobs a notice turn started (notices.go).
+	noticeJobs map[string]bool
 	// dispatched marks the child conversations a host started with Dispatch
 	// (and that are still running), so their relayed asks say so.
 	dispatched map[string]bool
@@ -168,7 +172,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	guard := newGuard(cfg.Logger, scrub, cfg.PanicReporter)
 	cfg.ProviderConfig.Panics = guard
-	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
+	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), noticeQueueLimit: NoticeQueueLimit, noticeJobs: make(map[string]bool), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
 		// A subtask result is already held under the budget (result.go); a
 		// preview would break its JSON.
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
@@ -177,9 +181,6 @@ func New(cfg Config) (*Engine, error) {
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
 		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
-	if engineCreated != nil {
-		engineCreated(e)
-	}
 	// Expired tool results, cached for an hour or stored subtask results for
 	// 30 days, share one table; clear them once when the agent opens.
 	if removed, err := e.cache.Purge(context.Background()); err != nil {
@@ -204,9 +205,6 @@ func newGuard(logger *slog.Logger, scrub *redact.Redactor, host panics.Reporter)
 	return panics.New(panics.Config{Reporter: reporter, Redact: scrub.Text})
 }
 
-// engineCreated, set only by tests, sees every engine New makes.
-var engineCreated func(*Engine)
-
 type Input struct {
 	Text  string
 	Slots []slots.Update
@@ -216,9 +214,13 @@ type Input struct {
 }
 
 // SourceNotice marks a turn started because a notice arrived. Its trace
-// record has source "reflex" (libs agent/trace v0.2.0 has no "notice"
-// source; an automatic trigger is the closest).
+// record has source "reflex": a notice turn is an automatic activation, which
+// is what reflex records. Its user message is NoticeTurnText, set by the
+// engine; the notice itself reaches the model only in the session slot.
 const SourceNotice = "notice"
+
+// NoticeTurnText is the user message of every notice turn.
+const NoticeTurnText = "A notice arrived."
 
 func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error) {
 	return e.startRun(ctx, id, input, false)
@@ -332,7 +334,14 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if input.Source != "" && input.Source != SourceNotice {
+	switch input.Source {
+	case "":
+	case SourceNotice:
+		if input.Text != "" {
+			return nil, fmt.Errorf("a notice turn's text is set by the engine; leave Input.Text empty")
+		}
+		input.Text = NoticeTurnText
+	default:
 		return nil, fmt.Errorf("unknown turn source %q", input.Source)
 	}
 	e.mu.Lock()

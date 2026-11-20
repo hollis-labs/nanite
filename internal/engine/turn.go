@@ -99,6 +99,8 @@ type execution struct {
 	// shared is the root turn's token budget, shared with its foreground
 	// subtasks at every depth; nil when the agent sets none.
 	shared *turnBudget
+	// source is what started this turn (Input.Source).
+	source string
 	// usageMu guards result.Usage, which subtask handlers add child usage to.
 	usageMu sync.Mutex
 	// returned is set once this child has called return_result; the turn
@@ -134,6 +136,7 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	// with its ref.
 	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil, e.subtaskLinkOf(info.ID))}
 	if input.Source == SourceNotice && interrupted == nil {
+		// A notice turn is an automatic activation: its source is reflex.
 		tr.rec.Source = trace.SourceReflex
 	}
 	// A panic while preparing the turn fails it with a ref; the host and the
@@ -303,7 +306,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	e.warnCuts(ctx, info.ID, assembled.Report)
 	x := &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
-		variants: variants, variant: variant, chain: chain, depth: depth, root: root, lineage: lineage}
+		variants: variants, variant: variant, chain: chain, depth: depth, root: root, lineage: lineage, source: input.Source}
 	if depth > 0 {
 		// The title's goal was scrubbed when the child was created.
 		x.origin = &permission.SubtaskOrigin{ChildID: info.ID, Variant: variant.Name, Goal: strings.TrimPrefix(info.Title, subtaskTitlePrefix),

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/engine"
@@ -106,13 +107,26 @@ func (c *Conversation) History(ctx context.Context) ([]Message, error) {
 }
 
 // SourceNotice is the Input.Source of a turn a host starts because a notice
-// arrived. Its trace record has source "reflex".
+// arrived. Leave Input.Text empty: the engine sets the user message to
+// NoticeTurnText, and the notice reaches the model in the session slot. Its
+// trace record has source "reflex".
 const SourceNotice = engine.SourceNotice
 
-// DispatchStart is one subtask a host starts with Dispatch: the same fields
-// as the model's subtask call (goal, return_spec, variant, inputs, context,
-// background). The variant is required.
-type DispatchStart = subagent.Request
+// NoticeTurnText is the user message of every notice turn.
+const NoticeTurnText = engine.NoticeTurnText
+
+// DispatchStart is one subtask a host starts with Dispatch, with the same
+// fields as the model's subtask call. Variant is required; ReturnSpec is a
+// JSON string (prose) or a JSON Schema object; Inputs and Context are JSON;
+// Background starts it as a background job.
+type DispatchStart struct {
+	Goal       string          `json:"goal"`
+	ReturnSpec json.RawMessage `json:"return_spec"`
+	Variant    string          `json:"variant"`
+	Inputs     json.RawMessage `json:"inputs,omitempty"`
+	Context    json.RawMessage `json:"context,omitempty"`
+	Background bool            `json:"background,omitempty"`
+}
 
 // ErrNoStarts is returned by Dispatch when it is given nothing to start.
 var ErrNoStarts = engine.ErrNoStarts
@@ -131,7 +145,11 @@ var ErrNoStarts = engine.ErrNoStarts
 // Job reads its result. Every start is checked before anything runs. The
 // conversation must be a root chat; its history does not change.
 func (c *Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error) {
-	return c.agent.engine.Dispatch(ctx, c.id, starts)
+	requests := make([]subagent.Request, len(starts))
+	for i, s := range starts {
+		requests[i] = subagent.Request{Goal: s.Goal, ReturnSpec: s.ReturnSpec, Variant: s.Variant, Inputs: s.Inputs, Context: s.Context, Background: s.Background}
+	}
+	return c.agent.engine.Dispatch(ctx, c.id, requests)
 }
 
 // PostNotice posts a notice to the conversation: it is announced at once (on

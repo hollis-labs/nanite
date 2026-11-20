@@ -469,6 +469,26 @@ for example as an activity of kind `agent.ActivityAuthWaiting`
 token fails with an error naming the request; a later turn mints once the
 request is approved.
 
+`AuthWaiting.Conversation` names the conversation whose turn needed the
+grant and `AuthWaiting.For` what needed it (`provider <name>` or
+`MCP server <name>`); the grant request's purpose names both too, so the
+approval card says what it is for. `Agent.AuthRequest` looks a request up,
+and `Agent.AuthDecided` tells the agent a request was decided so the next
+token request checks it at once.
+
+The chatrunner does all of this for a chat: it publishes a
+`nanite.auth.waiting` activity on the chat once per request (request id,
+status, tier, audience, scopes and `for`), ends the turn with a run error
+that says it is waiting for that request, and watches the request (every
+`Options.AuthPoll`, default 30s, doubling up to five minutes; the watch is
+kept in host state, so a restart goes on watching). When the request is
+decided, each chat that waited gets a notice of kind `auth`
+(`chatrunner.NoticeKindAuth`): on approval it says to continue, and with
+`Options.NoticeTurns` it starts a notice turn that retries; on a denial or
+expiry it says so. A host that is pushed decisions (from Gatecrasher or
+Warden) calls `Runner.AuthDecided(ctx, requestID, status)` itself;
+`Options.AuthStatus` replaces the lookup the polling uses.
+
 `agent.ErrReenroll` (matched with `errors.Is`) means the parent credential
 can no longer be used safely; see the agent directory doc for recovery.
 

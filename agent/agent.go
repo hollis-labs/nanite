@@ -445,6 +445,40 @@ type AuthWaiting struct {
 	Tier      string   `json:"tier,omitempty"`
 	Audience  string   `json:"audience"`
 	Scopes    []string `json:"scopes,omitempty"`
+	// Conversation is the conversation whose turn needed the grant ("" when
+	// the need came from outside a turn).
+	Conversation string `json:"conversation,omitempty"`
+	// For names what needed it: "provider <name>" or "MCP server <name>".
+	For string `json:"for,omitempty"`
+}
+
+// ErrNoWarden means the agent has no Warden identity (identity.yaml).
+var ErrNoWarden = errors.New("nanite: the agent has no warden identity")
+
+// AuthRequest looks up a Warden grant request's current status: "pending",
+// "approved", "denied", "expired" or another Warden status.
+func (a *Agent) AuthRequest(ctx context.Context, id string) (AuthWaiting, error) {
+	src := a.engine.Warden()
+	if src == nil {
+		return AuthWaiting{}, ErrNoWarden
+	}
+	w, err := src.Request(ctx, id)
+	return AuthWaiting(w), err
+}
+
+// AuthDecided tells the agent a grant request has been decided, so the next
+// token request looks it up at once instead of after the recheck interval.
+func (a *Agent) AuthDecided(id string) {
+	if src := a.engine.Warden(); src != nil {
+		src.Decided(id)
+	}
+}
+
+// IsAuthWaiting reports whether err is a turn failing because a Warden grant
+// is still pending, and returns the request.
+func IsAuthWaiting(err error) (AuthWaiting, bool) {
+	w, ok := warden.AsMissingGrant(err)
+	return AuthWaiting(w), ok
 }
 
 // ErrReenroll means the agent's Warden parent credential can no longer be

@@ -79,6 +79,15 @@ type Options struct {
 	// negative waits indefinitely). The front desk's work on that chat
 	// waits meanwhile. The clock survives a restart.
 	InterruptedHold time.Duration
+	// AuthPoll is the first wait between looks at a pending Warden grant
+	// request a turn waited on (default 30s); it doubles up to five
+	// minutes. When the request is decided, every chat that waited gets a
+	// notice (NoticeKindAuth); see Runner.AuthDecided.
+	AuthPoll time.Duration
+	// AuthStatus looks up a grant request's status; nil asks Warden
+	// (agent.Agent.AuthRequest). A host pushed decisions calls
+	// Runner.AuthDecided instead.
+	AuthStatus AuthStatus
 }
 
 // Runner is a chat.Runner backed by one Nanite agent.
@@ -117,6 +126,8 @@ type Runner struct {
 	resuming map[string]bool
 	// serving is set once the chat Service is known to run.
 	serving bool
+	// auth is the Warden grant requests turns wait on.
+	auth authWaits
 }
 
 var _ chat.Runner = (*Runner)(nil)
@@ -149,6 +160,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	ao := opts.Agent
 	ao.Gate = gate{r}
 	ao.PDP = pdp{runner: r, host: opts.Agent.PDP}
+	ao.OnAuthWaiting = r.onAuthWaiting
 	a, err := agent.Open(ctx, ao)
 	if err != nil {
 		return nil, err
@@ -176,6 +188,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		}
 	}
 	r.holdInterrupted(ctx)
+	r.loadAuthWaits(ctx)
 	return r, nil
 }
 
@@ -216,6 +229,7 @@ func (r *Runner) Close() error {
 	r.mu.Unlock()
 	r.stopNotices()
 	<-r.noticesDone
+	r.auth.wg.Wait()
 	if r.desk != nil {
 		r.desk.saveAll()
 	}

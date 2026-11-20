@@ -418,7 +418,7 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 		runID = interrupted.ID
 	}
 
-	r, ctx := e.newRunLocked(ctx, id, runID)
+	r, ctx := e.newRunLocked(warden.WithConversation(ctx, id), id, runID)
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
 	hostTools, hostSkills := e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot()
@@ -679,3 +679,7 @@ func (e *Engine) forgetTurnContext(conversation string) {
 	}
 	e.previous[conversation] = hashes
 }
+
+// Warden is the agent's Warden token source, nil without identity.yaml's
+// warden section.
+func (e *Engine) Warden() *warden.Source { return e.cfg.ProviderConfig.Warden }

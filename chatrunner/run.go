@@ -489,7 +489,9 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			return x.end(chatstream.Event{Verb: chatstream.VerbRunAbort, Reason: chat.AbortCanceled})
 		}
 		message := "the turn failed"
-		if e.Err != nil {
+		if w, ok := agent.IsAuthWaiting(e.Err); ok {
+			message = authWaitingText(x.runner.authFor(w))
+		} else if e.Err != nil {
 			message = e.Err.Error()
 		}
 		return x.end(chatstream.Event{Verb: chatstream.VerbRunError, Code: CodeTurnFailed, Message: message})

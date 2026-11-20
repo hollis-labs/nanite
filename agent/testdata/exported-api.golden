@@ -1,5 +1,7 @@
 const ActivityAuthWaiting untyped string
 type Agent struct
+  (*Agent) AuthDecided(id string)
+  (*Agent) AuthRequest(ctx context.Context, id string) (AuthWaiting, error)
   (*Agent) Close() error
   (*Agent) Complete(ctx context.Context, use string, system string, prompt string, maxTokens int) (string, error)
   (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
@@ -26,6 +28,8 @@ type AuthWaiting struct
   field Tier string
   field Audience string
   field Scopes []string
+  field Conversation string
+  field For string
 const BuiltinBackground github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesRead github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesWrite github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
@@ -88,6 +92,7 @@ var ErrBusy error
 var ErrNoConversation error
 var ErrNoStarts error
 var ErrNoSteering error
+var ErrNoWarden error
 var ErrReenroll error
 type Event = github.com/hollis-labs/nanite/internal/events.Event interface
 type EventMeta = github.com/hollis-labs/nanite/internal/events.EventMeta struct
@@ -115,6 +120,7 @@ type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
 type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
   field ID string
   field UserMessageID string
+func IsAuthWaiting(err error) (AuthWaiting, bool)
 const JobReasonProcessExit untyped string
 const JobReasonShutdown untyped string
 type Message = github.com/hollis-labs/nanite/internal/store.Message struct

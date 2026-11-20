@@ -168,7 +168,28 @@ lead back to the same definition without moving into a property or item.
 Keywords must be spelled exactly (jsonschema-go reads them ignoring case),
 and the check runs on the library's own reading of the schema. Anything else
 is refused before a child starts. Tool input schemas from the host and MCP
-servers are not held to this. With a schema, `result` is
+servers are not held to this subset. Validation of every schema, from any
+source, is bounded at run time: Nanite uses a vendored jsonschema-go
+(`internal/third_party/jsonschema`) whose `Validate` takes a context and a
+work budget: 200,000 units, charged in proportion to the work each keyword
+does, with the context checked every 64 units and a 2-second cutoff. It
+bounds the error text it builds while keeping the failing leaf's path, and
+refuses a pattern compiling to more than 20,000 instructions. Cheap static checks
+made once per schema refuse what could never validate well: a cycle among
+the in-place keywords above, more than 64 of them in a row on one value,
+more than 10,000 such runs from one schema, patterns compiling to more than
+100,000 instructions together, more than 256KB (16KB for a schema the model
+writes), and JSON nesting past 256 levels. The check follows jsonschema-go's
+own resolution of each `$ref` and `$dynamicRef` (a `$dynamicRef` resolved at
+validation time is taken to reach every matching `$dynamicAnchor`). A value
+(tool input, a returned result, an answer) nesting more than 64 levels is
+refused before validation, and validation error text is cut to 4KB. The
+static check errs on the side of refusing: it also refuses a cycle in
+`$defs` nothing uses, a cycle through draft-07 keywords that sit beside a
+`$ref` (which draft-07 ignores), and one through `dependencies` in a
+2020-12 ignores). An MCP tool with an unsafe schema is left out of the
+catalog with a warning naming the server and tool; a host tool keeps its
+entry and each call fails with `invalid tool schema`. With a schema, `result` is
 validated: a result that fails gets one repair (the child sees the
 validation error and calls `return_result` again), and a second failure is
 accepted as `partial` with the reason `return_spec: <error>`.

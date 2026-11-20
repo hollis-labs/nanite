@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hollis-labs/nanite/internal/elicitation"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 // MaxDepth is the deepest a child conversation may run. A root chat is depth

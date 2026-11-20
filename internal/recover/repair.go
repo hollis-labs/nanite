@@ -1,13 +1,15 @@
 package recover
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hollis-labs/nanite/internal/elicitation"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 type Validator struct {
@@ -20,18 +22,23 @@ func NewValidator(schema json.RawMessage) Validator {
 	return Validator{schema: resolved, err: err}
 }
 
-func (v Validator) Validate(input map[string]any) error {
+func (v Validator) Validate(ctx context.Context, input map[string]any) error {
 	if v.err != nil {
 		return fmt.Errorf("invalid tool schema: %w", v.err)
 	}
 	if input == nil {
 		input = map[string]any{}
 	}
-	return v.schema.Validate(input)
+	return elicitation.Validate(ctx, v.schema, input)
 }
 
-// Classify identifies invalid arguments to a valid schema.
-func (v Validator) Classify(err error) bool { return v.schema != nil && err != nil }
+// Classify identifies invalid arguments to a valid schema. Input refused for
+// nesting too deeply, or whose validation ran out of budget or time, is not
+// repairable: it is never sent back to a model.
+func (v Validator) Classify(err error) bool {
+	return v.schema != nil && err != nil && !errors.Is(err, elicitation.ErrValueTooDeep) &&
+		!errors.Is(err, jsonschema.ErrBudget) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
 
 type outcome struct {
 	RepairedArgs    map[string]any `json:"repaired_args"`

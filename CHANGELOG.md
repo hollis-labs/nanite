@@ -59,6 +59,34 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   and is now a reserved tool name. A child gets `fetch_tool_result` and
   `search_tool_result` even when its variant's allow list leaves them out;
   an explicit deny removes them.
+- Bounded schema validation, so no schema or value from a host, an MCP
+  server or the model can crash, hang or exhaust the process. Nanite now
+  validates with a vendored copy of jsonschema-go v0.4.3
+  (`internal/third_party/jsonschema`, MIT, with upstream's tests and the
+  JSON-Schema-Test-Suite subset; see its README) patched so `Validate` takes
+  a context and a work budget: it stops past 200,000 units of work, charged
+  in proportion to what each keyword does (schema-value visits, enum/const
+  nodes compared, uniqueItems item sizes, string lengths, required names,
+  instance keys, and regular-expression matching by input length times
+  program size), checks the context every 64 units, and is cut off after
+  2 seconds. Error text stays bounded while a failure still names its leaf
+  path: wraps add only their prefix, discarded branches build no text, and
+  long messages keep their start and end. A pattern compiling to more than
+  20,000 instructions is refused. Validation that ran out of budget or time
+  is not sent to argument repair. Cheap static checks still refuse, with
+  `ErrUnsafeSchema`: a cycle among in-place keywords (`$ref`, `$dynamicRef`,
+  `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `dependentSchemas`,
+  draft-07 schema `dependencies`); more than 64 of them in a row on one
+  value; more than 10,000 such runs from one schema; patterns compiling to
+  more than 100,000 instructions together; a schema over 256KB (16KB for one
+  the model writes); and JSON nesting past 256 levels. A value (tool input,
+  `return_result`, `ask_user` answers) nesting more than 64 levels is
+  refused before validation and is not sent to argument repair; validation
+  error text is cut to 4KB. An MCP tool with an unsafe schema is left out of
+  the catalog with a warning naming the server and tool; a host tool keeps
+  its entry and each call fails with `invalid tool schema`. Resolved schemas
+  are cached by content in an LRU bounded at 64MB, sized from measured
+  per-entry memory.
 - Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
   subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
   keywords spelled exactly, `$ref` only to `#/$defs/<name>` or

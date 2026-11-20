@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 // MaxSchemaBytes bounds a schema the model writes itself (a subtask's
@@ -27,8 +27,9 @@ const MaxSchemaBytes = 16 << 10
 //     properties, items and the like is fine: each step is into a smaller
 //     value.
 //
-// Tool input schemas from hosts and MCP servers go through Resolve
-// unchanged.
+// Tool input schemas from hosts and MCP servers go through Resolve alone,
+// which holds every schema to the limits in guard.go (no in-place cycle,
+// bounded in-place chains and paths, size and nesting) without this subset.
 func ResolveLimited(raw json.RawMessage) (*jsonschema.Resolved, error) {
 	if len(raw) > MaxSchemaBytes {
 		return nil, fmt.Errorf("schema is %d bytes; the limit is %d", len(raw), MaxSchemaBytes)

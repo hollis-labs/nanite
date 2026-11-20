@@ -10,11 +10,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
 	"github.com/hollis-labs/nanite/internal/background"
+	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 	"github.com/hollis-labs/nanite/internal/tools"
 )
 
@@ -74,7 +75,7 @@ const maxValidationError = 600
 // return spec's schema gets one repair; a second failure is accepted as
 // partial with the validation error, and either way the child's turn ends.
 // The schema is checked without holding the engine lock.
-func (x *execution) returnResult(_ context.Context, in subagent.Return) (tools.Result, error) {
+func (x *execution) returnResult(ctx context.Context, in subagent.Return) (tools.Result, error) {
 	switch in.Status {
 	case subagent.StatusOK, subagent.StatusPartial, subagent.StatusError:
 	case subagent.StatusDenied:
@@ -100,7 +101,7 @@ func (x *execution) returnResult(_ context.Context, in subagent.Return) (tools.R
 	}
 	var problem string
 	if schema != nil {
-		if err := validateResult(schema, in.Result); err != nil {
+		if err := validateResult(ctx, schema, in.Result); err != nil {
 			problem = truncateText(err.Error(), maxValidationError)
 		}
 	}
@@ -127,12 +128,12 @@ func (x *execution) returnResult(_ context.Context, in subagent.Return) (tools.R
 	return tools.Result{Text: "Returned to the parent."}, nil
 }
 
-func validateResult(schema *jsonschema.Resolved, raw json.RawMessage) error {
+func validateResult(ctx context.Context, schema *jsonschema.Resolved, raw json.RawMessage) error {
 	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return fmt.Errorf("result is not valid JSON: %w", err)
 	}
-	return schema.Validate(value)
+	return elicitation.Validate(ctx, schema, value)
 }
 
 // subtaskCost is a subtask's spend. TokensIn counts every input token,

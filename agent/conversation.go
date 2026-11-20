@@ -115,6 +115,22 @@ const SourceNotice = engine.SourceNotice
 // NoticeTurnText is the user message of every notice turn.
 const NoticeTurnText = engine.NoticeTurnText
 
+// SourceAuto is the Input.Source of a turn the host sends on its own (a
+// trigger, a reflex of the host's, another agent) rather than a person. Like
+// a notice turn, it is not classified, runs no reflexes and does not reach a
+// front desk; unlike one, it carries its own Input.Text. Its trace record
+// has source "host", and its situation the source.
+const SourceAuto = engine.SourceAuto
+
+// SourceErrandPrefix starts the Input.Source of a turn one of the host's
+// modules asked for; ErrandSource builds it.
+const SourceErrandPrefix = engine.SourceErrandPrefix
+
+// ErrandSource is the Input.Source of a turn the host's module asked for,
+// "errand:<module>". It is steered like a SourceAuto turn. A module name is 1
+// to 64 letters, digits, '.', '_' or '-', starting with a letter or digit.
+func ErrandSource(module string) (string, error) { return engine.ErrandSource(module) }
+
 // DispatchStart is one subtask a host starts with Dispatch, with the same
 // fields as the model's subtask call. Variant is required; ReturnSpec is a
 // JSON string (prose) or a JSON Schema object; Inputs and Context are JSON;
@@ -190,6 +206,23 @@ func (c *Conversation) Mode(ctx context.Context) (string, error) {
 // was opened without Steering.
 func (c *Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error) {
 	return c.agent.engine.Steer(ctx, c.id, in)
+}
+
+// SteerEvent runs the conversation's active event reflexes for a host event
+// topic (a reflex on "a.b" fires for "a.b" and "a.b.c"), in the mode in
+// force. What fired is returned for the host to carry out; a remind reflex's
+// reminder waits for the next person's message. Nanite posts
+// TopicCompacted itself after a compaction pass. Only a root conversation
+// is steered; the model has no tool for this. It returns ErrNoSteering when
+// the agent was opened without Steering.
+func (c *Conversation) SteerEvent(ctx context.Context, topic string) (HostFired, error) {
+	return c.agent.engine.SteerEvent(ctx, c.id, topic)
+}
+
+// SteerFocus runs the conversation's active focus reflexes for the view that
+// came in front, as SteerEvent does for an event.
+func (c *Conversation) SteerFocus(ctx context.Context, view string) (HostFired, error) {
+	return c.agent.engine.SteerFocus(ctx, c.id, view)
 }
 
 // AcceptSuggestion applies a classifier suggestion (from a Steered event)

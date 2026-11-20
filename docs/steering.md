@@ -29,10 +29,24 @@ Steering runs for root conversations only; a subtask works under its variant.
 | --- | --- | --- | --- | --- |
 | A person's message | yes | yes | yes, if `Classify` is set | yes |
 | A notice turn | yes | yes | no | no |
+| A host turn (`SourceAuto`, `ErrandSource(module)`) | yes | yes | no | no |
 | A resumed turn | yes | no | no | no |
 
+A **host turn** is one the host sends on its own (`Input.Source:
+agent.SourceAuto`: a trigger, a host reflex, another agent) or that one of its
+modules asked for (`agent.ErrandSource("late-answer")` is
+`"errand:late-answer"`; a module name is 1 to 64 letters, digits, `.`, `_` or
+`-`, starting with a letter or digit). It carries its own text, and is not
+the person speaking: it is not classified, fires no reflexes, does not reach
+the front desk, does not replace the person's interrupted turn (it is refused
+until they resume or discard it) and does not reset the notice-turn count.
+Its trace record has source `host`, and its `situation` the exact source, with
+or without steering. chatrunner maps a chat turn's meta: a non-empty
+`"errand"` is `ErrandSource` of it, else `"auto"` set to `true` or a
+non-empty string is `SourceAuto`; bad meta refuses the turn.
+
 Subtasks and `Dispatch` do not inherit the mode: a subtask conversation has
-none, and its turns are not steered. A notice or resumed turn keeps a preset
+none, and its turns are not steered. A notice, host or resumed turn keeps a preset
 the classifier applied (`auto`) on the person's last message, as long as the
 policy still applies it; it is not classified again.
 
@@ -64,9 +78,39 @@ sends it as the `nanite.steer` activity). The turn's trace record carries the
 decision in its `situation`, `classified`, `why` and `fired` fields, with no
 prompt content: the views and module in front, the mode and its source, the
 layout, the turn source and the slots, but no message text, selection, window
-titles or signals. `fired` is null on a notice or resumed turn, where no
+titles or signals. `fired` is null on a notice, host or resumed turn, where no
 reflex layer runs. A turn a reflex halted has `why` starting with `halted`,
 no provider or model, and no steps.
+
+## Events and focus changes
+
+Event and focus reflexes (`steer.TriggerEvent` on a topic, `steer.TriggerFocus`
+on a view) run when the host reports one, outside any turn:
+
+```go
+fired, _ := c.SteerEvent(ctx, "mail.new")    // a reflex on "mail" fires for "mail" and "mail.new"
+fired, _ = c.SteerFocus(ctx, "notes")        // the notes view came in front
+for _, a := range fired.Actions { carryOut(a) }
+```
+
+- They run the reflexes active in the mode in force (deliberate, else the
+  preset the person's last message was classified into, else the default),
+  and keep cooldowns like any reflex.
+- What fired comes back as `agent.HostFired`: the reflex names and the host's
+  actions. A `remind` reminder waits for the conversation's **next person's
+  message**, however many notice or host turns run first. A `halt` needs a
+  message to answer, so steer refuses one on an event or focus trigger.
+- They are for the host, like `SetMode`: the model has no tool for them. Only
+  a root conversation is steered; without `Steering` they return
+  `ErrNoSteering`. chatrunner has `Runner.SteerEvent` and `Runner.SteerFocus`
+  by chat conversation id.
+- Nanite posts **`nanite.compacted`** (`agent.TopicCompacted`) itself after a
+  compaction pass shortens a root turn's history. What that fires is reported
+  on the turn's run as a `Steered` event with `Event` set to the topic and only
+  `Fired` and `Actions` filled; chatrunner hands it to `OnSteered`, and its
+  `nanite.steer` activity carries just the event and the names.
+- Waiting reminders are held in memory: a restart, or a conversation idle for
+  30 minutes, drops them.
 
 ## Steering ahead of the turn
 

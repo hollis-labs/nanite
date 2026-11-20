@@ -56,10 +56,10 @@ func TestCacheTTLInvalidRejectedBeforeClient(t *testing.T) {
 	c := New()
 	for _, ttl := range []string{"2h", "60m", " 1h"} {
 		req := ttlRequest(ttl)
-		if _, err := c.StreamChat(t.Context(), req); err == nil || !strings.Contains(err.Error(), "TTL") {
+		if _, err := c.StreamChat(t.Context(), req); err == nil || (!strings.Contains(err.Error(), "TTL") || !strings.Contains(err.Error(), ttl)) {
 			t.Fatalf("stream TTL %q: %v", ttl, err)
 		}
-		if _, err := c.Complete(t.Context(), req); err == nil || !strings.Contains(err.Error(), "TTL") {
+		if _, err := c.Complete(t.Context(), req); err == nil || (!strings.Contains(err.Error(), "TTL") || !strings.Contains(err.Error(), ttl)) {
 			t.Fatalf("complete TTL %q: %v", ttl, err)
 		}
 	}
@@ -82,4 +82,37 @@ func TestCacheTTLConcurrentRequests(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestMixedCacheTTLOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name, tools, system, older, newer string
+		fallback                          bool
+	}{
+		{"long prefix", "1h", "1h", "5m", "", false},
+		{"tools before system", "5m", "1h", "", "", true},
+		{"default tools before system", "", "1h", "", "", true},
+		{"older before newer", "1h", "1h", "5m", "1h", true},
+		{"long older message", "1h", "1h", "1h", "5m", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := ttlRequest(tc.system)
+			req.Messages = append(req.Messages, llmtypes.ChatMessage{Role: "user", Content: "newer"})
+			req.CacheHints = []llmtypes.CacheHint{{Position: "tools", TTL: tc.tools}, {Position: "system", TTL: tc.system}, {Position: "recent_message", Index: 1, TTL: tc.older}, {Position: "recent_message", Index: 0, TTL: tc.newer}}
+			raw, err := json.Marshal(New().buildMessageParams(req, "test-model", false, llmcontracts.ReasoningConfig{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.fallback && strings.Contains(string(raw), `"ttl":"1h"`) {
+				t.Fatalf("invalid mixed TTLs: %s", raw)
+			}
+			plan := planCacheMarkersWithHints(req, req.CacheHints)
+			if !tc.fallback && (plan.ToolsTTL != tc.tools || plan.SystemTTL != tc.system || plan.RecentTTLs[1] != tc.older || plan.RecentTTLs[0] != tc.newer) {
+				t.Fatalf("valid TTL order changed: %+v", plan)
+			}
+			if req.CacheHints[1].TTL != tc.system {
+				t.Fatal("request hints mutated")
+			}
+		})
+	}
 }

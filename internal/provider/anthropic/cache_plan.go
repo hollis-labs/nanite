@@ -1,6 +1,8 @@
 package anthropic
 
 import (
+	"fmt"
+
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	llmcontracts "github.com/hollis-labs/libs/llm/core/llmcontracts"
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -100,7 +102,55 @@ func planCacheMarkersWithHints(req llmtypes.ChatRequest, hints []llmcontracts.Ca
 		total--
 	}
 
+	plan.normalizeTTLs(req)
 	return plan
+}
+
+// normalizeTTLs follows Anthropic's logical cache order: tools, system, then
+// messages from oldest to newest. If custom hints put a longer TTL after a
+// shorter one, fall back to five minutes rather than extend cache billing.
+// Omitted TTLs stay omitted; they already mean five minutes.
+func (p *cachePlan) normalizeTTLs(req llmtypes.ChatRequest) {
+	short, invalid := false, false
+	visit := func(ttl string) {
+		if ttl == "1h" {
+			invalid = invalid || short
+		} else {
+			short = true
+		}
+	}
+	if p.Tools && len(req.Tools) > 0 {
+		visit(p.ToolsTTL)
+	}
+	if p.System {
+		visit(p.SystemTTL)
+	}
+	count := 0
+	for _, m := range req.Messages {
+		if m.Role == "user" {
+			count++
+		}
+	}
+	if count > p.RecentMessages {
+		count = p.RecentMessages
+	}
+	for i := count - 1; i >= 0; i-- {
+		visit(p.RecentTTLs[i])
+	}
+	if !invalid {
+		return
+	}
+	if p.ToolsTTL == "1h" {
+		p.ToolsTTL = "5m"
+	}
+	if p.SystemTTL == "1h" {
+		p.SystemTTL = "5m"
+	}
+	for i, ttl := range p.RecentTTLs {
+		if ttl == "1h" {
+			p.RecentTTLs[i] = "5m"
+		}
+	}
 }
 
 // collectStablePrefixSlots walks SlotBlocks in order and returns the
@@ -154,7 +204,7 @@ func collectStablePrefixSlots(blocks []llmtypes.SlotBlock) []string {
 func (c *Client) validateCacheTTLs(req llmtypes.ChatRequest) error {
 	for _, hint := range c.effectiveCacheHints(req) {
 		if err := hint.ValidateTTL(); err != nil {
-			return err
+			return fmt.Errorf("cache hint %s TTL %q: %w", hint.Position, hint.TTL, err)
 		}
 	}
 	return nil

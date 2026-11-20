@@ -482,3 +482,8 @@ and omits TTL from the wire request. Other values fail validation. Recent
 message markers retain their provider default. TTL travels with each request;
 conversations sharing a provider do not change one another's hints. OpenAI
 ignores the hint.
+
+Custom Anthropic cache hints must put one-hour markers before five-minute
+markers in logical prompt order (tools, system, then messages). If hints
+violate that order, the adapter uses five minutes for the request’s cache
+markers, preserving omitted TTL fields and avoiding a longer billed lifetime.

@@ -1,3 +1,4 @@
 # scan-public allowlist: RULE-ID PATH-GLOB REASON
 #
 # One line per reviewed finding; allowlisted findings are still printed and counted.
+generic-api-key agent/providers/providers_test.go@c926bda3 test fixture strings (not keys) in #32; the tree now builds them at run time

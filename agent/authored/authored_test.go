@@ -53,3 +53,23 @@ func TestPublicRulesAreTheEngines(t *testing.T) {
 		t.Errorf("LoadProviders: %+v %v", p, err)
 	}
 }
+
+// TestIdentityIsTheEngines: identity.yaml is parsed and loaded with the
+// engine's rules.
+func TestIdentityIsTheEngines(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok, err := authored.LoadIdentity(dir); ok || err != nil {
+		t.Fatalf("LoadIdentity without the file: %v %v", ok, err)
+	}
+	if _, err := authored.ParseIdentity([]byte("principal: agent:a\nwarden:\n  url: https://warden.example\n  credential_file: "+filepath.Join(dir, "agent.cred")+"\n"), dir); err == nil {
+		t.Error("ParseIdentity accepted a credential file inside the agent directory")
+	}
+	raw := "principal: agent:a\nwarden:\n  url: https://warden.example\n  credential_file: /var/empty/agent.cred\n"
+	if err := os.WriteFile(filepath.Join(dir, "identity.yaml"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id, ok, err := authored.LoadIdentity(dir)
+	if err != nil || !ok || id.Principal != "agent:a" || id.Warden == nil || id.Warden.URL != "https://warden.example" {
+		t.Fatalf("LoadIdentity = %+v %v %v", id, ok, err)
+	}
+}

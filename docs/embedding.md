@@ -109,6 +109,23 @@ added to `Options.Redactor`: pass the scope you scrub logs and traces with,
 since with none the key goes to a scope nothing reads. A key that cannot be
 resolved fails the request, not `New`.
 
+A named provider with `auth: warden` sends a short-lived Warden token instead
+of a key. Build one `Warden` from the agent's `identity.yaml` and pass it to
+every such provider, so they share one token cache and one parent credential:
+
+```go
+id, ok, err := authored.LoadIdentity(dir) // ok is false without identity.yaml
+w, err := providers.NewWarden(id, providers.WardenOptions{
+    Redactor:      scope,           // learns every token and parent minted
+    OnAuthWaiting: showGrantRequest, // a missing grant is filed and reported here
+})
+q, err := providers.NewNamed(spec, providers.Options{Redactor: scope, Warden: w})
+```
+
+`NewNamed` refuses `auth: warden` without `Options.Warden`. The Warden mints
+under the same `<credential_file>.lock` as a running agent and the Warden
+client, so a Workbench can share an agent's credential file with it.
+
 ## Steering
 
 `Options.Steering` turns on modes, work slots, reflexes and a classifier for

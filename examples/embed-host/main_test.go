@@ -18,7 +18,7 @@ func Example() {
 	fmt.Print(permissionTokens.ReplaceAllString(out.String(), "  $1: <varies> tokens"))
 	// Output:
 	// Turn 1 slots:
-	//   universal: 625 tokens, changed yes
+	//   universal: 765 tokens, changed yes
 	//     engine/rules: ship
 	//   system: <varies> tokens, changed yes
 	//     engine/environment: ship
@@ -34,7 +34,7 @@ func Example() {
 	// Tool called: notes_search
 	// The notes mention a planning meeting.
 	// Turn 2 slots:
-	//   universal: 625 tokens, changed no
+	//   universal: 765 tokens, changed no
 	//     engine/rules: ship
 	//   system: <varies> tokens, changed no
 	//     engine/environment: ship
@@ -50,7 +50,7 @@ func Example() {
 	// Tool called: files_list
 	// The workspace contains agenda.md.
 	// Turn 3 slots:
-	//   universal: 625 tokens, changed no
+	//   universal: 765 tokens, changed no
 	//     engine/rules: ship
 	//   system: <varies> tokens, changed no
 	//     engine/environment: ship

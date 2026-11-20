@@ -7,6 +7,7 @@ my-agent/
   .mcp.json               optional MCP registrations
   permissions.yaml        optional tool rules and default mode
   skills/<name>/SKILL.md  optional skill metadata and instructions
+  variants/<name>.md      optional subtask variants
   context/*.md            optional Markdown context entries
   .nanite/                generated private state
 ```
@@ -228,6 +229,17 @@ YAML frontmatter supplies `name` (defaults to the directory name) and
 Directory skills take precedence over skills of the same name in
 `~/.nanite/skills` or provided by the embedding host. Nanite adds each direct
 Markdown file in `context/` to the Context slot. Other extensions are ignored.
+
+## Subtask variants
+
+A file in `variants/` defines a subtask variant: a kind of child
+conversation the agent can start with the `subtask` tool. The file name is
+the variant's name (lower-case letters, digits and dashes). Optional YAML
+frontmatter sets its description, tools, model, budgets and defaults, and
+the Markdown body is its role prompt. Nanite reads the files again at the
+start of each turn, and `nanite validate` checks them. `nanite init` writes a
+commented example, `variants/reviewer.md`. The fields, the built-in variants
+and how subtasks work are in [code-mode.md](code-mode.md).
 
 ## Generated state
 

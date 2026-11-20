@@ -39,14 +39,27 @@ func TestRootHasCommands(t *testing.T) {
 	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out.String()) != "assistant" {
+	// The starter writes a commented example variant, and validate accepts it.
+	if strings.TrimSpace(out.String()) != "assistant\nvariants: reviewer" {
 		t.Fatalf("validate output %q", out.String())
+	}
+	// So is the lead example in the docs, alongside the starter's reviewer.
+	council, err := os.ReadFile(filepath.Join("..", "..", "examples", "variants", "council.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "variants", "council.md"), council, 0o600); err != nil { // #nosec G703 -- A path under the test's temporary directory.
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(out.String(), "variants: council, reviewer") {
+		t.Fatalf("validate with the council example: %q, %v", out.String(), err)
+	}
+	if err := os.Remove(filepath.Join(dir, "variants", "council.md")); err != nil {
+		t.Fatal(err)
 	}
 
 	// Authored subtask variants are validated too.
-	if err := os.MkdirAll(filepath.Join(dir, "variants"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(dir, "variants", "lead.md"), []byte("---\ncan_spawn: true\n---\nYou lead.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

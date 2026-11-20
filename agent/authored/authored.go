@@ -1,6 +1,6 @@
 // Package authored validates the Nanite-specific files an agent directory
 // may hold beside the libs agentdir files: subtask variants
-// (variants/<name>.md), providers.yaml and tool packages
+// (variants/<name>.md), providers.yaml, identity.yaml and tool packages
 // (tools/<name>/tool.yaml). The engine loads them through
 // the same rules, so a tool that edits an agent directory (an editor, a
 // workbench, CI) applies exactly the rules Nanite will.
@@ -140,3 +140,24 @@ func LoadTool(dir, name string, allowEnv ...string) (ToolPackage, error) {
 // through: a provider key variable Nanite reads, or a name that looks like a
 // credential, unless allow lists it.
 func CheckToolEnv(name string, allow []string) error { return authored.CheckToolEnv(name, allow) }
+
+// Identity is a parsed identity.yaml: the agent's principal on the mesh,
+// where it gets Warden tokens, and Warden auth for its MCP HTTP servers.
+type Identity = authored.Identity
+
+// WardenIdentity is identity.yaml's warden section: Warden's URL, the parent
+// credential file (outside the agent directory) and a grant-request purpose.
+type WardenIdentity = authored.WardenIdentity
+
+// MCPIdentity is the Warden auth for one MCP HTTP server in .mcp.json.
+type MCPIdentity = authored.MCPIdentity
+
+// ParseIdentity parses and validates identity.yaml content. dir is the agent
+// directory, which the credential file must be outside of.
+func ParseIdentity(data []byte, dir string) (Identity, error) {
+	return authored.ParseIdentity(data, dir)
+}
+
+// LoadIdentity reads and validates dir/identity.yaml. A missing file is the
+// zero Identity, false and no error.
+func LoadIdentity(dir string) (Identity, bool, error) { return authored.LoadIdentity(dir) }

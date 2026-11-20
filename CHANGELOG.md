@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `agent/providers`: named providers with `auth: warden`. `NewWarden`
+  builds a token source from an agent's identity (`WardenOptions` carries
+  the redaction scope, a logger and `OnAuthWaiting`), and `Options.Warden`
+  passes it to `NewNamed`, which refuses `auth: warden` without one.
+  Providers built with one Warden share its token cache. `agent/authored`
+  exports identity.yaml: `Identity`, `WardenIdentity`, `MCPIdentity`,
+  `ParseIdentity` and `LoadIdentity`. `agent.Open` builds its Warden through
+  the same code.
 - Tool packages: tools an agent writes for itself. `tools/<name>/tool.yaml`
   names an executable entry and a kind. `kind: command` is offered as
   `tool__<name>` and runs the entry per call (JSON arguments on standard

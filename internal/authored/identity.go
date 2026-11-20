@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/warden"
 	"gopkg.in/yaml.v3"
@@ -127,6 +129,22 @@ func ExpandHome(path string) (string, error) {
 		return "", errors.New("warden credential_file must be an absolute path or start with ~/")
 	}
 	return filepath.Clean(path), nil
+}
+
+// NewWardenSource returns the token source for id's warden section, or nil
+// when id has none. Agent.Open and the public providers package both build
+// it here, so they read identity.yaml the same way. It is a function, not a
+// method, so the public Identity alias does not expose an internal type.
+func NewWardenSource(id Identity, redactor *redact.Scope, logger *slog.Logger, onWaiting func(warden.Waiting)) (*warden.Source, error) {
+	if id.Warden == nil {
+		return nil, nil
+	}
+	file, err := ExpandHome(id.Warden.CredentialFile)
+	if err != nil {
+		return nil, err
+	}
+	return warden.New(warden.Config{URL: id.Warden.URL, CredentialFile: file, Principal: id.Principal, Purpose: id.Warden.Purpose,
+		Redactor: redactor, Logger: logger, OnWaiting: onWaiting})
 }
 
 // LoadIdentity reads and validates dir/identity.yaml through a root, so a

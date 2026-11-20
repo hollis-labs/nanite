@@ -199,18 +199,11 @@ func New(cfg Config) (*Engine, error) {
 	cfg.ProviderConfig.Panics = guard
 	var mcpAuth *mcpclient.Auth
 	if cfg.Identity != nil {
-		if w := cfg.Identity.Warden; w != nil {
-			file, err := authored.ExpandHome(w.CredentialFile)
-			if err != nil {
-				return nil, err
-			}
-			src, err := warden.New(warden.Config{URL: w.URL, CredentialFile: file, Principal: cfg.Identity.Principal, Purpose: w.Purpose,
-				Redactor: cfg.ProviderConfig.Redactor, Logger: cfg.Logger, OnWaiting: cfg.OnAuthWaiting})
-			if err != nil {
-				return nil, err
-			}
-			cfg.ProviderConfig.Warden = src
+		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting)
+		if err != nil {
+			return nil, err
 		}
+		cfg.ProviderConfig.Warden = src
 		mcpAuth = &mcpclient.Auth{Principal: cfg.Identity.Principal, Warden: cfg.ProviderConfig.Warden, Servers: cfg.Identity.MCP}
 	}
 	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), noticeQueueLimit: NoticeQueueLimit, noticeJobs: make(map[string]bool), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger, mcpAuth), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,

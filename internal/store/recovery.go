@@ -3,10 +3,15 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 )
 
-type InterruptedTurn struct{ ID, UserMessageID string }
+type InterruptedTurn struct {
+	ID, UserMessageID string
+	AgentDir          string
+	Headers           map[string]string
+}
 
 type RunningTurn struct{ ConversationID, TurnID string }
 
@@ -29,12 +34,16 @@ func (s *Store) RunningTurns(ctx context.Context) ([]RunningTurn, error) {
 
 func (s *Store) Interrupted(ctx context.Context, conversation string) (*InterruptedTurn, error) {
 	var turn InterruptedTurn
-	err := s.db.Reader().QueryRowContext(ctx, `SELECT id,user_message_id FROM turns
-  WHERE conversation_id=? AND status='interrupted' ORDER BY seq DESC LIMIT 1`, conversation).Scan(&turn.ID, &turn.UserMessageID)
+	var headers string
+	err := s.db.Reader().QueryRowContext(ctx, `SELECT id,user_message_id,agent_dir,headers_json FROM turns
+  WHERE conversation_id=? AND status='interrupted' ORDER BY seq DESC LIMIT 1`, conversation).Scan(&turn.ID, &turn.UserMessageID, &turn.AgentDir, &headers)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(headers), &turn.Headers); err != nil {
 		return nil, err
 	}
 	return &turn, nil

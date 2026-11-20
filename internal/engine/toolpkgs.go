@@ -59,8 +59,8 @@ func (e *Engine) toolApproved(ctx context.Context, pkg authored.ToolPackage) boo
 // A change between this check and the start of the process is still
 // possible; the agent's own files are not a security boundary against the
 // agent, which runs as the same OS user.
-func (e *Engine) recheckTool(pkg authored.ToolPackage) error {
-	now, err := authored.LoadTool(e.cfg.Dir, pkg.Name, e.cfg.ToolPackageEnv...)
+func (e *Engine) recheckTool(ctx context.Context, pkg authored.ToolPackage) error {
+	now, err := authored.LoadTool(e.profileDir(ctx), pkg.Name, e.cfg.ToolPackageEnv...)
 	if err != nil {
 		return fmt.Errorf("tool package %s no longer loads: %w", pkg.Name, err)
 	}
@@ -157,16 +157,16 @@ func (e *Engine) toolServers(ctx context.Context, authoredCfg agentdir.MCPConfig
 		if out.Servers == nil {
 			out.Servers = map[string]agentdir.MCPServer{}
 		}
-		out.Servers[mcpclient.ToolPackageServerPrefix+name] = agentdir.MCPServer{Type: "stdio", Command: e.toolEntry(pkg), Env: env}
+		out.Servers[mcpclient.ToolPackageServerPrefix+name] = agentdir.MCPServer{Type: "stdio", Command: e.toolEntry(ctx, pkg), Env: env}
 	}
 	return out, warnings
 }
 
 // toolEntry is the absolute path of a package's entry.
-func (e *Engine) toolEntry(pkg authored.ToolPackage) string {
-	dir, err := filepath.Abs(e.cfg.Dir)
+func (e *Engine) toolEntry(ctx context.Context, pkg authored.ToolPackage) string {
+	dir, err := filepath.Abs(e.profileDir(ctx))
 	if err != nil {
-		dir = e.cfg.Dir
+		dir = e.profileDir(ctx)
 	}
 	return filepath.Join(dir, filepath.FromSlash(pkg.Dir()), filepath.FromSlash(pkg.Entry))
 }
@@ -211,11 +211,11 @@ func (e *Engine) toolEnv(ctx context.Context, pkg authored.ToolPackage) ([]strin
 
 // toolDir is where a command package runs: the first workspace root, else
 // its own directory.
-func (e *Engine) toolDir(pkg authored.ToolPackage) string {
+func (e *Engine) toolDir(ctx context.Context, pkg authored.ToolPackage) string {
 	if roots := e.cfg.WorkspaceRoots; len(roots) > 0 {
 		return roots[0]
 	}
-	return filepath.Dir(e.toolEntry(pkg))
+	return filepath.Dir(e.toolEntry(ctx, pkg))
 }
 
 // packageTools offers each command-kind package as tool__<package>, and
@@ -238,7 +238,7 @@ func (x *execution) packageTools(ctx context.Context) []tools.Tool {
 				Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
 					// Runs only after the call was approved: nothing from the
 					// package runs and no token is minted before.
-					if err := x.engine.recheckTool(pkg); err != nil {
+					if err := x.engine.recheckTool(ctx, pkg); err != nil {
 						return errorResult(err), nil
 					}
 					if pkg.Background {
@@ -252,7 +252,7 @@ func (x *execution) packageTools(ctx context.Context) []tools.Tool {
 				Description: "Ask to start tool package " + name + ", an MCP server: " + pkg.Description + " Once approved, its tools are offered from the next turn.",
 				Destructive: true,
 				Handler: func(ctx context.Context, _ tools.Call) (tools.Result, error) {
-					if err := x.engine.recheckTool(pkg); err != nil {
+					if err := x.engine.recheckTool(ctx, pkg); err != nil {
 						return errorResult(err), nil
 					}
 					if err := x.engine.cfg.Store.SetSetting(ctx, "", toolApprovalKey(pkg.Name), pkg.Digest); err != nil {
@@ -308,7 +308,7 @@ func (x *execution) runTool(ctx context.Context, pkg authored.ToolPackage, input
 	if err != nil {
 		return tools.Result{Text: e.scrub.Text(fmt.Sprintf("tool package %s: %v", pkg.Name, err)), IsError: true}, nil
 	}
-	result, err := shell.RunExec(ctx, shell.Exec{Name: "tool package " + pkg.Name, Path: e.toolEntry(pkg), Dir: e.toolDir(pkg), Env: env, Stdin: input, Timeout: pkg.Timeout})
+	result, err := shell.RunExec(ctx, shell.Exec{Name: "tool package " + pkg.Name, Path: e.toolEntry(ctx, pkg), Dir: e.toolDir(ctx, pkg), Env: env, Stdin: input, Timeout: pkg.Timeout})
 	stderr := strings.TrimSpace(result.Stderr)
 	fail := func(format string, args ...any) (tools.Result, error) {
 		text := fmt.Sprintf(format, args...)
@@ -370,7 +370,7 @@ func (x *execution) startToolJob(ctx context.Context, pkg authored.ToolPackage, 
 		// What this job causes must not start another notice turn.
 		e.markNoticeWork(jobID)
 	}
-	command := shell.Exec{Name: "tool package " + pkg.Name, Path: e.toolEntry(pkg), Dir: e.toolDir(pkg), Env: env, Stdin: input, Timeout: pkg.Timeout}
+	command := shell.Exec{Name: "tool package " + pkg.Name, Path: e.toolEntry(ctx, pkg), Dir: e.toolDir(ctx, pkg), Env: env, Stdin: input, Timeout: pkg.Timeout}
 	job, err := e.jobs.Start(ctx, store.Job{ID: jobID, ConversationID: x.info.ID, Kind: toolJobKind, Spec: e.scrub.Text(string(spec))},
 		func(runCtx context.Context, output io.Writer) (background.Task, error) {
 			process, err := shell.StartExecStreaming(runCtx, command, output)
@@ -412,7 +412,7 @@ func (x *execution) toolValidate() tools.Tool {
 			if err := json.Unmarshal(call.Input, &in); err != nil {
 				return tools.Result{}, err
 			}
-			pkgs, err := authored.LoadTools(x.engine.cfg.Dir, x.engine.cfg.ToolPackageEnv...)
+			pkgs, err := authored.LoadTools(x.engine.profileDir(ctx), x.engine.cfg.ToolPackageEnv...)
 			var lines []string
 			for _, name := range authored.ToolNames(pkgs) {
 				if in.Name == "" || in.Name == name {

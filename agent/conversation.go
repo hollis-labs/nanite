@@ -23,8 +23,9 @@ type Conversation struct {
 	agent *Agent
 }
 
-// Input gives the user text and optional slot entries applied only to this
-// turn. The entries are discarded when the turn ends.
+// Input gives the user text, optional slots, a composed AgentDir profile and
+// non-credential request Headers for this turn. Profile and headers are inherited
+// by descendants and persisted for interrupted-turn recovery.
 type Input = engine.Input
 
 // Message is a timestamped transcript entry. Role identifies the author,
@@ -230,4 +231,12 @@ func (c *Conversation) SteerFocus(ctx context.Context, view string) (HostFired, 
 // pinned until the window in front changes. view is the view in front.
 func (c *Conversation) AcceptSuggestion(ctx context.Context, suggestion SteerVerdict, view string) error {
 	return c.agent.engine.AcceptSuggestion(ctx, c.id, suggestion, view)
+}
+
+// TurnContext validates a turn's profile and headers and returns a context
+// carrying their snapshot. Hosts that plan or Dispatch before Send use this
+// context for all three operations so background work keeps the same profile.
+// The context is scoped to this agent; it must not be reused for another agent.
+func (a *Agent) TurnContext(ctx context.Context, in Input) (context.Context, error) {
+	return a.engine.TurnContext(ctx, in)
 }

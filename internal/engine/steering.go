@@ -68,6 +68,8 @@ var steererIdle = 30 * time.Minute
 
 // steering is one root conversation's steering state.
 type steering struct {
+	profile   bool
+	cfg       *Steering
 	steer     *steer.Steer
 	owner     *steer.OwnerControls
 	cooldowns *steer.MemoryCooldowns
@@ -101,7 +103,7 @@ func (s *Steering) validate() error {
 // pin and its reflexes' cooldowns. It is made on first use, with the mode and
 // cooldowns kept for the conversation, and dropped once it idles.
 func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, error) {
-	cfg := e.cfg.Steering
+	cfg := e.steeringConfig(ctx)
 	if cfg == nil {
 		return nil, ErrNoSteering
 	}
@@ -113,7 +115,8 @@ func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, e
 			delete(e.steerers, id)
 		}
 	}
-	if st, ok := e.steerers[conversation]; ok {
+	prior := e.steerers[conversation]
+	if st, ok := e.steerers[conversation]; ok && st.cfg == cfg {
 		st.used = now
 		return st, nil
 	}
@@ -122,7 +125,9 @@ func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, e
 		vocab = steer.NewVocabulary()
 	}
 	var sel steer.Selector = steer.NewFocusSelector(GeneralSlot)
-	if cfg.NewSelector != nil {
+	if prior != nil {
+		sel = prior.steer.Selector()
+	} else if cfg.NewSelector != nil {
 		sel = cfg.NewSelector()
 	}
 	cooldowns := steer.NewMemoryCooldowns()
@@ -155,22 +160,31 @@ func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, e
 			e.cfg.Logger.WarnContext(ctx, "a conversation's mode is no longer registered", "conversation", conversation, "mode", mode)
 		}
 	}
-	st := &steering{steer: s, owner: owner, cooldowns: cooldowns, used: now}
+	st := &steering{profile: profileFrom(ctx) != nil, cfg: cfg, steer: s, owner: owner, cooldowns: cooldowns, used: now}
+	if prior != nil {
+		prior.mu.Lock()
+		st.carried = append([]string(nil), prior.carried...)
+		st.last = prior.last
+		prior.mu.Unlock()
+	}
 	e.steerers[conversation] = st
 	return st, nil
 }
 
 // rootSteerer is a root conversation's steering state; a subtask has none.
 func (e *Engine) rootSteerer(ctx context.Context, id string) (*steering, error) {
-	if e.cfg.Steering == nil {
-		return nil, ErrNoSteering
-	}
 	info, err := e.cfg.Store.Conversation(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if info.ParentID != "" {
 		return nil, errors.New("nanite: only a root conversation has a mode")
+	}
+	e.steerMu.Lock()
+	existing := e.steerers[id]
+	e.steerMu.Unlock()
+	if existing != nil && (e.cfg.Steering != nil || existing.profile) && profileFrom(ctx) == nil {
+		return existing, nil
 	}
 	var st *steering
 	err = e.guardHost(id, func() (err error) {
@@ -181,11 +195,11 @@ func (e *Engine) rootSteerer(ctx context.Context, id string) (*steering, error) 
 }
 
 // knownPreset refuses a name the registry does not hold; "" is no mode.
-func (e *Engine) knownPreset(name string) error {
+func (e *Engine) knownPreset(cfg *Steering, name string) error {
 	if name == "" {
 		return nil
 	}
-	if _, _, ok := e.cfg.Steering.Registry.Get(name); !ok {
+	if _, _, ok := cfg.Registry.Get(name); !ok {
 		return fmt.Errorf("%w: %s", steer.ErrUnknownPreset, name)
 	}
 	return nil
@@ -211,7 +225,7 @@ func (e *Engine) SetMode(ctx context.Context, conversation, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := e.knownPreset(name); err != nil {
+	if err := e.knownPreset(st.cfg, name); err != nil {
 		return err
 	}
 	st.mu.Lock()
@@ -238,8 +252,8 @@ func (e *Engine) AcceptSuggestion(ctx context.Context, conversation string, v st
 		return err
 	}
 	var all []steer.Slot
-	if e.cfg.Steering.Slots != nil {
-		if err := e.guardHost(conversation, func() error { all = e.cfg.Steering.Slots(); return nil }); err != nil {
+	if st.cfg.Slots != nil {
+		if err := e.guardHost(conversation, func() error { all = st.cfg.Slots(); return nil }); err != nil {
 			return err
 		}
 	}
@@ -248,7 +262,7 @@ func (e *Engine) AcceptSuggestion(ctx context.Context, conversation string, v st
 	if v.Facet != steer.FacetPreset || v.Outcome != steer.OutcomeSuggest {
 		return e.guardHost(conversation, func() error { return st.owner.Accept(v, view, all) })
 	}
-	if err := e.knownPreset(v.Label); err != nil {
+	if err := e.knownPreset(st.cfg, v.Label); err != nil {
 		return err
 	}
 	prev := st.steer.Modes().Current()
@@ -286,9 +300,10 @@ const (
 // host sees a reflex halt before it does anything else with the message. The
 // turn sent with it in Input.Steer uses it instead of steering again.
 type PreparedSteer struct {
-	conversation string
-	text         string
-	out          *steered
+	profileDir, profileDigest string
+	conversation              string
+	text                      string
+	out                       *steered
 	// taken is shared by every copy, so a copy cannot be used again.
 	taken *atomic.Bool
 }
@@ -313,7 +328,12 @@ func (p *PreparedSteer) take(conversation, text string) (*steered, error) {
 // cooldown starts now, and stays started if the turn then fails to send).
 // Send the turn with the result in Input.Steer.
 func (e *Engine) Steer(ctx context.Context, conversation string, input Input) (*PreparedSteer, error) {
-	if e.cfg.Steering == nil {
+	var err error
+	ctx, err = e.prepareProfile(ctx, &input)
+	if err != nil {
+		return nil, err
+	}
+	if e.steeringConfig(ctx) == nil {
 		return nil, ErrNoSteering
 	}
 	if input.Source != "" {
@@ -330,7 +350,11 @@ func (e *Engine) Steer(ctx context.Context, conversation string, input Input) (*
 	if err != nil {
 		return nil, err
 	}
-	return &PreparedSteer{conversation: conversation, text: input.Text, out: out, taken: new(atomic.Bool)}, nil
+	prepared := &PreparedSteer{conversation: conversation, text: input.Text, out: out, taken: new(atomic.Bool)}
+	if p := profileFrom(ctx); p != nil {
+		prepared.profileDir, prepared.profileDigest = p.dir, p.digest
+	}
+	return prepared, nil
 }
 
 // maxCarried is how many reminders wait for the next person's message,
@@ -350,8 +374,7 @@ func (st *steering) lastClassified() steer.Classification {
 
 // validReflexes are the host's reflexes now, without the invalid ones, which
 // are skipped with a warning. It calls the host: run it guarded.
-func (e *Engine) validReflexes(ctx context.Context) []steer.Reflex {
-	cfg := e.cfg.Steering
+func (e *Engine) validReflexes(ctx context.Context, cfg *Steering) []steer.Reflex {
 	if cfg.Reflexes == nil {
 		return nil
 	}
@@ -429,9 +452,9 @@ func (e *Engine) steerHost(ctx context.Context, conversation string, fire func(*
 	}
 	var fired steer.Fired
 	err = e.guardHost(conversation, func() error {
-		mode := steer.Resolve(e.cfg.Steering.Registry, st.steer.Modes().Current(), st.lastClassified(), st.steer.Policy())
+		mode := steer.Resolve(st.cfg.Registry, st.steer.Modes().Current(), st.lastClassified(), st.steer.Policy())
 		var ferr error
-		fired, ferr = fire(st.steer.Reflexes(), steer.Active(e.validReflexes(ctx), mode.Preset))
+		fired, ferr = fire(st.steer.Reflexes(), steer.Active(e.validReflexes(ctx, st.cfg), mode.Preset))
 		if ferr != nil {
 			e.cfg.Logger.WarnContext(ctx, "a reflex could not be evaluated or fired", "err", e.scrub.Text(ferr.Error()))
 		}
@@ -451,7 +474,7 @@ func (e *Engine) steerHost(ctx context.Context, conversation string, fire func(*
 // after a compaction pass, and reports what fired on the turn's run as a
 // Steered event with Event set, so the host carries out the actions.
 func (e *Engine) compactedReflexes(ctx context.Context, r *Run, conversation string) {
-	if e.cfg.Steering == nil {
+	if e.steeringConfig(ctx) == nil {
 		return
 	}
 	fired, err := e.SteerEvent(ctx, conversation, TopicCompacted)
@@ -489,7 +512,7 @@ func (e *Engine) steerTurn(ctx context.Context, info store.Conversation, input I
 }
 
 func (e *Engine) steerWith(ctx context.Context, info store.Conversation, input Input, kind steerKind) (*steered, error) {
-	cfg := e.cfg.Steering
+	cfg := e.steeringConfig(ctx)
 	st, err := e.steerer(ctx, info.ID)
 	if err != nil {
 		return nil, err
@@ -510,7 +533,7 @@ func (e *Engine) steerWith(ctx context.Context, info store.Conversation, input I
 	}
 	in := steer.Input{Sit: sit, Slots: all}
 	if person {
-		in.Reflexes = e.validReflexes(ctx)
+		in.Reflexes = e.validReflexes(ctx, cfg)
 		if prior, err := e.cfg.Store.LastMessages(ctx, info.ID, priorSignals); err == nil {
 			for i := len(prior) - 1; i >= 0; i-- {
 				in.Prior = append(in.Prior, signal(prior[i]))

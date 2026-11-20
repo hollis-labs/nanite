@@ -13,11 +13,12 @@ import (
 type Context struct{ Name, Text string }
 
 type Definition struct {
-	Snapshot agentdir.Snapshot
-	Runtime  agentdir.Runtime
-	Skills   map[string]agentdir.SkillRef
-	Context  []Context
-	Rules    []byte
+	Snapshot     agentdir.Snapshot
+	Runtime      agentdir.Runtime
+	Skills       map[string]agentdir.SkillRef
+	GlobalSkills map[string]agentdir.SkillRef
+	Context      []Context
+	Rules        []byte
 	// Providers are the named providers from providers.yaml.
 	Providers map[string]provider.Spec
 	// Use selects a provider and model per use (chat, summarizer, subtask, desk)
@@ -34,7 +35,7 @@ func Load(dir, globalSkillsDir string) (Definition, error) {
 	if err != nil {
 		return Definition{}, err
 	}
-	out := Definition{Snapshot: snap, Runtime: snap.Profile.Runtime, Skills: make(map[string]agentdir.SkillRef)}
+	out := Definition{Snapshot: snap, Runtime: snap.Profile.Runtime, Skills: make(map[string]agentdir.SkillRef), GlobalSkills: make(map[string]agentdir.SkillRef)}
 	providers, err := authored.LoadProviders(dir)
 	if err != nil {
 		return Definition{}, err
@@ -76,6 +77,7 @@ func Load(dir, globalSkillsDir string) (Definition, error) {
 		}
 		for _, ref := range global {
 			out.Skills[ref.Name] = ref
+			out.GlobalSkills[ref.Name] = ref
 		}
 	}
 	for _, ref := range snap.Skills {

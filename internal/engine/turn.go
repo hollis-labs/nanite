@@ -208,7 +208,13 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		input.Text = resume.UserText
 	}
 
-	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	var def definition.Definition
+	var err error
+	if p := profileFrom(ctx); p != nil {
+		def = p.definition
+	} else {
+		def, err = definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	}
 	if err != nil {
 		return events.Result{}, err
 	}
@@ -216,13 +222,27 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
-	variants, variantErr := subagent.Load(e.cfg.Dir)
+	var variants map[string]subagent.Variant
+	var variantErr error
+	if p := profileFrom(ctx); p != nil {
+		variants = p.variants
+	} else {
+		variants, variantErr = subagent.Load(e.cfg.Dir)
+	}
 	variantWarning := ""
 	if variantErr != nil {
 		// A bad authored variant is skipped, not fatal; nanite validate reports it.
 		variantWarning = "Some subtask variants did not load: " + variantErr.Error()
 	}
-	toolPkgs, toolWarning := e.toolPackages()
+	var toolPkgs map[string]authored.ToolPackage
+	var toolWarning string
+	if p := profileFrom(ctx); p != nil {
+		if e.cfg.Builtins.Has(tools.BuiltinTools) {
+			toolPkgs = p.packages
+		}
+	} else {
+		toolPkgs, toolWarning = e.toolPackages()
+	}
 	var variant subagent.Variant
 	var chain []subagent.Variant
 	depth := 0
@@ -310,7 +330,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		e.cfg.Logger.WarnContext(ctx, warnings[i])
 	}
 	var steerOut *steered
-	if e.cfg.Steering != nil && depth == 0 {
+	if e.steeringConfig(ctx) != nil && depth == 0 {
 		switch {
 		case interrupted != nil:
 			steerOut, err = e.steerTurn(ctx, info, input, steerResumed)
@@ -375,6 +395,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		// The trace shows the tool schemas' share of the request.
 		tr.rec.Slots = append(tr.rec.Slots, trace.Slot{Name: "tool_schemas", Tokens: x.schemaTokens})
 	}
+	if err := e.validateHeaderValues(input.Headers); err != nil {
+		return events.Result{}, err
+	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)
 	if err != nil {
 		return events.Result{}, err
@@ -397,7 +420,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 
 	now := time.Now().UTC()
-	record := store.Turn{ID: r.id, UserMessageID: store.NewID(now)}
+	record := store.Turn{ID: r.id, UserMessageID: store.NewID(now), AgentDir: input.AgentDir, Headers: input.Headers}
 	if interrupted != nil {
 		record.UserMessageID = interrupted.UserMessageID
 		x.result.Steps = resume.Steps

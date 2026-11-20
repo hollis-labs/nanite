@@ -64,7 +64,16 @@ func (e *Engine) Dispatch(ctx context.Context, id string, starts []subagent.Requ
 	if !e.cfg.Builtins.Offers(subagent.ToolName) {
 		return nil, fmt.Errorf("dispatch: this agent does not offer the subtask tool")
 	}
+	input := Input{}
+	var err error
+	ctx, err = e.prepareProfile(ctx, &input)
+	if err != nil {
+		return nil, err
+	}
 	variants, loadErr := subagent.Load(e.cfg.Dir)
+	if p := profileFrom(ctx); p != nil {
+		variants, loadErr = p.variants, nil
+	}
 	for i, start := range starts {
 		if start.Background && !e.cfg.Builtins.Offers("background_status") {
 			return nil, fmt.Errorf("dispatch start %d: background subtasks need the background tools, which this agent does not offer", i+1)
@@ -147,7 +156,13 @@ func (e *Engine) executeDispatch(ctx context.Context, r *Run, info store.Convers
 
 func (e *Engine) dispatch(ctx context.Context, r *Run, info store.Conversation, variants map[string]subagent.Variant, starts []subagent.Request, tr *turnTrace) (events.Result, error) {
 	r.emit(ctx, func(meta events.EventMeta) events.Event { return events.RunStarted{EventMeta: meta} })
-	def, err := definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	var def definition.Definition
+	var err error
+	if p := profileFrom(ctx); p != nil {
+		def = p.definition
+	} else {
+		def, err = definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
+	}
 	if err != nil {
 		return events.Result{}, err
 	}

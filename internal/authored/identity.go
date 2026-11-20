@@ -135,7 +135,7 @@ func ExpandHome(path string) (string, error) {
 // when id has none. Agent.Open and the public providers package both build
 // it here, so they read identity.yaml the same way. It is a function, not a
 // method, so the public Identity alias does not expose an internal type.
-func NewWardenSource(id Identity, redactor *redact.Scope, logger *slog.Logger, onWaiting, onGranted func(warden.Waiting)) (*warden.Source, error) {
+func NewWardenSource(id Identity, redactor *redact.Scope, logger *slog.Logger, onWaiting, onGranted func(warden.Waiting), autoApprove bool) (*warden.Source, error) {
 	if id.Warden == nil {
 		return nil, nil
 	}
@@ -144,7 +144,7 @@ func NewWardenSource(id Identity, redactor *redact.Scope, logger *slog.Logger, o
 		return nil, err
 	}
 	return warden.New(warden.Config{URL: id.Warden.URL, CredentialFile: file, Principal: id.Principal, Purpose: id.Warden.Purpose,
-		Redactor: redactor, Logger: logger, OnWaiting: onWaiting, OnGranted: onGranted})
+		Redactor: redactor, Logger: logger, OnWaiting: onWaiting, OnGranted: onGranted, FailFastGrants: autoApprove})
 }
 
 // LoadIdentity reads and validates dir/identity.yaml through a root, so a

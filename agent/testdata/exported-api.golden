@@ -32,6 +32,12 @@ type AuthWaiting struct
   field Scopes []string
   field Conversation string
   field For string
+type AutoApproved = github.com/hollis-labs/nanite/internal/events.AutoApproved struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Conversation string
+  field CallID string
+  field Tool string
+  field InputSummary string
 const BuiltinBackground github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesRead github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesWrite github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
@@ -182,6 +188,7 @@ type Options struct
   field Logger *log/slog.Logger
   field Events EventSink
   field Gate Gate
+  field AutoApprove bool
   field SubtaskAskWait time.Duration
   field PDP github.com/hollis-labs/libs/security/policy.PDP
   field SlotSources []SlotSource

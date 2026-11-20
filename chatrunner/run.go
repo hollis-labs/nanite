@@ -352,6 +352,9 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 				Meta: map[string]json.RawMessage{chatstream.MetaCallID: raw(e.CallID), chatstream.MetaIsError: raw(e.IsError)}},
 			chatstream.Event{Verb: chatstream.VerbPartEnd, PartID: id, Final: raw(map[string]any{"text": e.Result.Text, "is_error": e.IsError})})
 
+	case agent.AutoApproved:
+		return []chatstream.Event{activity("auto-approved", map[string]string{"conversation": e.Conversation, "call_id": e.CallID, "tool": e.Tool, "input": e.InputSummary})}
+
 	case agent.PermissionAsked:
 		if e.Request.ConversationID != x.nanite {
 			return nil // not this conversation's: a subtask's ask arrives relayed, under the root's ID

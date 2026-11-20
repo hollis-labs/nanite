@@ -137,6 +137,8 @@ func AsMissingGrant(err error) (Waiting, bool) {
 
 // Config configures a Source.
 type Config struct {
+	// FailFastGrants files missing-grant requests without registering chat waits.
+	FailFastGrants bool
 	// URL is Warden's base URL (https; http only for a loopback address).
 	URL string
 	// CredentialFile is the 0600 parent credential file.
@@ -334,7 +336,7 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 		delete(e.waiters, conversation)
 		changed = true
 		granted = &Waiting{RequestID: id, Status: "granted", Audience: audience, Scopes: slices.Clone(scopes), Conversation: conversation, For: forFrom(ctx)}
-	case errors.As(err, &missing) && conversation != "":
+	case errors.As(err, &missing) && conversation != "" && !s.cfg.FailFastGrants:
 		if e.waiters == nil {
 			e.waiters = map[string]waiter{}
 		}
@@ -348,6 +350,13 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 	}
 	if granted != nil && s.cfg.OnGranted != nil {
 		s.cfg.OnGranted(*granted)
+	}
+	if s.cfg.FailFastGrants && errors.As(err, &missing) {
+		w := missing.Waiting
+		s.cfg.Logger.Warn("warden: auto mode grant wait skipped", "audience", w.Audience, "request", w.RequestID, "conversation", conversation)
+		// Neither wrap MissingGrantError nor reuse its parseable text: hosts
+		// must treat this as an ordinary failure, never an auth hold.
+		return "", fmt.Errorf("warden: auto mode cannot access audience %s; grant request %s (%s); grant wait skipped", w.Audience, w.RequestID, w.Status)
 	}
 	return tok, err
 }
@@ -438,6 +447,9 @@ func (s *Source) pending(ctx context.Context, e *entry, audience string, scopes 
 // sees a pending request again on each attempt and should deduplicate.
 func (s *Source) waiting(ctx context.Context, w Waiting) Waiting {
 	w.Conversation, w.For = conversationFrom(ctx), forFrom(ctx)
+	if s.cfg.FailFastGrants {
+		return w
+	}
 	s.cfg.Logger.Info("warden: waiting for a grant", "request", w.RequestID, "status", w.Status, "audience", w.Audience)
 	if s.cfg.OnWaiting != nil {
 		s.cfg.OnWaiting(w)

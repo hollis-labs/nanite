@@ -1,6 +1,7 @@
 package mcpclient
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,68 +18,74 @@ import (
 )
 
 func TestPackageRecheckedAtMCPStartAndReconnect(t *testing.T) {
-	for _, started := range []bool{false, true} {
-		t.Run(fmt.Sprint(started), func(t *testing.T) {
-			dir := t.TempDir()
-			pkgDir := filepath.Join(dir, "tools", "fixture")
-			if err := os.MkdirAll(pkgDir, 0700); err != nil {
-				t.Fatal(err)
-			}
-			marker := filepath.Join(t.TempDir(), "starts")
-			script := fmt.Sprintf("#!/bin/sh\n[ -z \"$NANITE_TOOL_CHECK\" ] || exit 90\nprintf 'started\\n' >> %q\nexport NANITE_MCP_TEST_SERVER=1\nexec %q -test.run='^TestMCPTransports$' -test.v=false\n", marker, os.Args[0])
-			entry := filepath.Join(pkgDir, "run.sh")
-			if err := os.WriteFile(entry, []byte(script), 0700); err != nil { //nolint:gosec // G306: the test package entry must be executable.
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(pkgDir, "tool.yaml"), []byte("description: d\nkind: mcp\nentry: run.sh\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			pkg, err := authored.LoadTool(dir, "fixture")
-			if err != nil {
-				t.Fatal(err)
-			}
-			check, err := json.Marshal(PackageCheck{Dir: dir, Name: pkg.Name, Digest: pkg.Digest})
-			if err != nil {
-				t.Fatal(err)
-			}
-			client := New(dir, nil, redact.NewScope(), slog.Default(), nil)
-			defer func() { _ = client.Close() }()
-			lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"tool:fixture": {Type: "stdio", Command: entry, Env: map[string]string{PackageCheckEnv: string(check)}}}})
-			defer lease.Close()
-			if len(warnings) != 0 {
-				t.Fatal(warnings)
-			}
-			var offered []tools.Tool
-			if started {
-				offered, warnings = lease.Tools(t.Context())
-				if len(offered) != 1 || len(warnings) != 0 {
-					t.Fatalf("initial discovery: %v %v", offered, warnings)
+	for _, auto := range []bool{false, true} {
+		for _, started := range []bool{false, true} {
+			t.Run(fmt.Sprintf("auto_%v_started_%v", auto, started), func(t *testing.T) {
+				dir := t.TempDir()
+				pkgDir := filepath.Join(dir, "tools", "fixture")
+				if err := os.MkdirAll(pkgDir, 0700); err != nil {
+					t.Fatal(err)
 				}
-			}
-			if err := os.WriteFile(filepath.Join(pkgDir, "changed"), []byte("changed after approval"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if started {
-				client.pool.Invalidate(lease.servers[0].key)
-				result, err := offered[0].Handler(t.Context(), tools.Call{Input: json.RawMessage(`{}`)})
-				if err == nil && !result.IsError {
-					t.Fatal("changed package reconnected")
+				marker := filepath.Join(t.TempDir(), "starts")
+				script := fmt.Sprintf("#!/bin/sh\n[ -z \"$NANITE_TOOL_CHECK\" ] || exit 90\nprintf 'started\\n' >> %q\nexport NANITE_MCP_TEST_SERVER=1\nexec %q -test.run='^TestMCPTransports$' -test.v=false\n", marker, os.Args[0])
+				entry := filepath.Join(pkgDir, "run.sh")
+				if err := os.WriteFile(entry, []byte(script), 0700); err != nil { //nolint:gosec // G306: the test package entry must be executable.
+					t.Fatal(err)
 				}
-			} else {
-				got, warnings := lease.Tools(t.Context())
-				if len(got) != 0 || len(warnings) == 0 {
-					t.Fatalf("changed package started: %v %v", got, warnings)
+				if err := os.WriteFile(filepath.Join(pkgDir, "tool.yaml"), []byte("description: d\nkind: mcp\nentry: run.sh\n"), 0600); err != nil {
+					t.Fatal(err)
 				}
-			}
-			raw, err := os.ReadFile(marker) //nolint:gosec // G304: marker is in a test-owned temporary directory.
-			if started {
-				if err != nil || strings.Count(string(raw), "started") != 1 {
-					t.Fatalf("restarted changed package: %q %v", raw, err)
+				pkg, err := authored.LoadTool(dir, "fixture")
+				if err != nil {
+					t.Fatal(err)
 				}
-			} else if !os.IsNotExist(err) {
-				t.Fatalf("started changed package: %q %v", raw, err)
-			}
-		})
+				check, err := json.Marshal(PackageCheck{Dir: dir, Name: pkg.Name, Digest: pkg.Digest, AutoApprove: auto})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var logs bytes.Buffer
+				client := New(dir, nil, redact.NewScope(), slog.New(slog.NewTextHandler(&logs, nil)), nil)
+				defer func() { _ = client.Close() }()
+				lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"tool:fixture": {Type: "stdio", Command: entry, Env: map[string]string{PackageCheckEnv: string(check)}}}})
+				defer lease.Close()
+				if len(warnings) != 0 {
+					t.Fatal(warnings)
+				}
+				var offered []tools.Tool
+				if started {
+					offered, warnings = lease.Tools(t.Context())
+					if len(offered) != 1 || len(warnings) != 0 {
+						t.Fatalf("initial discovery: %v %v", offered, warnings)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(pkgDir, "changed"), []byte("changed after approval"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if started {
+					client.pool.Invalidate(lease.servers[0].key)
+					result, err := offered[0].Handler(t.Context(), tools.Call{Input: json.RawMessage(`{}`)})
+					if err == nil && !result.IsError {
+						t.Fatal("changed package reconnected")
+					}
+				} else {
+					got, warnings := lease.Tools(t.Context())
+					if len(got) != 0 || len(warnings) == 0 {
+						t.Fatalf("changed package started: %v %v", got, warnings)
+					}
+				}
+				raw, err := os.ReadFile(marker) //nolint:gosec // G304: marker is in a test-owned temporary directory.
+				if started {
+					if err != nil || strings.Count(string(raw), "started") != 1 {
+						t.Fatalf("restarted changed package: %q %v", raw, err)
+					}
+				} else if !os.IsNotExist(err) {
+					t.Fatalf("started changed package: %q %v", raw, err)
+				}
+				if got := strings.Count(logs.String(), "auto mode MCP package startup"); (auto && started && got != 1) || ((!auto || !started) && got != 0) {
+					t.Fatalf("startup logs=%d: %s", got, logs.String())
+				}
+			})
+		}
 	}
 }
 

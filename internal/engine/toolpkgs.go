@@ -121,17 +121,16 @@ func (e *Engine) toolServers(ctx context.Context, authoredCfg agentdir.MCPConfig
 	}
 	for _, name := range authored.ToolNames(pkgs) {
 		pkg := pkgs[name]
-		if pkg.Kind != authored.ToolMCP || !e.toolApproved(ctx, pkg) {
-			// An MCP package starts (and gets its tokens) only once a person
-			// approved this exact package; until then it is offered as its
-			// approval tool (packageTools).
+		if pkg.Kind != authored.ToolMCP || (!e.cfg.AutoApprove && !e.toolApproved(ctx, pkg)) {
+			// Outside auto mode an MCP package starts only once a person
+			// approved this exact package; until then offer its approval tool.
 			continue
 		}
 		if err := e.recheckTool(ctx, pkg); err != nil {
 			warnings = append(warnings, err.Error())
 			continue
 		}
-		check, err := json.Marshal(mcpclient.PackageCheck{Dir: e.profileDir(ctx), Name: pkg.Name, Digest: pkg.Digest, AllowEnv: e.cfg.ToolPackageEnv})
+		check, err := json.Marshal(mcpclient.PackageCheck{Dir: e.profileDir(ctx), Name: pkg.Name, Digest: pkg.Digest, AllowEnv: e.cfg.ToolPackageEnv, AutoApprove: e.cfg.AutoApprove})
 		if err != nil {
 			warnings = append(warnings, err.Error())
 			continue
@@ -249,7 +248,7 @@ func (x *execution) packageTools(ctx context.Context) []tools.Tool {
 					return x.runTool(ctx, pkg, call.Input)
 				},
 			})
-		case !x.engine.toolApproved(ctx, pkg):
+		case !x.engine.cfg.AutoApprove && !x.engine.toolApproved(ctx, pkg):
 			out = append(out, tools.Tool{Name: tools.ToolPackagePrefix + name, InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
 				Description: "Ask to start tool package " + name + ", an MCP server: " + pkg.Description + " Once approved, its tools are offered from the next turn.",
 				Destructive: true,

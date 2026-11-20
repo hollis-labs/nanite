@@ -6,6 +6,11 @@ Closing replies at turn limits, embedder limits and deferred tool schemas;
 the latest tool step survives compaction; offline evals for steering host
 actions. No breaking changes.
 
+- Testing-only `agent.Options.AutoApprove` skips approval asks with WARN logs
+  and host activity, runs unapproved packages without saving approval, and
+  fails missing Warden grants without a chat hold. Explicit denies and package
+  integrity checks remain active; the option is off by default.
+
 - Evals can stub steering host commands and tools by name, fire event/focus
   reflexes offline, and record fired actions and canned results as run evidence
   (`Scenario.HostStubs`, `Scenario.HostTriggers`, `Result.HostActions`).

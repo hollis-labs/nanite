@@ -307,6 +307,19 @@ func (a *Agent) Close() error {
 	return a.closeErr
 }
 
+// UseDesk names the providers.yaml use for the front desk's planner. Like
+// every use, it falls back to chat when the file does not select it.
+const UseDesk = "desk"
+
+// Complete makes one model request outside any conversation: the provider
+// and model providers.yaml selects for use (UseDesk, or "chat",
+// "summarizer", "subtask"), a system prompt and one user message, at most
+// maxTokens out (default 2048). It is for host helpers such as a planner;
+// it runs no tools and records nothing.
+func (a *Agent) Complete(ctx context.Context, use, system, prompt string, maxTokens int) (string, error) {
+	return a.engine.Complete(ctx, use, system, prompt, maxTokens)
+}
+
 // Info re-reads the authored files and reports the current definition.
 func (a *Agent) Info(ctx context.Context) (Info, error) {
 	if err := ctx.Err(); err != nil {

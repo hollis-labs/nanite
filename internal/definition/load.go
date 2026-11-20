@@ -35,6 +35,8 @@ const (
 	UseChat       = "chat"
 	UseSummarizer = "summarizer"
 	UseSubtask    = "subtask"
+	// UseDesk is the front desk's planner (chatrunner DeskOptions.PlanWithModel).
+	UseDesk = "desk"
 )
 
 // Selection names a provider (built in or named) and a model.
@@ -81,9 +83,9 @@ func loadProviders(dir string) (map[string]provider.Spec, map[string]Selection, 
 	}
 	for use, sel := range file.Use {
 		switch use {
-		case UseChat, UseSummarizer, UseSubtask:
+		case UseChat, UseSummarizer, UseSubtask, UseDesk:
 		default:
-			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer or subtask", use)
+			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer, subtask or desk", use)
 		}
 		// A name not defined here may be one the host supplies; the engine
 		// reports a name nobody defines when the use is resolved.

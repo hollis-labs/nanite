@@ -119,7 +119,6 @@ func (e *Engine) noticeWorkIn(lineage []string) bool {
 	return false
 }
 
-
 // announce reports a stored notice on its conversation's running turn, if it
 // has one, and to every subscriber, saying which turn (if any) carried it.
 func (e *Engine) announce(ctx context.Context, notice store.Notice, chained bool) {

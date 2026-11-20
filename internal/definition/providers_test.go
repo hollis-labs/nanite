@@ -33,12 +33,13 @@ use:
   chat: {provider: local, model: llama-3.1-8b}
   summarizer: {provider: anthropic, model: claude-haiku-5-5}
   subtask: {provider: station, model: claude-sonnet-5-5}
+  desk: {provider: local, model: llama-3.2-1b}
 `)
 	specs, use, err := loadProviders(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if specs["local"].Name != "local" || specs["station"].Headers["X-Team"] != "nanite" || use["chat"].Model != "llama-3.1-8b" || use["summarizer"].Provider != "anthropic" {
+	if specs["local"].Name != "local" || specs["station"].Headers["X-Team"] != "nanite" || use["chat"].Model != "llama-3.1-8b" || use["summarizer"].Provider != "anthropic" || use["desk"].Model != "llama-3.2-1b" {
 		t.Fatalf("specs %+v use %+v", specs, use)
 	}
 
@@ -53,8 +54,8 @@ use:
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, headers: {api-key: secret}}\n":       "looks like a credential",
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, extra: 1}\n":                         "field extra not found",
 		"use:\n  chat: {provider: anthropic}\n":                                                        "needs provider and model",
-		"use:\n  review: {provider: anthropic, model: m}\n":                                            "chat, summarizer or subtask",
-		"use:\n  subagent: {provider: anthropic, model: m}\n":                                          "chat, summarizer or subtask",
+		"use:\n  review: {provider: anthropic, model: m}\n":                                            "chat, summarizer, subtask or desk",
+		"use:\n  subagent: {provider: anthropic, model: m}\n":                                          "chat, summarizer, subtask or desk",
 	} {
 		write(text)
 		if _, _, err := loadProviders(dir); err == nil || !strings.Contains(err.Error(), want) {

@@ -322,3 +322,35 @@ func TestDeskGivesUpOnAnItemThatCannotStart(t *testing.T) {
 		}
 	}
 }
+
+// PlanWithModel plans with the agent's own provider (the "desk" use,
+// falling back to chat), with the host's instructions in the prompt.
+func TestDeskPlansWithTheAgentsModel(t *testing.T) {
+	var plans []desk.Result
+	var mu sync.Mutex
+	w := newWiredWith(t, false, &chatrunner.DeskOptions{
+		Intake:              desk.Intake{Mode: desk.IntakeAuto},
+		PlanWithModel:       true,
+		PlannerInstructions: "Seats: tether, nanite.",
+		Policy:              mergePolicy(200 * time.Millisecond),
+		OnPlan:              func(_ string, r desk.Result) { mu.Lock(); plans = append(plans, r); mu.Unlock() },
+	})
+	w.brain.mu.Lock()
+	w.brain.plan = `{"topic_title":"Two lookups","items":[{"id":"1","kind":"research","goal":"report:alpha-result"},{"id":"2","kind":"research","goal":"report:beta-result"}],"confidence":0.9,"why":"two lookups"}`
+	w.brain.mu.Unlock()
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: twoSteps}); err != nil {
+		t.Fatal(err)
+	}
+	w.deskNotices(t, "the model plan's results", "alpha-result", "beta-result")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(plans) != 1 || plans[0].Plan.Source != "model" || plans[0].Err != "" || plans[0].Plan.TopicTitle != "Two lookups" {
+		t.Fatalf("plans %+v", plans)
+	}
+	w.brain.mu.Lock()
+	defer w.brain.mu.Unlock()
+	if len(w.brain.planned) != 1 || !strings.Contains(w.brain.planned[0].SystemPrompt, "Seats: tether, nanite.") ||
+		w.brain.planned[0].Model != "test-model" || !strings.Contains(w.brain.planned[0].Messages[0].Content, "research alpha") {
+		t.Fatalf("planner request %+v", w.brain.planned)
+	}
+}

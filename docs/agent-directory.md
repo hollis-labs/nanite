@@ -118,6 +118,7 @@ use:
   chat:       {provider: local, model: llama-3.1-8b-instruct}
   summarizer: {provider: anthropic, model: claude-haiku-5-5}
   subtask:    {provider: gateway, model: claude-sonnet-5-5}
+  desk:       {provider: local, model: llama-3.2-1b}
 ```
 
 Each provider entry has:
@@ -143,8 +144,9 @@ The names `anthropic` and `openai` are the built-in providers above and cannot
 be redefined.
 
 `use` selects a provider and model for `chat` (the conversation and argument
-repair), `summarizer` (compaction summaries) and `subtask` (subtask
-conversations). A use without its own entry falls back to `chat`.
+repair), `summarizer` (compaction summaries), `subtask` (subtask
+conversations) and `desk` (the front desk's planner, see
+[embedding](embedding.md)). A use without its own entry falls back to `chat`.
 Without `use.chat`, chat uses `runtime.provider` and `runtime.model` from
 `host.yaml`. `providers.yaml` is read again each turn, like the other authored
 files. A use may name a provider only the host defines.

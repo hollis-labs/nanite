@@ -36,6 +36,12 @@ type DeskOptions struct {
 	// Intake configures the planner. Mode off (the zero value) plans
 	// nothing; the delivery editor still paces notices.
 	Intake desk.Intake
+	// PlanWithModel, when Intake.Planner is nil, plans with a desk.Model
+	// on the agent's own provider: the providers.yaml use "desk"
+	// (agent.UseDesk), falling back to chat. PlannerInstructions are added
+	// to its prompt (the host's seats and variants, say).
+	PlanWithModel       bool
+	PlannerInstructions string
 	// IntakeTimeout bounds planning before a turn starts (default 15s).
 	// When it runs out the message goes to the chat agent unplanned.
 	IntakeTimeout time.Duration
@@ -103,15 +109,15 @@ type deskChat struct {
 
 // planRun is a plan being carried out on one chat.
 type planRun struct {
-	id     string
-	chatID string
-	topic  desk.TopicID
-	plan   desk.Plan
+	id       string
+	chatID   string
+	topic    desk.TopicID
+	plan     desk.Plan
 	state    map[string]desk.WorkState // item ID → state
 	result   map[string]string         // item ID → result text
 	attempts map[string]int            // item ID → failed dispatch attempts
-	asked  map[string]string         // item ID → question ID, while open
-	refs   map[desk.Ref]string       // delegated ref → item ID
+	asked    map[string]string         // item ID → question ID, while open
+	refs     map[desk.Ref]string       // delegated ref → item ID
 }
 
 func (p *planRun) workID(item string) string { return p.id + "/" + item }
@@ -157,6 +163,12 @@ func newDesk(r *Runner, opts DeskOptions) (*Desk, error) {
 	}
 	if opts.IntakeTimeout <= 0 {
 		opts.IntakeTimeout = 15 * time.Second
+	}
+	if opts.Intake.Planner == nil && opts.PlanWithModel {
+		opts.Intake.Planner = desk.Model{Instructions: opts.PlannerInstructions,
+			Complete: func(ctx context.Context, system, user string) (string, error) {
+				return r.agent.Complete(ctx, agent.UseDesk, system, user, 2048)
+			}}
 	}
 	ledger := opts.Ledger
 	if ledger == nil {
@@ -723,6 +735,13 @@ func (d *Desk) notice(ctx context.Context, n agent.NoticePosted) {
 	d.submit(chatID, item)
 }
 
+// jobLookupAttempts is how many times a finished job is read before its
+// item is failed; a lookup can fail for a moment (a busy database).
+// jobLookupBackoff is the first wait between attempts; it doubles.
+const jobLookupAttempts = 3
+
+var jobLookupBackoff = 500 * time.Millisecond
+
 // subtaskJobKind is the kind of the notice a background subtask's finish
 // posts.
 const subtaskJobKind = "subagent"
@@ -832,7 +851,18 @@ func (d *Desk) jobOutcome(ctx context.Context, naniteID, job string) (finished, 
 	if err != nil {
 		return true, false, err.Error()
 	}
-	raw, err := c.Job(ctx, job)
+	var raw string
+	for attempt := range jobLookupAttempts {
+		if raw, err = c.Job(ctx, job); err == nil || ctx.Err() != nil {
+			break
+		}
+		if attempt < jobLookupAttempts-1 {
+			select {
+			case <-time.After(jobLookupBackoff << attempt):
+			case <-ctx.Done():
+			}
+		}
+	}
 	if err != nil {
 		return true, false, err.Error()
 	}

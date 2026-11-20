@@ -124,6 +124,22 @@ it covers. Provider requests use that summary and the messages that follow it.
 Host history retains the full transcript. New schema changes use numbered
 migrations.
 
+### When compaction runs
+
+After each step, the engine checks whether the next request still fits.
+The check counts everything a request carries:
+- the system slot blocks;
+- the schemas of every tool offered that turn, which the engine places in
+  the Tools slot of its context window;
+- the conversation.
+
+It compacts when that estimate passes the budget, or when the provider's
+own count of the last request's input (cached or not) does. The budget is
+80% of `runtime.context_window` (200,000 tokens when unset), or
+`agent.Options.CompactAt` when a host sets it. A pass that frees nothing
+stops compaction for the rest of the turn. The trace lists the tool schemas'
+size as the `tool_schemas` slot.
+
 ## MCP and skills
 
 Nanite reads `.mcp.json` at the start of each turn. It supports stdio,

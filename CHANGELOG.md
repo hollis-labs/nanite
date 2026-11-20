@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Compaction counts everything a request carries. Tool schemas fill the
+  Tools slot of the context window, and the provider's reported input for
+  the last request is checked against the budget too. Before, a host with
+  hundreds of tools could grow requests past the window without compaction
+  ever firing. New `agent.Options.CompactAt` sets the budget in tokens.
 Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
 - Code Mode evals (experimental): six scenarios (code search, research from a

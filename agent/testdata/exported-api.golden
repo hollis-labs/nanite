@@ -111,6 +111,7 @@ type Options struct
   field SubtaskResultCap int
   field SubtaskLimit int
   field TurnTokenBudget int
+  field CompactAt int
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
   field Ref string
   field At time.Time

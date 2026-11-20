@@ -56,6 +56,9 @@ type execution struct {
 	specs           []llmtypes.ToolDefinition
 	loop            *loopdetect.Detector
 	result          events.Result
+	// lastRequestTokens is the input the provider reported for the latest
+	// request, the ground truth the compaction check is held to.
+	lastRequestTokens int
 	// toolCalls and passes record the turn's tool calls and compaction
 	// passes for its trace record.
 	toolCalls []trace.ToolCall
@@ -304,6 +307,11 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	tr.rec.Slots, tr.rec.Trimmed = traceSlots(assembled, e.scrub.Text)
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
+	}
+	x.sizeWindow()
+	if tools := x.assembled.Window.Slot(ctxpkg.SlotTools); tools != nil && tools.TokenCount > 0 {
+		// The trace shows the tool schemas' share of the request.
+		tr.rec.Slots = append(tr.rec.Slots, trace.Slot{Name: "tool_schemas", Tokens: tools.TokenCount})
 	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)
 	if err != nil {
@@ -570,7 +578,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	}
 	window := x.assembled.Window
 	window.SetContent(ctxpkg.SlotConversation, string(raw))
-	if !force && (x.stalled || !window.NeedsCompaction()) {
+	if !force && (x.stalled || !x.needsCompaction(window)) {
 		return nil
 	}
 	if x.compactions >= maxCompactionsPerTurn {
@@ -643,7 +651,9 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			x.shared.add(est.Estimate(prompt) + est.Estimate(string(raw)) + est.Estimate(summary))
 		}}
 	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
-	if force {
+	// The pipeline's own check uses the estimate; when the provider's count
+	// is what says the request is too big, run it without that check.
+	if force || (x.lastRequestTokens > window.TotalBudget && !window.NeedsCompaction()) {
 		_, err = pipeline.RunForce(ctx)
 	} else {
 		_, err = pipeline.Run(ctx)
@@ -807,6 +817,12 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			x.ownUsage.CacheWriteTokens += u.CacheCreationTokens
 			x.usageMu.Unlock()
 			x.shared.add(u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens)
+			// What the provider counted for the request just sent: its input,
+			// cached or not. Compaction checks it against the budget too,
+			// since a size estimate can be well off.
+			if in := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens; in > 0 {
+				x.lastRequestTokens = in
+			}
 			if u.StopReason != "" {
 				x.result.StopReason = u.StopReason
 			}

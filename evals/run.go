@@ -46,9 +46,14 @@ type Config struct {
 	Gateway agent.Gateway
 	// Modes limits the arms run to these modes; empty runs every arm.
 	Modes []Mode
-	// Dir is where each run's agent directory is made; empty is a temporary
-	// directory, removed afterwards.
+	// Dir is the base directory each run's agent directory and workspace
+	// copy are made in; empty is a temporary directory per run, removed
+	// afterwards. A run works only inside its own copy (agent.Options.WorkDir)
+	// and never changes the process's working directory.
 	Dir string
+	// Parallel is how many runs may happen at once; zero is one. Results
+	// keep the scenario and arm order whatever finishes first.
+	Parallel int
 	// TurnTokens caps the tokens one run's task turn may use, its subtasks
 	// included (agent.Options.TurnTokenBudget). Zero is no cap.
 	TurnTokens int
@@ -119,21 +124,27 @@ type Result struct {
 	ParentFetches int      `json:"parent_fetches"`
 	// Skipped says why the run did not happen.
 	Skipped string `json:"skipped,omitempty"`
+	// cancelled is set when the run ended with Run's context already
+	// cancelled (by another run's failure or an interrupt).
+	cancelled bool
 }
 
-// Run runs each scenario in each of its arms, in order, and returns what ran
-// even when it stops early.
-//
-// Runs happen one at a time: each changes the process's working directory to
-// its copy of the workspace (the file tools resolve relative paths against
-// it), so nothing else in the process may depend on the working directory
-// while Run runs, and Run must not be called concurrently.
+// Run runs each scenario in each of its arms and returns what ran, in
+// scenario and arm order, even when it stops early. Up to cfg.Parallel runs
+// happen at once. Run is safe to call concurrently: no run depends on or
+// changes the process's working directory.
 func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) {
 	if cfg.Price == (Price{}) {
 		cfg.Price = ConservativePrice
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Minute
+	}
+	if cfg.Parallel < 0 {
+		return Report{}, errors.New("evals: Parallel must not be negative")
+	}
+	if cfg.Parallel == 0 {
+		cfg.Parallel = 1
 	}
 	model := cfg.Model
 	if cfg.Provider == nil {
@@ -142,36 +153,91 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 		return Report{}, errors.New("evals: a live run needs a model")
 	}
 	rep := Report{Model: model, Price: cfg.Price}
-	meter := &meter{price: cfg.Price, max: cfg.MaxUSD}
-	defer func() { rep.SpentUSD = meter.spentUSD() }()
+	meter := newMeter(cfg.Price, cfg.MaxUSD)
+
+	type job struct {
+		s   Scenario
+		arm Arm
+	}
+	var jobs []job
 	for _, s := range scenarios {
 		for _, arm := range s.AllArms() {
 			if len(cfg.Modes) > 0 && !slices.Contains(cfg.Modes, arm.Mode) {
 				continue
 			}
-			skip := ""
-			switch {
-			case ctx.Err() != nil:
-				skip = "interrupted"
-			case meter.over():
-				skip = fmt.Sprintf("dollar cap $%.2f reached", cfg.MaxUSD)
-			}
-			if skip != "" {
-				rep.Stopped = skip
-				rep.Results = append(rep.Results, Result{Scenario: s.Name, Arm: arm.Name, Mode: arm.Mode, Skipped: skip})
-				continue
-			}
-			r, err := runOne(ctx, cfg, model, meter, s, arm)
-			rep.Results = append(rep.Results, r)
-			if err != nil {
-				rep.Stopped = "error: " + Shorten(err.Error())
-				rep.SpentUSD = meter.spentUSD()
-				return rep, fmt.Errorf("%s/%s: %w", s.Name, arm.Name, err)
-			}
+			jobs = append(jobs, job{s, arm})
 		}
 	}
+	results := make([]Result, len(jobs))
+	errs := make([]error, len(jobs))
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+		// failed is the index of the run that failed, or -1.
+		failed = -1
+	)
+	// A failed run stops the others: none starts after it, and those in
+	// flight are cancelled.
+	runCtx, stopAll := context.WithCancel(ctx)
+	defer stopAll()
+	sem := make(chan struct{}, cfg.Parallel)
+	for i, j := range jobs {
+		sem <- struct{}{}
+		mu.Lock()
+		stop := failed >= 0
+		mu.Unlock()
+		skip := ""
+		switch {
+		case stop:
+			skip = "an earlier run failed"
+		case ctx.Err() != nil:
+			skip = "interrupted"
+		case meter.over():
+			skip = fmt.Sprintf("dollar cap $%.2f reached", cfg.MaxUSD)
+		}
+		if skip != "" {
+			<-sem
+			results[i] = Result{Scenario: j.s.Name, Arm: j.arm.Name, Mode: j.arm.Mode, Skipped: skip}
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i], errs[i] = runOne(runCtx, cfg, model, meter, j.s, j.arm)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case errs[i] != nil && failed < 0:
+				failed = i
+				stopAll()
+			case failed >= 0 && ctx.Err() == nil && (errs[i] != nil || (results[i].cancelled && !results[i].Success)):
+				// Cancelled because another run failed.
+				errs[i] = nil
+				results[i].Why, results[i].Invalid = "", false
+				results[i].Skipped = "stopped: another run failed"
+			}
+		}()
+	}
+	wg.Wait()
 	rep.SpentUSD = meter.spentUSD()
-	return rep, nil
+
+	var firstErr error
+	if failed >= 0 {
+		firstErr = fmt.Errorf("%s/%s: %w", jobs[failed].s.Name, jobs[failed].arm.Name, errs[failed])
+		rep.Stopped = "error: " + Shorten(errs[failed].Error())
+	}
+	for _, r := range results {
+		if r.Skipped == "an earlier run failed" {
+			// Runs that never started after a failure are not reported.
+			continue
+		}
+		if r.Skipped != "" && rep.Stopped == "" {
+			rep.Stopped = r.Skipped
+		}
+		rep.Results = append(rep.Results, r)
+	}
+	return rep, firstErr
 }
 
 func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s Scenario, arm Arm) (res Result, retErr error) {
@@ -189,7 +255,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	if err != nil {
 		return res, err
 	}
-	// Resolve symlinks (macOS's temporary directory is one), so the working
+	// Resolve symlinks (macOS's temporary directory is one), so the work
 	// directory and the agent directory are the same single workspace root.
 	if dir, err = filepath.EvalSymlinks(dir); err != nil {
 		return res, err
@@ -205,17 +271,6 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 			return res, err
 		}
 	}
-	// File tools resolve relative paths against the working directory first,
-	// so the run works inside its own copy of the workspace.
-	prev, err := os.Getwd()
-	if err != nil {
-		return res, err
-	}
-	if err := os.Chdir(dir); err != nil {
-		return res, err
-	}
-	defer func() { retErr = errors.Join(retErr, os.Chdir(prev)) }()
-
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	var model llmcontracts.Provider
@@ -239,7 +294,9 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	var mu sync.Mutex
 	var records []agent.TraceRecord
 	opts := agent.Options{
-		Dir: dir, GlobalSkillsDir: "-", Builtins: builtins, Provider: model, Gateway: cfg.Gateway, Gate: gate,
+		// The run works inside its own copy of the workspace: relative paths
+		// resolve there, and the process's working directory is untouched.
+		Dir: dir, WorkDir: dir, GlobalSkillsDir: "-", Builtins: builtins, Provider: model, Gateway: cfg.Gateway, Gate: gate,
 		TurnTokenBudget: cfg.TurnTokens,
 		TraceSink: func(_ context.Context, r agent.TraceRecord) {
 			mu.Lock()
@@ -255,7 +312,8 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 		return res, errors.New("evals: an arm may not add named providers; they would bypass the dollar cap")
 	}
 	probe := &probe{seedLacks: arm.SeedLacks}
-	opts.Provider = &metered{Provider: opts.Provider, meter: meter, cancel: cancel, probe: probe}
+	meteredProvider := &metered{Provider: opts.Provider, meter: meter, cancel: cancel, probe: probe}
+	opts.Provider = meteredProvider
 	a, err := agent.Open(runCtx, opts)
 	if err != nil {
 		return res, err
@@ -296,6 +354,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	if runErr == nil {
 		result, runErr = send(task)
 	}
+	res.cancelled = ctx.Err() != nil
 	res.WallMS = time.Since(start).Milliseconds()
 	res.Approvals = int(gate.n.Load())
 
@@ -305,7 +364,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	res.fill(recs, conv.ID(), meter.price)
 
 	switch {
-	case meter.capped():
+	case meteredProvider.capped.Load():
 		res.Why = fmt.Sprintf("stopped: dollar cap $%.2f reached", cfg.MaxUSD)
 	case runErr != nil:
 		res.Why = "run failed: " + Shorten(runErr.Error())
@@ -504,7 +563,10 @@ func (g *countingGate) Decide(ctx context.Context, req agent.PermissionRequest) 
 
 // meter keeps the estimated spend. A request reserves its most expensive
 // outcome before it is sent and settles to its reported usage when that
-// arrives, so concurrent requests cannot together pass the cap.
+// arrives, so concurrent requests cannot together pass the cap. A request
+// that would pass the cap waits while other requests hold reservations (they
+// usually settle far below their worst case) and is refused only when it
+// would pass the cap on its own; after that every request is refused.
 type meter struct {
 	price    Price
 	max      float64
@@ -512,18 +574,44 @@ type meter struct {
 	spent    float64
 	reserved float64
 	refused  bool
+	// holds counts the reservations not yet settled. It decides whether a
+	// request waits, since reserved, a float, may not return to exactly 0.
+	holds int
+	// changed is closed, and replaced, whenever a reservation settles.
+	changed chan struct{}
 }
 
-// reserve holds cost against the cap; false means the request would pass it.
-func (m *meter) reserve(cost float64) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.refused || (m.max > 0 && m.spent+m.reserved+cost > m.max) {
-		m.refused = true
-		return false
+func newMeter(price Price, maxUSD float64) *meter {
+	return &meter{price: price, max: maxUSD, changed: make(chan struct{})}
+}
+
+// reserve holds cost against the cap. It returns errCapped when the request
+// would pass the cap, or ctx's error if ctx ends while it waits.
+func (m *meter) reserve(ctx context.Context, cost float64) error {
+	for {
+		m.mu.Lock()
+		switch {
+		case m.refused:
+			m.mu.Unlock()
+			return errCapped
+		case m.max <= 0 || m.spent+m.reserved+cost <= m.max:
+			m.reserved += cost
+			m.holds++
+			m.mu.Unlock()
+			return nil
+		case m.holds == 0:
+			m.refused = true
+			m.mu.Unlock()
+			return errCapped
+		}
+		wait := m.changed
+		m.mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	m.reserved += cost
-	return true
 }
 
 // settle releases a reservation and records what the request cost.
@@ -531,7 +619,13 @@ func (m *meter) settle(reserved, cost float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reserved -= reserved
+	m.holds--
+	if m.holds == 0 {
+		m.reserved = 0
+	}
 	m.spent += cost
+	close(m.changed)
+	m.changed = make(chan struct{})
 }
 
 // over reports whether no further request can start.
@@ -539,13 +633,6 @@ func (m *meter) over() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.refused || (m.max > 0 && m.spent >= m.max)
-}
-
-// capped reports whether the cap refused a request.
-func (m *meter) capped() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.refused
 }
 
 func (m *meter) spentUSD() float64 {
@@ -589,6 +676,17 @@ type metered struct {
 	meter  *meter
 	cancel context.CancelFunc
 	probe  *probe
+	// capped is set when the cap refused one of this run's requests.
+	capped atomic.Bool
+}
+
+// refuse ends the run when the meter refused a request for the cap.
+func (p *metered) refuse(err error) error {
+	if errors.Is(err, errCapped) {
+		p.capped.Store(true)
+		p.cancel()
+	}
+	return err
 }
 
 func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
@@ -596,9 +694,8 @@ func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-c
 		p.probe.see(req)
 	}
 	hold := p.meter.worst(req)
-	if !p.meter.reserve(hold) {
-		p.cancel()
-		return nil, errCapped
+	if err := p.meter.reserve(ctx, hold); err != nil {
+		return nil, p.refuse(err)
 	}
 	in, err := p.Provider.StreamChat(ctx, req)
 	if err != nil {
@@ -656,9 +753,8 @@ func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-c
 // its reservation.
 func (p *metered) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	hold := p.meter.worst(req)
-	if !p.meter.reserve(hold) {
-		p.cancel()
-		return "", errCapped
+	if err := p.meter.reserve(ctx, hold); err != nil {
+		return "", p.refuse(err)
 	}
 	text, err := p.Provider.Complete(ctx, req)
 	if err != nil {

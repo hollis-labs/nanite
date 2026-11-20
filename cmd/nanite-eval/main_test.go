@@ -43,7 +43,7 @@ func TestInterruptedRunStillWrites(t *testing.T) {
 }
 
 func TestBadFlags(t *testing.T) {
-	for _, args := range [][]string{{"-mode", "both"}, {"-scenario", "nope"}} {
+	for _, args := range [][]string{{"-mode", "both"}, {"-scenario", "nope"}, {"-parallel", "0"}, {"-parallel", "9"}} {
 		if err := run(context.Background(), args, nil, nil); err == nil {
 			t.Errorf("%v: no error", args)
 		}

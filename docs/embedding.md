@@ -184,6 +184,13 @@ hosts to share.
   `Options.DataDir`, one directory per agent under the application's own
   state root. When it is empty, state goes in `.nanite/` inside the agent
   directory, as the terminal does.
+- The working directory is where the file tools resolve relative paths
+  first (then the agent directory) and where bash and background jobs run.
+  It is `Options.WorkDir`, an existing absolute directory, or the process's
+  working directory at `Open` when that is empty. Nanite never changes the
+  process's working directory, so several agents in one process can each
+  work in their own `WorkDir`. MCP stdio servers are the exception: they
+  start in the process's working directory, so give them absolute paths.
 
 Only one process can hold an agent's state directory open. If the
 application keeps state in its own `DataDir`, `nanite -C agents/<name>` from a

@@ -121,6 +121,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error)
 type Options struct
   field Dir string
   field DataDir string
+  field WorkDir string
   field GlobalSkillsDir string
   field Provider github.com/hollis-labs/libs/llm/core/llmcontracts.Provider
   field Gateway Gateway

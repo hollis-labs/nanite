@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hollis-labs/libs/agent/trace"
+	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/agent"
 )
@@ -119,6 +122,75 @@ func TestOfflineRun(t *testing.T) {
 	}
 }
 
+// TestParallelRunsLeaveTheWorkingDirectory: runs happen at once, within one
+// Run and across two concurrent Runs, each inside its own workspace copy.
+// The process's working directory (an empty directory here, so a file tool
+// that resolved against it would fail its run) never changes, and the report
+// is the same as a serial one.
+func TestParallelRunsLeaveTheWorkingDirectory(t *testing.T) {
+	t.Setenv("NANITE_DEFAULT_MODEL", "some-other-model")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	stop := make(chan struct{})
+	moved := make(chan string, 1)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				close(moved)
+				return
+			default:
+			}
+			if got, err := os.Getwd(); err != nil || got != cwd {
+				select {
+				case moved <- got:
+				default:
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	serial, err := Run(context.Background(), Config{TurnTokens: 500000}, Scenarios())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := make([]Report, 2)
+	errs := make([]error, 2)
+	done := make(chan int)
+	for i := range reports {
+		go func() {
+			reports[i], errs[i] = Run(context.Background(), Config{TurnTokens: 500000, Parallel: 3}, Scenarios())
+			done <- i
+		}()
+	}
+	<-done
+	<-done
+	close(stop)
+	if got, ok := <-moved; ok {
+		t.Errorf("the working directory changed to %q during the runs", got)
+	}
+	want := Markdown(serial, false)
+	for i, rep := range reports {
+		if errs[i] != nil {
+			t.Fatal(errs[i])
+		}
+		for _, r := range rep.Results {
+			if !r.Success {
+				t.Errorf("run %d: %s/%s failed: %s", i, r.Scenario, r.Arm, r.Why)
+			}
+		}
+		if got := Markdown(rep, false); got != want {
+			t.Errorf("run %d: the parallel report differs from the serial one:\n%s\nwant:\n%s", i, got, want)
+		}
+	}
+}
+
+func TestNegativeParallelIsRefused(t *testing.T) {
+	if _, err := Run(context.Background(), Config{Parallel: -1}, Scenarios()); err == nil {
+		t.Fatal("Parallel -1 was accepted")
+	}
+}
+
 // TestDollarCapStopsTheRun: a request that would pass the cap is refused, the
 // run in progress ends, the rest are skipped, and the report says so.
 func TestDollarCapStopsTheRun(t *testing.T) {
@@ -143,6 +215,128 @@ func TestDollarCapStopsTheRun(t *testing.T) {
 	}
 }
 
+// TestDollarCapWithParallelRuns: runs in flight share the cap. A request
+// that does not fit beside the others' reservations waits for them rather
+// than ending every run, so the cap stops the run near the cap, not at the
+// first wave's reservations.
+func TestDollarCapWithParallelRuns(t *testing.T) {
+	rep, err := Run(context.Background(), Config{MaxUSD: 2, Parallel: 8}, Scenarios())
+	if err != nil {
+		t.Fatal(err)
+	}
+	passed, capped := 0, 0
+	for _, r := range rep.Results {
+		if r.Success {
+			passed++
+		}
+		if strings.Contains(r.Why, "dollar cap") {
+			capped++
+		}
+	}
+	if passed == 0 || capped == 0 || capped > 8 || !strings.Contains(rep.Stopped, "dollar cap") {
+		t.Fatalf("want some runs passed and the cap stopping the rest; %d passed, %d capped, stopped %q", passed, capped, rep.Stopped)
+	}
+	// One request's worst case is about $1.25 at the conservative price, so
+	// the cap refuses once about $0.75 is spent, as a serial run does.
+	if rep.SpentUSD > 2 || rep.SpentUSD < 0.5 {
+		t.Fatalf("spent $%.4f; want the cap reached on real spend, not on the first wave's reservations, and no more than $2", rep.SpentUSD)
+	}
+}
+
+// gauge counts the model requests in flight across runs and the most at once.
+type gauge struct {
+	mu        sync.Mutex
+	now, peak int
+}
+
+// slowly wraps a provider: each request counts as in flight for a while, or,
+// with block, until its context ends.
+type slowly struct {
+	llmcontracts.Provider
+	g     *gauge
+	block bool
+}
+
+func (p slowly) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	p.g.mu.Lock()
+	p.g.now++
+	p.g.peak = max(p.g.peak, p.g.now)
+	p.g.mu.Unlock()
+	defer func() { p.g.mu.Lock(); p.g.now--; p.g.mu.Unlock() }()
+	wait := time.After(30 * time.Millisecond)
+	if p.block {
+		wait = nil
+	}
+	select {
+	case <-wait:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return p.Provider.StreamChat(ctx, req)
+}
+
+// withArms is code-search under name, with its two default arms adjusted.
+func withArms(name string, adjust func(*agent.Options), prepare func(string) error) Scenario {
+	s := Scenarios()[0]
+	s.Name = name
+	s.Arms = []Arm{{Name: string(Direct), Mode: Direct, Options: adjust, Prepare: prepare}, {Name: string(Subtask), Mode: Subtask, Options: adjust, Prepare: prepare}}
+	return s
+}
+
+// TestParallelRunsOverlap: Parallel runs that many at once.
+func TestParallelRunsOverlap(t *testing.T) {
+	g := &gauge{}
+	slow := func(o *agent.Options) { o.Provider = slowly{Provider: o.Provider, g: g} }
+	var scenarios []Scenario
+	for i := range 3 {
+		scenarios = append(scenarios, withArms(fmt.Sprintf("slow-%d", i), slow, nil))
+	}
+	rep, err := Run(context.Background(), Config{Parallel: 3}, scenarios)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rep.Results {
+		if !r.Success {
+			t.Errorf("%s/%s: %s", r.Scenario, r.Arm, r.Why)
+		}
+	}
+	if g.peak < 2 || g.peak > 3 {
+		t.Fatalf("at most %d requests were in flight at once; want 2 or 3 with Parallel 3", g.peak)
+	}
+}
+
+// TestFailedRunStopsTheOthers: when a run fails, the run in flight beside it
+// is cancelled and reported as stopped, no run starts after it, and Run
+// returns the failed run's error.
+func TestFailedRunStopsTheOthers(t *testing.T) {
+	g := &gauge{}
+	block := func(o *agent.Options) { o.Provider = slowly{Provider: o.Provider, g: g, block: true} }
+	broken := errors.New("broken fixture")
+	fail := func(string) error {
+		// Fail only once the blocked run is in flight.
+		for {
+			g.mu.Lock()
+			n := g.now
+			g.mu.Unlock()
+			if n > 0 {
+				return broken
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	scenarios := []Scenario{withArms("blocked", block, nil), withArms("broken", nil, fail), withArms("later", nil, nil)}
+	scenarios[0].Arms = scenarios[0].Arms[:1]
+	scenarios[1].Arms = scenarios[1].Arms[:1]
+	// A short timeout makes a regression fail rather than hang.
+	rep, err := Run(context.Background(), Config{Parallel: 2, Modes: []Mode{Direct}, Timeout: 20 * time.Second}, scenarios)
+	if !errors.Is(err, broken) || !strings.Contains(err.Error(), "broken/direct") {
+		t.Fatalf("error %v, want the broken run's", err)
+	}
+	if len(rep.Results) != 2 || rep.Results[0].Skipped != "stopped: another run failed" || rep.Results[1].Scenario != "broken" || !strings.HasPrefix(rep.Stopped, "error: ") {
+		t.Fatalf("report %+v", rep)
+	}
+}
+
 // TestInterruptedRunKeepsWhatRan: a cancelled context skips the runs not yet
 // started, and the report keeps the spend so far.
 func TestInterruptedRunKeepsWhatRan(t *testing.T) {
@@ -158,19 +352,50 @@ func TestInterruptedRunKeepsWhatRan(t *testing.T) {
 }
 
 func TestMeterReservesTheWorstCase(t *testing.T) {
-	m := &meter{price: Price{Input: 1, Output: 1}, max: 1}
+	m := newMeter(Price{Input: 1, Output: 1}, 1)
 	hold := 0.5
 	for i := range 2 {
-		if !m.reserve(hold) {
-			t.Fatalf("half-dollar reservation %d refused under a dollar cap", i+1)
+		if err := m.reserve(t.Context(), hold); err != nil {
+			t.Fatalf("half-dollar reservation %d refused under a dollar cap: %v", i+1, err)
 		}
 	}
-	if m.reserve(0.01) {
-		t.Fatal("a third request was let past the reserved cap")
+	// A third request does not fit beside the two reservations: it waits for
+	// one to settle, and fits once the first settles at its real cost.
+	got := make(chan error, 1)
+	waitCtx, stopWait := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stopWait()
+	go func() { got <- m.reserve(waitCtx, 0.01) }()
+	select {
+	case err := <-got:
+		t.Fatalf("a third request was let past the reserved cap: %v", err)
+	case <-time.After(50 * time.Millisecond):
 	}
 	m.settle(hold, 0.1)
-	if m.spentUSD() != 0.1 || m.over() != true {
+	if err := <-got; err != nil {
+		t.Fatalf("the waiting request was refused after a settle: %v", err)
+	}
+	if m.spentUSD() != 0.1 || m.over() {
 		t.Fatalf("spent %v, over %v", m.spentUSD(), m.over())
+	}
+	// A request that cannot fit even alone is refused once nothing else is
+	// reserved, and every request after it is refused too.
+	m.settle(hold, 0.5)
+	m.settle(0.01, 0.01)
+	if err := m.reserve(t.Context(), 0.5); !errors.Is(err, errCapped) {
+		t.Fatalf("a request past the cap on its own: %v", err)
+	}
+	if err := m.reserve(t.Context(), 0.0001); !errors.Is(err, errCapped) || !m.over() {
+		t.Fatalf("a request after a refusal: %v", err)
+	}
+	// A waiting request ends with its context.
+	w := newMeter(Price{Input: 1, Output: 1}, 1)
+	if err := w.reserve(t.Context(), 0.9); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := w.reserve(ctx, 0.5); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting request after its context ended: %v", err)
 	}
 }
 
@@ -185,7 +410,7 @@ func (completer) Complete(context.Context, llmtypes.ChatRequest) (string, error)
 type fakeProvider struct{ *scripted }
 
 func TestCompleteIsMetered(t *testing.T) {
-	m := &meter{price: Price{Input: 1, Output: 1}, max: 1}
+	m := newMeter(Price{Input: 1, Output: 1}, 1)
 	cancelled := false
 	p := &metered{Provider: completer{fakeProvider{newScripted(Script{})}}, meter: m, cancel: func() { cancelled = true }}
 	req := llmtypes.ChatRequest{SystemPrompt: strings.Repeat("y", 4000), MaxTokens: 100}
@@ -380,7 +605,7 @@ func TestUnfinishedStreamsKeepTheReservation(t *testing.T) {
 		"no usage":                      {streamOf{events: []llmtypes.StreamEvent{{Type: llmtypes.EventDone}}}, false, true},
 		"finished":                      {streamOf{events: end}, false, false},
 	} {
-		m := &meter{price: Price{Input: 1, Output: 1}}
+		m := newMeter(Price{Input: 1, Output: 1}, 0)
 		ctx, cancel := context.WithCancel(context.Background())
 		mp := &metered{Provider: tc.p, meter: m, cancel: cancel}
 		ch, err := mp.StreamChat(ctx, req)
@@ -500,7 +725,7 @@ func settled(t *testing.T, m *meter, want float64) {
 func TestMeterChargesFailuresAndLateUsage(t *testing.T) {
 	req := llmtypes.ChatRequest{SystemPrompt: strings.Repeat("y", 3000)}
 	price := Price{Input: 1, Output: 1}
-	m := &meter{price: price}
+	m := newMeter(price, 0)
 	// The defaults: input at three characters a token, 16,384 output tokens.
 	// The request is 3,000 characters of prompt plus "null" for its messages
 	// and for its tools.
@@ -511,7 +736,7 @@ func TestMeterChargesFailuresAndLateUsage(t *testing.T) {
 		t.Fatalf("worst = %v, want %v", got, want)
 	}
 	t.Run("start failure", func(t *testing.T) {
-		m := &meter{price: price}
+		m := newMeter(price, 0)
 		mp := &metered{Provider: failing{}, meter: m, cancel: func() {}}
 		if _, err := mp.StreamChat(context.Background(), req); err == nil {
 			t.Fatal("no error")
@@ -519,7 +744,7 @@ func TestMeterChargesFailuresAndLateUsage(t *testing.T) {
 		settled(t, m, m.worst(req))
 	})
 	t.Run("Complete failure", func(t *testing.T) {
-		m := &meter{price: price}
+		m := newMeter(price, 0)
 		mp := &metered{Provider: failing{}, meter: m, cancel: func() {}}
 		if _, err := mp.Complete(context.Background(), req); err == nil {
 			t.Fatal("no error")
@@ -527,7 +752,7 @@ func TestMeterChargesFailuresAndLateUsage(t *testing.T) {
 		settled(t, m, m.worst(req))
 	})
 	t.Run("usage after the reader left", func(t *testing.T) {
-		m := &meter{price: price}
+		m := newMeter(price, 0)
 		ctx, cancel := context.WithCancel(context.Background())
 		mp := &metered{Provider: lateUsage{}, meter: m, cancel: cancel}
 		ch, err := mp.StreamChat(ctx, req)
@@ -542,8 +767,8 @@ func TestMeterChargesFailuresAndLateUsage(t *testing.T) {
 		settled(t, m, 1)
 	})
 	t.Run("refused stays refused", func(t *testing.T) {
-		m := &meter{price: price, max: 1}
-		if m.reserve(2) || m.reserve(0.0001) {
+		m := newMeter(price, 1)
+		if m.reserve(t.Context(), 2) == nil || m.reserve(t.Context(), 0.0001) == nil {
 			t.Fatal("a reservation after a refusal was accepted")
 		}
 	})

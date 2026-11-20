@@ -138,9 +138,11 @@ the model. A low price makes the dollar cap stop late.
 - A failed request, or a failed summary or repair, is charged its reservation. A successful summary
   or repair reports no usage, so it is charged an estimate: its input at three characters a token
   and its answer at four.
-- Once the cap has refused a request, every later request is refused too.
-- A request that would pass the cap is refused. That ends the run in progress, and the rest are
-  skipped.
+- A request that does not fit beside other requests' reservations waits for them to settle (they
+  usually settle well below their worst case). One that would pass the cap on its own is refused.
+  That ends the run it belongs to, and the runs not yet started are skipped.
+- Once the cap has refused a request, every later request is refused too, so runs in flight at
+  that moment end at their next request.
 
 **Results:** on any exit (finished, capped, Ctrl-C or an error), it writes what ran and the spend
 so far. Error text is shortened, and anything that looks like a credential is removed, before it
@@ -149,10 +151,13 @@ goes into a report.
 **Credentials:** it reads them the way `nanite` does: `NANITE_GATEWAY_URL` and
 `NANITE_GATEWAY_KEY_REF`, then the keychain, then `NANITE_PROVIDER_KEY_ENV=1`.
 
-**One run at a time:** each run moves the process into its own copy of the workspace, because the
-file tools resolve relative paths against the working directory. The harness therefore runs
-scenarios one at a time. Nothing else in the process may rely on the working directory while it
-runs.
+**Working directory:** each run works in its own copy of the workspace through
+`agent.Options.WorkDir`, so relative paths in the file tools resolve there. The harness never
+changes the process's working directory. `Config.Parallel` (`-parallel`, default 1, at most 8)
+runs that many at once; `Run` itself is safe to call concurrently, and results keep scenario and
+arm order. The dollar cap is shared by every run in one `Run`. When a run fails with an error, the
+runs in flight beside it are cancelled and reported as `stopped: another run failed`, and no
+further run starts. MCP stdio servers start in the process's working directory, not the copy.
 
 ## Live results, 2026-11-20
 

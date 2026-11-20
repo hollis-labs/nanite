@@ -87,6 +87,7 @@ func run(ctx context.Context, args []string, w, status io.Writer) error {
 	mode := fs.String("mode", "", "run only the arms of this mode: direct or subtask (default all)")
 	out := fs.String("out", "", "write results.md and results.json into this directory instead of printing the table")
 	maxUSD := fs.Float64("max-usd", 10, "live: stop the whole run before its estimated spend passes this many dollars (0 < cap <= 50)")
+	parallel := fs.Int("parallel", 1, "how many runs happen at once (1-8); they share the dollar cap")
 	turnTokens := fs.Int("turn-tokens", 150000, "live: token cap for one run's task turn, its subtasks included (> 0)")
 	price := evals.ConservativePrice
 	fs.Float64Var(&price.Input, "price-in", price.Input, "dollars per million input tokens")
@@ -104,7 +105,10 @@ func run(ctx context.Context, args []string, w, status io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cfg := evals.Config{TurnTokens: *turnTokens, Price: price}
+	if *parallel < 1 || *parallel > 8 {
+		return fmt.Errorf("-parallel must be between 1 and 8, not %d", *parallel)
+	}
+	cfg := evals.Config{TurnTokens: *turnTokens, Price: price, Parallel: *parallel}
 	if *mode != "" {
 		m := evals.Mode(*mode)
 		if m != evals.Direct && m != evals.Subtask {

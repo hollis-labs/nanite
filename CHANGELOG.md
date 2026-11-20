@@ -9,6 +9,11 @@
   is the model's context window, so an over-window history now compacts
   before the first request instead of after the provider refuses it.
 
+- `Runner.Discard` is idempotent when no interrupted turn remains: it returns
+  nil and sends no discard activity. Racing owner and timeout discards announce
+  only the successful discard. Failed hold expiry retries back off from 100 ms
+  to 30 seconds, logging once per delay level.
+
 - Interrupted-turn holds retry after a failed or cancelled resume or a failed
   timeout discard. Hold timestamps belong to a specific turn, obsolete waiting
   notices are withdrawn, and a new message racing timeout discard succeeds.

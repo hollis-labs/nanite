@@ -36,10 +36,12 @@ const defaultInterruptedHold = 15 * time.Minute
 
 // hold is an interrupted turn waiting for the owner.
 type hold struct {
-	turn     string
-	timer    *time.Timer // nil when the hold has no end
-	deadline time.Time
-	noticeMu sync.Mutex // orders waiting-item submission and withdrawal
+	turn        string
+	timer       *time.Timer // nil when the hold has no end
+	deadline    time.Time
+	retryDelay  time.Duration
+	loggedRetry time.Duration
+	noticeMu    sync.Mutex // orders waiting-item submission and withdrawal
 	// waiting is set when the desk has work waiting for the turn; told,
 	// once the owner has been told so.
 	waiting, told bool
@@ -172,16 +174,19 @@ func (r *Runner) expireHold(chatID, turnID string) {
 	ctx := context.Background()
 	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
 	if err != nil {
-		r.rearmHold(chatID)
+		r.rearmHold(chatID, err)
 		return
 	}
 	if turn := c.Interrupted(); turn == nil || turn.ID != turnID {
 		r.endHold(chatID)
 		return
 	}
-	if err := c.Discard(ctx); err != nil && !errors.Is(err, agent.ErrNoInterrupted) {
-		r.logger().Warn("chatrunner: discard interrupted turn after its hold", "conversation", chatID, "error", err.Error())
-		r.rearmHold(chatID)
+	if err := c.Discard(ctx); err != nil {
+		if errors.Is(err, agent.ErrNoInterrupted) {
+			r.endHold(chatID)
+		} else {
+			r.rearmHold(chatID, err)
+		}
 		return
 	}
 	r.endHold(chatID)
@@ -411,23 +416,35 @@ func (r *Runner) unclaim(chatID string) {
 	r.mu.Lock()
 	delete(r.resuming, chatID)
 	r.mu.Unlock()
-	r.rearmHold(chatID)
+	r.rearmHold(chatID, nil)
 }
 
-// rearmHold retries an expired hold after a failed discard or a resume that
-// released its claim without ending the hold. Keep the original deadline;
-// a short retry delay avoids spinning on a persistent store error.
-func (r *Runner) rearmHold(chatID string) {
+// rearmHold preserves the original deadline. Once expired, retries back off
+// from 100ms to 30s; persistent failures log only once at each delay level.
+func (r *Runner) rearmHold(chatID string, cause error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	h := r.holds[chatID]
 	if r.closed || h == nil || h.deadline.IsZero() {
+		r.mu.Unlock()
 		return
 	}
 	if h.timer != nil {
 		h.timer.Stop()
 	}
-	h.timer = time.AfterFunc(max(100*time.Millisecond, time.Until(h.deadline)), func() { r.expireHold(chatID, h.turn) })
+	wait := time.Until(h.deadline)
+	if wait <= 0 {
+		h.retryDelay = min(max(100*time.Millisecond, h.retryDelay*2), 30*time.Second)
+		wait = h.retryDelay
+	}
+	logFailure := cause != nil && h.loggedRetry != wait
+	if logFailure {
+		h.loggedRetry = wait
+	}
+	h.timer = time.AfterFunc(wait, func() { r.expireHold(chatID, h.turn) })
+	r.mu.Unlock()
+	if logFailure {
+		r.logger().Warn("chatrunner: retry interrupted hold", "conversation", chatID, "retry_after", wait, "error", cause.Error())
+	}
 }
 
 // Discard abandons the turn the previous process left unfinished on a chat
@@ -439,7 +456,11 @@ func (r *Runner) Discard(ctx context.Context, chatID string) error {
 		return fmt.Errorf("chatrunner: open conversation: %w", err)
 	}
 	turn := c.Interrupted()
-	if err := c.Discard(ctx); err != nil && !errors.Is(err, agent.ErrNoInterrupted) {
+	if err := c.Discard(ctx); err != nil {
+		if errors.Is(err, agent.ErrNoInterrupted) {
+			r.endHold(chatID)
+			return nil
+		}
 		return fmt.Errorf("chatrunner: discard interrupted turn: %w", err)
 	}
 	r.endHold(chatID)

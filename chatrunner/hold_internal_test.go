@@ -1,11 +1,14 @@
 package chatrunner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -181,12 +184,21 @@ func TestHoldTimestampBelongsToInterruptedTurn(t *testing.T) {
 func TestConcurrentOwnerAndTimeoutDiscard(t *testing.T) {
 	r, c, chatID := interruptedRunner(t)
 	turnID := expiredHold(t, r, chatID)
+	announcements := make(chan struct{}, 12)
+	r.opts.Observe = func(_ context.Context, _ string, _ chat.Turn, run chat.Run) error {
+		for ev := range run.Events() {
+			if ev.Kind == ActivityInterrupted && bytes.Contains(ev.Value, []byte(`"discarded"`)) {
+				announcements <- struct{}{}
+			}
+		}
+		return nil
+	}
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for range 10 {
 		wg.Go(func() {
 			<-start
-			if _, err := r.discardInterrupted(t.Context(), chatID, c); err != nil {
+			if err := r.Discard(t.Context(), chatID); err != nil {
 				t.Errorf("owner discard: %v", err)
 			}
 		})
@@ -194,6 +206,16 @@ func TestConcurrentOwnerAndTimeoutDiscard(t *testing.T) {
 	wg.Go(func() { <-start; r.expireHold(chatID, turnID) })
 	close(start)
 	wg.Wait()
+	select {
+	case <-announcements:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no discard announcement")
+	}
+	select {
+	case <-announcements:
+		t.Fatal("duplicate discard announcement")
+	case <-time.After(100 * time.Millisecond):
+	}
 	if err := c.Discard(t.Context()); !errors.Is(err, agent.ErrNoInterrupted) {
 		t.Fatalf("already discarded: %v", err)
 	}
@@ -259,5 +281,58 @@ func TestLateWaitingNoticeCannotReturnAfterHoldEnds(t *testing.T) {
 	r.tellHeld(chatID, h)
 	if len(d.chat(chatID).editor.Pending()) != 0 {
 		t.Fatal("late waiting notice was queued")
+	}
+}
+
+func TestHoldRetryBackoffCapsAndLogsOncePerLevel(t *testing.T) {
+	r, _, chatID := interruptedRunner(t)
+	expiredHold(t, r, chatID)
+	var logs bytes.Buffer
+	r.opts.Agent.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	want := 100 * time.Millisecond
+	for range 15 {
+		r.rearmHold(chatID, errors.New("store unavailable"))
+		r.mu.Lock()
+		h := r.holds[chatID]
+		h.timer.Stop()
+		got := h.retryDelay
+		r.mu.Unlock()
+		if got != want {
+			t.Fatalf("retry delay %s, want %s", got, want)
+		}
+		want = min(want*2, 30*time.Second)
+	}
+	if got := strings.Count(logs.String(), "retry interrupted hold"); got != 10 {
+		t.Fatalf("logged %d times, want 10 levels", got)
+	}
+}
+
+func TestLegacyHoldStampStartsFreshOnce(t *testing.T) {
+	r, c, chatID := interruptedRunner(t)
+	r.opts.InterruptedHold = -1
+	old := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	if err := c.SetHostState(t.Context(), holdHostState, old); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now()
+	r.startHold(t.Context(), chatID)
+	raw, err := c.HostState(t.Context(), holdHostState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stamp struct {
+		Turn  string
+		Since time.Time
+	}
+	if err := json.Unmarshal([]byte(raw), &stamp); err != nil {
+		t.Fatal(err)
+	}
+	if stamp.Turn != c.Interrupted().ID || stamp.Since.Before(before) {
+		t.Fatalf("legacy stamp not reset: %+v", stamp)
+	}
+	r.startHold(t.Context(), chatID)
+	again, err := c.HostState(t.Context(), holdHostState)
+	if err != nil || again != raw {
+		t.Fatalf("hold reset twice: %q %v", again, err)
 	}
 }

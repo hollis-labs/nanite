@@ -517,7 +517,11 @@ func (s *Source) send(ctx context.Context, method, path, ctype string, body io.R
 	var connected atomic.Bool
 	if sent != nil {
 		ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
-		defer func() { *sent = connected.Load() }()
+		// Only the standard transport is known to report GotConn before
+		// writing a request; with any other, assume the request may have
+		// left, so a failure keeps the lost-answer marker.
+		reports := tracesConnections(s.cfg.HTTP)
+		defer func() { *sent = connected.Load() || !reports }()
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(s.cfg.URL, "/")+path, body)
 	if err != nil {
@@ -579,4 +583,17 @@ func errorCode(raw []byte) string {
 		}
 	}
 	return e.Code
+}
+
+// tracesConnections reports whether the client's transport is the standard
+// one, which calls httptrace GotConn before it writes a request.
+func tracesConnections(c *http.Client) bool {
+	if c == nil {
+		return true
+	}
+	switch c.Transport.(type) {
+	case nil, *http.Transport:
+		return true
+	}
+	return false
 }

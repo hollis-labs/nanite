@@ -507,3 +507,20 @@ func TestInvalidateDropsOnlyTheTokenSent(t *testing.T) {
 		t.Fatal("the refused token was kept")
 	}
 }
+
+type opaqueTransport struct{}
+
+func (opaqueTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("opaque transport failure")
+}
+
+// A transport that does not report connections cannot prove a request never
+// left, so its failures keep the lost-answer marker.
+func TestUnknownTransportFailureKeepsTheMarker(t *testing.T) {
+	if tracesConnections(&http.Client{Transport: opaqueTransport{}}) {
+		t.Fatal("an unknown transport was trusted to report connections")
+	}
+	if !tracesConnections(nil) || !tracesConnections(&http.Client{}) || !tracesConnections(&http.Client{Transport: &http.Transport{}}) {
+		t.Fatal("the standard transport was not trusted")
+	}
+}

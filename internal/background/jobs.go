@@ -55,10 +55,13 @@ type Manager struct {
 	mu     sync.Mutex
 	active map[string]activeJob
 	closed bool
+	// cancelled is the active jobs Cancel was asked to stop, so their end
+	// is not taken for a shutdown when Close follows.
+	cancelled map[string]bool
 }
 
 func New(db *store.Store, scrub *redact.Redactor, notify func(store.Job, store.Notice), logger *slog.Logger, guard *panics.Guard) *Manager {
-	return &Manager{db: db, scrub: scrub, notify: notify, logger: logger, panics: guard, active: make(map[string]activeJob)}
+	return &Manager{db: db, scrub: scrub, notify: notify, logger: logger, panics: guard, active: make(map[string]activeJob), cancelled: map[string]bool{}}
 }
 
 func (m *Manager) Start(ctx context.Context, job store.Job, start Start) (store.Job, error) {
@@ -123,7 +126,7 @@ func (m *Manager) Start(ctx context.Context, job store.Job, start Start) (store.
 func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os.File, logWriter io.WriteCloser, active activeJob) {
 	defer active.cancel()
 	defer close(active.done)
-	defer func() { m.mu.Lock(); delete(m.active, job.ID); m.mu.Unlock() }()
+	defer func() { m.mu.Lock(); delete(m.active, job.ID); delete(m.cancelled, job.ID); m.mu.Unlock() }()
 	// A panic while the job runs fails the job with the ref; the job is still
 	// completed, logged and announced.
 	var got Outcome
@@ -135,7 +138,7 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 	if errors.Is(got.Err, context.Canceled) || ctx.Err() != nil {
 		job.Status = "cancelled"
 		m.mu.Lock()
-		if m.closed {
+		if m.closed && !m.cancelled[job.ID] {
 			job.Reason = store.JobReasonShutdown
 		}
 		m.mu.Unlock()
@@ -181,6 +184,7 @@ func (m *Manager) Cancel(id string) bool {
 	defer m.mu.Unlock()
 	job, ok := m.active[id]
 	if ok {
+		m.cancelled[id] = true
 		job.cancel()
 	}
 	return ok

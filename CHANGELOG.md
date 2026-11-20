@@ -23,7 +23,8 @@
   `SetHostState` and `ConversationHostStates`: host values that outlive a
   restart and that the model never sees (stored with the conversation
   settings, under a `host.` key prefix; no migration).
-- A background job `Close` cancels now has the reason `shutdown`, and a job
+- A background job `Close` cancels now has the reason `shutdown` (a job
+  `Cancel` was asked to stop keeps a plain cancellation), and a job
   the next start finds still running (status `lost`) has `process exit`
   (`agent.JobReasonShutdown`, `agent.JobReasonProcessExit`), so a host can
   tell a restart from a cancellation or a failure.

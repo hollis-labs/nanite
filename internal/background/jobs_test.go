@@ -108,3 +108,53 @@ func TestCloseMarksJobsStoppedByShutdown(t *testing.T) {
 		t.Fatalf("job %+v, %v", got, err)
 	}
 }
+
+// A job Cancel stopped keeps a plain cancellation even when Close follows
+// before it has ended.
+func TestCancelBeforeCloseIsNotAShutdown(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), ".nanite"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Now().UTC()
+	conversation := store.Conversation{ID: store.NewID(now), Role: "chat", Status: "active", CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateConversation(t.Context(), conversation); err != nil {
+		t.Fatal(err)
+	}
+	scrub, err := redact.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(db, scrub, func(store.Job, store.Notice) {}, slog.New(slog.DiscardHandler), panics.New(panics.Config{Redact: scrub.Text}))
+	started, release := make(chan struct{}), make(chan struct{})
+	job, err := m.Start(t.Context(), store.Job{ID: store.NewID(now), ConversationID: conversation.ID, Kind: "subagent", Spec: "{}"},
+		func(ctx context.Context, _ io.Writer) (Task, error) {
+			// It ends only after Close has begun, as a slow job would.
+			return Task{Wait: func() Outcome { close(started); <-ctx.Done(); <-release; return Outcome{Err: ctx.Err()} }}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if !m.Cancel(job.ID) {
+		t.Fatal("cancel found no job")
+	}
+	closed := make(chan struct{})
+	go func() { m.Close(); close(closed) }()
+	for {
+		m.mu.Lock()
+		c := m.closed
+		m.mu.Unlock()
+		if c {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	<-closed
+	got, err := db.Job(t.Context(), conversation.ID, "subagent", job.ID)
+	if err != nil || got.Status != "cancelled" || got.Reason != "" {
+		t.Fatalf("job %+v, %v", got, err)
+	}
+}

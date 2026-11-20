@@ -86,11 +86,17 @@ type Desk struct {
 	workers map[string]*noticeWorker
 	seq     int
 
-	// saveMu serializes saves (see persist). ownLedger is set when the
-	// desk made the ledger, and so saves and restores it.
-	saveMu      sync.Mutex
-	ownLedger   bool
-	savedLedger string
+	// ledgerGen counts changes to the ledger (under mu).
+	ledgerGen int
+
+	// saveMu serializes saves (see persist); the fields after it are
+	// under it. ownLedger is set when the desk made the ledger, and so
+	// saves and restores it; ledgerFrozen when the saved ledger is from a
+	// newer version and must not be overwritten.
+	saveMu         sync.Mutex
+	ownLedger      bool
+	ledgerFrozen   bool
+	savedLedgerGen int
 }
 
 // noticeWorker handles one Nanite conversation's notices in order, so a
@@ -107,13 +113,17 @@ type noticeWorker struct {
 const maxDispatchAttempts = 3
 
 type deskChat struct {
-	editor    *desk.Editor
-	timer     *time.Timer
-	typing    bool
-	suggested map[string]desk.Plan
-	plans     []*planRun
-	retired   []string // recent job IDs whose finish was applied, oldest first
-	saved     string   // the state last saved, under saveMu
+	editor      *desk.Editor
+	timer       *time.Timer
+	typing      bool
+	suggested   map[string]desk.Plan
+	suggestedAt map[string]time.Time
+	plans       []*planRun
+	retired     []string // recent job IDs whose finish was applied, oldest first
+	saved       string   // the state last saved, under saveMu
+	// frozen is set when the chat's saved state is from a newer version:
+	// it is neither read nor overwritten.
+	frozen bool
 }
 
 // planRun is a plan being carried out on one chat.
@@ -198,7 +208,7 @@ func (d *Desk) chat(chatID string) *deskChat {
 	c := d.chats[chatID]
 	if c == nil {
 		ed, _ := desk.NewEditor(d.policy, desk.WithLedger(d.ledger)) // the policy was validated
-		c = &deskChat{editor: ed, suggested: map[string]desk.Plan{}}
+		c = &deskChat{editor: ed, suggested: map[string]desk.Plan{}, suggestedAt: map[string]time.Time{}}
 		d.chats[chatID] = c
 	}
 	return c
@@ -258,8 +268,8 @@ func (d *Desk) Flush(chatID string) bool {
 	}
 	m, ok := c.editor.Flush()
 	if ok {
+		d.persist(chatID) // released before it goes out, as in pump
 		d.publish(chatID, m)
-		d.persist(chatID)
 	}
 	return ok
 }
@@ -291,7 +301,7 @@ func (d *Desk) beforeTurn(ctx context.Context, chatID, text string) (note string
 	case desk.Suggest:
 		d.mu.Lock()
 		id := d.nextID("plan-")
-		d.chat(chatID).suggested[id] = res.Plan
+		d.chat(chatID).suggest(id, res.Plan, time.Now())
 		d.mu.Unlock()
 		d.persist(chatID)
 		card := res.Plan.Card()
@@ -335,6 +345,7 @@ func (d *Desk) newRun(chatID string, p desk.Plan) (*planRun, error) {
 		if err != nil {
 			return nil, err
 		}
+		d.touchLedger()
 		topic = t.ID
 	}
 	d.mu.Lock()
@@ -347,6 +358,7 @@ func (d *Desk) newRun(chatID string, p desk.Plan) (*planRun, error) {
 			return nil, err
 		}
 	}
+	d.touchLedger()
 	d.mu.Lock()
 	d.chat(chatID).plans = append(d.chat(chatID).plans, run)
 	d.mu.Unlock()
@@ -376,7 +388,7 @@ func (d *Desk) AcceptPlan(ctx context.Context, chatID, planID string, edited *de
 		d.mu.Unlock()
 		return fmt.Errorf("chatrunner: no suggested plan %q", planID)
 	}
-	delete(d.chat(chatID).suggested, planID)
+	d.chat(chatID).unsuggest(planID)
 	d.mu.Unlock()
 	d.persist(chatID)
 	if d.opts.OnCorrection != nil {
@@ -395,7 +407,7 @@ func (d *Desk) AcceptPlan(ctx context.Context, chatID, planID string, edited *de
 func (d *Desk) DeclinePlan(chatID, planID string) error {
 	d.mu.Lock()
 	proposed, ok := d.chat(chatID).suggested[planID]
-	delete(d.chat(chatID).suggested, planID)
+	d.chat(chatID).unsuggest(planID)
 	d.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("chatrunner: no suggested plan %q", planID)
@@ -459,6 +471,7 @@ func (d *Desk) answerOpen(chatID, text string) {
 	d.mu.Unlock()
 	for _, a := range answered {
 		_ = d.ledger.Answer(a.run.topic, a.id, text)
+		d.touchLedger()
 		d.mu.Lock()
 		delete(a.run.asked, a.item)
 		d.mu.Unlock()
@@ -466,8 +479,14 @@ func (d *Desk) answerOpen(chatID, text string) {
 	}
 }
 
-// finish records an item's outcome in the plan and the ledger.
+// finish records an item's outcome in the plan and the ledger, and saves.
 func (d *Desk) finish(run *planRun, item string, ok bool, result string) {
+	d.record(run, item, ok, result)
+	d.persist(run.chatID)
+}
+
+// record records an item's outcome in the plan and the ledger.
+func (d *Desk) record(run *planRun, item string, ok bool, result string) {
 	state := desk.WorkDone
 	if !ok {
 		state = desk.WorkFailed
@@ -479,7 +498,7 @@ func (d *Desk) finish(run *planRun, item string, ok bool, result string) {
 	if err := d.ledger.Progress(run.topic, run.workID(item), state, result); err != nil {
 		d.logger.Warn("chatrunner: desk ledger", "topic", run.topic, "work", item, "error", err.Error())
 	}
-	d.persist(run.chatID)
+	d.touchLedger()
 }
 
 // advance starts every ready item of the chat's plans. Subtask items are
@@ -538,6 +557,7 @@ func (d *Desk) advanceWith(ctx context.Context, chatID string, c *agent.Conversa
 			continue
 		}
 		_ = d.ledger.Progress(p.run.topic, p.run.workID(p.item.ID), desk.WorkRunning, "")
+		d.touchLedger()
 		d.mu.Lock()
 		p.run.asked[p.item.ID] = q.ID
 		d.mu.Unlock()
@@ -552,6 +572,7 @@ func (d *Desk) advanceWith(ctx context.Context, chatID string, c *agent.Conversa
 		}
 		_ = d.ledger.Progress(p.run.topic, p.run.workID(p.item.ID), desk.WorkRunning, "")
 		_ = d.ledger.Link(p.run.topic, ref)
+		d.touchLedger()
 		d.mu.Lock()
 		p.run.refs[ref] = p.item.ID
 		d.mu.Unlock()
@@ -623,6 +644,7 @@ func (d *Desk) dispatch(ctx context.Context, chatID string, c *agent.Conversatio
 		ref := desk.Ref{Kind: "job", ID: handle.ID}
 		_ = d.ledger.Progress(p.run.topic, p.run.workID(p.item.ID), desk.WorkRunning, "")
 		_ = d.ledger.Link(p.run.topic, ref)
+		d.touchLedger()
 		d.mu.Lock()
 		d.jobs[handle.ID] = p.run
 		p.run.refs[ref] = p.item.ID
@@ -974,6 +996,9 @@ func (d *Desk) pump(chatID string) {
 	}
 	st := d.state(chatID)
 	if m, ok := c.editor.Due(st); ok {
+		// Save that it was released before it goes out: a crash in
+		// between loses the message rather than sending it twice.
+		d.persist(chatID)
 		d.publish(chatID, m)
 	}
 	next, ok := c.editor.Next(st)

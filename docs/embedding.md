@@ -291,8 +291,14 @@ plans needs the `subtasks` and `background` builtin groups.
   again, counting as one of the step's three attempts. Then ready steps
   start and what the editor holds goes out when due. A job's finish is
   applied once, whether its notice or `Recover` sees it first, and an item
-  the editor already released is not sent again. `Close` saves everything
-  before it stops the agent. The owner's typing state is not saved.
+  the editor already released is not sent again. A release is saved before
+  it is published, so a crash in that moment loses that one message rather
+  than sending it twice. A step saved as running before its job was
+  recorded goes back to planned on restart, without counting an attempt.
+  Suggested plans nobody answers expire after 24 hours (at most 20 per
+  chat). State saved by a newer Nanite is neither read nor overwritten.
+  `Close` saves everything before it stops the agent. The owner's typing
+  state is not saved.
 
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the

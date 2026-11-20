@@ -67,6 +67,17 @@ about either setting.
 - `inventory` varies `SubtaskResultCap`. At 1,500 tokens the list is over the cap: the parent
   receives a pointer and has to fetch the stored result.
 
+**Stub tools:** a scenario's `Stubs` are host tools offered in every arm (group `eval-stubs`), so a
+case can exercise an agent that depends on host tools without calling them. Each stub has a name
+(1-64 letters, digits, `_` or `-`; not a built-in or reserved name, so an MCP tool cannot be stubbed
+under its `mcp__` name), a description, an input schema and canned results. A call gets the first
+result whose `when` fields equal its input's, otherwise the next ordered result (the last repeats).
+Calls in one model step may run at once in any order, so give those a `when` to keep a run
+deterministic. `read_only` works as for any host tool (read-only variants are offered it; whether a
+call asks for approval depends on the permission mode). `Result.StubCalls` (JSON only) counts each
+stub's calls in the task turn, subtasks' included. Bad stubs are refused before any run starts. The
+checked-in scenarios use none.
+
 ## Metrics
 
 All of these come from the task turn's trace records (libs `agent/trace` v0.2.0), except approvals

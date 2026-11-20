@@ -122,6 +122,9 @@ type Result struct {
 	// what its arm varies.
 	SubtaskTools  []string `json:"subtask_tools,omitempty"`
 	ParentFetches int      `json:"parent_fetches"`
+	// StubCalls counts the calls to each of the scenario's stub tools,
+	// subtasks' calls included.
+	StubCalls map[string]int `json:"stub_calls,omitempty"`
 	// Skipped says why the run did not happen.
 	Skipped string `json:"skipped,omitempty"`
 	// cancelled is set when the run ended with Run's context already
@@ -160,6 +163,11 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 		arm Arm
 	}
 	var jobs []job
+	for _, s := range scenarios {
+		if err := checkStubs(s.Stubs); err != nil {
+			return Report{}, fmt.Errorf("%s: %w", s.Name, err)
+		}
+	}
 	for _, s := range scenarios {
 		for _, arm := range s.AllArms() {
 			if len(cfg.Modes) > 0 && !slices.Contains(cfg.Modes, arm.Mode) {
@@ -319,6 +327,12 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 		return res, err
 	}
 	defer func() { retErr = errors.Join(retErr, a.Close()) }()
+	stubs := &stubCalls{}
+	if len(s.Stubs) > 0 {
+		if err := a.Tools().SetGroup(StubGroup, stubs.tools(s.Stubs)...); err != nil {
+			return res, err
+		}
+	}
 	conv, err := a.NewConversation(runCtx)
 	if err != nil {
 		return res, err
@@ -349,6 +363,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	first := len(records)
 	mu.Unlock()
 	gate.n.Store(0)
+	stubs.reset()
 	start := time.Now()
 	var result agent.Result
 	if runErr == nil {
@@ -357,6 +372,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	res.cancelled = ctx.Err() != nil
 	res.WallMS = time.Since(start).Milliseconds()
 	res.Approvals = int(gate.n.Load())
+	res.StubCalls = stubs.counts()
 
 	mu.Lock()
 	recs := append([]agent.TraceRecord(nil), records[first:]...)

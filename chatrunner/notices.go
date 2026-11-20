@@ -22,36 +22,48 @@ const noticePublishWait = 2 * time.Minute
 const maxNoticeTurns = 3
 
 // listen hands each notice to its conversation's publisher, so one slow
-// Observe never holds up another conversation's notices.
+// Observe never holds up another conversation's notices. With a front
+// desk, notices go to it instead, and it publishes composed releases.
 func (r *Runner) listen(ctx context.Context, notices <-chan agent.NoticePosted) {
 	defer close(r.noticesDone)
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	var mu sync.Mutex
-	publishers := map[string]*publisher{}
+	defer r.publishing.Wait()
 	for n := range notices {
 		if r.opts.Observe == nil {
 			continue
 		}
-		mu.Lock()
-		p := publishers[n.ConversationID]
-		if p == nil || !p.push(n) {
-			// None yet, or the last one has just stopped: start another.
-			p = &publisher{wake: make(chan struct{}, 1)}
-			p.push(n)
-			publishers[n.ConversationID] = p
-			wg.Add(1)
-			go func(key string) {
-				defer wg.Done()
-				p.run(ctx, r)
-				mu.Lock()
-				if publishers[key] == p {
-					delete(publishers, key)
-				}
-				mu.Unlock()
-			}(n.ConversationID)
+		if r.desk != nil {
+			r.desk.queue(ctx, n)
+			continue
 		}
-		mu.Unlock()
+		r.enqueueNotice(n)
+	}
+}
+
+// enqueueNotice queues a notice on its conversation's publisher, starting
+// one when there is none.
+func (r *Runner) enqueueNotice(n agent.NoticePosted) {
+	ctx := r.noticeCtx
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ctx == nil || r.closed {
+		return
+	}
+	p := r.publishers[n.ConversationID]
+	if p == nil || !p.push(n) {
+		// None yet, or the last one has just stopped: start another.
+		p = &publisher{wake: make(chan struct{}, 1)}
+		p.push(n)
+		r.publishers[n.ConversationID] = p
+		r.publishing.Add(1)
+		go func(key string) {
+			defer r.publishing.Done()
+			p.run(ctx, r)
+			r.mu.Lock()
+			if r.publishers[key] == p {
+				delete(r.publishers, key)
+			}
+			r.mu.Unlock()
+		}(n.ConversationID)
 	}
 }
 

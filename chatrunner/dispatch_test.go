@@ -34,6 +34,11 @@ type wired struct {
 
 func newWired(t *testing.T, noticeTurns bool) *wired {
 	t.Helper()
+	return newWiredWith(t, noticeTurns, nil)
+}
+
+func newWiredWith(t *testing.T, noticeTurns bool, desk *chatrunner.DeskOptions) *wired {
+	t.Helper()
 	dir := t.TempDir()
 	definition := "---\nschema_version: \"2\"\ndefinition_id: def:chat-test\nrevision: \"1\"\nname: chat-test\ndescription: Chat test.\nbehavior:\n  purpose: Test.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: default\ncontinuity:\n  mode: durable\n---\nTest instructions.\n"
 	profile := "kind: embedded\nlifetime: application\napplication_id: chat-test\nruntime:\n  provider: anthropic\n  model: test-model\n"
@@ -53,6 +58,7 @@ func newWired(t *testing.T, noticeTurns bool) *wired {
 			return svc.Load().Observe(ctx, conversationID, turn, run)
 		},
 		NoticeTurns: noticeTurns,
+		Desk:        desk,
 	})
 	if err != nil {
 		t.Fatal(err)

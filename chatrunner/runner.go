@@ -10,8 +10,10 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	chat "github.com/hollis-labs/libs/agent/chat"
+	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
 	"github.com/hollis-labs/nanite/agent"
 )
 
@@ -50,6 +52,12 @@ type Options struct {
 	// before a user turn. The turn starts only once the Service adopts it.
 	// It needs Observe. Off by default.
 	NoticeTurns bool
+	// Desk turns on the front desk: intake planning on each user message,
+	// plans dispatched as background subtasks and tracked by topic, and a
+	// delivery editor that paces the notices no running turn carried into
+	// composed messages. Nil leaves notices published one by one as they
+	// arrive. It needs Observe.
+	Desk *DeskOptions
 }
 
 // Runner is a chat.Runner backed by one Nanite agent.
@@ -72,6 +80,13 @@ type Runner struct {
 	// noticeTurns counts notice turns in a row per Nanite conversation;
 	// a user turn resets it.
 	noticeTurns map[string]int
+	// publishers publishes each conversation's notices in order;
+	// publishing counts the running ones.
+	publishers map[string]*publisher
+	publishing sync.WaitGroup
+	noticeCtx  context.Context
+	closed     bool
+	desk       *Desk
 }
 
 var _ chat.Runner = (*Runner)(nil)
@@ -85,7 +100,17 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	if opts.ContextSlot == "" {
 		opts.ContextSlot = agent.SlotUserContext
 	}
-	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}}
+	if opts.Desk != nil && opts.Observe == nil {
+		return nil, errors.New("chatrunner: Options.Desk needs Options.Observe")
+	}
+	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}, publishers: map[string]*publisher{}}
+	if opts.Desk != nil {
+		d, err := newDesk(r, *opts.Desk)
+		if err != nil {
+			return nil, err
+		}
+		r.desk = d
+	}
 	ao := opts.Agent
 	ao.Gate = gate{r}
 	ao.PDP = pdp{runner: r, host: opts.Agent.PDP}
@@ -99,7 +124,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		return nil, err
 	}
 	listen, stop := context.WithCancel(context.WithoutCancel(ctx))
-	r.stopNotices, r.noticesDone = stop, make(chan struct{})
+	r.stopNotices, r.noticesDone, r.noticeCtx = stop, make(chan struct{}), listen
 	notices := a.SubscribeNotices(listen)
 	go r.listen(listen, notices)
 	return r, nil
@@ -109,8 +134,17 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 // SetTools for the host's tools so their levels are kept.
 func (r *Runner) Agent() *agent.Agent { return r.agent }
 
+// Desk returns the front desk, or nil when Options.Desk is not set.
+func (r *Runner) Desk() *Desk { return r.desk }
+
 // Close stops running turns and releases the agent directory.
 func (r *Runner) Close() error {
+	if r.desk != nil {
+		r.desk.stop()
+	}
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
 	r.stopNotices()
 	<-r.noticesDone
 	return r.agent.Close()
@@ -159,16 +193,43 @@ func TurnFromContext(ctx context.Context) (chat.Turn, bool) {
 	return t, ok
 }
 
-// Start begins a turn.
+// Start begins a turn. With a front desk, the message is planned first:
+// a dispatched plan's background subtasks start before the turn, and the
+// chat agent is told about the plan in the turn's context.
 func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	in := agent.Input{Text: turn.Text}
-	if text := contextText(turn.Context); text != "" {
-		in.Slots = []agent.SlotUpdate{{Slot: r.opts.ContextSlot, Entry: agent.SlotEntry{Owner: "chat", Key: "turn-context", Content: text}}}
-	}
-	x, err := r.begin(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) { return c.Send(runCtx, in) })
+	text := contextText(turn.Context)
+	var prelude []chatstream.Event
+	x, err := r.beginAfterDesk(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
+		// The desk works only once the turn holds the conversation, so a
+		// turn that could not start has not answered or planned anything.
+		var plan *planRun
+		if r.desk != nil {
+			var note string
+			note, prelude, plan = r.desk.beforeTurn(runCtx, turn.ConversationID, turn.Text)
+			if note != "" {
+				text = strings.TrimSpace(text + "\n\n" + note)
+			}
+		}
+		if text != "" {
+			in.Slots = []agent.SlotUpdate{{Slot: r.opts.ContextSlot, Entry: agent.SlotEntry{Owner: "chat", Key: "turn-context", Content: text}}}
+		}
+		if r.desk != nil {
+			// Start what is ready (this message's plan, and later steps
+			// that waited for the conversation) before the turn holds it.
+			if err := r.desk.advanceWith(context.WithoutCancel(runCtx), turn.ConversationID, c); err != nil {
+				r.desk.logger.Warn("chatrunner: desk dispatch before the turn", "conversation", turn.ConversationID, "error", err.Error())
+				if plan != nil {
+					prelude = append(prelude, activity(ActivityDeskPlan, map[string]any{"id": plan.id, "disposition": "failed", "error": err.Error()}))
+				}
+			}
+		}
+		return c.Send(runCtx, in)
+	})
 	if err != nil {
 		return nil, err
 	}
+	x.prelude = prelude
 	// A user turn lets notices start notice turns again.
 	r.mu.Lock()
 	delete(r.noticeTurns, x.nanite)
@@ -179,11 +240,17 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 // begin opens the chat conversation's Nanite conversation and starts a run
 // on it with start, registered so its approvals are answered on the wire.
 func (r *Runner) begin(ctx context.Context, turn chat.Turn, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
+	return r.beginRun(ctx, turn, false, start)
+}
+
+// beginRun is begin; hostDispatch marks the front desk's own dispatch
+// before the run is registered, so nothing sees it as the owner's turn.
+func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
 	c, err := r.conversation(ctx, turn.ConversationID)
 	if err != nil {
 		return nil, err
 	}
-	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}, ended: make(chan struct{})}
+	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}, ended: make(chan struct{}), hostDispatch: hostDispatch}
 	if info, err := r.agent.Info(ctx); err == nil {
 		out.provider, out.model = info.Definition.Profile.Runtime.Provider, info.Definition.Profile.Runtime.Model
 	}
@@ -303,10 +370,79 @@ func (r *Runner) activeRun(naniteID string) *run {
 
 func (r *Runner) release(x *run) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.active[x.nanite] == x {
+	released := r.active[x.nanite] == x
+	if released {
 		delete(r.active, x.nanite)
 	}
+	r.mu.Unlock()
+	if released && r.desk != nil && x.turn.ConversationID != "" {
+		// Start what waited for the conversation (an advance that found it
+		// held) and publish what waited for the owner.
+		go r.desk.idle(x.turn.ConversationID)
+	}
+}
+
+// isHostDispatch reports whether a run is the front desk's own dispatch.
+// The flag is set before the run is registered and never changes.
+func (r *Runner) isHostDispatch(x *run) bool { return x.hostDispatch }
+
+func (r *Runner) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
+}
+
+// ownerTurn reports whether a turn the owner sees runs on a conversation:
+// any run but the front desk's own dispatch.
+func (r *Runner) ownerTurn(naniteID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	x := r.active[naniteID]
+	return x != nil && !x.hostDispatch
+}
+
+// beginAfterDesk is begin, except that when the front desk's own short
+// dispatch holds the conversation it waits for that to end (up to 10s)
+// instead of failing the owner's turn.
+func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
+	for range 2 {
+		x, err := r.begin(ctx, turn, start)
+		if err == nil || !errors.Is(err, agent.ErrBusy) {
+			return x, err
+		}
+		held := r.activeRun(ConversationID(turn.ConversationID))
+		if held == nil || !r.isHostDispatch(held) {
+			return nil, err
+		}
+		select {
+		case <-held.ended:
+		case <-time.After(10 * time.Second):
+			return nil, err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.begin(ctx, turn, start)
+}
+
+// hostDispatch starts subtasks on a chat conversation for the front desk,
+// holding the conversation like a turn but publishing nothing: background
+// starts return their job handles at once, and their finishes arrive as
+// notices.
+func (r *Runner) hostDispatch(ctx context.Context, chatID string, starts []agent.DispatchStart) ([]agent.Dispatched, error) {
+	x, err := r.beginRun(ctx, chat.Turn{ConversationID: chatID}, true, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
+		return c.Dispatch(runCtx, starts)
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer close(x.ended)
+	defer r.release(x)
+	defer x.stop()
+	for range x.inner.Events() {
+	}
+	result, err := x.inner.Wait()
+	return result.Dispatched, err
 }
 
 // chatID is the chat conversation a Nanite conversation serves: the running

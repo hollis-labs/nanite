@@ -47,6 +47,8 @@ github.com/hollis-labs/libs/agent/chat v0.1.0 h1:NHored2kzzCXwgaX96joqO4ZJejKyLm
 github.com/hollis-labs/libs/agent/chat v0.1.0/go.mod h1:rDzqOwUmC6Gu2wN5XjG59lcRcJPXKhbj/77U63w0Gr8=
 github.com/hollis-labs/libs/agent/core v0.5.0 h1:bk2GAHef+lH5ihYKBnQpir5SZoeRNTp7AyY8iYCLkr0=
 github.com/hollis-labs/libs/agent/core v0.5.0/go.mod h1:AHtYM1ZFiaAVnPQYaZjJrI8trpmwomFMPknACIUe+4Y=
+github.com/hollis-labs/libs/agent/desk v0.1.0 h1:FwwMKVy1yvgDwkeLoEsKWfqQRL5KJ2+1BnolFXwcQ1I=
+github.com/hollis-labs/libs/agent/desk v0.1.0/go.mod h1:qxS+mHoXWnjobirZGKqea8BroZs03RMImfU86SAMx0U=
 github.com/hollis-labs/libs/agent/trace v0.2.0 h1:02DO98Er1J5lKrvEP2Gt5BXpvcjgOAuzwFL8GevcVAg=
 github.com/hollis-labs/libs/agent/trace v0.2.0/go.mod h1:/X9cP7OTPpF+aM7I+4L/XdRVjFZdOMix8T7913NDm3s=
 github.com/hollis-labs/libs/core/panics v0.1.0 h1:mWJ9yPTRCBsLFprCNGIJrroehfh/g3UaDmLEH6gncB8=
@@ -55,8 +57,8 @@ github.com/hollis-labs/libs/core/store v0.1.0 h1:kcTrDBmi7ciKaSNCkWjrE+Uff6r10Zk
 github.com/hollis-labs/libs/core/store v0.1.0/go.mod h1:aKsmHWniP1YHsQQdK/JHmLXV2JGBu/gJy8/JRlCeMhU=
 github.com/hollis-labs/libs/core/util v0.11.1 h1:jhRJoQJDzXuVmRJUagCu4b3SwJ5f2VRztfQ0JHeoido=
 github.com/hollis-labs/libs/core/util v0.11.1/go.mod h1:BZUY24frcNPSvP9RGyOOTE5Go+uVZsMMfWQtvVy8CpQ=
-github.com/hollis-labs/libs/harness/core v0.17.1-0.20261115212742-8f2ed31176b0 h1:SeEPGTolLgNjMPuJio2ndFRng7FEYaaBhJklhg10gis=
-github.com/hollis-labs/libs/harness/core v0.17.1-0.20261115212742-8f2ed31176b0/go.mod h1:JOL5aJxxZ1ne2qCHnN4ctrjOgAqVf6htGl5D+SUvlCM=
+github.com/hollis-labs/libs/harness/core v0.17.1-0.20261119210534-e787671699c2 h1:N6KQFTTvzf7YodZoAsFO6AweElAIc6bd0GIp3A5x4ng=
+github.com/hollis-labs/libs/harness/core v0.17.1-0.20261119210534-e787671699c2/go.mod h1:JOL5aJxxZ1ne2qCHnN4ctrjOgAqVf6htGl5D+SUvlCM=
 github.com/hollis-labs/libs/llm/core v0.4.0 h1:ZdeAqDqVGi4d1sfkJQflg6KVA3fc/Htyl/wAa0EComE=
 github.com/hollis-labs/libs/llm/core v0.4.0/go.mod h1:7ggK4lyXpOBUpk/rdh+cYkh1EUPlP7RsETVi6JCBmDc=
 github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0 h1:wS9KsD0Jk4QD+SEepirMGZJwUtXpL5hMjPL/wYdEk20=
@@ -71,8 +73,8 @@ github.com/hollis-labs/libs/security/secrets v0.1.0 h1:/wrYAM5viUnYMpDhvbQmPlTMe
 github.com/hollis-labs/libs/security/secrets v0.1.0/go.mod h1:Krd1kgmisOVmeN1G/ltaLMva58tIBki9xShsySqd86Y=
 github.com/hollis-labs/libs/ui/ui-go v0.4.0 h1:3TydDJElqD1ilgfY1FY+ei+joAuRcwMyuorGTDD1qIw=
 github.com/hollis-labs/libs/ui/ui-go v0.4.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
-github.com/hollis-labs/substrate v0.1.1-0.20261120013640-a617597c4092 h1:U5JgXNAV8RSbu7RLwHGpx2891Ju008vn8BaA5lTxYx4=
-github.com/hollis-labs/substrate v0.1.1-0.20261120013640-a617597c4092/go.mod h1:LNK7DIqGyVnvvKGYJIhnVKIdF1yIfNP9MtE252Y8G80=
+github.com/hollis-labs/substrate v0.1.1-0.20261120070525-86095cf225a5 h1:lgZQaPNCkdZUUgsXY+Asscvr47p4IxaCOstHDTBg3zw=
+github.com/hollis-labs/substrate v0.1.1-0.20261120070525-86095cf225a5/go.mod h1:LNK7DIqGyVnvvKGYJIhnVKIdF1yIfNP9MtE252Y8G80=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/invopop/jsonschema v0.14.0 h1:MHQqLhvpNUZfw+hM3AZDYK7jxO8FZoQeQM77g8iyZjg=

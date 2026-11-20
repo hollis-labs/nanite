@@ -9,7 +9,7 @@ require (
 	github.com/hollis-labs/libs/agent/trace v0.2.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/ui/ui-go v0.4.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261120013640-a617597c4092
+	github.com/hollis-labs/substrate v0.1.1-0.20261120070525-86095cf225a5
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
@@ -71,10 +71,11 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hollis-labs/libs/agent/core v0.5.0
+	github.com/hollis-labs/libs/agent/desk v0.1.0
 	github.com/hollis-labs/libs/core/panics v0.1.0
 	github.com/hollis-labs/libs/core/store v0.1.0
 	github.com/hollis-labs/libs/core/util v0.11.1
-	github.com/hollis-labs/libs/harness/core v0.17.1-0.20261115212742-8f2ed31176b0
+	github.com/hollis-labs/libs/harness/core v0.17.1-0.20261119210534-e787671699c2
 	github.com/hollis-labs/libs/mcp/plugin-mcp v0.6.0
 	github.com/hollis-labs/libs/mesh/core v0.11.0
 	github.com/hollis-labs/libs/security/redact v0.2.0

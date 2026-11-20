@@ -327,7 +327,8 @@ func TestFailedRunStopsTheOthers(t *testing.T) {
 	scenarios := []Scenario{withArms("blocked", block, nil), withArms("broken", nil, fail), withArms("later", nil, nil)}
 	scenarios[0].Arms = scenarios[0].Arms[:1]
 	scenarios[1].Arms = scenarios[1].Arms[:1]
-	rep, err := Run(context.Background(), Config{Parallel: 2, Modes: []Mode{Direct}}, scenarios)
+	// A short timeout makes a regression fail rather than hang.
+	rep, err := Run(context.Background(), Config{Parallel: 2, Modes: []Mode{Direct}, Timeout: 20 * time.Second}, scenarios)
 	if !errors.Is(err, broken) || !strings.Contains(err.Error(), "broken/direct") {
 		t.Fatalf("error %v, want the broken run's", err)
 	}
@@ -361,7 +362,9 @@ func TestMeterReservesTheWorstCase(t *testing.T) {
 	// A third request does not fit beside the two reservations: it waits for
 	// one to settle, and fits once the first settles at its real cost.
 	got := make(chan error, 1)
-	go func() { got <- m.reserve(context.Background(), 0.01) }()
+	waitCtx, stopWait := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stopWait()
+	go func() { got <- m.reserve(waitCtx, 0.01) }()
 	select {
 	case err := <-got:
 		t.Fatalf("a third request was let past the reserved cap: %v", err)

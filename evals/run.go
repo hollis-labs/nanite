@@ -124,6 +124,9 @@ type Result struct {
 	ParentFetches int      `json:"parent_fetches"`
 	// Skipped says why the run did not happen.
 	Skipped string `json:"skipped,omitempty"`
+	// cancelled is set when the run ended with Run's context already
+	// cancelled (by another run's failure or an interrupt).
+	cancelled bool
 }
 
 // Run runs each scenario in each of its arms and returns what ran, in
@@ -208,7 +211,7 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 			case errs[i] != nil && failed < 0:
 				failed = i
 				stopAll()
-			case failed >= 0 && ctx.Err() == nil && (errs[i] != nil || !results[i].Success):
+			case failed >= 0 && ctx.Err() == nil && (errs[i] != nil || (results[i].cancelled && !results[i].Success)):
 				// Cancelled because another run failed.
 				errs[i] = nil
 				results[i].Why, results[i].Invalid = "", false
@@ -351,6 +354,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	if runErr == nil {
 		result, runErr = send(task)
 	}
+	res.cancelled = ctx.Err() != nil
 	res.WallMS = time.Since(start).Milliseconds()
 	res.Approvals = int(gate.n.Load())
 

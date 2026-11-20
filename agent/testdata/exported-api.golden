@@ -5,11 +5,11 @@ type Agent struct
   (*Agent) Info(ctx context.Context) (Info, error)
   (*Agent) Latest(ctx context.Context) (*Conversation, error)
   (*Agent) NewConversation(ctx context.Context, options ...ConversationOption) (*Conversation, error)
-  (*Agent) Notices() <-chan Notice
   (*Agent) RebuildIndex(ctx context.Context) error
   (*Agent) Skills() *SkillSet
   (*Agent) SlotBudget(name SlotName) int
   (*Agent) Slots() *Slots
+  (*Agent) SubscribeNotices(ctx context.Context) <-chan NoticePosted
   (*Agent) Tools() *ToolSet
 func AllBuiltins() []BuiltinGroup
 var AllowGate github.com/hollis-labs/nanite/internal/permission.Gate
@@ -36,9 +36,12 @@ type CompactionStarted = github.com/hollis-labs/nanite/internal/events.Compactio
   field Before int
 type Conversation struct
   (*Conversation) Discard(ctx context.Context) error
+  (*Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error)
   (*Conversation) History(ctx context.Context) ([]Message, error)
   (*Conversation) ID() string
   (*Conversation) Interrupted() *InterruptedTurn
+  (*Conversation) Job(ctx context.Context, id string) (string, error)
+  (*Conversation) PostNotice(ctx context.Context, kind string, body string) error
   (*Conversation) Record(ctx context.Context, userText string, answer string) error
   (*Conversation) Resume(ctx context.Context) (*Run, error)
   (*Conversation) Send(ctx context.Context, in Input) (*Run, error)
@@ -52,8 +55,20 @@ type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversatio
   field UpdatedAt time.Time
 type ConversationOption func(*ConversationInfo)
 var DenyGate github.com/hollis-labs/nanite/internal/permission.Gate
+type DispatchStart struct
+  field Goal string
+  field ReturnSpec encoding/json.RawMessage
+  field Variant string
+  field Inputs encoding/json.RawMessage
+  field Context encoding/json.RawMessage
+  field Background bool
+type Dispatched = github.com/hollis-labs/nanite/internal/events.Dispatched struct
+  field Result encoding/json.RawMessage
+  field IsError bool
+  field Err string
 var ErrBusy error
 var ErrNoConversation error
+var ErrNoStarts error
 type Event = github.com/hollis-labs/nanite/internal/events.Event interface
 type EventMeta = github.com/hollis-labs/nanite/internal/events.EventMeta struct
   field RunID string
@@ -73,6 +88,7 @@ type Info struct
 type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
   field Text string
   field Slots []github.com/hollis-labs/nanite/internal/slots.Update
+  field Source string
 type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
   field ID string
   field UserMessageID string
@@ -83,11 +99,15 @@ type Message = github.com/hollis-labs/nanite/internal/store.Message struct
   field Blocks []github.com/hollis-labs/libs/llm/core/llmtypes.ContentBlock
   field CreatedAt time.Time
   field Seq int
-type Notice = github.com/hollis-labs/nanite/internal/store.Notice struct
+type NoticePosted = github.com/hollis-labs/nanite/internal/events.NoticePosted struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
   field ConversationID string
   field Kind string
   field Body string
+  field Chained bool
+  field Dropped int
+const NoticeTurnText untyped string
 func Open(ctx context.Context, opts Options) (*Agent, error)
 type Options struct
   field Dir string
@@ -170,6 +190,7 @@ type Result = github.com/hollis-labs/nanite/internal/events.Result struct
   field StopReason string
   field Usage github.com/hollis-labs/nanite/internal/events.Usage
   field Steps int
+  field Dispatched []github.com/hollis-labs/nanite/internal/events.Dispatched
 type Run = github.com/hollis-labs/nanite/internal/engine.Run struct
   (*Run) Answer(id string, answer github.com/hollis-labs/nanite/internal/events.Answer) error
   (*Run) Cancel()
@@ -264,6 +285,7 @@ type Slots struct
 type SlotsAssembled = github.com/hollis-labs/nanite/internal/events.SlotsAssembled struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Report github.com/hollis-labs/nanite/internal/slots.Report
+const SourceNotice untyped string
 type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFinished struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
@@ -288,6 +310,7 @@ type SubtaskOrigin = github.com/hollis-labs/nanite/internal/permission.SubtaskOr
   field Goal string
   field Depth int
   field CallID string
+  field Dispatched bool
 type SubtaskProgress = github.com/hollis-labs/nanite/internal/events.SubtaskProgress struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string

@@ -557,7 +557,7 @@ func TestBackgroundSubtaskReportsInSubtaskTerms(t *testing.T) {
 	p := &routedProvider{root: fake.New(subtaskCall("worker", "child work", true), wait, fake.Text("parent finished")),
 		children: map[string]*fake.Provider{"child work": fake.New(child)}}
 	e, db, id := setupEngine(t, p, "")
-	notices := make(chan store.Notice, 1)
+	notices := make(chan events.NoticePosted, 1)
 	if err := e.cfg.Tools.SetGroup("host", tools.Tool{Name: "await_notice", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`),
 		Handler: func(ctx context.Context, _ tools.Call) (tools.Result, error) {
 			select {

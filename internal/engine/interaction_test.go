@@ -131,10 +131,10 @@ func TestNoticesWakeHostAndAppearOnce(t *testing.T) {
 	}
 	select {
 	case n := <-e.Notices():
-		if n.ConversationID != id || n.Body != "build finished" {
+		if n.ConversationID != id || n.Body != "build finished" || n.RunID != "" {
 			t.Fatalf("notice %+v", n)
 		}
-	default:
+	case <-time.After(2 * time.Second):
 		t.Fatal("idle host did not receive notice")
 	}
 	for i := range 2 {

@@ -23,8 +23,18 @@ type Event = events.Event
 type EventMeta = events.EventMeta
 
 // Result contains the assistant text, stop reason, accumulated token usage, and
-// number of completed model steps.
+// number of completed model steps; for a dispatch, the outcome of each start.
 type Result = events.Result
+
+// Dispatched is the outcome of one start in a host Dispatch: the JSON the
+// model's subtask call would have returned (a result contract, or a
+// background job handle), or Err when it could not start.
+type Dispatched = events.Dispatched
+
+// NoticePosted reports a notice posted to a conversation. It arrives on the
+// conversation's running turn, if any (EventMeta.RunID is that turn), and on
+// every SubscribeNotices channel (RunID empty when no turn carried it).
+type NoticePosted = events.NoticePosted
 
 // RunStarted is emitted when the engine begins processing the turn.
 type RunStarted = events.RunStarted

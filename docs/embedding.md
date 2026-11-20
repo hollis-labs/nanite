@@ -203,6 +203,26 @@ Nanite's own tools as usual. Leave `Gate` nil: approvals are answered on the
 chat wire. `r.Agent()` gives the agent for slots, skills and notices, and
 `r.Close()` releases the directory.
 
+**Notices and host work.** Set `Options.Observe` to the chat Service's
+`Observe`. A notice posted while a turn runs reaches the wire on that turn as
+a `nanite.notice` activity (id, kind, body). With `Observe`, one posted while
+no turn runs is published as a short run of its own, each conversation's
+notices in order and independently of other conversations. With
+`NoticeTurns` it starts a notice turn instead, whose user message is
+`agent.NoticeTurnText` and which opens with the `nanite.notice` activity. The
+turn starts only when the Service adopts it, so it never holds the
+conversation before it is published; if a turn began meanwhile, the notice
+turn only announces the notice, so the wire shows "A notice arrived." with no
+model reply, and it still counts toward the limit. A chained notice never
+starts one (a chained ask relayed between turns waits for a user turn or its
+`SubtaskAskWait`), and at most three notice turns follow one another before a
+user turn. `r.Dispatch(ctx, chatID, starts)` starts subtasks
+for the host without a model call and publishes the dispatch as a run on the
+wire, so the subtasks' activity and relayed approvals are seen and answered
+like a turn's; it returns the outcomes once every foreground start has ended.
+A background start's finish reaches the wire as a `nanite.notice`. Without
+`Observe`, notices wait for the conversation's next turn and `Dispatch` fails.
+
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
 `runner_ref` on the chat conversation record. A turn the previous process

@@ -125,10 +125,19 @@ type Engine struct {
 	children                subagent.Limit
 	// leads limits subtasks that may start their own (a can_spawn variant
 	// at depth 1), apart from children, so a council never starves itself.
-	leads   subagent.Limit
-	notices chan store.Notice
-	mcp     *mcpclient.Client
-	cache   *toolresult.Cache
+	leads subagent.Limit
+	// noticeSubs are the notice subscribers, by subscription id (notices.go).
+	noticeSubs map[uint64]*noticeQueue
+	noticeSeq  uint64
+	// noticeQueueLimit bounds each subscriber's queue (NoticeQueueLimit).
+	noticeQueueLimit int
+	// noticeJobs marks background jobs a notice turn started (notices.go).
+	noticeJobs map[string]bool
+	// dispatched marks the child conversations a host started with Dispatch
+	// (and that are still running), so their relayed asks say so.
+	dispatched map[string]bool
+	mcp        *mcpclient.Client
+	cache      *toolresult.Cache
 	// subtaskResults stores over-cap subtask results in the same table as
 	// cache, for subtaskResultTTL rather than an hour (result.go).
 	subtaskResults *toolresult.Cache
@@ -163,7 +172,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	guard := newGuard(cfg.Logger, scrub, cfg.PanicReporter)
 	cfg.ProviderConfig.Panics = guard
-	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
+	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), noticeQueueLimit: NoticeQueueLimit, noticeJobs: make(map[string]bool), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
 		// A subtask result is already held under the budget (result.go); a
 		// preview would break its JSON.
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
@@ -199,7 +208,19 @@ func newGuard(logger *slog.Logger, scrub *redact.Redactor, host panics.Reporter)
 type Input struct {
 	Text  string
 	Slots []slots.Update
+	// Source says what started the turn: empty for a person's message, or
+	// SourceNotice for a turn a host starts because a notice arrived.
+	Source string
 }
+
+// SourceNotice marks a turn started because a notice arrived. Its trace
+// record has source "reflex": a notice turn is an automatic activation, which
+// is what reflex records. Its user message is NoticeTurnText, set by the
+// engine; the notice itself reaches the model only in the session slot.
+const SourceNotice = "notice"
+
+// NoticeTurnText is the user message of every notice turn.
+const NoticeTurnText = "A notice arrived."
 
 func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error) {
 	return e.startRun(ctx, id, input, false)
@@ -313,6 +334,16 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	switch input.Source {
+	case "":
+	case SourceNotice:
+		if input.Text != "" {
+			return nil, fmt.Errorf("a notice turn's text is set by the engine; leave Input.Text empty")
+		}
+		input.Text = NoticeTurnText
+	default:
+		return nil, fmt.Errorf("unknown turn source %q", input.Source)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
@@ -341,21 +372,9 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 		runID = interrupted.ID
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	r := &Run{id: runID, events: make(chan events.Event, 65), done: make(chan struct{}), cancel: cancel}
-	r.observe = func(eventCtx context.Context, event events.Event) {
-		// The host's event sink is telemetry: a panic in it is recorded and
-		// the turn goes on.
-		_ = e.panics.Call("event sink", func() error {
-			e.runtime.Observe(eventCtx, id, r.id, event)
-			return nil
-		}, panics.With("conversation", id))
-	}
-
+	r, ctx := e.newRunLocked(ctx, id, runID)
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
-	e.active[id] = r
-	e.signalLocked()
 	hostTools, hostSkills := e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot()
 	e.panics.Go("turn", func() {
 		e.execute(ctx, r, info, input, state, prev, hostTools, hostSkills, interrupted)
@@ -371,10 +390,31 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	return r, nil
 }
 
+// newRunLocked makes a run for conversation id and makes it the active one.
+// The caller holds e.mu and has checked the conversation is free.
+func (e *Engine) newRunLocked(ctx context.Context, id, runID string) (*Run, context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	r := &Run{id: runID, events: make(chan events.Event, 65), done: make(chan struct{}), cancel: cancel}
+	r.observe = func(eventCtx context.Context, event events.Event) {
+		// The host's event sink is telemetry: a panic in it is recorded and
+		// the turn goes on.
+		_ = e.panics.Call("event sink", func() error {
+			e.runtime.Observe(eventCtx, id, r.id, event)
+			return nil
+		}, panics.With("conversation", id))
+	}
+	e.active[id] = r
+	e.signalLocked()
+	return r, ctx
+}
+
 func (e *Engine) Close() {
 	e.mu.Lock()
 	e.closed = true
-	close(e.notices)
+	for id, q := range e.noticeSubs {
+		q.stop()
+		delete(e.noticeSubs, id)
+	}
 	runs := make([]*Run, 0, len(e.active))
 	for _, r := range e.active {
 		runs = append(runs, r)

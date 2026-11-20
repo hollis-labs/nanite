@@ -32,6 +32,9 @@ type SubtaskOrigin struct {
 	// CallID is the root conversation's subtask tool call that started this
 	// subtask's chain, so a client can attach the ask to it.
 	CallID string `json:"call_id,omitempty"`
+	// Dispatched marks a subtask chain the host started with Dispatch rather
+	// than the model with a subtask call.
+	Dispatched bool `json:"dispatched,omitempty"`
 }
 
 // PermissionScope determines how long an approval applies.

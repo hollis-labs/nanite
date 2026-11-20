@@ -45,11 +45,17 @@ func (x *execution) startShell(ctx context.Context, raw json.RawMessage) (string
 	}
 	e := x.engine
 	command := input.ShellCommand(e.cfg.WorkspaceRoots[0], x.definition.Runtime.Env)
-	job, err := e.jobs.Start(ctx, store.Job{ID: store.NewID(time.Now()), ConversationID: x.info.ID, Kind: "shell", Spec: e.scrub.Text(string(raw))},
+	jobID := store.NewID(time.Now())
+	if x.source == SourceNotice {
+		// What this job causes must not start another notice turn.
+		e.markNoticeWork(jobID)
+	}
+	job, err := e.jobs.Start(ctx, store.Job{ID: jobID, ConversationID: x.info.ID, Kind: "shell", Spec: e.scrub.Text(string(raw))},
 		func(runCtx context.Context, output io.Writer) (background.Task, error) {
 			return background.Shell(runCtx, command, output)
 		})
 	if err != nil {
+		e.forgetNoticeWork(jobID)
 		return "", err
 	}
 	return jobJSON(job, "")
@@ -157,6 +163,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ to
 	e.mu.Lock()
 	e.subtaskCalls[child.ID] = rootCall
 	e.subtaskLinks[child.ID] = subtaskLink{ParentTurnID: x.run.id, ParentCallID: callIDFrom(ctx), Depth: x.depth + 1}
+	if ctx.Value(dispatchKey{}) != nil {
+		e.dispatched[child.ID] = true
+	}
 	e.mu.Unlock()
 	// Once the child ends, its call mapping, trace link and own grants go too.
 	forget := func() {
@@ -164,6 +173,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ to
 		delete(e.subtaskCalls, child.ID)
 		delete(e.subtaskLinks, child.ID)
 		delete(e.grants, child.ID)
+		delete(e.dispatched, child.ID)
 		e.mu.Unlock()
 	}
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: message}) }
@@ -173,6 +183,10 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ to
 			ChildID, Variant, Goal string
 			ReturnSpec, Context    json.RawMessage `json:",omitempty"`
 		}{child.ID, variant.Name, request.Goal, request.ReturnSpec, request.Context})
+		if x.source == SourceNotice {
+			// What this subtask causes must not start another notice turn.
+			e.markNoticeWork(child.ID)
+		}
 		job, err := e.jobs.Start(ctx, store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: subtaskJobKind, Spec: string(spec)},
 			func(jobCtx context.Context, _ io.Writer) (background.Task, error) {
 				// A background subtask outlives the turn, so it has only its
@@ -216,6 +230,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ to
 			release()
 			e.closeSubtask(child.ID)
 			forget()
+			e.forgetNoticeWork(child.ID)
 			return tools.Result{}, err
 		}
 		x.emitSubtaskStarted(ctx, child, request)

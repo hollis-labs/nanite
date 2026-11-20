@@ -79,7 +79,7 @@ func TestWorkDirIsWhereToolsWork(t *testing.T) {
 func writeAgent(t *testing.T, root string) {
 	t.Helper()
 	for name, raw := range map[string]string{
-		"agent.md": "---\nschema_version: \"2\"\ndefinition_id: def:workdir\nrevision: \"1\"\nname: workdir\ndescription: WorkDir test agent.\nbehavior:\n  purpose: Use tools.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: example\ncontinuity:\n  mode: durable\n---\nUse tools.\n",
+		"agent.md":  "---\nschema_version: \"2\"\ndefinition_id: def:workdir\nrevision: \"1\"\nname: workdir\ndescription: WorkDir test agent.\nbehavior:\n  purpose: Use tools.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: example\ncontinuity:\n  mode: durable\n---\nUse tools.\n",
 		"host.yaml": "kind: stable\nlifetime: on-demand\nseat_id: workdir\n\nruntime:\n  provider: anthropic\n  max_steps: 10\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(raw), 0o600); err != nil {

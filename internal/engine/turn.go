@@ -26,6 +26,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/failure"
+	"github.com/hollis-labs/nanite/internal/provider/keepalive"
 	"github.com/hollis-labs/nanite/internal/provider/station"
 	"github.com/hollis-labs/nanite/internal/recover"
 	"github.com/hollis-labs/nanite/internal/recovery"
@@ -553,7 +554,7 @@ func (x *execution) generate(ctx context.Context) error {
 			}}
 		safeModel := x.engine.scrub.Text(req.Model)
 		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)
-		callCtx, cancelCall := context.WithCancel(spanCtx)
+		callCtx, cancelCall := context.WithCancel(keepalive.WithIdle(spanCtx, x.engine.idleTimeout()))
 		cancel := func() { cancelCall(); endSpan() }
 		x.estimateRequest()
 		stream, err := x.provider.StreamChat(callCtx, req)
@@ -840,7 +841,7 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEvent) (step, error) {
 	var got step
 	var text strings.Builder
-	reader, err := turn.NewReader(ctx, stream, 90*time.Second)
+	reader, err := turn.NewReader(ctx, stream, x.engine.idleTimeout())
 	if err != nil {
 		return got, err
 	}

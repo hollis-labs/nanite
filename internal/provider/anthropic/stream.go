@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/provider/failure"
+	"github.com/hollis-labs/nanite/internal/provider/keepalive"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
@@ -151,9 +152,11 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 	var currentTool *toolUseAcc
 	var currentThinking *thinkingAcc
 
+	busy := keepalive.Start(ctx)
 	emit := func(event llmtypes.StreamEvent) bool {
 		select {
 		case ch <- event:
+			busy.Sent()
 			return true
 		case <-ctx.Done():
 			return false
@@ -170,6 +173,11 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 		}
 
 		ev := stream.Current()
+		// A frame arrived; if nothing was passed on for a while (the model
+		// is writing a tool input or thinking), say the stream is busy.
+		if busy.Due() && !emit(llmtypes.StreamEvent{Type: keepalive.Event}) {
+			return
+		}
 		switch ev.Type {
 		case "message_start":
 			// Usage on message_start carries input_tokens (and cache

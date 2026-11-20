@@ -172,6 +172,7 @@ type Options struct
   field SubtaskResultCap int
   field SubtaskLimit int
   field TurnTokenBudget int
+  field IdleTimeout time.Duration
   field Steering *Steering
   field OnAuthWaiting func(AuthWaiting)
   field OnAuthGranted func(AuthWaiting)

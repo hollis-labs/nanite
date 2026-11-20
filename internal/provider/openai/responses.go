@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hollis-labs/nanite/internal/provider/failure"
+	"github.com/hollis-labs/nanite/internal/provider/keepalive"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/toolargs"
@@ -74,11 +75,13 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 		defer close(out)
 		defer failure.RecoverStream(ctx, c.panics, "openai responses stream", out)
 		defer func() { _ = stream.Close() }()
+		busy := keepalive.Start(ctx)
 		emit := func(event llmtypes.StreamEvent) bool {
 			select {
 			case <-ctx.Done():
 				return false
 			case out <- event:
+				busy.Sent()
 				return true
 			}
 		}
@@ -87,6 +90,9 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 		}
 		for stream.Next() {
 			event := stream.Current()
+			if busy.Due() && !emit(llmtypes.StreamEvent{Type: keepalive.Event}) {
+				return
+			}
 			switch event.Type {
 			case "response.output_text.delta", "response.refusal.delta":
 				if !emit(llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: event.Delta}) {

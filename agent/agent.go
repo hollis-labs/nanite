@@ -139,6 +139,12 @@ type Options struct {
 	// runtime.turn_token_budget, else no shared budget": an embedder cannot
 	// turn off a host.yaml budget through Options, only set its own.
 	TurnTokenBudget int
+	// IdleTimeout is how long a model stream may send nothing before its
+	// turn fails as stalled. Zero means 90 seconds; negative is refused. A
+	// stream that is busy but not passing anything on (the model writing a
+	// long tool input, or thinking) sends keepalives, so this measures real
+	// silence from the provider.
+	IdleTimeout time.Duration
 	// Steering, when set, runs libs agent/steer before each root turn: the
 	// conversation's mode (set only through Conversation.SetMode, never by
 	// the model), work slots, reflexes and classifier. Classifier results
@@ -251,6 +257,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.SubtaskLimit < 0 || opts.SubtaskLimit > subagent.MaxLimit {
 		return nil, fmt.Errorf("nanite: SubtaskLimit must be between 0 and %d", subagent.MaxLimit)
 	}
+	if opts.IdleTimeout < 0 {
+		return nil, fmt.Errorf("nanite: IdleTimeout must not be negative")
+	}
 	if opts.TurnTokenBudget < 0 {
 		return nil, fmt.Errorf("nanite: TurnTokenBudget must not be negative")
 	}
@@ -345,7 +354,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt, Steering: opts.Steering,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: opts.IdleTimeout, CompactAt: opts.CompactAt, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {

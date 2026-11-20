@@ -150,7 +150,7 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 		return Report{}, errors.New("evals: a live run needs a model")
 	}
 	rep := Report{Model: model, Price: cfg.Price}
-	meter := &meter{price: cfg.Price, max: cfg.MaxUSD}
+	meter := newMeter(cfg.Price, cfg.MaxUSD)
 
 	type job struct {
 		s   Scenario
@@ -168,15 +168,20 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 	results := make([]Result, len(jobs))
 	errs := make([]error, len(jobs))
 	var (
-		mu     sync.Mutex
-		failed bool
-		wg     sync.WaitGroup
+		mu sync.Mutex
+		wg sync.WaitGroup
+		// failed is the index of the run that failed, or -1.
+		failed = -1
 	)
+	// A failed run stops the others: none starts after it, and those in
+	// flight are cancelled.
+	runCtx, stopAll := context.WithCancel(ctx)
+	defer stopAll()
 	sem := make(chan struct{}, cfg.Parallel)
 	for i, j := range jobs {
 		sem <- struct{}{}
 		mu.Lock()
-		stop := failed
+		stop := failed >= 0
 		mu.Unlock()
 		skip := ""
 		switch {
@@ -196,11 +201,18 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i], errs[i] = runOne(ctx, cfg, model, meter, j.s, j.arm)
-			if errs[i] != nil {
-				mu.Lock()
-				failed = true
-				mu.Unlock()
+			results[i], errs[i] = runOne(runCtx, cfg, model, meter, j.s, j.arm)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case errs[i] != nil && failed < 0:
+				failed = i
+				stopAll()
+			case failed >= 0 && ctx.Err() == nil && (errs[i] != nil || !results[i].Success):
+				// Cancelled because another run failed.
+				errs[i] = nil
+				results[i].Why, results[i].Invalid = "", false
+				results[i].Skipped = "stopped: another run failed"
 			}
 		}()
 	}
@@ -208,13 +220,13 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 	rep.SpentUSD = meter.spentUSD()
 
 	var firstErr error
-	for i, r := range results {
-		if errs[i] != nil && firstErr == nil {
-			firstErr = fmt.Errorf("%s/%s: %w", jobs[i].s.Name, jobs[i].arm.Name, errs[i])
-			rep.Stopped = "error: " + Shorten(errs[i].Error())
-		}
-		if firstErr != nil && r.Skipped == "an earlier run failed" {
-			// Runs after a failure are not reported, as before.
+	if failed >= 0 {
+		firstErr = fmt.Errorf("%s/%s: %w", jobs[failed].s.Name, jobs[failed].arm.Name, errs[failed])
+		rep.Stopped = "error: " + Shorten(errs[failed].Error())
+	}
+	for _, r := range results {
+		if r.Skipped == "an earlier run failed" {
+			// Runs that never started after a failure are not reported.
 			continue
 		}
 		if r.Skipped != "" && rep.Stopped == "" {
@@ -297,7 +309,8 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 		return res, errors.New("evals: an arm may not add named providers; they would bypass the dollar cap")
 	}
 	probe := &probe{seedLacks: arm.SeedLacks}
-	opts.Provider = &metered{Provider: opts.Provider, meter: meter, cancel: cancel, probe: probe}
+	meteredProvider := &metered{Provider: opts.Provider, meter: meter, cancel: cancel, probe: probe}
+	opts.Provider = meteredProvider
 	a, err := agent.Open(runCtx, opts)
 	if err != nil {
 		return res, err
@@ -347,7 +360,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	res.fill(recs, conv.ID(), meter.price)
 
 	switch {
-	case meter.capped():
+	case meteredProvider.capped.Load():
 		res.Why = fmt.Sprintf("stopped: dollar cap $%.2f reached", cfg.MaxUSD)
 	case runErr != nil:
 		res.Why = "run failed: " + Shorten(runErr.Error())
@@ -546,7 +559,10 @@ func (g *countingGate) Decide(ctx context.Context, req agent.PermissionRequest) 
 
 // meter keeps the estimated spend. A request reserves its most expensive
 // outcome before it is sent and settles to its reported usage when that
-// arrives, so concurrent requests cannot together pass the cap.
+// arrives, so concurrent requests cannot together pass the cap. A request
+// that would pass the cap waits while other requests hold reservations (they
+// usually settle far below their worst case) and is refused only when it
+// would pass the cap on its own; after that every request is refused.
 type meter struct {
 	price    Price
 	max      float64
@@ -554,18 +570,44 @@ type meter struct {
 	spent    float64
 	reserved float64
 	refused  bool
+	// holds counts the reservations not yet settled. It decides whether a
+	// request waits, since reserved, a float, may not return to exactly 0.
+	holds int
+	// changed is closed, and replaced, whenever a reservation settles.
+	changed chan struct{}
 }
 
-// reserve holds cost against the cap; false means the request would pass it.
-func (m *meter) reserve(cost float64) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.refused || (m.max > 0 && m.spent+m.reserved+cost > m.max) {
-		m.refused = true
-		return false
+func newMeter(price Price, max float64) *meter {
+	return &meter{price: price, max: max, changed: make(chan struct{})}
+}
+
+// reserve holds cost against the cap. It returns errCapped when the request
+// would pass the cap, or ctx's error if ctx ends while it waits.
+func (m *meter) reserve(ctx context.Context, cost float64) error {
+	for {
+		m.mu.Lock()
+		switch {
+		case m.refused:
+			m.mu.Unlock()
+			return errCapped
+		case m.max <= 0 || m.spent+m.reserved+cost <= m.max:
+			m.reserved += cost
+			m.holds++
+			m.mu.Unlock()
+			return nil
+		case m.holds == 0:
+			m.refused = true
+			m.mu.Unlock()
+			return errCapped
+		}
+		wait := m.changed
+		m.mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	m.reserved += cost
-	return true
 }
 
 // settle releases a reservation and records what the request cost.
@@ -573,7 +615,13 @@ func (m *meter) settle(reserved, cost float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reserved -= reserved
+	m.holds--
+	if m.holds == 0 {
+		m.reserved = 0
+	}
 	m.spent += cost
+	close(m.changed)
+	m.changed = make(chan struct{})
 }
 
 // over reports whether no further request can start.
@@ -581,13 +629,6 @@ func (m *meter) over() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.refused || (m.max > 0 && m.spent >= m.max)
-}
-
-// capped reports whether the cap refused a request.
-func (m *meter) capped() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.refused
 }
 
 func (m *meter) spentUSD() float64 {
@@ -631,6 +672,17 @@ type metered struct {
 	meter  *meter
 	cancel context.CancelFunc
 	probe  *probe
+	// capped is set when the cap refused one of this run's requests.
+	capped atomic.Bool
+}
+
+// refuse ends the run when the meter refused a request for the cap.
+func (p *metered) refuse(err error) error {
+	if errors.Is(err, errCapped) {
+		p.capped.Store(true)
+		p.cancel()
+	}
+	return err
 }
 
 func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
@@ -638,9 +690,8 @@ func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-c
 		p.probe.see(req)
 	}
 	hold := p.meter.worst(req)
-	if !p.meter.reserve(hold) {
-		p.cancel()
-		return nil, errCapped
+	if err := p.meter.reserve(ctx, hold); err != nil {
+		return nil, p.refuse(err)
 	}
 	in, err := p.Provider.StreamChat(ctx, req)
 	if err != nil {
@@ -698,9 +749,8 @@ func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-c
 // its reservation.
 func (p *metered) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
 	hold := p.meter.worst(req)
-	if !p.meter.reserve(hold) {
-		p.cancel()
-		return "", errCapped
+	if err := p.meter.reserve(ctx, hold); err != nil {
+		return "", p.refuse(err)
 	}
 	text, err := p.Provider.Complete(ctx, req)
 	if err != nil {

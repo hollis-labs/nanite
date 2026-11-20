@@ -3,12 +3,16 @@
 ## Unreleased
 
 - `agent.Options.WorkDir`: the working directory the file tools resolve
-  relative paths against first and bash runs in (absolute; empty is the
-  process's working directory at `Open`).
+  relative paths against first and bash runs in (an existing absolute
+  directory; empty is the process's working directory at `Open`). MCP stdio
+  servers still start in the process's working directory.
 - evals: **breaking** — `Run` never changes the process's working directory;
   each run works in its copy through `WorkDir`, so `Run` is safe to call
   concurrently. `Config.Dir` is the base directory for the run copies.
   New `Config.Parallel` (and `nanite-eval -parallel`, 1–8) runs that many at
+  once, sharing the dollar cap; results keep scenario and arm order. A
+  request that does not fit beside others' reservations now waits for them
+  instead of being refused; a failed run cancels the runs in flight.
   once, sharing the dollar cap; results keep scenario and arm order.
 - New public package `agent/authored`: the rules for the Nanite files in an
   agent directory, for editors and CI. `ParseVariant`, `LoadVariants`,

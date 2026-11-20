@@ -44,11 +44,13 @@ type Options struct {
 	Dir string
 	// DataDir defaults to .nanite inside Dir.
 	DataDir string
-	// WorkDir is the agent's working directory: relative paths in the file
-	// tools resolve there first, then in Dir, and bash runs there. Empty is
-	// the process's working directory at Open. Set it when several agents
-	// in one process each work in their own directory; the process's
-	// working directory is never changed.
+	// WorkDir is the agent's working directory, an existing absolute
+	// directory: relative paths in the file tools resolve there first, then
+	// in Dir, and bash and background jobs run there. Empty is the process's
+	// working directory at Open. Set it when several agents in one process
+	// each work in their own directory; the process's working directory is
+	// never changed. MCP stdio servers are not affected: they start in the
+	// process's working directory.
 	WorkDir string
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
@@ -205,8 +207,13 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("nanite: agent directory required")
 	}
-	if opts.WorkDir != "" && !filepath.IsAbs(opts.WorkDir) {
-		return nil, fmt.Errorf("nanite: WorkDir %q must be absolute", opts.WorkDir)
+	if opts.WorkDir != "" {
+		if !filepath.IsAbs(opts.WorkDir) {
+			return nil, fmt.Errorf("nanite: WorkDir %q must be absolute", opts.WorkDir)
+		}
+		if info, err := os.Stat(opts.WorkDir); err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("nanite: WorkDir %q must be an existing directory", opts.WorkDir)
+		}
 	}
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")

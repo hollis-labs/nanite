@@ -46,9 +46,14 @@ type Config struct {
 	Gateway agent.Gateway
 	// Modes limits the arms run to these modes; empty runs every arm.
 	Modes []Mode
-	// Dir is where each run's agent directory is made; empty is a temporary
-	// directory, removed afterwards.
+	// Dir is the base directory each run's agent directory and workspace
+	// copy are made in; empty is a temporary directory per run, removed
+	// afterwards. A run works only inside its own copy (agent.Options.WorkDir)
+	// and never changes the process's working directory.
 	Dir string
+	// Parallel is how many runs may happen at once; zero is one. Results
+	// keep the scenario and arm order whatever finishes first.
+	Parallel int
 	// TurnTokens caps the tokens one run's task turn may use, its subtasks
 	// included (agent.Options.TurnTokenBudget). Zero is no cap.
 	TurnTokens int
@@ -121,19 +126,22 @@ type Result struct {
 	Skipped string `json:"skipped,omitempty"`
 }
 
-// Run runs each scenario in each of its arms, in order, and returns what ran
-// even when it stops early.
-//
-// Runs happen one at a time: each changes the process's working directory to
-// its copy of the workspace (the file tools resolve relative paths against
-// it), so nothing else in the process may depend on the working directory
-// while Run runs, and Run must not be called concurrently.
+// Run runs each scenario in each of its arms and returns what ran, in
+// scenario and arm order, even when it stops early. Up to cfg.Parallel runs
+// happen at once. Run is safe to call concurrently: no run depends on or
+// changes the process's working directory.
 func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) {
 	if cfg.Price == (Price{}) {
 		cfg.Price = ConservativePrice
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Minute
+	}
+	if cfg.Parallel < 0 {
+		return Report{}, errors.New("evals: Parallel must not be negative")
+	}
+	if cfg.Parallel == 0 {
+		cfg.Parallel = 1
 	}
 	model := cfg.Model
 	if cfg.Provider == nil {
@@ -143,35 +151,78 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 	}
 	rep := Report{Model: model, Price: cfg.Price}
 	meter := &meter{price: cfg.Price, max: cfg.MaxUSD}
-	defer func() { rep.SpentUSD = meter.spentUSD() }()
+
+	type job struct {
+		s   Scenario
+		arm Arm
+	}
+	var jobs []job
 	for _, s := range scenarios {
 		for _, arm := range s.AllArms() {
 			if len(cfg.Modes) > 0 && !slices.Contains(cfg.Modes, arm.Mode) {
 				continue
 			}
-			skip := ""
-			switch {
-			case ctx.Err() != nil:
-				skip = "interrupted"
-			case meter.over():
-				skip = fmt.Sprintf("dollar cap $%.2f reached", cfg.MaxUSD)
-			}
-			if skip != "" {
-				rep.Stopped = skip
-				rep.Results = append(rep.Results, Result{Scenario: s.Name, Arm: arm.Name, Mode: arm.Mode, Skipped: skip})
-				continue
-			}
-			r, err := runOne(ctx, cfg, model, meter, s, arm)
-			rep.Results = append(rep.Results, r)
-			if err != nil {
-				rep.Stopped = "error: " + Shorten(err.Error())
-				rep.SpentUSD = meter.spentUSD()
-				return rep, fmt.Errorf("%s/%s: %w", s.Name, arm.Name, err)
-			}
+			jobs = append(jobs, job{s, arm})
 		}
 	}
+	results := make([]Result, len(jobs))
+	errs := make([]error, len(jobs))
+	var (
+		mu     sync.Mutex
+		failed bool
+		wg     sync.WaitGroup
+	)
+	sem := make(chan struct{}, cfg.Parallel)
+	for i, j := range jobs {
+		sem <- struct{}{}
+		mu.Lock()
+		stop := failed
+		mu.Unlock()
+		skip := ""
+		switch {
+		case stop:
+			skip = "an earlier run failed"
+		case ctx.Err() != nil:
+			skip = "interrupted"
+		case meter.over():
+			skip = fmt.Sprintf("dollar cap $%.2f reached", cfg.MaxUSD)
+		}
+		if skip != "" {
+			<-sem
+			results[i] = Result{Scenario: j.s.Name, Arm: j.arm.Name, Mode: j.arm.Mode, Skipped: skip}
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i], errs[i] = runOne(ctx, cfg, model, meter, j.s, j.arm)
+			if errs[i] != nil {
+				mu.Lock()
+				failed = true
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
 	rep.SpentUSD = meter.spentUSD()
-	return rep, nil
+
+	var firstErr error
+	for i, r := range results {
+		if errs[i] != nil && firstErr == nil {
+			firstErr = fmt.Errorf("%s/%s: %w", jobs[i].s.Name, jobs[i].arm.Name, errs[i])
+			rep.Stopped = "error: " + Shorten(errs[i].Error())
+		}
+		if firstErr != nil && r.Skipped == "an earlier run failed" {
+			// Runs after a failure are not reported, as before.
+			continue
+		}
+		if r.Skipped != "" && rep.Stopped == "" {
+			rep.Stopped = r.Skipped
+		}
+		rep.Results = append(rep.Results, r)
+	}
+	return rep, firstErr
 }
 
 func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s Scenario, arm Arm) (res Result, retErr error) {
@@ -189,7 +240,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	if err != nil {
 		return res, err
 	}
-	// Resolve symlinks (macOS's temporary directory is one), so the working
+	// Resolve symlinks (macOS's temporary directory is one), so the work
 	// directory and the agent directory are the same single workspace root.
 	if dir, err = filepath.EvalSymlinks(dir); err != nil {
 		return res, err
@@ -205,17 +256,6 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 			return res, err
 		}
 	}
-	// File tools resolve relative paths against the working directory first,
-	// so the run works inside its own copy of the workspace.
-	prev, err := os.Getwd()
-	if err != nil {
-		return res, err
-	}
-	if err := os.Chdir(dir); err != nil {
-		return res, err
-	}
-	defer func() { retErr = errors.Join(retErr, os.Chdir(prev)) }()
-
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	var model llmcontracts.Provider
@@ -239,7 +279,9 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	var mu sync.Mutex
 	var records []agent.TraceRecord
 	opts := agent.Options{
-		Dir: dir, GlobalSkillsDir: "-", Builtins: builtins, Provider: model, Gateway: cfg.Gateway, Gate: gate,
+		// The run works inside its own copy of the workspace: relative paths
+		// resolve there, and the process's working directory is untouched.
+		Dir: dir, WorkDir: dir, GlobalSkillsDir: "-", Builtins: builtins, Provider: model, Gateway: cfg.Gateway, Gate: gate,
 		TurnTokenBudget: cfg.TurnTokens,
 		TraceSink: func(_ context.Context, r agent.TraceRecord) {
 			mu.Lock()

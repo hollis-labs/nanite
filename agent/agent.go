@@ -44,6 +44,12 @@ type Options struct {
 	Dir string
 	// DataDir defaults to .nanite inside Dir.
 	DataDir string
+	// WorkDir is the agent's working directory: relative paths in the file
+	// tools resolve there first, then in Dir, and bash runs there. Empty is
+	// the process's working directory at Open. Set it when several agents
+	// in one process each work in their own directory; the process's
+	// working directory is never changed.
+	WorkDir string
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
 	// Provider defaults to the adapter selected by host.yaml and Gateway.
@@ -199,6 +205,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("nanite: agent directory required")
 	}
+	if opts.WorkDir != "" && !filepath.IsAbs(opts.WorkDir) {
+		return nil, fmt.Errorf("nanite: WorkDir %q must be absolute", opts.WorkDir)
+	}
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
 	}
@@ -264,8 +273,12 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	a := &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}}
 	roots := []string{def.Directory}
-	if cwd, err := os.Getwd(); err == nil && cwd != def.Directory {
-		roots = append([]string{cwd}, roots...)
+	work := opts.WorkDir
+	if work == "" {
+		work, _ = os.Getwd()
+	}
+	if work != "" && filepath.Clean(work) != def.Directory {
+		roots = append([]string{filepath.Clean(work)}, roots...)
 	}
 	offered := opts.Builtins
 	if offered == nil && def.Profile.Kind == agentdir.Embedded {

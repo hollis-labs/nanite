@@ -149,10 +149,11 @@ goes into a report.
 **Credentials:** it reads them the way `nanite` does: `NANITE_GATEWAY_URL` and
 `NANITE_GATEWAY_KEY_REF`, then the keychain, then `NANITE_PROVIDER_KEY_ENV=1`.
 
-**One run at a time:** each run moves the process into its own copy of the workspace, because the
-file tools resolve relative paths against the working directory. The harness therefore runs
-scenarios one at a time. Nothing else in the process may rely on the working directory while it
-runs.
+**Working directory:** each run works in its own copy of the workspace through
+`agent.Options.WorkDir`, so relative paths in the file tools resolve there. The harness never
+changes the process's working directory. `Config.Parallel` (`-parallel`, default 1, at most 8)
+runs that many at once; `Run` itself is safe to call concurrently, and results keep scenario and
+arm order. The dollar cap is shared by every run in one `Run`.
 
 ## Live results, 2026-11-20
 

@@ -119,6 +119,75 @@ func TestOfflineRun(t *testing.T) {
 	}
 }
 
+// TestParallelRunsLeaveTheWorkingDirectory: runs happen at once, within one
+// Run and across two concurrent Runs, each inside its own workspace copy.
+// The process's working directory (an empty directory here, so a file tool
+// that resolved against it would fail its run) never changes, and the report
+// is the same as a serial one.
+func TestParallelRunsLeaveTheWorkingDirectory(t *testing.T) {
+	t.Setenv("NANITE_DEFAULT_MODEL", "some-other-model")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	stop := make(chan struct{})
+	moved := make(chan string, 1)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				close(moved)
+				return
+			default:
+			}
+			if got, err := os.Getwd(); err != nil || got != cwd {
+				select {
+				case moved <- got:
+				default:
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	serial, err := Run(context.Background(), Config{TurnTokens: 500000}, Scenarios())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := make([]Report, 2)
+	errs := make([]error, 2)
+	done := make(chan int)
+	for i := range reports {
+		go func() {
+			reports[i], errs[i] = Run(context.Background(), Config{TurnTokens: 500000, Parallel: 3}, Scenarios())
+			done <- i
+		}()
+	}
+	<-done
+	<-done
+	close(stop)
+	if got, ok := <-moved; ok {
+		t.Errorf("the working directory changed to %q during the runs", got)
+	}
+	want := Markdown(serial, false)
+	for i, rep := range reports {
+		if errs[i] != nil {
+			t.Fatal(errs[i])
+		}
+		for _, r := range rep.Results {
+			if !r.Success {
+				t.Errorf("run %d: %s/%s failed: %s", i, r.Scenario, r.Arm, r.Why)
+			}
+		}
+		if got := Markdown(rep, false); got != want {
+			t.Errorf("run %d: the parallel report differs from the serial one:\n%s\nwant:\n%s", i, got, want)
+		}
+	}
+}
+
+func TestNegativeParallelIsRefused(t *testing.T) {
+	if _, err := Run(context.Background(), Config{Parallel: -1}, Scenarios()); err == nil {
+		t.Fatal("Parallel -1 was accepted")
+	}
+}
+
 // TestDollarCapStopsTheRun: a request that would pass the cap is refused, the
 // run in progress ends, the rest are skipped, and the report says so.
 func TestDollarCapStopsTheRun(t *testing.T) {

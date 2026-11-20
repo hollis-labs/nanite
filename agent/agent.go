@@ -91,6 +91,9 @@ type Options struct {
 	Events EventSink
 	// Gate defaults to DenyGate for tool calls that require approval.
 	Gate Gate
+	// AutoApprove skips approval prompts and grant waits for testing only.
+	// Explicit denies and package integrity checks still apply. Default false.
+	AutoApprove bool
 	// SubtaskAskWait bounds how long a subtask's approval or question waits,
 	// in total, for its root conversation to have a running turn to be asked
 	// on (a background subtask can ask between turns). It then ends denied,
@@ -393,7 +396,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		providers[spec.Name] = spec
 	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AutoApprove: opts.AutoApprove, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,

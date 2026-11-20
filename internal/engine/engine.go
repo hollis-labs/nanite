@@ -46,6 +46,7 @@ var ErrNoInterrupted = errors.New("conversation has no interrupted turn")
 
 type Config struct {
 	MaxOutputTokens, MaxSteps int
+	AutoApprove               bool // Testing only; convert approval asks to allows, not denies.
 	Events                    events.Sink
 	Logger                    *slog.Logger
 	Dir, GlobalSkillsDir      string
@@ -206,6 +207,9 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.AutoApprove {
+		cfg.Logger.Warn("nanite: auto mode is on; approvals and grant waits are skipped (testing only)")
+	}
 	if cfg.Gate == nil {
 		cfg.Gate = permission.DenyGate
 	}
@@ -226,7 +230,7 @@ func New(cfg Config) (*Engine, error) {
 	cfg.ProviderConfig.Panics = guard
 	var mcpAuth *mcpclient.Auth
 	if cfg.Identity != nil {
-		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting, cfg.OnAuthGranted)
+		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting, cfg.OnAuthGranted, cfg.AutoApprove)
 		if err != nil {
 			return nil, err
 		}

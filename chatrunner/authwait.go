@@ -64,6 +64,9 @@ var (
 // onAuthWaiting sees each grant request a token request found missing. It
 // runs inside the token request, so it only records and hands off.
 func (r *Runner) onAuthWaiting(w agent.AuthWaiting) {
+	if r.opts.Agent.AutoApprove {
+		return
+	}
 	if r.opts.Agent.OnAuthWaiting != nil {
 		r.opts.Agent.OnAuthWaiting(w)
 	}
@@ -376,6 +379,9 @@ func (r *Runner) saveAuthWaits() {
 // loadAuthWaits restores the watched requests after a restart, merging with
 // any registered meanwhile, and watches them again.
 func (r *Runner) loadAuthWaits(ctx context.Context) {
+	if r.opts.Agent.AutoApprove {
+		return
+	}
 	raw, err := r.agent.HostState(ctx, authWaitsKey)
 	if err != nil {
 		r.logger().Warn("chatrunner: load grant requests", "error", err.Error())

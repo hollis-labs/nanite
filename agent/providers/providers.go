@@ -122,7 +122,7 @@ func NewWarden(dir string, id authored.Identity, opts WardenOptions) (*Warden, e
 	if opts.OnAuthWaiting != nil {
 		onWaiting = func(w warden.Waiting) { opts.OnAuthWaiting(agent.AuthWaiting(w)) }
 	}
-	src, err := internalauthored.NewWardenSource(id, opts.Redactor, opts.Logger, onWaiting, nil)
+	src, err := internalauthored.NewWardenSource(id, opts.Redactor, opts.Logger, onWaiting, nil, false)
 	if err != nil {
 		return nil, err
 	}

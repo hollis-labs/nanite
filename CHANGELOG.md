@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0
+
+Auto mode for testing and pilots. No breaking changes.
+
+- Testing-only `agent.Options.AutoApprove` skips approval asks with WARN logs
+  and host activity, runs unapproved packages without saving approval, and
+  fails missing Warden grants without a chat hold. Explicit denies and package
+  integrity checks remain active; the option is off by default.
+
 ## 0.9.0
 
 Closing replies at turn limits, embedder limits and deferred tool schemas;

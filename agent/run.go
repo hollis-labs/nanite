@@ -104,3 +104,6 @@ type RunFinished = events.RunFinished
 // RunFailed is the terminal event for a failed or cancelled run and carries
 // the corresponding error.
 type RunFailed = events.RunFailed
+
+// AutoApproved reports an approval prompt skipped by Options.AutoApprove.
+type AutoApproved = events.AutoApproved

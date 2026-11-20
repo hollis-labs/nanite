@@ -275,3 +275,10 @@ type RunFailed struct {
 	EventMeta
 	Err error
 }
+
+// AutoApproved reports an approval prompt skipped in host-enabled testing mode.
+// InputSummary contains no input values.
+type AutoApproved struct {
+	EventMeta
+	Conversation, CallID, Tool, InputSummary string
+}

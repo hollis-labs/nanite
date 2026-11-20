@@ -483,3 +483,28 @@ func TestAuthUnknownPollStatusKeepsWatching(t *testing.T) {
 	}
 	w.authNotice(t, "approval after unknown status", "approved grant request req-1")
 }
+
+func TestAutoApproveGrantFailureDoesNotHoldChat(t *testing.T) {
+	ws := newFakeWarden(t)
+	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), func(o *chatrunner.Options) { o.Agent.AutoApprove = true })
+	seen := w.turn(t, "hi")
+	var failed bool
+	for _, ev := range seen {
+		if isAuthWaiting(ev) {
+			t.Fatal("auto mode emitted waiting activity")
+		}
+		if ev.Verb == chatstream.VerbRunError {
+			failed = true
+			if !strings.Contains(ev.Message, "llm-gateway") || !strings.Contains(ev.Message, "req-1") || strings.Contains(ev.Message, "continues once") {
+				t.Fatalf("error %+v", ev)
+			}
+		}
+	}
+	if !failed {
+		t.Fatal("no ordinary run error")
+	}
+	raw, err := w.runner.Agent().HostState(t.Context(), "auth.waits")
+	if err != nil || raw != "" {
+		t.Fatalf("persisted auth hold %q %v", raw, err)
+	}
+}

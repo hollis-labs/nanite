@@ -85,7 +85,7 @@ func New(dir string, resolver *secrets.Resolver, scope *redact.Scope, logger *sl
 	c := &Client{dir: dir, resolver: resolver, scope: scope, logger: logger, auth: auth, servers: make(map[string]*registration),
 		discovery: make(chan struct{}, discoveryConcurrency)}
 	c.pool = mcp.NewPool(mcp.WithIdentity("nanite", "0.5.0"), mcp.WithRetries(1),
-		mcp.WithCommandEnv(commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes), mcp.WithHTTPClient(c.httpClient),
+		mcp.WithCommandEnv(c.commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes), mcp.WithHTTPClient(c.httpClient),
 		mcp.WithDefaultCallTimeouts(map[string]time.Duration{"stdio": 60 * time.Second, "http": 60 * time.Second, "sse": 60 * time.Second}),
 		mcp.WithClientOptions(func(key string, options *sdk.ClientOptions) {
 			options.ElicitationHandler = c.elicit(key)
@@ -457,6 +457,7 @@ const PackageCheckEnv = "NANITE_TOOL_CHECK"
 
 // PackageCheck is the exact tool package approved for a stdio registration.
 type PackageCheck struct {
+	AutoApprove       bool
 	Dir, Name, Digest string
 	AllowEnv          []string
 }
@@ -505,4 +506,17 @@ func (c *Client) warm(ctx context.Context, reg *registration) error {
 		return nil
 	}
 	return conn.Ping(reg.transportContext(station.WithHeaders(ctx, nil)))
+}
+
+// commandEnv logs each auto-mode process startup, including reconnects, only
+// after the normal integrity and environment checks have succeeded.
+func (c *Client) commandEnv(cfg mcp.ServerConfig) ([]string, error) {
+	env, err := commandEnv(cfg)
+	if err == nil {
+		var check PackageCheck
+		if json.Unmarshal([]byte(cfg.Env[PackageCheckEnv]), &check) == nil && check.AutoApprove && c.logger != nil {
+			c.logger.Warn("nanite: auto mode MCP package startup", "package", check.Name, "digest", check.Digest)
+		}
+	}
+	return env, err
 }

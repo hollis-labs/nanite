@@ -254,7 +254,9 @@ func (x *execution) authorizeStart(ctx context.Context, call string, start subag
 	permit := trace.PermissionAllow
 	if effect.Effect == policy.Ask && err == nil {
 		permit = trace.PermissionApproved
-		if x.granted(subagent.ToolName) {
+		if e.cfg.AutoApprove {
+			decision = x.autoApprove(ctx, req)
+		} else if x.granted(subagent.ToolName) {
 			decision = permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "conversation approval"}
 		} else {
 			req.Reason = e.scrub.Text(effect.Reason)

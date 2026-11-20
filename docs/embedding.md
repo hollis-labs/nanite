@@ -27,6 +27,30 @@ authored directory and retain its conversations.
 5. Use `writer.Clear()` and `a.Tools().RemoveGroup("demo")` to remove the host
    contributions before the third turn. Call `a.Close()` at shutdown.
 
+### Auto approvals for testing
+
+**Testing only:** `agent.Options{AutoApprove: true}` lets a pilot agent run calls
+that would normally ask for approval, including subtask and host-dispatch calls.
+It is off by default. Set `chatrunner.Options.Agent.AutoApprove` for a chat host;
+there is no `host.yaml` setting. Explicit authored and host-PDP denies still deny.
+The host Gate is bypassed for asks, so do not enable this on agents whose actions
+need human review.
+
+Opening the agent logs one WARN. Each skipped approval logs a WARN with the tool,
+conversation, and a fully redacted input-size summary, and emits `AutoApproved`;
+chatrunner renders it as an `auto-approved` activity. Tool-package calls log their
+package name and digest. MCP startups and reconnects log those fields too.
+Unapproved or changed packages can run, but all file, environment and startup
+integrity checks remain active. Auto mode never saves package approvals or
+conversation grants, so opening with it off restores the normal gates.
+
+For Nanite-managed Warden authentication, a missing grant still files its request,
+but the call fails immediately with the audience and request ID as an ordinary
+error. It logs a WARN and creates no `AuthWaiting` callback or chat hold. Existing
+chat grant watches are not resumed in auto mode; their saved state is retained for
+when normal mode returns. Auto mode does not grant access at Warden or bypass its
+checks. A host-supplied provider continues to own its authentication behavior.
+
 `SlotsAssembled` reports each slot's estimated token count, whether its content
 changed since the previous turn, and each entry's disposition. A changed slot
 with zero tokens was cleared. The example also prints the names it observes

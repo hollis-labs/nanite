@@ -126,7 +126,9 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 		// A conversation-scope allow covers the conversation it was given on
 		// and the subtasks under it: a root's grant reaches its children, a
 		// subtask's never reaches its parent or siblings.
-		if x.granted(x.grantKey(t.Name)) {
+		if x.engine.cfg.AutoApprove {
+			decision = x.autoApprove(ctx, req)
+		} else if x.granted(x.grantKey(t.Name)) {
 			decision = permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "conversation approval"}
 		} else {
 			req.Reason = x.engine.scrub.Text(effect.Reason)
@@ -312,6 +314,12 @@ func (x *execution) batch(ctx context.Context, jobs []tooluse.Job, calls []llmty
 		toolCtx, endSpan := events.ToolSpan(ctx, x.engine.scrub.Text(call.Name))
 		defer endSpan()
 
+		if x.engine.cfg.AutoApprove {
+			if name, ok := packageOf(call.Name); ok {
+				pkg := x.toolPkgs[name]
+				x.engine.cfg.Logger.WarnContext(ctx, "nanite: auto mode tool package call", "package", name, "digest", pkg.Digest, "conversation", x.info.ID)
+			}
+		}
 		var result tools.Result
 		// A panicking tool yields an error result carrying the panic ref.
 		err := x.engine.panics.Call("tool "+call.Name, func() (err error) {

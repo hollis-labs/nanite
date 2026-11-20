@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
+
+Steering, the front desk, Warden auth and the Workbench APIs. Root turns can
+be steered (libs `agent/steer`: owner-set modes, work slots, reflexes and
+classifier suggestions), including host turns (auto, errand) and event and
+focus reflexes. chatrunner gains the front desk (libs `agent/desk`), which
+survives a restart, and resumes interrupted turns. Agents authenticate with
+short-lived Warden tokens (`identity.yaml`, `auth: warden`), and a missing
+grant waits in the chat and continues on approval. Agents can write their own
+tools (`tools/<name>/`). New public packages `agent/authored` (the rules for
+an agent directory's Nanite files) and `agent/providers` (provider
+constructors); evals run concurrently and can stub tools. Compaction matches
+libs agent/host (recent turns kept whole, a configurable prompt and input
+cap, request sizes on its events), with host.yaml keys for it and the idle
+timeout. A model writing a long tool input is no longer taken for a stalled
+stream.
+
+Root conversations can search and read their own full transcript after
+compaction, and a turn can carry its own composed profile and headers.
+
+Also in this release:
 
 - Front-desk completion notices wait for dispatched jobs to be registered,
   so fast jobs cannot leave accepted plans waiting forever. Concurrent pumps
@@ -43,23 +63,6 @@
 - Turn profiles and headers survive interrupted-turn recovery. chatrunner's
   `TurnProfile` hook selects them; `Agent.TurnContext` shares the validated
   snapshot with planning and host dispatch. See [turn profiles](docs/turn-profiles.md).
-
-## 0.7.0
-
-Steering, the front desk, Warden auth and the Workbench APIs. Root turns can
-be steered (libs `agent/steer`: owner-set modes, work slots, reflexes and
-classifier suggestions), including host turns (auto, errand) and event and
-focus reflexes. chatrunner gains the front desk (libs `agent/desk`), which
-survives a restart, and resumes interrupted turns. Agents authenticate with
-short-lived Warden tokens (`identity.yaml`, `auth: warden`), and a missing
-grant waits in the chat and continues on approval. Agents can write their own
-tools (`tools/<name>/`). New public packages `agent/authored` (the rules for
-an agent directory's Nanite files) and `agent/providers` (provider
-constructors); evals run concurrently and can stub tools. Compaction matches
-libs agent/host (recent turns kept whole, a configurable prompt and input
-cap, request sizes on its events), with host.yaml keys for it and the idle
-timeout. A model writing a long tool input is no longer taken for a stalled
-stream.
 
 Breaking (no aliases or compatibility layer):
 

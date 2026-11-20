@@ -101,6 +101,9 @@ type Config struct {
 	// tokens and estimated compaction summaries count. Reaching it stops
 	// running subtasks mid-step and the turn at its next step.
 	TurnTokenBudget int
+	// IdleTimeout is how long a model stream may be silent before the turn
+	// fails as stalled; zero means DefaultIdleTimeout.
+	IdleTimeout time.Duration
 	// CompactAt, when positive, is the estimated request size in tokens
 	// (system blocks, tool schemas and conversation together) at which the
 	// conversation is compacted. Zero uses 80% of the runtime context window.
@@ -729,3 +732,14 @@ func (e *Engine) forgetTurnContext(conversation string) {
 // Warden is the agent's Warden token source, nil without identity.yaml's
 // warden section.
 func (e *Engine) Warden() *warden.Source { return e.cfg.ProviderConfig.Warden }
+
+// DefaultIdleTimeout is how long a model stream may be silent before its turn
+// fails as stalled, when Config.IdleTimeout is zero.
+const DefaultIdleTimeout = 90 * time.Second
+
+func (e *Engine) idleTimeout() time.Duration {
+	if e.cfg.IdleTimeout > 0 {
+		return e.cfg.IdleTimeout
+	}
+	return DefaultIdleTimeout
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/hollis-labs/nanite/internal/provider/failure"
+	"github.com/hollis-labs/nanite/internal/provider/keepalive"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/toolargs"
@@ -54,17 +55,24 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 			toolOrder    []int64
 		)
 
+		busy := keepalive.Start()
 		emit := func(ev llmtypes.StreamEvent) bool {
 			select {
 			case <-ctx.Done():
 				return false
 			case out <- ev:
+				busy.Sent()
 				return true
 			}
 		}
 
 		for stream.Next() {
 			chunk := stream.Current()
+			// Tool-call arguments are kept until the stream ends; say the
+			// stream is busy while they arrive.
+			if busy.Due() && !emit(llmtypes.StreamEvent{Type: keepalive.Event}) {
+				return
+			}
 			// Capture usage when present (final chunk under include_usage).
 			if chunk.JSON.Usage.Valid() {
 				lastUsage = &llmtypes.Usage{

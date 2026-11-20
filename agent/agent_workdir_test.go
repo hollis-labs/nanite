@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/agent"
@@ -85,5 +86,13 @@ func writeAgent(t *testing.T, root string) {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(raw), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// A negative IdleTimeout is refused when the agent opens.
+func TestNegativeIdleTimeoutIsRefused(t *testing.T) {
+	_, err := agent.Open(t.Context(), agent.Options{Dir: t.TempDir(), GlobalSkillsDir: "-", Provider: fake.New(fake.Text("x")), IdleTimeout: -time.Second})
+	if err == nil || !strings.Contains(err.Error(), "IdleTimeout") {
+		t.Fatalf("Open = %v, want an IdleTimeout error", err)
 	}
 }

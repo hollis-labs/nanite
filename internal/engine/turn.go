@@ -840,7 +840,7 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEvent) (step, error) {
 	var got step
 	var text strings.Builder
-	reader, err := turn.NewReader(ctx, stream, 90*time.Second)
+	reader, err := turn.NewReader(ctx, stream, x.engine.idleTimeout())
 	if err != nil {
 		return got, err
 	}

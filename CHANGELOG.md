@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A model writing a long tool input is no longer taken for a stalled stream.
+  The Anthropic and OpenAI streams keep a tool call's input (and thinking)
+  until the block ends; while those frames arrive they now send a
+  `keepalive` event at most every 5 seconds, which the turn's idle timer
+  counts and everything else ignores. A stream with no frames still stalls.
+  `Options.IdleTimeout` sets the idle limit (default 90 seconds, as before).
 - Waiting for a Warden grant shows in the chat and continues on approval.
   `agent.AuthWaiting` gains `Conversation` and `For` (`provider <name>` or
   `MCP server <name>`), which the grant request's purpose names too;

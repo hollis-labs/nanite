@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
+
+A daily token cap per agent and a stop-everything switch. Requires libs
+agent/agentdir v0.5.0 (Substrate BOM f70a163). No breaking changes.
 
 - Add a persisted per-agent UTC-day token cap, with one 80% warning per day,
   through `runtime.daily_token_budget` and `Options.DailyTokenBudget`.

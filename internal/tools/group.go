@@ -97,7 +97,7 @@ func builtin(name string) bool {
 		"skill_list", "skill_get", "subtask", "return_result", "parent_history_search", "parent_history_get",
 		"background_start", "background_status", "background_cancel", "fetch_tool_result",
 		"search_tool_result", "ask_user", "read_file", "write_file", "edit_file", "list_dir", "find_files", "search_files", "bash",
-		"tool_validate":
+		"tool_validate", "history_search", "history_get":
 		return true
 	default:
 		return strings.HasPrefix(name, "mcp__") || strings.HasPrefix(name, ToolPackagePrefix)

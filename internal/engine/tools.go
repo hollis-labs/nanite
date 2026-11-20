@@ -44,6 +44,9 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 	if x.info.ParentID != "" {
 		// Only a subtask child can read its parent's history.
 		catalog = append(catalog, x.parentHistory().Tools()...)
+	} else {
+		// A root conversation reads its own transcript and the agent's others.
+		catalog = append(catalog, x.history().Tools()...)
 	}
 	roots := x.engine.cfg.WorkspaceRoots
 	if len(roots) > 0 {

@@ -56,6 +56,7 @@ const (
 	BuiltinNotes      = tools.BuiltinNotes      // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  = tools.BuiltinQuestions  // ask_user
 	BuiltinTools      = tools.BuiltinTools      // tool packages (tool__*) and tool_validate
+	BuiltinHistory    = tools.BuiltinHistory    // history_search, history_get (a root conversation's own transcript)
 )
 
 // AllBuiltins lists every built-in group, for a host that wants all but a few.

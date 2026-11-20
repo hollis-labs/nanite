@@ -409,6 +409,17 @@ children read the lead's conversation. Both belong to the `subtasks`
 built-in group, and an authored variant with an allow list must list them
 to keep them; the forked context mentions them only when the child has them.
 
+A root conversation has its own pair instead, in the `history` built-in
+group: `history_search(query, k)` searches its own messages the same way, and
+`history_get(from, to)` reads up to 20 of them (at most 32,000 characters) by
+number. Compaction only shortens what is sent to the model; the transcript
+keeps every message, so these tools recover what a summary left out, and the
+summary names them and the compacted range when they are offered. They never
+reach another conversation: searching across conversations belongs to the
+shared transcript service. For a long message, only a window around the match
+is redacted to build a snippet; the window is far wider than the snippet, so
+no secret is cut into it.
+
 A variant's tool rules govern what a child may call, not what it may read:
 a child with parent history tools can read anything in its parent
 conversation, including the output of tools its own variant denies. Withhold

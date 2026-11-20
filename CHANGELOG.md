@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Recovery after compaction: the `history` built-in group
+  (`agent.BuiltinHistory`) offers root conversations `history_search` (words,
+  `k` up to 20) and `history_get` (up to 20 messages, 32,000 characters, by
+  number) over their own full transcript, including what compaction
+  summarized. The compaction summary names them and the compacted message
+  range. Subtask children keep `parent_history_*`. Hosts get
+  `Conversation.SearchHistory` and `Conversation.HistoryMessages`, scoped to
+  that conversation; results are redacted. Cross-conversation search is left
+  to the shared transcript service.
+
 ## 0.7.0
 
 Steering, the front desk, Warden auth and the Workbench APIs. Root turns can

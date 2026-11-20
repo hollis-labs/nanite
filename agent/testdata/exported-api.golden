@@ -34,6 +34,7 @@ const BuiltinBackground github.com/hollis-labs/nanite/internal/tools.BuiltinGrou
 const BuiltinFilesRead github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesWrite github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 type BuiltinGroup = github.com/hollis-labs/nanite/internal/tools.BuiltinGroup string
+const BuiltinHistory github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinNotes github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinQuestions github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinShell github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
@@ -58,6 +59,7 @@ type Conversation struct
   (*Conversation) Discard(ctx context.Context) error
   (*Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error)
   (*Conversation) History(ctx context.Context) ([]Message, error)
+  (*Conversation) HistoryMessages(ctx context.Context, from int, to int) (string, error)
   (*Conversation) HostState(ctx context.Context, key string) (string, error)
   (*Conversation) ID() string
   (*Conversation) Interrupted() *InterruptedTurn
@@ -66,6 +68,7 @@ type Conversation struct
   (*Conversation) PostNotice(ctx context.Context, kind string, body string) error
   (*Conversation) Record(ctx context.Context, userText string, answer string) error
   (*Conversation) Resume(ctx context.Context) (*Run, error)
+  (*Conversation) SearchHistory(ctx context.Context, query string, k int) ([]HistoryHit, error)
   (*Conversation) Send(ctx context.Context, in Input) (*Run, error)
   (*Conversation) SetHostState(ctx context.Context, key string, value string) error
   (*Conversation) SetMode(ctx context.Context, name string) error
@@ -116,6 +119,12 @@ type Gateway = github.com/hollis-labs/nanite/internal/provider.Gateway struct
   field KeyRef string
   field Auth string
 var GeneralSlot github.com/hollis-labs/libs/agent/steer.Slot
+type HistoryHit = github.com/hollis-labs/nanite/internal/engine.HistoryHit struct
+  field ConversationID string
+  field Seq int
+  field Role string
+  field At time.Time
+  field Snippet string
 type HostFired = github.com/hollis-labs/nanite/internal/engine.HostFired struct
   field Fired []string
   field Actions []github.com/hollis-labs/libs/agent/steer.Action

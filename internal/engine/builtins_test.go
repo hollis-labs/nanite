@@ -63,7 +63,7 @@ func TestNilBuiltinsOfferEverything(t *testing.T) {
 	}
 	// The complete default list. The test engine has no workspace root, so
 	// bash and background_start, which need one, are absent here.
-	want := strings.Fields("ask_user background_cancel background_status edit_file fetch_tool_result find_files list_dir read_file " +
+	want := strings.Fields("ask_user background_cancel background_status edit_file fetch_tool_result find_files history_get history_search list_dir read_file " +
 		"scratchpad_read scratchpad_write search_files search_tool_result skill_get skill_list " +
 		"subtask todo_list todo_write tool_validate write_file")
 	if got := offered(p.requests[0]); !slices.Equal(got, want) {

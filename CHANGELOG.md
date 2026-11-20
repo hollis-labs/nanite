@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.9.0
+
+Closing replies at turn limits, embedder limits and deferred tool schemas;
+the latest tool step survives compaction; offline evals for steering host
+actions. No breaking changes.
 
 - Evals can stub steering host commands and tools by name, fire event/focus
   reflexes offline, and record fired actions and canned results as run evidence

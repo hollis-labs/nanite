@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
+
+Safe first use of a conversation from concurrent callers, Warden waiters that
+survive a restart, optional one-hour prompt caching, and tool-package
+hardening. Requires libs agent/agentdir v0.4.0 and llm/core v0.5.0.
+
+Breaking: tool-package approvals move out of the agent directory (see below);
+hosts re-grant them once, and should set `Options.DataDir` to keep them in
+host state.
 
 - Auth decisions normalize case and whitespace, accepting `approved`, `denied`,
   `expired` or `withdrawn`, with `granted` as an approval alias. Unknown poll

@@ -399,6 +399,7 @@ func TestSteerAheadHaltsOnceAndTheTraceSaysSo(t *testing.T) {
 	if _, err := e.Send(t.Context(), id, Input{Text: "/other", Steer: prepared}); err == nil {
 		t.Fatal("a turn used steering prepared for another message")
 	}
+	copied := *prepared // taken before use: a copy shares the used flag
 	run, err := e.Send(t.Context(), id, Input{Text: "/stop", Steer: prepared})
 	if err != nil {
 		t.Fatal(err)
@@ -416,6 +417,11 @@ func TestSteerAheadHaltsOnceAndTheTraceSaysSo(t *testing.T) {
 	rec := sunk[len(sunk)-1]
 	if rec.Provider != "" || rec.Model != "" || !strings.HasPrefix(rec.Why, "halted") || !slices.Equal(rec.Fired, []string{"stop"}) || rec.Outcome.Steps != 0 {
 		t.Fatalf("halted trace: provider=%q model=%q why=%q fired=%v", rec.Provider, rec.Model, rec.Why, rec.Fired)
+	}
+	if again, err := e.Send(t.Context(), id, Input{Text: "/stop", Steer: &copied}); err == nil {
+		if _, err = again.Wait(); err == nil {
+			t.Fatal("a copy of used prepared steering was used again")
+		}
 	}
 	if again, err := e.Send(t.Context(), id, Input{Text: "/stop", Steer: prepared}); err == nil {
 		if _, err = again.Wait(); err == nil {

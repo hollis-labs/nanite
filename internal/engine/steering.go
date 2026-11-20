@@ -284,7 +284,8 @@ type PreparedSteer struct {
 	conversation string
 	text         string
 	out          *steered
-	taken        atomic.Bool
+	// taken is shared by every copy, so a copy cannot be used again.
+	taken *atomic.Bool
 }
 
 // Halted reports whether a reflex answered the message: its turn replies
@@ -296,7 +297,7 @@ func (p *PreparedSteer) take(conversation, text string) (*steered, error) {
 	if p.conversation != conversation || p.text != text {
 		return nil, errors.New("nanite: Input.Steer was prepared for another message")
 	}
-	if p.taken.Swap(true) {
+	if p.taken == nil || p.taken.Swap(true) {
 		return nil, errors.New("nanite: Input.Steer was already used by a turn")
 	}
 	return p.out, nil
@@ -304,7 +305,8 @@ func (p *PreparedSteer) take(conversation, text string) (*steered, error) {
 
 // Steer runs steering for a person's message ahead of its turn: the mode,
 // work slots, classifier and reflexes, firing what fires (a reflex's
-// cooldown starts now). Send the turn with the result in Input.Steer.
+// cooldown starts now, and stays started if the turn then fails to send).
+// Send the turn with the result in Input.Steer.
 func (e *Engine) Steer(ctx context.Context, conversation string, input Input) (*PreparedSteer, error) {
 	if e.cfg.Steering == nil {
 		return nil, ErrNoSteering
@@ -323,7 +325,7 @@ func (e *Engine) Steer(ctx context.Context, conversation string, input Input) (*
 	if err != nil {
 		return nil, err
 	}
-	return &PreparedSteer{conversation: conversation, text: input.Text, out: out}, nil
+	return &PreparedSteer{conversation: conversation, text: input.Text, out: out, taken: new(atomic.Bool)}, nil
 }
 
 // priorSignals is how many earlier messages predicate reflexes see.

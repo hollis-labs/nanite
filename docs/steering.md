@@ -74,7 +74,12 @@ A host that acts on a message before its turn (chatrunner's front desk does)
 steers it first with `Conversation.Steer`. If the result is `Halted`, a reflex
 answered the message and nothing else should act on it. Send the turn with
 the result in `Input.Steer`: the turn uses it instead of steering again, so a
-reflex fires once. It is for that conversation and text only, and used once.
+reflex fires once. It is for that conversation and text only, and used once
+(a copy of it too). The reflexes fire in `Steer`: if the `Send` that follows
+fails, their cooldowns have still started.
+
+chatrunner's `Options.OnSteered` runs inline with the turn's wire events, so
+keep it fast and hand slow work off.
 
 ## Modes
 

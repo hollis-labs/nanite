@@ -66,7 +66,8 @@ type Options struct {
 	// OnSteered, with Agent.Steering, sees what steering decided for each
 	// root turn, including the reflex actions for the host to carry out.
 	// Those actions never go on the wire; the nanite.steer activity carries
-	// the rest.
+	// the rest. It runs inline with the turn's wire events: keep it fast,
+	// and hand slow work off.
 	OnSteered func(chatID string, s agent.Steered)
 }
 

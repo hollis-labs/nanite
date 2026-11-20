@@ -106,6 +106,16 @@ func (st *state) errorf(format string, args ...any) error {
 	format = typeVerbs(format, args)
 	for i, a := range args {
 		if _, isErr := a.(error); !isErr {
+			// fmt renders the whole value before the bound cuts it, so the
+			// work is charged by the value's size. This is never refunded,
+			// even when the text is discarded.
+			v, ok := a.(reflect.Value)
+			if !ok {
+				v = reflect.ValueOf(a)
+			}
+			if err := st.chargeSize(v); err != nil {
+				return err
+			}
 			args[i] = bounded{a}
 		}
 	}
@@ -384,25 +394,34 @@ func (rs *Resolved) RefTargets(s *Schema) (ref, dyn *Schema, anchor string) {
 	return info.resolvedRef, info.resolvedDynamicRef, info.dynamicRefAnchor
 }
 
-// smallerSide iterates the schema properties that the instance has, from
-// whichever side is smaller: the schema's properties, or a map instance's
-// keys. Visiting a schema property the instance lacks finds nothing, so the
+// smallerSide iterates the entries of m (a keyword keyed by property name)
+// that the instance has, from whichever side is smaller: m's keys, or a map
+// instance's keys. Visiting a key the instance lacks finds nothing, so the
 // result is the same either way.
-func smallerSide(props map[string]*Schema, instance reflect.Value) iter.Seq2[string, *Schema] {
-	return func(yield func(string, *Schema) bool) {
-		if instance.Kind() == reflect.Map && instance.Len() < len(props) && instance.Type().Key().Kind() == reflect.String {
+func smallerSide[T any](m map[string]T, instance reflect.Value) iter.Seq2[string, T] {
+	return func(yield func(string, T) bool) {
+		if instance.Kind() == reflect.Map && instance.Len() < len(m) && instance.Type().Key().Kind() == reflect.String {
 			for it := instance.MapRange(); it.Next(); {
 				prop := it.Key().String()
-				if sub, ok := props[prop]; ok && !yield(prop, sub) {
+				if v, ok := m[prop]; ok && !yield(prop, v) {
 					return
 				}
 			}
 			return
 		}
-		for prop, sub := range props {
-			if !yield(prop, sub) {
+		for prop, v := range m {
+			if !yield(prop, v) {
 				return
 			}
 		}
 	}
+}
+
+// chargeKeys charges for visiting the smaller of a keyword's keys and a map
+// instance's keys, as smallerSide does.
+func (st *state) chargeKeys(n int, instance reflect.Value) error {
+	if instance.Kind() == reflect.Map {
+		n = min(n, instance.Len())
+	}
+	return st.charge(n)
 }

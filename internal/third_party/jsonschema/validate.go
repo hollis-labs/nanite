@@ -516,7 +516,7 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 		evalProps := map[string]bool{}
 		// Nanite patch: visit the smaller side, the schema's properties or the
 		// instance's keys, and charge for it.
-		if err := st.charge(min(len(schema.Properties), instance.Len())); err != nil {
+		if err := st.chargeKeys(len(schema.Properties), instance); err != nil {
 			return err
 		}
 		for prop, subschema := range smallerSide(schema.Properties, instance) {
@@ -639,7 +639,10 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 
 		if st.rs.draft == draft7 {
 			if schema.DependencyStrings != nil {
-				for dprop, dstrings := range schema.DependencyStrings {
+				if err := st.chargeKeys(len(schema.DependencyStrings), instance); err != nil { // Nanite patch
+					return err
+				}
+				for dprop, dstrings := range smallerSide(schema.DependencyStrings, instance) { // Nanite patch: smaller side
 					if hasProperty(dprop) {
 						if m := missingProperties(dstrings); len(m) > 0 {
 							return st.errorf("dependentRequired[%q]: missing properties %q", dprop, m)
@@ -648,7 +651,10 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 				}
 			}
 			if schema.DependencySchemas != nil {
-				for dprop, dschema := range schema.DependencySchemas {
+				if err := st.chargeKeys(len(schema.DependencySchemas), instance); err != nil { // Nanite patch
+					return err
+				}
+				for dprop, dschema := range smallerSide(schema.DependencySchemas, instance) { // Nanite patch: smaller side
 					if hasProperty(dprop) {
 						err := st.validate(instance, dschema, &anns)
 						if err != nil {
@@ -662,7 +668,10 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 				// "Validation succeeds if, for each name that appears in both the instance
 				// and as a name within this keyword's value, every item in the corresponding
 				// array is also the name of a property in the instance." §6.5.4
-				for dprop, reqs := range schema.DependentRequired {
+				if err := st.chargeKeys(len(schema.DependentRequired), instance); err != nil { // Nanite patch
+					return err
+				}
+				for dprop, reqs := range smallerSide(schema.DependentRequired, instance) { // Nanite patch: smaller side
 					if hasProperty(dprop) {
 						if m := missingProperties(reqs); len(m) > 0 {
 							return st.errorf("dependentRequired[%q]: missing properties %q", dprop, m)
@@ -675,7 +684,10 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 			// Nanite patch: the spec URL anchor here read as an IP address to scan-public.
 			if schema.DependentSchemas != nil {
 				// This does not collect annotations, although it seems like it should.
-				for dprop, ss := range schema.DependentSchemas {
+				if err := st.chargeKeys(len(schema.DependentSchemas), instance); err != nil { // Nanite patch
+					return err
+				}
+				for dprop, ss := range smallerSide(schema.DependentSchemas, instance) { // Nanite patch: smaller side
 					if hasProperty(dprop) {
 						// TODO: include dependentSchemas[dprop] in the errors.
 						err := st.validate(instance, ss, &anns)

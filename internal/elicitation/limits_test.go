@@ -34,6 +34,10 @@ type reproCase struct {
 	want []string
 }
 
+// A case whose name ends in noWall runs without the 2s wall cut, so the
+// work budget alone must stop it.
+const noWall = "(no wall)"
+
 func defs(n int, body func(i int) string) string {
 	parts := make([]string, n)
 	for i := range n {
@@ -164,6 +168,27 @@ func reproCases() map[string]reproCase {
 	} {
 		cases[name] = tc
 	}
+	// Last review round (cases5): loops charged one unit for unbounded work.
+	depKeys := func(kw, value string) string {
+		keys := make([]string, 20000)
+		for i := range keys {
+			keys[i] = fmt.Sprintf(`"k%d":%s`, i, value)
+		}
+		return `{"type":"array","items":{"` + kw + `":{` + strings.Join(keys, ",") + `}}}`
+	}
+	empty150k := "[" + repeat(150000, "{}") + "]"
+	ints := make([]string, 20000)
+	for i := range ints {
+		ints[i] = strconv.Itoa(i)
+	}
+	refund := `{"allOf":[` + repeat(550, `{"$ref":"#/$defs/A"}`) + `],"$defs":{"A":{"anyOf":[` + repeat(15, `{"type":"integer"}`) + `,{}]}}}`
+	for name, tc := range map[string]reproCase{
+		"dependentRequired x items (no wall)": {depKeys("dependentRequired", "[]"), empty150k, harmless2},
+		"dependentSchemas x items (no wall)":  {depKeys("dependentSchemas", "true"), empty150k, harmless2},
+		"error formatting refunded (no wall)": {refund, `{"blob":"` + strings.Repeat("x", 400000) + `","arr":[` + strings.Join(ints, ",") + `]}`, harmless2},
+	} {
+		cases[name] = tc
+	}
 	for name, tc := range realCases() {
 		cases[name] = tc
 	}
@@ -269,6 +294,9 @@ func maxRSS() int64 {
 func TestReproChild(t *testing.T) {
 	if name := os.Getenv("NANITE_SCHEMA_REPRO"); name != "" {
 		tc := reproCases()[name]
+		if strings.HasSuffix(name, noWall) {
+			MaxValidationTime = time.Hour
+		}
 		runCase([]byte(tc.schema), []byte(tc.value))
 		return
 	}

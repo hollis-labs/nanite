@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func resolveJSON(t *testing.T, raw string) *Resolved {
@@ -154,5 +155,45 @@ func TestDiscardedBranchesBuildNoText(t *testing.T) {
 	err := rs.Validate(context.Background(), decode(t, `{"x":"a","y":"no"}`), Budget{ErrorBytes: 2 << 10})
 	if err == nil || strings.Contains(err.Error(), "further detail omitted") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// The budget alone (no deadline) stops each of these: each was charged one
+// unit for unbounded work.
+func TestBudgetAloneStopsKeyLoopsAndFormatting(t *testing.T) {
+	keys := func(value string) string {
+		parts := make([]string, 20000)
+		for i := range parts {
+			parts[i] = fmt.Sprintf(`"k%d":%s`, i, value)
+		}
+		return strings.Join(parts, ",")
+	}
+	empties := "[" + strings.TrimSuffix(strings.Repeat("{},", 150000), ",") + "]"
+	ints := make([]string, 20000)
+	for i := range ints {
+		ints[i] = fmt.Sprint(i)
+	}
+	for name, tc := range map[string]struct{ schema, value string }{
+		"dependentRequired":     {`{"type":"array","items":{"dependentRequired":{` + keys("[]") + `}}}`, empties},
+		"dependentSchemas":      {`{"type":"array","items":{"dependentSchemas":{` + keys("true") + `}}}`, empties},
+		"draft-07 dependencies": {`{"$schema":"http://json-schema.org/draft-07/schema#","type":"array","items":{"dependencies":{` + keys(`["a"]`) + `}}}`, empties},
+		"formatting refunded by anyOf": {`{"allOf":[` + strings.TrimSuffix(strings.Repeat(`{"$ref":"#/$defs/A"},`, 550), ",") +
+			`],"$defs":{"A":{"anyOf":[` + strings.Repeat(`{"type":"integer"},`, 15) + `{}]}}}`,
+			`{"blob":"` + strings.Repeat("x", 400000) + `","arr":[` + strings.Join(ints, ",") + `]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rs := resolveJSON(t, tc.schema)
+			v := decode(t, tc.value)
+			start := time.Now()
+			err := rs.Validate(context.Background(), v, Budget{})
+			if took := time.Since(start); took > 2*time.Second {
+				t.Fatalf("took %s: %v", took, err)
+			}
+			// Empty objects match no keys, so the key loops may finish
+			// valid within budget; the formatting case must hit it.
+			if name == "formatting refunded by anyOf" && !errors.Is(err, ErrBudget) {
+				t.Fatalf("err = %.200v", err)
+			}
+		})
 	}
 }

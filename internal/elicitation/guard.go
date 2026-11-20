@@ -41,9 +41,6 @@ const (
 	// MaxValueDepth bounds how deeply a value (tool input, a returned result,
 	// an answer) nests before it is validated.
 	MaxValueDepth = 64
-	// MaxValidationTime bounds the wall time of one Validate call, on top of
-	// its work budget.
-	MaxValidationTime = 2 * time.Second
 	// MaxValidationError bounds the validation error text passed on.
 	MaxValidationError = 4 << 10
 	// MaxSchemaRegexpInsts bounds the compiled size of all of a schema's
@@ -58,6 +55,10 @@ var ErrUnsafeSchema = errors.New("unsafe schema")
 
 // ErrValueTooDeep marks a value nested more than MaxValueDepth levels.
 var ErrValueTooDeep = errors.New("value nests too deeply")
+
+// MaxValidationTime bounds the wall time of one Validate call, on top of its
+// work budget. (A variable so tests can show the budget alone stops work.)
+var MaxValidationTime = 2 * time.Second
 
 // ValidationBudget is the work budget for one Validate call.
 var ValidationBudget = jsonschema.Budget{Visits: jsonschema.DefaultVisits, ErrorBytes: MaxValidationError}

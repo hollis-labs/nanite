@@ -271,3 +271,29 @@ func TestDiscoveryStartsServersConcurrently(t *testing.T) {
 		t.Fatalf("discovery result = %d", got)
 	}
 }
+
+func TestCyclicToolSchemaLeavesOnlyThatToolOut(t *testing.T) {
+	server := testServer("ok")
+	// Validating against this schema would recurse until the stack overflows.
+	server.AddTool(&sdk.Tool{Name: "loop", InputSchema: json.RawMessage(`{"type":"object","allOf":[{"$ref":"#"}]}`)},
+		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{}, nil
+		})
+	httpServer := httptest.NewServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil))
+	defer httpServer.Close()
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	defer client.Close()
+	lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"fixture": {Type: "http", URL: httpServer.URL}}})
+	if len(warnings) > 0 {
+		t.Fatal(warnings)
+	}
+	defer lease.Close()
+	got, discover := lease.Tools(t.Context())
+	if len(got) != 1 || got[0].Name != "mcp__fixture__hello" {
+		t.Fatalf("tools %+v", got)
+	}
+	if len(discover) != 1 || !strings.Contains(discover[0], `MCP server "fixture"`) || !strings.Contains(discover[0], `tool "loop" left out`) ||
+		!strings.Contains(discover[0], "refers back to itself") {
+		t.Fatalf("warnings %v", discover)
+	}
+}

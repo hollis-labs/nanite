@@ -59,6 +59,18 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   and is now a reserved tool name. A child gets `fetch_tool_result` and
   `search_tool_result` even when its variant's allow list leaves them out;
   an explicit deny removes them.
+- Every JSON Schema Nanite resolves (tool input schemas from hosts and MCP
+  servers included) is refused when its in-place keywords (`$ref`,
+  `$dynamicRef`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`,
+  `dependentSchemas`, draft-07 schema `dependencies`) refer back to
+  themselves. Validating against such a schema recursed until the stack
+  overflowed, which ended the whole process. The check follows
+  jsonschema-go's own reference resolution (`$id` bases, `$anchor`,
+  percent- and pointer-decoding, keyword case). An MCP tool with such a
+  schema is now left out of the catalog with a warning naming the server
+  and tool; the server's other tools stay. A host tool keeps its catalog
+  entry and every call fails with `invalid tool schema`. Recursion through
+  `properties`, `items` and the like is unaffected.
 - Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
   subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
   keywords spelled exactly, `$ref` only to `#/$defs/<name>` or

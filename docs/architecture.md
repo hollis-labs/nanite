@@ -168,7 +168,12 @@ lead back to the same definition without moving into a property or item.
 Keywords must be spelled exactly (jsonschema-go reads them ignoring case),
 and the check runs on the library's own reading of the schema. Anything else
 is refused before a child starts. Tool input schemas from the host and MCP
-servers are not held to this. With a schema, `result` is
+servers are not held to this subset, but every schema Nanite resolves is
+refused when those in-place keywords form a cycle, using jsonschema-go's own
+resolution of each `$ref` (so `$id`, `$anchor` and encoded pointers resolve
+exactly as validation would). An MCP tool with such a schema is left out of
+the catalog with a warning naming the server and tool; a host tool keeps its
+entry and each call fails with `invalid tool schema`. With a schema, `result` is
 validated: a result that fails gets one repair (the child sees the
 validation error and calls `return_result` again), and a second failure is
 accepted as `partial` with the reason `return_spec: <error>`.

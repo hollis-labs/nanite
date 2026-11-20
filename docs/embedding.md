@@ -223,6 +223,43 @@ like a turn's; it returns the outcomes once every foreground start has ended.
 A background start's finish reaches the wire as a `nanite.notice`. Without
 `Observe`, notices wait for the conversation's next turn and `Dispatch` fails.
 
+**Front desk.** `Options.Desk` puts the front desk (libs `agent/desk`)
+between the owner and the chat agent. It needs `Observe`, and dispatching
+plans needs the `subtasks` and `background` builtin groups.
+
+- *Intake.* Before each user turn, `DeskOptions.Intake` screens the message
+  and, when it is worth it, plans it (`desk.Model` over a small model, or
+  the rules). Planning is bounded by `IntakeTimeout` (15s) and never blocks
+  the message. A trivial plan changes nothing. In `suggest` mode the turn
+  opens with a `nanite.desk.plan` activity (id, disposition, topic, card,
+  plan) and the chat agent is told a plan was suggested; the host calls
+  `r.Desk().AcceptPlan(ctx, chatID, id, edited)` or `DeclinePlan`, and
+  `OnCorrection` sees the answer. In `auto` mode a confident plan is
+  dispatched before the turn and the chat agent is told not to redo it.
+  `OnPlan` sees every intake result, shadow ones included.
+- *Running a plan.* Items run as their dependencies finish. Research and
+  analysis run as background `research` subtasks, council and delegate as
+  `worker` (`Variants` overrides); `Delegate` hands delegate items to their
+  owning seat instead, and the host reports the outcome with
+  `r.Desk().Complete`. An answer item is left to the chat agent. A question
+  item goes to the owner at once, and the owner's next message answers it.
+  A later step's goal carries the results of the steps it depends on. Steps
+  that come due while a turn runs start when it ends.
+- *Ledger.* Every plan is a topic in `r.Desk().Ledger()` (pass your own in
+  `DeskOptions.Ledger` to persist it): its work, results and the questions
+  waiting on the owner.
+- *Delivery.* With a desk, a notice no running turn carried does not go to
+  the wire as it arrives. Each one (a desk job's result, a relayed ask,
+  a host notice, a shell job) is an item for the chat's delivery editor,
+  which applies `DeskOptions.Policy` (default `desk.DefaultPolicy()`): now,
+  merge with more on the topic, hold while a question on the topic is open,
+  digest, or file. What is due goes out as one `nanite.notice` of kind
+  `desk` whose body is the composed message. A turn the owner sees, or
+  `r.Desk().SetOwnerTyping(chatID, true)`, holds everything but critical
+  items and questions until it ends. `Held` counts what waits and `Flush`
+  sends it now. A desk job's result always goes through the editor, even
+  when a running turn announced that the job ended.
+
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
 `runner_ref` on the chat conversation record. A turn the previous process

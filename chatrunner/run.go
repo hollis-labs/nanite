@@ -72,6 +72,11 @@ type run struct {
 	ended chan struct{}
 	// notice is the notice that started a notice turn.
 	notice *agent.NoticePosted
+	// prelude is activity the run opens with (the front desk's plan).
+	prelude []chatstream.Event
+	// hostDispatch marks the front desk's own dispatch, which is never
+	// published and does not count as the owner's turn ending.
+	hostDispatch bool
 
 	// Translation state, used only by the goroutine reading Events.
 	asked    map[string]bool // call IDs an approval.request was emitted for
@@ -260,7 +265,7 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			// A notice turn says first which notice started it.
 			out = append(out, noticeActivity(*x.notice))
 		}
-		return out
+		return append(out, x.prelude...)
 
 	case agent.SlotsAssembled:
 		type slot struct {

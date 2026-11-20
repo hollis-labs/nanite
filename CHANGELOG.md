@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- chatrunner: the front desk (`Options.Desk`, libs `agent/desk`). Intake
+  plans each user message (off, shadow, suggest or auto); suggested plans
+  open the turn as a `nanite.desk.plan` activity and run on
+  `Desk.AcceptPlan`; dispatched plans run as background subtasks, wave by
+  wave as dependencies finish, with earlier results in later goals, and are
+  tracked as topics in a ledger. Every notice no running turn carried goes
+  through a delivery editor that paces it into composed `desk` notices:
+  now, merge, hold while the owner answers, digest or file.
+
 ## 0.6.0
 
 Code Mode: an agent can hand work to a `subtask` running a chosen variant,

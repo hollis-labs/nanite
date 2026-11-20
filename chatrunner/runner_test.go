@@ -75,6 +75,13 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 		}
 		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-bg", Name: "subtask",
 			Input: map[string]any{"variant": "worker", "goal": b.noticeBackground, "return_spec": "a line", "background": true}}}, {Type: llmtypes.EventDone}}}
+	case strings.HasPrefix(script, "report:"):
+		// "report:<text>" is a subtask that returns <text> as its result.
+		if steps > 0 {
+			return fake.Text("done")
+		}
+		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "ret-1", Name: "return_result",
+			Input: map[string]any{"status": "ok", "result": strings.TrimPrefix(script, "report:")}}}, {Type: llmtypes.EventDone}}}
 	case strings.HasPrefix(script, "subtask:"):
 		// "subtask:<variant>:<goal>" starts one subtask, then says "done".
 		if steps > 0 {
@@ -117,6 +124,22 @@ func (b *brain) Complete(context.Context, llmtypes.ChatRequest) (string, error) 
 }
 
 func (*brain) Capabilities() llmtypes.ProviderCapabilities { return llmtypes.ProviderCapabilities{} }
+
+// saw reports whether any request the model was sent contains text.
+func (b *brain) saw(text string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		all := req.EffectiveSystemPrompt()
+		for _, m := range req.Messages {
+			all += "\n" + messageText(m)
+		}
+		if strings.Contains(all, text) {
+			return true
+		}
+	}
+	return false
+}
 
 // last is everything the model was sent in its most recent request.
 func (b *brain) request() llmtypes.ChatRequest {

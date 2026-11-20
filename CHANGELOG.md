@@ -87,10 +87,14 @@ Breaking (no aliases or compatibility layer):
   `Options.AuthStatus` replaces the lookup. `Agent.AuthDecided` takes the
   status (a refusal forgets the request, so the next attempt files anew);
   `Options.OnAuthGranted` and `agent.ErrAuthRequestGone` are new.
-- `agent/providers`: named providers with `auth: warden`. `NewWarden`
-  builds a token source from an agent's identity (`WardenOptions` carries
-  the redaction scope, a logger and `OnAuthWaiting`), and `Options.Warden`
-  passes it to `NewNamed`, which refuses `auth: warden` without one.
+- `agent/providers`: named providers with `auth: warden`.
+  `NewWarden(dir, identity, opts)` builds a token source from an agent's
+  identity and refuses a credential file inside the agent directory
+  (`WardenOptions` carries the redaction scope, a logger and
+  `OnAuthWaiting`). `Options.Warden` passes it to `NewNamed`, which refuses
+  `auth: warden` without one or with an `Options.Redactor` other than the
+  Warden's scope. Share the credential file only with Nanite processes,
+  never with the Warden client or CLI.
   Providers built with one Warden share its token cache. `agent/authored`
   exports identity.yaml: `Identity`, `WardenIdentity`, `MCPIdentity`,
   `ParseIdentity` and `LoadIdentity`. `agent.Open` builds its Warden through

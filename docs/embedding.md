@@ -115,16 +115,23 @@ every such provider, so they share one token cache and one parent credential:
 
 ```go
 id, ok, err := authored.LoadIdentity(dir) // ok is false without identity.yaml
-w, err := providers.NewWarden(id, providers.WardenOptions{
+w, err := providers.NewWarden(dir, id, providers.WardenOptions{
     Redactor:      scope,           // learns every token and parent minted
     OnAuthWaiting: showGrantRequest, // a missing grant is filed and reported here
 })
 q, err := providers.NewNamed(spec, providers.Options{Redactor: scope, Warden: w})
 ```
 
-`NewNamed` refuses `auth: warden` without `Options.Warden`. The Warden mints
-under the same `<credential_file>.lock` as a running agent and the Warden
-client, so a Workbench can share an agent's credential file with it.
+`NewNamed` refuses `auth: warden` without `Options.Warden`, and refuses an
+`Options.Redactor` that is not the Warden's own scope. `NewWarden` refuses a
+credential file inside the agent directory.
+
+The Warden mints under the same `<credential_file>.lock` and
+`<credential_file>.inflight` marker as a running Nanite agent, so a Workbench
+can share an agent's credential file with that agent. Never share it with the
+Warden client or the `warden` CLI: they take the lock but ignore the
+in-flight marker, so after a lost mint answer they can present a spent parent
+credential, and Warden revokes the whole credential family.
 
 ## Steering
 

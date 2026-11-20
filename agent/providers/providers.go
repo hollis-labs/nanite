@@ -78,15 +78,22 @@ type Options struct {
 
 // Warden mints and renews the short-lived Warden tokens of providers with
 // auth warden, caching one token per audience and scope set. Each mint
-// rotates the agent's parent credential under the same file lock Nanite and
-// the Warden client take, so a Warden can share its credential file with a
-// running agent.
-type Warden struct{ src *warden.Source }
+// rotates the agent's parent credential under the file lock and in-flight
+// marker every Nanite process honors, so a Warden can share its credential
+// file with a running Nanite agent. Do not share it with the Warden client
+// or the warden CLI: they take the same lock but ignore the in-flight
+// marker, so after a lost mint answer they can present a spent parent and
+// Warden revokes the whole credential family.
+type Warden struct {
+	src      *warden.Source
+	redactor *redact.Scope
+}
 
 // WardenOptions are a Warden's hooks.
 type WardenOptions struct {
-	// Redactor receives every token and parent credential minted. Pass the
-	// same scope as Options.Redactor; nil is a new scope that nothing reads.
+	// Redactor receives every token and parent credential minted. NewNamed
+	// refuses a Warden whose Redactor is not the same scope as its
+	// Options.Redactor; nil scrubs nothing.
 	Redactor *redact.Scope
 	// Logger reports mints and grant requests, never their secrets; nil
 	// discards them.
@@ -97,14 +104,18 @@ type WardenOptions struct {
 	OnAuthWaiting func(agent.AuthWaiting)
 }
 
-// NewWarden builds a Warden from an agent's identity (authored.LoadIdentity),
-// which must have a warden section. It reads nothing until the first token
-// is needed.
-func NewWarden(id authored.Identity, opts WardenOptions) (*Warden, error) {
+// NewWarden builds a Warden from the identity of the agent in dir
+// (authored.LoadIdentity(dir)), which must have a warden section whose
+// credential file is outside dir. dir must be the path given to
+// LoadIdentity. It reads nothing until the first token is needed.
+func NewWarden(dir string, id authored.Identity, opts WardenOptions) (*Warden, error) {
+	if dir == "" {
+		return nil, errors.New("providers: NewWarden needs the agent directory")
+	}
 	if id.Warden == nil {
 		return nil, errors.New("providers: identity has no warden section")
 	}
-	if err := id.Validate(""); err != nil {
+	if err := id.Validate(dir); err != nil {
 		return nil, fmt.Errorf("providers: identity: %w", err)
 	}
 	var onWaiting func(warden.Waiting)
@@ -115,7 +126,7 @@ func NewWarden(id authored.Identity, opts WardenOptions) (*Warden, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Warden{src: src}, nil
+	return &Warden{src: src, redactor: opts.Redactor}, nil
 }
 
 // New builds a built-in provider. It fails on an unknown name or an invalid
@@ -134,6 +145,9 @@ func NewNamed(spec authored.ProviderSpec, opts Options) (llmcontracts.Provider, 
 	if spec.Auth == authored.AuthWarden {
 		if opts.Warden == nil {
 			return nil, fmt.Errorf("provider %s: auth warden needs Options.Warden (NewWarden)", spec.Name)
+		}
+		if opts.Warden.redactor != opts.Redactor {
+			return nil, fmt.Errorf("provider %s: Options.Redactor must be the scope the Warden was built with (WardenOptions.Redactor)", spec.Name)
 		}
 		cfg.Warden = opts.Warden.src
 	}

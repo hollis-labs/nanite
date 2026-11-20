@@ -449,6 +449,9 @@ func (r *Runner) ownerTurn(naniteID string) bool {
 // failing the owner's turn when the conversation is held by a run the owner
 // is not waiting on: the front desk's own short dispatch, or a run that has
 // already sent its terminal event and is releasing.
+// Do not call it from inside the Events loop of the run that holds the
+// conversation: that run cannot release until the loop returns, so the call
+// waits the full 10s and then fails busy.
 func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
 	for range 2 {
 		x, err := r.begin(ctx, turn, start)

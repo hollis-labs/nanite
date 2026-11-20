@@ -41,6 +41,9 @@ import (
 
 var ErrBusy = errors.New("nanite: conversation is busy")
 
+// ErrNoInterrupted means there is no interrupted turn to resume or discard.
+var ErrNoInterrupted = errors.New("conversation has no interrupted turn")
+
 type Config struct {
 	Events               events.Sink
 	Logger               *slog.Logger
@@ -353,7 +356,7 @@ func (e *Engine) Discard(ctx context.Context, id string) error {
 		return err
 	}
 	if turn == nil {
-		return fmt.Errorf("conversation has no interrupted turn")
+		return ErrNoInterrupted
 	}
 	history, err := e.cfg.Store.History(ctx, id)
 	if err != nil {
@@ -475,7 +478,7 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 		return nil, fmt.Errorf("conversation has an interrupted turn; resume it before sending")
 	}
 	if interrupted == nil && resume {
-		return nil, fmt.Errorf("conversation has no interrupted turn")
+		return nil, ErrNoInterrupted
 	}
 	if interrupted != nil {
 		input.AgentDir, input.Headers = interrupted.AgentDir, interrupted.Headers

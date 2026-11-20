@@ -2,6 +2,7 @@ package chatrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -23,7 +24,8 @@ const ActivityInterrupted = "nanite.interrupted"
 
 // chatHostState is the host state on a Nanite conversation naming the chat
 // conversation it serves; holdHostState is when its interrupted turn's hold
-// began (RFC 3339), so a restart does not reset the clock.
+// began, keyed by turn ID, so a restart does not reset the clock or reuse
+// a stale timestamp for a different interrupted turn.
 const (
 	chatHostState = "chat"
 	holdHostState = "interrupted_since"
@@ -34,8 +36,12 @@ const defaultInterruptedHold = 15 * time.Minute
 
 // hold is an interrupted turn waiting for the owner.
 type hold struct {
-	turn  string
-	timer *time.Timer // nil when the hold has no end
+	turn        string
+	timer       *time.Timer // nil when the hold has no end
+	deadline    time.Time
+	retryDelay  time.Duration
+	loggedRetry time.Duration
+	noticeMu    sync.Mutex // orders waiting-item submission and withdrawal
 	// waiting is set when the desk has work waiting for the turn; told,
 	// once the owner has been told so.
 	waiting, told bool
@@ -94,12 +100,21 @@ func (r *Runner) startHold(ctx context.Context, chatID string) {
 		return
 	}
 	since := time.Now()
-	if raw, err := c.HostState(ctx, holdHostState); err == nil && raw != "" {
-		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-			since = t
+	var saved struct {
+		Turn  string    `json:"turn"`
+		Since time.Time `json:"since"`
+	}
+	raw, err := c.HostState(ctx, holdHostState)
+	if err == nil && json.Unmarshal([]byte(raw), &saved) == nil && saved.Turn == turn.ID && !saved.Since.IsZero() {
+		since = saved.Since
+	} else {
+		// Legacy timestamps without a turn ID cannot safely identify this hold;
+		// give it a fresh deadline once, just as for a stale or malformed stamp.
+		saved.Turn, saved.Since = turn.ID, since.UTC()
+		encoded, _ := json.Marshal(saved)
+		if err := c.SetHostState(ctx, holdHostState, string(encoded)); err != nil {
+			r.logger().Warn("chatrunner: save interrupted hold", "conversation", chatID, "error", err.Error())
 		}
-	} else if err := c.SetHostState(ctx, holdHostState, since.UTC().Format(time.RFC3339Nano)); err != nil {
-		r.logger().Warn("chatrunner: save interrupted hold", "conversation", chatID, "error", err.Error())
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -108,7 +123,8 @@ func (r *Runner) startHold(ctx context.Context, chatID string) {
 	}
 	h := &hold{turn: turn.ID}
 	if d := r.holdFor(); d >= 0 {
-		h.timer = time.AfterFunc(max(0, time.Until(since.Add(d))), func() { r.expireHold(chatID, turn.ID) })
+		h.deadline = since.Add(d)
+		h.timer = time.AfterFunc(max(0, time.Until(h.deadline)), func() { r.expireHold(chatID, turn.ID) })
 	}
 	r.holds[chatID] = h
 	r.logger().Info("chatrunner: interrupted turn waits for the owner", "conversation", chatID, "turn", turn.ID)
@@ -126,6 +142,11 @@ func (r *Runner) endHold(chatID string) {
 	if h.timer != nil {
 		h.timer.Stop()
 	}
+	if r.desk != nil {
+		h.noticeMu.Lock()
+		r.desk.withdraw(chatID, "interrupted-wait-"+h.turn)
+		h.noticeMu.Unlock()
+	}
 	ctx := context.Background()
 	if c, err := r.agent.Conversation(ctx, ConversationID(chatID)); err == nil {
 		if err := c.SetHostState(ctx, holdHostState, ""); err != nil {
@@ -142,13 +163,18 @@ func (r *Runner) expireHold(chatID, turnID string) {
 	}
 	r.mu.Lock()
 	resuming := r.resuming[chatID]
+	h := r.holds[chatID]
 	r.mu.Unlock()
+	if h == nil || h.turn != turnID {
+		return
+	}
 	if resuming {
-		return // the resume ends the hold
+		return // a successful resume ends the hold; unclaim re-arms failures
 	}
 	ctx := context.Background()
 	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
 	if err != nil {
+		r.rearmHold(chatID, err)
 		return
 	}
 	if turn := c.Interrupted(); turn == nil || turn.ID != turnID {
@@ -156,7 +182,11 @@ func (r *Runner) expireHold(chatID, turnID string) {
 		return
 	}
 	if err := c.Discard(ctx); err != nil {
-		r.logger().Warn("chatrunner: discard interrupted turn after its hold", "conversation", chatID, "error", err.Error())
+		if errors.Is(err, agent.ErrNoInterrupted) {
+			r.endHold(chatID)
+		} else {
+			r.rearmHold(chatID, err)
+		}
 		return
 	}
 	r.endHold(chatID)
@@ -193,21 +223,37 @@ func (r *Runner) tellWaiting() {
 	if r.desk == nil {
 		return
 	}
-	type tell struct{ chatID, turn string }
+	type tell struct {
+		chatID string
+		h      *hold
+	}
 	var tells []tell
 	r.mu.Lock()
 	if r.serving {
 		for chatID, h := range r.holds {
 			if h.waiting && !h.told {
 				h.told = true
-				tells = append(tells, tell{chatID, h.turn})
+				tells = append(tells, tell{chatID, h})
 			}
 		}
 	}
 	r.mu.Unlock()
 	for _, t := range tells {
-		go r.desk.submit(t.chatID, desk.Item{ //nolint:gosec // G118: the desk's work outlives this call
-			ID: "interrupted-wait-" + t.turn, Kind: desk.ItemNotice, Source: "desk",
+		go r.tellHeld(t.chatID, t.h)
+	}
+}
+
+// tellHeld may run after endHold. Serialize with withdrawal and confirm
+// that this exact hold still owns the chat before submitting its notice.
+func (r *Runner) tellHeld(chatID string, h *hold) {
+	h.noticeMu.Lock()
+	defer h.noticeMu.Unlock()
+	r.mu.Lock()
+	current := r.holds[chatID] == h && !r.closed
+	r.mu.Unlock()
+	if current {
+		r.desk.submit(chatID, desk.Item{
+			ID: "interrupted-wait-" + h.turn, Kind: desk.ItemNotice, Source: "desk",
 			Title: "Work is waiting",
 			Text:  "Work the desk started waits for the interrupted turn: resume it or discard it to let the work continue.",
 		})
@@ -370,6 +416,35 @@ func (r *Runner) unclaim(chatID string) {
 	r.mu.Lock()
 	delete(r.resuming, chatID)
 	r.mu.Unlock()
+	r.rearmHold(chatID, nil)
+}
+
+// rearmHold preserves the original deadline. Once expired, retries back off
+// from 100ms to 30s; persistent failures log only once at each delay level.
+func (r *Runner) rearmHold(chatID string, cause error) {
+	r.mu.Lock()
+	h := r.holds[chatID]
+	if r.closed || h == nil || h.deadline.IsZero() {
+		r.mu.Unlock()
+		return
+	}
+	if h.timer != nil {
+		h.timer.Stop()
+	}
+	wait := time.Until(h.deadline)
+	if wait <= 0 {
+		h.retryDelay = min(max(100*time.Millisecond, h.retryDelay*2), 30*time.Second)
+		wait = h.retryDelay
+	}
+	logFailure := cause != nil && h.loggedRetry != wait
+	if logFailure {
+		h.loggedRetry = wait
+	}
+	h.timer = time.AfterFunc(wait, func() { r.expireHold(chatID, h.turn) })
+	r.mu.Unlock()
+	if logFailure {
+		r.logger().Warn("chatrunner: retry interrupted hold", "conversation", chatID, "retry_after", wait, "error", cause.Error())
+	}
 }
 
 // Discard abandons the turn the previous process left unfinished on a chat
@@ -382,6 +457,10 @@ func (r *Runner) Discard(ctx context.Context, chatID string) error {
 	}
 	turn := c.Interrupted()
 	if err := c.Discard(ctx); err != nil {
+		if errors.Is(err, agent.ErrNoInterrupted) {
+			r.endHold(chatID)
+			return nil
+		}
 		return fmt.Errorf("chatrunner: discard interrupted turn: %w", err)
 	}
 	r.endHold(chatID)

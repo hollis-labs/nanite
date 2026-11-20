@@ -784,7 +784,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		}
 		summary := header + "\n\n" + x.engine.scrub.Text(summarizer.summary)
 		if pinned := x.compactionContext(summarizer.messages[count:]); pinned != "" {
-			summary += "\n\n" + pinned
+			summary += "\n\n" + compactionContextLabel + "\n" + pinned
 		}
 		compacted := append([]llmtypes.ChatMessage{{Role: "user", Content: summary}}, summarizer.messages[count:]...)
 		remaining, err := json.Marshal(compacted)

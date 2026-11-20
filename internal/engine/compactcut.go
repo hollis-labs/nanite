@@ -232,6 +232,11 @@ func requestMessages(msgs []llmtypes.ChatMessage, ids []string) []llmtypes.ChatM
 	return append([]llmtypes.ChatMessage{merged}, msgs[2:]...)
 }
 
+// compactionContextLabel introduces host context carried into a summary, so a
+// later turn's newer context (or a cleared slot) is not read alongside it as
+// current.
+const compactionContextLabel = "[Host context as of this compaction. Context sent in a later message replaces it; if none is sent, it may be out of date.]"
+
 // compactionContext preserves current in-turn slots whose verbatim content
 // would otherwise disappear with the summarized messages. Unchanged slots
 // may have been sent many turns ago; keepCut can also cut inside a long turn.

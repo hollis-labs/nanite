@@ -61,7 +61,7 @@ func TestTurnContextSurvivesMidTurnCompaction(t *testing.T) {
 			// its preservation must also be durable for a subsequent recovery.
 			if slot == slots.UserContext {
 				summary, _, _, err := db.ModelHistory(t.Context(), id)
-				if err != nil || !strings.Contains(summary, marker) {
+				if err != nil || !strings.Contains(summary, marker) || !strings.Contains(summary, compactionContextLabel) {
 					t.Fatalf("summary lost context: %q, %v", summary, err)
 				}
 			}

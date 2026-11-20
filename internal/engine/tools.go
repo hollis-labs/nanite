@@ -61,7 +61,12 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 				if err != nil {
 					return tools.Result{}, err
 				}
-				text, failed := item.handler(ctx, x.info.ID, args, 0)
+				scope := x.info.ID
+				if id, _ := args["id"].(string); id != "" && x.info.ParentID != "" {
+					// A child may follow a pointer from the parent context it was given.
+					scope = x.resultScope(ctx, id)
+				}
+				text, failed := item.handler(ctx, scope, args, 0)
 				return tools.Result{Text: text, IsError: failed}, nil
 			},
 		})

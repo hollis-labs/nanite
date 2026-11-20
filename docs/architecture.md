@@ -148,29 +148,51 @@ parent turn's usage.
 ### Forked context
 
 A child does not get the parent's whole conversation. Its first message
-copies the parent's last N messages, as numbered lines (`[#12 user] ...`),
-with each block shortened to about 2,000 characters. N is the call's
-`context.last_n`, else the variant's `last_n`, else 6; at most 50, and 0
-copies none. `context.full: true` copies every message instead. The window
-never starts on a tool result whose call fell outside it, and the parent's
-in-flight message (the one calling `subtask`) is left out.
+copies the parent's last N messages, as numbered lines (`[#12 user] ...`).
+N is the call's `context.last_n`, else the variant's `last_n`, else 6; at
+most 50, and 0 copies none. `context.full: true` copies every message
+instead. The parent's in-flight message (the one calling `subtask`) is left
+out, and the window never starts on a tool result whose call fell outside
+it. Calls and results are paired by position (a tool message answers the
+assistant message just before it), not by call ID, because some providers
+reuse IDs such as `call_0` in every turn.
 
 `context.include` copies parent state too, each item in its own tagged
 block: `todos` (the checklist), `plan` (the scratchpad entry `plan`),
 `handoff` (the `handoff` slot) and `scratchpad:<key>`. A missing item reads
 `(none)`.
 
+Everything copied is redacted first and only then shortened, so a cut can
+never leave part of a secret the redactor would have caught whole. Each text
+block or tool result is cut to about 2,000 characters, each tool input to
+500, and each include item to 4,000. The whole forked context fits a budget
+of 32,000 characters: include items first, then as many of the newest
+messages as fit, with the number left out stated. `context.full` is bounded
+the same way.
+
 Every child is also offered two read-only tools over its parent conversation,
 which a root conversation never gets: `parent_history_search(query, k)`, a
 full-text search over the parent's messages (the store indexes message text,
 not thinking, in `messages_fts`), and `parent_history_get(from, to)`, which
-returns up to 20 messages by number. Their results are redacted and go
-through the tool-result cache like any other tool's, so a long one comes
-back as a page with a pointer. A lead's children read the lead's
-conversation. Both belong to the `subtasks` built-in group, and an authored
-variant with an allow list must list them to keep them. The copied context
-is redacted the same way. The child's own transcript is a normal child
-conversation.
+returns up to 20 messages by number, each block up to 8,000 characters.
+Search results are whole messages read back from the store, redacted, and
+only then cut to a snippet with the matches marked; the index's own text is
+never shown. Both tools' results go through the tool-result cache like any
+other tool's, so a long one comes back as a page with a pointer. A lead's
+children read the lead's conversation. Both belong to the `subtasks`
+built-in group, and an authored variant with an allow list must list them
+to keep them; the forked context mentions them only when the child has them.
+
+A variant's tool rules govern what a child may call, not what it may read:
+a child with parent history tools can read anything in its parent
+conversation, including the output of tools its own variant denies. Withhold
+`parent_history_*` (or keep the parent from holding it) when that matters.
+
+A pointer to a cached tool result in the copied context belongs to the
+parent's cache. A child's `fetch_tool_result` and `search_tool_result` look
+in its own cache first, then its parent's, then the lead's; never a
+sibling's or another conversation's. The child's own transcript is a normal
+child conversation.
 
 ### Variants
 

@@ -1,10 +1,13 @@
 package engine
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hollis-labs/libs/agent/core/toolresult"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/slots"
@@ -252,5 +255,228 @@ func TestLastMessagesAndSettled(t *testing.T) {
 		if got := seqs(lastMessages(settledHistory, n)); !slices.Equal(got, want) {
 			t.Errorf("lastMessages(%d) = %v, want %v", n, got, want)
 		}
+	}
+}
+
+// testKey is a fake key shaped like one the redactor recognizes; it must
+// never reach a child. It is built at run time so no key-shaped literal sits
+// in the source.
+var testKey = "sk-" + "ant-api03-" + strings.Repeat("AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", 2) + "-abcdefAA"
+
+// appendParent writes messages straight into a conversation's history, one
+// user text message each.
+func appendParent(t *testing.T, db *store.Store, id string, texts ...string) {
+	t.Helper()
+	j, err := db.OpenJournal(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	now := time.Now().UTC()
+	turn := store.Turn{ID: store.NewID(now), UserMessageID: store.NewID(now)}
+	if err := j.StartTurn(turn, now); err != nil {
+		t.Fatal(err)
+	}
+	for i, text := range texts {
+		mid := store.NewID(now)
+		if i == 0 {
+			mid = turn.UserMessageID
+		}
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		if err := j.AppendMessage(store.Message{ID: mid, TurnID: turn.ID, Role: role, CreatedAt: now,
+			Blocks: []llmtypes.ContentBlock{{Type: "text", Text: text}}}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turn.Status = "completed"
+	if err := j.FinishTurn(turn, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParentContextIsRedactedBeforeItIsCut(t *testing.T) {
+	// The key straddles the 2,000-character cut of a seeded block, and sits
+	// mid-window for a search snippet: both must be redacted whole first.
+	// 60 characters between the key and the match put the snippet's start mid-key.
+	long := strings.Repeat("alpha ", 330) + testKey + " " + strings.Repeat("m ", 30) + "zebra " + strings.Repeat("w ", 50)
+	child := fake.New(callWithID("parent_history_search", "call-search", map[string]any{"query": "zebra"}), fake.Text("report"))
+	input := map[string]any{"variant": "worker", "goal": "dig", "return_spec": "x", "context": map[string]any{"last_n": 5, "include": []any{"scratchpad:keys"}}}
+	p := &routedProvider{root: fake.New(fake.Text("noted"), callWithID("subtask", "call-subtask", input), fake.Text("root done")),
+		children: map[string]*fake.Provider{"dig": child}}
+	e, db, id := setupEngine(t, p, "")
+	appendParent(t, db, id, long, "ok")
+	if err := db.SetScratch(t.Context(), id, "keys", strings.Repeat("b", 3984)+" "+testKey); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"one more", "go"} {
+		run, err := e.Send(t.Context(), id, Input{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leaks := func(where, text string) {
+		t.Helper()
+		for _, part := range []string{"AbCdEfGh", "0123456789-abcdefAA", "sk-ant-api03"} {
+			if strings.Contains(text, part) {
+				t.Errorf("%s leaks %q:\n%s", where, part, text)
+			}
+		}
+	}
+	leaks("seed", firstChildMessage(t, p, "dig"))
+	results := toolResults(t, db, childOf(t, db, id).ID)
+	if len(results) != 1 || !strings.Contains(results[0].Content, "[zebra]") {
+		t.Fatalf("search results: %+v", results)
+	}
+	leaks("search", results[0].Content)
+}
+
+func TestSeedFitsItsBudget(t *testing.T) {
+	var texts []string
+	for i := 1; i <= 60; i++ {
+		texts = append(texts, fmt.Sprintf("message %d %s", i, strings.Repeat("x", 3000)))
+	}
+	big := strings.Repeat("p", 20000)
+	for name, ctx := range map[string]map[string]any{
+		"full":    {"full": true, "include": []any{"plan"}},
+		"last 50": {"last_n": 50, "include": []any{"plan"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := map[string]any{"variant": "worker", "goal": "dig", "return_spec": "x", "context": ctx}
+			p := &routedProvider{root: fake.New(callWithID("subtask", "call-subtask", input), fake.Text("root done")),
+				children: map[string]*fake.Provider{"dig": fake.New(fake.Text("report"))}}
+			e, db, id := setupEngine(t, p, "")
+			appendParent(t, db, id, texts...)
+			if err := db.SetScratch(t.Context(), id, "plan", big); err != nil {
+				t.Fatal(err)
+			}
+			run, err := e.Send(t.Context(), id, Input{Text: "go"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			first := firstChildMessage(t, p, "dig")
+			_, seed, _ := strings.Cut(first, "Context from the parent")
+			if len(seed) > seedBudget+1000 {
+				t.Fatalf("seed is %d characters, budget %d", len(seed), seedBudget)
+			}
+			// The newest messages are kept, the oldest left out and counted.
+			if !strings.Contains(seed, "[#61 user] go") || strings.Contains(seed, "message 1 ") || !strings.Contains(seed, "older ones left out to fit") {
+				t.Fatalf("seed did not keep the newest messages:\n%.600s", seed)
+			}
+			if strings.Contains(first, strings.Repeat("p", includeChars+1)) || !strings.Contains(first, "[shortened]") {
+				t.Fatal("the plan was not cut to its own bound")
+			}
+		})
+	}
+}
+
+func TestReusedToolCallIDsDoNotLeakTheInFlightCall(t *testing.T) {
+	// Some providers number calls call_0 in every turn.
+	input := map[string]any{"variant": "worker", "goal": "dig", "return_spec": "x", "context": map[string]any{"last_n": 10}}
+	p := &routedProvider{
+		root: fake.New(fake.Text("noted"), callWithID("todo_list", "call_0", map[string]any{}),
+			callWithID("subtask", "call_0", input), fake.Text("root done")),
+		children: map[string]*fake.Provider{"dig": fake.New(fake.Text("report"))},
+	}
+	e, _, id := setupEngine(t, p, "")
+	for _, text := range []string{"hi", "go"} {
+		run, err := e.Send(t.Context(), id, Input{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := firstChildMessage(t, p, "dig")
+	if strings.Contains(first, "[#6 ") || strings.Contains(first, "called subtask") {
+		t.Fatalf("the in-flight call leaked into the window:\n%s", first)
+	}
+	if !strings.Contains(first, "[#5 tool] (result of todo_list:") {
+		t.Fatalf("the result was not named from the call before it:\n%s", first)
+	}
+}
+
+func TestToolNamesPairByPosition(t *testing.T) {
+	call := store.Message{Role: "assistant", Blocks: []llmtypes.ContentBlock{
+		{Type: "tool_use", ID: "call_0", Name: "read_file"}, {Type: "tool_use", ID: "call_0", Name: "list_dir"}, {Type: "tool_use", ID: "x", Name: "bash"}}}
+	results := store.Message{Role: "tool", Blocks: []llmtypes.ContentBlock{
+		{Type: "tool_result", ToolUseID: "call_0"}, {Type: "tool_result", ToolUseID: "call_0"}, {Type: "tool_result", ToolUseID: "x"}}}
+	if got := toolNames(&call, results); !slices.Equal(got, []string{"read_file", "list_dir", "bash"}) {
+		t.Fatalf("names = %v", got)
+	}
+	if got := toolNames(nil, results); !slices.Equal(got, []string{"a tool", "a tool", "a tool"}) {
+		t.Fatalf("names without a call = %v", got)
+	}
+}
+
+func TestChildFetchesItsParentsCachedResults(t *testing.T) {
+	p := &routedProvider{root: fake.New(callWithID("subtask", "call-subtask", map[string]any{"variant": "worker", "goal": "dig", "return_spec": "x"}), fake.Text("root done"))}
+	e, db, id := setupEngine(t, p, "")
+	parentPointer, err := e.cache.Put(t.Context(), id, toolresult.Meta{Tool: "bash", CallID: "c"}, "parent's long output: ORCHID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	other := store.NewID(now)
+	if err := db.CreateConversation(t.Context(), store.Conversation{ID: other, Role: "chat", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	otherPointer, err := e.cache.Put(t.Context(), other, toolresult.Meta{Tool: "bash", CallID: "c"}, "another conversation's output: TULIP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.children = map[string]*fake.Provider{"dig": fake.New(
+		callWithID("fetch_tool_result", "call-mine", map[string]any{"id": parentPointer.ID}),
+		callWithID("fetch_tool_result", "call-theirs", map[string]any{"id": otherPointer.ID}),
+		fake.Text("report"))}
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	results := toolResults(t, db, childOf(t, db, id).ID)
+	if len(results) != 2 {
+		t.Fatalf("child results: %+v", results)
+	}
+	if results[0].IsError || !strings.Contains(results[0].Content, "ORCHID") {
+		t.Fatalf("child could not read its parent's cached result: %+v", results[0])
+	}
+	if !results[1].IsError || strings.Contains(results[1].Content, "TULIP") {
+		t.Fatalf("child read an unrelated conversation's result: %+v", results[1])
+	}
+}
+
+func TestSeedMentionsHistoryToolsOnlyWhenOffered(t *testing.T) {
+	input := map[string]any{"variant": "narrow", "goal": "dig", "return_spec": "x"}
+	p := &routedProvider{root: fake.New(fake.Text("noted"), callWithID("subtask", "call-subtask", input), fake.Text("root done")),
+		children: map[string]*fake.Provider{"dig": fake.New(fake.Text("report"))}}
+	e, _, id := setupEngine(t, p, "")
+	writeVariant(t, e.cfg.Dir, "narrow", "---\ntools:\n  allow: [read_file]\n---\nOnly read.\n")
+	for _, text := range []string{strings.Repeat("long ", 600), "go"} {
+		run, err := e.Send(t.Context(), id, Input{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := firstChildMessage(t, p, "dig")
+	if strings.Contains(first, "parent_history") || !strings.Contains(first, "[shortened]") {
+		t.Fatalf("seed names tools the child lacks:\n%.400s", first)
+	}
+	if offered := p.offered("dig", 0); slices.Contains(offered, "parent_history_get") {
+		t.Fatalf("narrow variant offered %v", offered)
 	}
 }

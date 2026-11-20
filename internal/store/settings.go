@@ -31,3 +31,22 @@ func (s *Store) SetSetting(ctx context.Context, conversation, key, value string)
 		return err
 	})
 }
+
+// SettingsByKey is every conversation's value for a setting key, by
+// conversation ID ("" is the agent-wide row).
+func (s *Store) SettingsByKey(ctx context.Context, key string) (map[string]string, error) {
+	rows, err := s.db.Reader().QueryContext(ctx, `SELECT conversation_id,value FROM conversation_settings WHERE key=?`, key)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }() // Query errors are returned through rows.Err or Scan.
+	out := map[string]string{}
+	for rows.Next() {
+		var id, v string
+		if err := rows.Scan(&id, &v); err != nil {
+			return nil, err
+		}
+		out[id] = v
+	}
+	return out, rows.Err()
+}

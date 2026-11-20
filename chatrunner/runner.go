@@ -138,10 +138,23 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		_ = a.Close()
 		return nil, err
 	}
+	if r.desk != nil {
+		// The desk's saved state is back before any notice arrives.
+		if err := r.desk.load(ctx); err != nil {
+			_ = a.Close()
+			return nil, err
+		}
+	}
 	listen, stop := context.WithCancel(context.WithoutCancel(ctx))
 	r.stopNotices, r.noticesDone, r.noticeCtx = stop, make(chan struct{}), listen
 	notices := a.SubscribeNotices(listen)
 	go r.listen(listen, notices)
+	if r.desk != nil {
+		// A failure here leaves the step for the next turn's advance.
+		if err := r.desk.Recover(ctx); err != nil {
+			r.desk.logger.Warn("chatrunner: desk recovery", "error", err.Error())
+		}
+	}
 	return r, nil
 }
 
@@ -177,6 +190,9 @@ func (r *Runner) Close() error {
 	r.mu.Unlock()
 	r.stopNotices()
 	<-r.noticesDone
+	if r.desk != nil {
+		r.desk.saveAll()
+	}
 	return r.agent.Close()
 }
 

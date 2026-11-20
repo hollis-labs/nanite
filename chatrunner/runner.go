@@ -561,7 +561,10 @@ func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(
 			return x, err
 		}
 		held := r.activeRun(ConversationID(turn.ConversationID))
-		if held == nil || (!r.isHostDispatch(held) && !held.finishing.Load()) {
+		if held == nil {
+			continue // it was released meanwhile: try again
+		}
+		if !r.isHostDispatch(held) && !held.finishing.Load() {
 			return nil, err
 		}
 		select {

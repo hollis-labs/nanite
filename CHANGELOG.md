@@ -48,6 +48,16 @@ host state.
   translates per-request TTL hints to `cache_control.ttl`; invalid mixed TTL
   ordering falls back to five minutes. OpenAI ignores the hints.
 
+- Turns that hit the step or output length limit get one additional tool-less
+  closing reply. The original limit reason is preserved and the extra request
+  counts in steps and usage; exhausted token or wall-clock budgets still stop
+  immediately.
+- Embedders can override `runtime.max_output_tokens` and `runtime.max_steps`
+  with positive `Options.MaxOutputTokens` and `Options.MaxSteps` values.
+- Host tools can opt into deferred schemas with `Tool.Deferred`. Their short
+  descriptions appear in `tool_describe`, which loads the full schema for the
+  remainder of the current turn without changing tool permissions.
+
 ## 0.7.0
 
 Steering, the front desk, Warden auth and the Workbench APIs. Root turns can

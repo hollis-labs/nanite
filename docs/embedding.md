@@ -178,6 +178,42 @@ reply, the transcript or the events. A stream that receives no frames at all
 still stalls. There is no `host.yaml` key for the idle timeout yet; it needs
 a field in libs `agent/agentdir`.
 
+## Turn limits and deferred schemas
+
+`Options.MaxOutputTokens` and `Options.MaxSteps` override the matching
+`host.yaml` runtime limits when positive. Zero keeps the authored value
+(and the default of 50 steps); negative values are rejected. The options
+also apply to subtasks, whose variant budgets may narrow the step limit.
+
+A turn that reaches `max_steps` or `max_tokens` makes one additional request
+with no tools, asking for a concise closing reply and any unfinished work.
+The original stop reason is preserved. The request counts in steps and
+usage and is never retried; errors and cancellation propagate normally.
+No closing request runs after a token or wall-clock budget is exhausted.
+
+For large host tool catalogs, set `Deferred: true` on tools that are not
+needed in every turn:
+
+```go
+tool := agent.Tool{
+    Name: "report_lookup",
+    Description: "Look up a saved report.",
+    Deferred: true,
+    ReadOnly: true,
+    InputSchema: schema,
+    Handler: lookupReport,
+}
+```
+
+Ordinary tools are sent with full schemas. Deferred tools appear by name
+and a one-line description (up to 240 characters) in `tool_describe`.
+Calling `tool_describe` with `{"name":"report_lookup"}` returns the full
+schema and adds it to subsequent requests in that turn. The next turn
+starts with the compact catalog again. Discovery honors subtask tool
+filters and tool calls still pass through normal permissions and input
+validation. `tool_describe` is reserved and only offered when there are
+deferred tools.
+
 ## Choosing the built-in tools
 
 The application decides what its embedded agent can do. An agent whose

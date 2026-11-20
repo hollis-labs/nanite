@@ -85,7 +85,7 @@ func TestToolResultPairingAndStepLimit(t *testing.T) {
 		steps               int
 	}{
 		{"continue after unknown tool", "", "end_turn", 2},
-		{"max steps", "runtime:\n  max_steps: 1\n", "max_steps", 1},
+		{"max steps", "runtime:\n  max_steps: 1\n", "max_steps", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, db, id := setupEngine(t, fake.New(toolResponse("unknown"), fake.Text("continued")), tc.runtime)

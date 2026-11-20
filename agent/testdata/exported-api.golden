@@ -168,6 +168,8 @@ type NoticePosted = github.com/hollis-labs/nanite/internal/events.NoticePosted s
 const NoticeTurnText untyped string
 func Open(ctx context.Context, opts Options) (*Agent, error)
 type Options struct
+  field MaxOutputTokens int
+  field MaxSteps int
   field Dir string
   field DataDir string
   field WorkDir string
@@ -429,6 +431,7 @@ type Thinking = github.com/hollis-labs/nanite/internal/events.Thinking struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Text string
 type Tool = github.com/hollis-labs/nanite/internal/tools.Tool struct
+  field Deferred bool
   field Name string
   field Description string
   field InputSchema encoding/json.RawMessage

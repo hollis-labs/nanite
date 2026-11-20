@@ -309,7 +309,7 @@ func TestChildAtStepLimitReportsLimit(t *testing.T) {
 		t.Run(map[bool]string{false: "foreground", true: "background"}[background], func(t *testing.T) {
 			spawn := subtaskCall("worker", "child work", background)
 			// The child calls a tool on its only step, so it stops at max_steps.
-			p := &promptProvider{parent: fake.New(spawn), child: fake.New(toolResponse("unknown"))}
+			p := &promptProvider{parent: fake.New(spawn, fake.Text("parent closing")), child: fake.New(toolResponse("unknown"), fake.Text("child closing"))}
 			e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
 			run, err := e.Send(t.Context(), id, Input{Text: "parent work"})
 			if err != nil {

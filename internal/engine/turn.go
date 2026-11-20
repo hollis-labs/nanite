@@ -60,6 +60,10 @@ type execution struct {
 	validators      map[string]recover.Validator
 	catalog         map[string]tools.Tool
 	specs           []llmtypes.ToolDefinition
+	deferredSpecs   map[string]llmtypes.ToolDefinition
+	described       map[string]bool
+	describeMu      sync.Mutex
+	toolNotes       string
 	loop            *loopdetect.Detector
 	result          events.Result
 	// lastRequestTokens is the input the provider reported for the latest
@@ -217,6 +221,12 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	if err != nil {
 		return events.Result{}, err
+	}
+	if e.cfg.MaxOutputTokens > 0 {
+		def.Runtime.MaxOutputTokens = e.cfg.MaxOutputTokens
+	}
+	if e.cfg.MaxSteps > 0 {
+		def.Runtime.MaxSteps = e.cfg.MaxSteps
 	}
 	pdp, err := permission.Rules(def.Snapshot.Profile.Permissions.Mode, def.Rules)
 	if err != nil {
@@ -389,6 +399,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	tr.rec.Slots, tr.rec.Trimmed = traceSlots(assembled, e.scrub.Text)
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
+	}
+	if slot := x.assembled.Window.Slot(ctxpkg.SlotTools); slot != nil {
+		x.toolNotes = slot.Content
 	}
 	x.sizeWindow()
 	if x.schemaTokens > 0 {
@@ -638,9 +651,13 @@ func (x *execution) generate(ctx context.Context) error {
 		if runErr = x.callTools(ctx, got.calls); runErr != nil {
 			return runloop.Terminate
 		}
+		x.promoteTools()
 		if x.returned.Load() {
 			// return_result ends a subtask: the parent has what it needs.
 			x.result.StopReason = llmtypes.StopReasonEndTurn
+			return runloop.Finish
+		}
+		if x.result.StopReason == llmtypes.StopReasonMaxTokens {
 			return runloop.Finish
 		}
 		if x.result.Steps >= x.definition.Runtime.MaxSteps {
@@ -659,6 +676,9 @@ func (x *execution) generate(ctx context.Context) error {
 	_, err := runloop.Execute[attempt, step](ctx, runloop.Ports[attempt, step]{
 		Request: request, Consume: consume, Settle: settle, Finalize: func(context.Context) runloop.Directive { return runloop.Finish },
 	})
+	if runErr == nil && err == nil && (x.result.StopReason == events.StopMaxSteps || x.result.StopReason == llmtypes.StopReasonMaxTokens) && x.budgetStop() == "" {
+		runErr = x.closingReply(ctx, blocks, &allText)
+	}
 	x.result.Text = x.engine.scrub.Text(allText.String())
 	if x.result.StopReason == "" && runErr == nil {
 		x.result.StopReason = llmtypes.StopReasonEndTurn

@@ -504,7 +504,7 @@ func TestWallBudgetStopsAChildMidStep(t *testing.T) {
 }
 
 func TestStepBudgetOnlyNarrows(t *testing.T) {
-	p := &routedProvider{root: fake.New(subtaskCall("roomy", "child work", false)),
+	p := &routedProvider{root: fake.New(subtaskCall("roomy", "child work", false), fake.Text("parent closing")),
 		children: map[string]*fake.Provider{"child work": fake.New(toolResponse("unknown"), toolResponse("unknown"), fake.Text("never"))}}
 	e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
 	writeVariant(t, e.cfg.Dir, "roomy", "---\nbudgets:\n  steps: 5\n---\nTake your time.\n")
@@ -520,7 +520,7 @@ func TestStepBudgetOnlyNarrows(t *testing.T) {
 		Steps          int
 	}
 	results := toolResults(t, db, id)
-	if len(results) != 1 || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "max_steps" || out.Steps != 1 {
+	if len(results) != 1 || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "max_steps" || out.Steps != 2 {
 		t.Fatalf("a variant raised the agent's step limit: %+v", results)
 	}
 }

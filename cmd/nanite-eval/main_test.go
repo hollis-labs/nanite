@@ -50,8 +50,9 @@ func TestBadFlags(t *testing.T) {
 	}
 }
 
-// TestLiveNeedsBounds: no live run without a finite dollar cap of at most
-// $50, a token cap, positive prices and a model of the provider's own.
+// TestLiveNeedsBounds checks checkLive directly; it never starts a live run.
+// No live run without a finite dollar cap of at most $50, a token cap, prices
+// of at least a cent per million tokens and a model of the provider's own.
 func TestLiveNeedsBounds(t *testing.T) {
 	p := evals.ConservativePrice
 	ok := func(f func(*evals.Price)) evals.Price { q := p; f(&q); return q }
@@ -66,6 +67,8 @@ func TestLiveNeedsBounds(t *testing.T) {
 		"cap over 50":   {"anthropic", "claude-sonnet-5-5", 51, 1000, p},
 		"no token cap":  {"anthropic", "claude-sonnet-5-5", 10, 0, p},
 		"zero price":    {"anthropic", "claude-sonnet-5-5", 10, 1000, ok(func(q *evals.Price) { q.CacheRead = 0 })},
+		"tiny price":    {"anthropic", "claude-sonnet-5-5", 10, 1000, ok(func(q *evals.Price) { q.Output = 0.001 })},
+		"odd model":     {"anthropic", "claude-Sonnet 5", 10, 1000, p},
 		"wrong model":   {"anthropic", "gpt-6", 10, 1000, p},
 		"wrong model 2": {"openai", "claude-sonnet-5-5", 10, 1000, p},
 		"bad provider":  {"other", "x", 10, 1000, p},
@@ -76,8 +79,5 @@ func TestLiveNeedsBounds(t *testing.T) {
 	}
 	if err := checkLive("anthropic", "claude-sonnet-5-5", 10, 150000, p); err != nil {
 		t.Errorf("the documented command is refused: %v", err)
-	}
-	if err := run(context.Background(), []string{"-live", "-max-usd", "0"}, nil, nil); err == nil {
-		t.Error("a live run without a cap started")
 	}
 }

@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/agent"
 )
 
 var update = flag.Bool("update", false, "rewrite docs/evals/offline.md and offline.json")
@@ -156,7 +159,7 @@ func TestInterruptedRunKeepsWhatRan(t *testing.T) {
 
 func TestMeterReservesTheWorstCase(t *testing.T) {
 	m := &meter{price: Price{Input: 1, Output: 1}, max: 1}
-	hold := m.worst(100000, 400000) // $0.50
+	hold := 0.5
 	for i := range 2 {
 		if !m.reserve(hold) {
 			t.Fatalf("half-dollar reservation %d refused under a dollar cap", i+1)
@@ -229,20 +232,22 @@ func TestGraders(t *testing.T) {
 		}
 	}
 	for answer, want := range map[string]bool{
-		"Done: every note now ends with Reviewed: 2026-11-20.": false, // the date's 6 is not a count
-		"Changed 6 files.":     true,
-		"I updated six notes.": true,
-		"Changed 16 files.":    false,
+		"Done.\nANSWER: Reviewed: 2026-11-20": false, // the date's 6 is not a count
+		"Changed them.\nANSWER: 6":            true,
+		"ANSWER: six files":                   true,
+		"ANSWER: 16":                          false,
+		"Changed 6 files.":                    false, // no ANSWER line
 	} {
 		if ok, why := ch.Grade(answer, ws); ok != want {
 			t.Errorf("chore %q: %v (%s), want %v", answer, ok, why, want)
 		}
 	}
 	cs := codeSearch()
-	good := "loadMode (src/config.go) and startServer (src/server.go) read it; modes dev, prod, test."
+	good := "ANSWER: src/config.go:loadMode, src/server.go:startServer; modes: dev, prod, test"
 	for answer, want := range map[string]bool{
-		good:                         true,
-		good + " Also describeMode.": false, // a decoy
+		good: true,
+		"describeMode only mentions APP_MODE, so it is not one.\n" + good: true, // a decoy ruled out outside the line
+		good + ", describeMode":                           false, // a decoy on the line
 		strings.ReplaceAll(good, "loadMode", "loadModes"): false, // whole words only
 	} {
 		if ok, why := cs.Grade(answer, ""); ok != want {
@@ -250,12 +255,32 @@ func TestGraders(t *testing.T) {
 		}
 	}
 	rs := research()
-	if ok, _ := rs.Grade("30 days, decided by the Data Council on 2026-03-04 (policy-2026.md), not Finance Operations.", ""); ok {
-		t.Error("research accepted an answer naming the superseded decider")
+	if ok, why := rs.Grade("It is policy-2026.md, not Finance Operations' 2024 rule.\nANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2026.md", ""); !ok {
+		t.Errorf("research rejected a right answer that rules out the decoy: %s", why)
+	}
+	if ok, _ := rs.Grade("ANSWER: 30 days; Finance Operations; 2026-03-04; corpus/policy-2026.md", ""); ok {
+		t.Error("research accepted the superseded decider on the ANSWER line")
 	}
 	co := council()
-	if ok, why := co.Grade("Line 17 has an Off-By-One loop; line 25 lets a NEGATIVE refund through.", ""); !ok {
+	if ok, why := co.Grade("**ANSWER: Line 17 has an Off-By-One loop; line 25 lets a NEGATIVE refund through.**", ""); !ok {
 		t.Errorf("council rejected a mixed-case answer: %s", why)
+	}
+	hs := history()
+	hws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(hws, "notes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for body, want := range map[string]bool{
+		"Codename: Juniper\nShip date: 2026-12-05\nOwner: Dana Reyes\n":             true,
+		"Codename: Juniper (was Cedar)\nShip date: 2026-12-05\nOwner: Dana Reyes\n": false, // the old codename, in the file
+		"# Release\nCodename: Juniper\nShip date: 2026-12-05\nOwner: Dana Reyes\n":  false, // four lines
+	} {
+		if err := os.WriteFile(filepath.Join(hws, "notes", "release.md"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if ok, why := hs.Grade("ANSWER: Juniper", hws); ok != want {
+			t.Errorf("history %q: %v (%s), want %v", body, ok, why, want)
+		}
 	}
 }
 
@@ -265,10 +290,130 @@ func TestReportPairs(t *testing.T) {
 		{Scenario: "a", Arm: "subtask", Mode: Subtask, Success: true, ParentContextTokens: 5, TotalTokens: 20},
 		{Scenario: "b", Arm: "direct", Mode: Direct, Success: true, ParentContextTokens: 10, TotalTokens: 10},
 		{Scenario: "b", Arm: "subtask", Mode: Subtask, Success: false, Why: "failed"},
+		{Scenario: "c", Arm: "direct", Mode: Direct, Success: false, Why: "failed"},
+		{Scenario: "c", Arm: "subtask", Mode: Subtask, Success: true, ParentContextTokens: 5, TotalTokens: 5},
 	}}
 	md := Markdown(rep, true)
-	if !strings.Contains(md, "- a, subtask: parent context n/a of the direct run's; total tokens 200%") || strings.Contains(md, "- b,") {
+	if !strings.Contains(md, "- a, subtask: parent context n/a of the direct run's; total tokens 200%") || strings.Contains(md, "- b,") || strings.Contains(md, "- c,") {
 		t.Fatalf("pairs:\n%s", md)
+	}
+}
+
+// streamOf is a provider that sends the events given, then closes; with
+// block it waits for cancellation first.
+type streamOf struct {
+	fakeProvider
+	events []llmtypes.StreamEvent
+	block  bool
+}
+
+func (p streamOf) StreamChat(ctx context.Context, _ llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	ch := make(chan llmtypes.StreamEvent)
+	go func() {
+		defer close(ch)
+		for _, e := range p.events {
+			ch <- e
+		}
+		if p.block {
+			<-ctx.Done()
+		}
+	}()
+	return ch, nil
+}
+
+// TestUnfinishedStreamsKeepTheReservation: a stream cancelled after its first
+// usage report, or one reporting none, is charged at least its reservation; a
+// finished stream settles to what it reported.
+func TestUnfinishedStreamsKeepTheReservation(t *testing.T) {
+	req := llmtypes.ChatRequest{SystemPrompt: strings.Repeat("y", 3000), MaxTokens: 1000}
+	start := llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 10}}
+	end := []llmtypes.StreamEvent{start, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{OutputTokens: 5, StopReason: "end_turn"}}, {Type: llmtypes.EventDone}}
+	for name, tc := range map[string]struct {
+		p      streamOf
+		cancel bool
+		hold   bool
+	}{
+		"cancelled after message_start": {streamOf{events: []llmtypes.StreamEvent{start}, block: true}, true, true},
+		"no usage":                      {streamOf{events: []llmtypes.StreamEvent{{Type: llmtypes.EventDone}}}, false, true},
+		"finished":                      {streamOf{events: end}, false, false},
+	} {
+		m := &meter{price: Price{Input: 1, Output: 1}}
+		ctx, cancel := context.WithCancel(context.Background())
+		mp := &metered{Provider: tc.p, meter: m, cancel: cancel}
+		ch, err := mp.StreamChat(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-ch
+		if tc.cancel {
+			cancel()
+		}
+		for range ch {
+		}
+		cancel()
+		want := 15.0 / 1e6
+		if tc.hold {
+			want = m.worst(req)
+		}
+		// The settle runs as the stream's goroutine ends, just after the
+		// channel closes.
+		for i := 0; i < 200 && math.Abs(m.spentUSD()-want) > 1e-12; i++ {
+			time.Sleep(time.Millisecond)
+		}
+		if got := m.spentUSD(); math.Abs(got-want) > 1e-12 {
+			t.Errorf("%s: charged $%v, want $%v", name, got, want)
+		}
+	}
+}
+
+// TestProbeMarksRunsThatTestedNothing: a last_n arm whose subtask was given
+// the facts, or chose its own context, and a result-cap arm whose result was
+// never stored and fetched, are invalid.
+func TestProbeMarksRunsThatTestedNothing(t *testing.T) {
+	child := func(first string) llmtypes.ChatRequest {
+		return llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{{Role: "user", Content: "Goal: write it\n\n" + first}}}
+	}
+	input := map[string]any{"goal": "g", "variant": "scribe", "context": map[string]any{"last_n": 20}}
+	override := llmtypes.ChatRequest{Messages: []llmtypes.ChatMessage{{Role: "assistant", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_use", Name: "subtask", Input: &input}}}}}
+	arm := Arm{Mode: Subtask, SeedLacks: []string{"Juniper"}}
+	ok := Result{Mode: Subtask}
+	for name, tc := range map[string]struct {
+		reqs []llmtypes.ChatRequest
+		arm  Arm
+		r    Result
+		want string
+	}{
+		"clean":          {[]llmtypes.ChatRequest{child("[#3 user] the owner is Dana")}, arm, ok, ""},
+		"seeded":         {[]llmtypes.ChatRequest{child("[#2 user] the codename is Juniper")}, arm, ok, `already held "Juniper"`},
+		"own context":    {[]llmtypes.ChatRequest{override}, arm, ok, "context.last_n"},
+		"nothing stored": {nil, Arm{Mode: Subtask, NeedsStored: true}, Result{Mode: Subtask, ParentFetches: 1}, "result cap"},
+	} {
+		p := &probe{seedLacks: tc.arm.SeedLacks}
+		for _, r := range tc.reqs {
+			p.see(r)
+		}
+		got := invalid(Scenario{}, tc.arm, tc.r, p)
+		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: invalid = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestFillCountsCompactionsAndLeavesBackgroundOut(t *testing.T) {
+	recs := []agent.TraceRecord{
+		{ConversationID: "root", Usage: trace.Usage{InputTokens: 100, OutputTokens: 10},
+			ToolCalls:   []trace.ToolCall{{Tool: "subtask"}, {Tool: "fetch_tool_result"}},
+			Compactions: []trace.Compaction{{}},
+			Subtasks: []trace.Subtask{
+				{ConversationID: "c1", Variant: "research", Usage: trace.Usage{InputTokens: 50}},
+				{ConversationID: "c2", Variant: "worker", Background: true, Status: trace.SubtaskRunning, Usage: trace.Usage{InputTokens: 999}},
+			}},
+		{ConversationID: "c1", ParentConversationID: "root", Role: "research", ToolCalls: []trace.ToolCall{{Tool: "read_file"}}, Compactions: []trace.Compaction{{}, {}}},
+	}
+	var r Result
+	r.fill(recs, "root", Price{Input: 1, Output: 1})
+	if r.Compactions != 3 || r.TotalTokens != 160 || r.ParentFetches != 1 || strings.Join(r.SubtaskTools, ",") != "read_file" || strings.Join(r.Variants, ",") != "research,worker" {
+		t.Fatalf("fill: %+v", r)
 	}
 }
 

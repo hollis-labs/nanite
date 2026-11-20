@@ -40,11 +40,11 @@ func Markdown(rep Report, wall bool) string {
 	if rep.Stopped != "" {
 		fmt.Fprintf(&b, " Stopped early: %s.", Shorten(rep.Stopped))
 	}
-	b.WriteString("\n\n| Scenario | Arm | Success | Parent context tokens | Total tokens | Est. cost (USD) | Wall | Approvals | Parent tool calls | Subtasks | Variants | Compactions |\n")
-	b.WriteString("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|\n")
+	b.WriteString("\n\n| Scenario | Arm | Success | Parent context tokens | Total tokens | Est. cost (USD) | Wall | Approvals | Parent tool calls | Subtasks | Variants | Subtask tools | Parent fetches | Compactions |\n")
+	b.WriteString("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|\n")
 	for _, r := range clean(rep.Results, wall) {
 		if r.Skipped != "" {
-			fmt.Fprintf(&b, "| %s | %s | skipped: %s | | | | | | | | | |\n", r.Scenario, r.Arm, r.Skipped)
+			fmt.Fprintf(&b, "| %s | %s | skipped: %s | | | | | | | | | | | |\n", r.Scenario, r.Arm, r.Skipped)
 			continue
 		}
 		ok := "yes"
@@ -55,12 +55,9 @@ func Markdown(rep Report, wall bool) string {
 		if wall {
 			w = fmt.Sprintf("%.1fs", float64(r.WallMS)/1000)
 		}
-		v := strings.Join(r.Variants, ", ")
-		if v == "" {
-			v = "-"
-		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %d | %d | %.4f | %s | %d | %d | %d | %s | %d |\n",
-			r.Scenario, r.Arm, ok, r.ParentContextTokens, r.TotalTokens, r.CostUSD, w, r.Approvals, r.ParentToolCalls, r.Subtasks, v, r.Compactions)
+		fmt.Fprintf(&b, "| %s | %s | %s | %d | %d | %.4f | %s | %d | %d | %d | %s | %s | %d | %d |\n",
+			r.Scenario, r.Arm, ok, r.ParentContextTokens, r.TotalTokens, r.CostUSD, w, r.Approvals, r.ParentToolCalls, r.Subtasks,
+			list(r.Variants), list(r.SubtaskTools), r.ParentFetches, r.Compactions)
 	}
 	if rep.Model == ScriptedModel {
 		return b.String()
@@ -93,6 +90,13 @@ func pairs(results []Result) []pair {
 		}
 	}
 	return out
+}
+
+func list(names []string) string {
+	if len(names) == 0 {
+		return "-"
+	}
+	return strings.Join(names, ", ")
 }
 
 // round keeps six decimals: concurrent subtasks add their costs in any

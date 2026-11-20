@@ -5,23 +5,24 @@
       "arm": "direct",
       "mode": "direct",
       "success": true,
-      "parent_context_tokens": 10392,
-      "total_tokens": 10460,
-      "cost_usd": 0.16098,
+      "parent_context_tokens": 10491,
+      "total_tokens": 10575,
+      "cost_usd": 0.163665,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 4,
       "subtasks": 0,
-      "compactions": 0
+      "compactions": 0,
+      "parent_fetches": 0
     },
     {
       "scenario": "code-search",
       "arm": "subtask",
       "mode": "subtask",
       "success": true,
-      "parent_context_tokens": 5007,
-      "total_tokens": 17586,
-      "cost_usd": 0.27315,
+      "parent_context_tokens": 5073,
+      "total_tokens": 17767,
+      "cost_usd": 0.276825,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 1,
@@ -29,30 +30,37 @@
       "variants": [
         "research"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "read_file",
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "research",
       "arm": "direct",
       "mode": "direct",
       "success": true,
-      "parent_context_tokens": 8045,
-      "total_tokens": 8110,
-      "cost_usd": 0.12555,
+      "parent_context_tokens": 8125,
+      "total_tokens": 8192,
+      "cost_usd": 0.1269,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 3,
       "subtasks": 0,
-      "compactions": 0
+      "compactions": 0,
+      "parent_fetches": 0
     },
     {
       "scenario": "research",
       "arm": "subtask",
       "mode": "subtask",
       "success": true,
-      "parent_context_tokens": 4991,
-      "total_tokens": 15252,
-      "cost_usd": 0.23862,
+      "parent_context_tokens": 5043,
+      "total_tokens": 15384,
+      "cost_usd": 0.24072,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 1,
@@ -60,30 +68,37 @@
       "variants": [
         "research"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "read_file",
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "chore",
       "arm": "direct",
       "mode": "direct",
       "success": true,
-      "parent_context_tokens": 11799,
-      "total_tokens": 12778,
-      "cost_usd": 0.25041,
+      "parent_context_tokens": 11889,
+      "total_tokens": 12870,
+      "cost_usd": 0.25191,
       "wall_ms": 0,
       "approvals": 6,
       "parent_tool_calls": 13,
       "subtasks": 0,
-      "compactions": 0
+      "compactions": 0,
+      "parent_fetches": 0
     },
     {
       "scenario": "chore",
       "arm": "subtask",
       "mode": "subtask",
       "success": true,
-      "parent_context_tokens": 5216,
-      "total_tokens": 20658,
-      "cost_usd": 0.37305,
+      "parent_context_tokens": 5262,
+      "total_tokens": 20798,
+      "cost_usd": 0.37527,
       "wall_ms": 0,
       "approvals": 6,
       "parent_tool_calls": 1,
@@ -91,30 +106,38 @@
       "variants": [
         "worker"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "list_dir",
+        "read_file",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "council",
       "arm": "direct",
       "mode": "direct",
       "success": true,
-      "parent_context_tokens": 4194,
-      "total_tokens": 4259,
-      "cost_usd": 0.067785,
+      "parent_context_tokens": 4240,
+      "total_tokens": 4288,
+      "cost_usd": 0.0672,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 1,
       "subtasks": 0,
-      "compactions": 0
+      "compactions": 0,
+      "parent_fetches": 0
     },
     {
       "scenario": "council",
       "arm": "subtask",
       "mode": "subtask",
       "success": true,
-      "parent_context_tokens": 5095,
-      "total_tokens": 28983,
-      "cost_usd": 0.461865,
+      "parent_context_tokens": 5141,
+      "total_tokens": 29196,
+      "cost_usd": 0.46404,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 1,
@@ -123,30 +146,38 @@
         "council",
         "reviewer"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "read_file",
+        "return_result",
+        "subtask"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "history",
       "arm": "direct",
       "mode": "direct",
       "success": true,
-      "parent_context_tokens": 5121,
-      "total_tokens": 5170,
-      "cost_usd": 0.08049,
+      "parent_context_tokens": 5167,
+      "total_tokens": 5216,
+      "cost_usd": 0.08118,
       "wall_ms": 0,
       "approvals": 1,
       "parent_tool_calls": 1,
       "subtasks": 0,
-      "compactions": 0
+      "compactions": 0,
+      "parent_fetches": 0
     },
     {
       "scenario": "history",
       "arm": "subtask",
       "mode": "subtask",
+      "last_n": 6,
       "success": true,
-      "parent_context_tokens": 6078,
-      "total_tokens": 14568,
-      "cost_usd": 0.22734,
+      "parent_context_tokens": 6125,
+      "total_tokens": 14685,
+      "cost_usd": 0.229095,
       "wall_ms": 0,
       "approvals": 1,
       "parent_tool_calls": 1,
@@ -154,7 +185,13 @@
       "variants": [
         "scribe"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "parent_history_search",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "history",
@@ -162,9 +199,9 @@
       "mode": "subtask",
       "last_n": 1,
       "success": true,
-      "parent_context_tokens": 6078,
-      "total_tokens": 14436,
-      "cost_usd": 0.22536,
+      "parent_context_tokens": 6125,
+      "total_tokens": 14552,
+      "cost_usd": 0.2271,
       "wall_ms": 0,
       "approvals": 1,
       "parent_tool_calls": 1,
@@ -172,7 +209,13 @@
       "variants": [
         "scribe"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "parent_history_search",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "history",
@@ -180,9 +223,9 @@
       "mode": "subtask",
       "last_n": 20,
       "success": true,
-      "parent_context_tokens": 6078,
-      "total_tokens": 14950,
-      "cost_usd": 0.23307,
+      "parent_context_tokens": 6125,
+      "total_tokens": 15068,
+      "cost_usd": 0.23484,
       "wall_ms": 0,
       "approvals": 1,
       "parent_tool_calls": 1,
@@ -190,30 +233,37 @@
       "variants": [
         "scribe"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "parent_history_search",
+        "return_result",
+        "write_file"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "inventory",
       "arm": "direct",
       "mode": "direct",
       "success": true,
-      "parent_context_tokens": 6968,
-      "total_tokens": 6996,
-      "cost_usd": 0.10662,
+      "parent_context_tokens": 7022,
+      "total_tokens": 7044,
+      "cost_usd": 0.10698,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 1,
       "subtasks": 0,
-      "compactions": 0
+      "compactions": 0,
+      "parent_fetches": 0
     },
     {
       "scenario": "inventory",
       "arm": "subtask",
       "mode": "subtask",
       "success": true,
-      "parent_context_tokens": 7729,
-      "total_tokens": 18860,
-      "cost_usd": 0.45306,
+      "parent_context_tokens": 7783,
+      "total_tokens": 18962,
+      "cost_usd": 0.45423,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 1,
@@ -221,7 +271,12 @@
       "variants": [
         "research"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 0
     },
     {
       "scenario": "inventory",
@@ -229,9 +284,9 @@
       "mode": "subtask",
       "result_cap": 1500,
       "success": true,
-      "parent_context_tokens": 11208,
-      "total_tokens": 22353,
-      "cost_usd": 0.506295,
+      "parent_context_tokens": 11289,
+      "total_tokens": 22482,
+      "cost_usd": 0.50787,
       "wall_ms": 0,
       "approvals": 0,
       "parent_tool_calls": 2,
@@ -239,7 +294,12 @@
       "variants": [
         "research"
       ],
-      "compactions": 0
+      "compactions": 0,
+      "subtask_tools": [
+        "return_result",
+        "search_files"
+      ],
+      "parent_fetches": 1
     }
   ],
   "model": "scripted",
@@ -249,5 +309,5 @@
     "CacheRead": 1.5,
     "CacheWrite": 18.75
   },
-  "spent_usd": 5.047485
+  "spent_usd": 5.071665
 }

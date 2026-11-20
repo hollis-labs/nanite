@@ -5,11 +5,11 @@
 // Without -live it runs offline against each scenario's scripted model, the
 // same run CI makes: a harness check, not evidence. With -live it calls the
 // configured provider and spends money. A live run needs a dollar cap
-// (-max-usd, at most 50), a per-run token cap (-turn-tokens) and positive
-// prices; every model request reserves its most expensive outcome against the
-// cap before it is sent. It prints the provider, model and prices before it
-// starts, and writes what ran and the spend so far even when it is
-// interrupted or fails.
+// (-max-usd, at most 50), a per-run token cap (-turn-tokens), prices of at
+// least a cent per million tokens and a model name; every model request
+// reserves its most expensive outcome against the cap before it is sent. It
+// prints the provider, model and prices before it starts, and writes what ran
+// and the spend so far even when it is interrupted or fails.
 //
 // The live run reads its provider key as nanite does: from NANITE_GATEWAY_URL
 // and NANITE_GATEWAY_KEY_REF for a gateway, else the keychain entry
@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
@@ -35,8 +36,16 @@ import (
 	"github.com/hollis-labs/nanite/internal/provider"
 )
 
-// maxCap is the most a single live run may be allowed to spend.
-const maxCap = 50.0
+// maxCap is the most a single live run may be allowed to spend, and
+// minPrice the lowest price per million tokens it accepts: a price near zero
+// would make the cap meaningless.
+const (
+	maxCap   = 50.0
+	minPrice = 0.01
+)
+
+// modelName is what a -model may look like.
+var modelName = regexp.MustCompile(`^[a-z0-9.-]+$`)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -120,9 +129,12 @@ func checkLive(providerName, model string, maxUSD float64, turnTokens int, p eva
 		return errors.New("-turn-tokens must be more than 0 for a live run")
 	}
 	for name, v := range map[string]float64{"-price-in": p.Input, "-price-out": p.Output, "-price-cache-read": p.CacheRead, "-price-cache-write": p.CacheWrite} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
-			return fmt.Errorf("%s must be more than 0 for a live run", name)
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < minPrice {
+			return fmt.Errorf("%s must be at least %g for a live run", name, minPrice)
 		}
+	}
+	if !modelName.MatchString(model) {
+		return fmt.Errorf("model %q is not a model name (lower-case letters, digits, dots and dashes)", model)
 	}
 	claude := strings.HasPrefix(model, "claude-")
 	switch providerName {

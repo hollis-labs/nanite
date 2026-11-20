@@ -56,8 +56,17 @@ type Arm struct {
 	// Prepare edits the run's copy of the agent directory before the agent
 	// opens, for example to change a variant's last_n.
 	Prepare func(dir string) error
-	// Options adjusts the agent's options, for example SubtaskResultCap.
+	// Options adjusts the agent's options, for example SubtaskResultCap. It
+	// may not add named providers: every request must go through the meter.
 	Options func(*agent.Options)
+	// SeedLacks are facts a subtask must not be given in its first message:
+	// a run where it was given one is invalid, because the subtask never had
+	// to look for it (a last_n arm testing history retrieval).
+	SeedLacks []string
+	// NeedsStored marks an arm that only tests something when a subtask's
+	// result is stored behind a pointer and the parent fetches it (a small
+	// result cap); a run where that did not happen is invalid.
+	NeedsStored bool
 }
 
 // DefaultArms are the arms every scenario runs: direct, and subtask with the
@@ -88,8 +97,19 @@ type Scenario struct {
 	Script func(Arm) Script
 }
 
-// AllArms are DefaultArms followed by the scenario's own arms.
-func (s Scenario) AllArms() []Arm { return append(DefaultArms(), s.Arms...) }
+// AllArms are DefaultArms, each replaced by the scenario's arm of the same
+// name, followed by the scenario's other arms.
+func (s Scenario) AllArms() []Arm {
+	arms := DefaultArms()
+	for _, a := range s.Arms {
+		if i := slices.IndexFunc(arms, func(d Arm) bool { return d.Name == a.Name }); i >= 0 {
+			arms[i] = a
+		} else {
+			arms = append(arms, a)
+		}
+	}
+	return arms
+}
 
 // Task is the scenario's prompt, from task.md.
 func (s Scenario) Task() (string, error) {
@@ -193,6 +213,31 @@ func mentions(answer string, phrases []string, decoys ...string) (bool, string) 
 	return true, ""
 }
 
+// answerLine is the answer's last line starting "ANSWER:", without the
+// prefix. The tasks ask for one, so a grader checks the facts there and not
+// in the explanation around it, which may name a decoy to rule it out.
+func answerLine(answer string) (string, bool) {
+	lines := strings.Split(answer, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(strings.Trim(strings.TrimSpace(lines[i]), "*`"))
+		if len(line) >= 7 && strings.EqualFold(line[:7], "ANSWER:") {
+			return strings.TrimSpace(line[7:]), true
+		}
+	}
+	return "", false
+}
+
+// graded runs check on the answer line.
+func graded(check func(line string) (bool, string)) func(string, string) (bool, string) {
+	return func(answer, _ string) (bool, string) {
+		line, ok := answerLine(answer)
+		if !ok {
+			return false, "no ANSWER: line"
+		}
+		return check(line)
+	}
+}
+
 var dates = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 
 // says checks that answer states the number n, as a digit or a word, outside
@@ -207,13 +252,13 @@ func says(answer string, n int, name string) (bool, string) {
 
 func codeSearch() Scenario {
 	const goal = "Find every function in src/ that reads the APP_MODE environment variable, and the mode values the code compares it against."
-	answer := "loadMode in src/config.go and startServer in src/server.go read APP_MODE. The code compares it against dev, prod and test."
+	answer := "loadMode and startServer read APP_MODE; describeMode only mentions it and legacyModes reads APP_MODES.\nANSWER: src/config.go:loadMode, src/server.go:startServer; modes: dev, prod, test"
 	return Scenario{
 		Name:  "code-search",
 		Files: files("code-search"),
-		Grade: func(a, _ string) (bool, string) {
-			return mentions(a, []string{"config.go", "loadMode", "server.go", "startServer", "dev", "prod", "test"}, "describeMode", "legacyModes")
-		},
+		Grade: graded(func(line string) (bool, string) {
+			return mentions(line, []string{"config.go", "loadMode", "server.go", "startServer", "dev", "prod", "test"}, "describeMode", "legacyModes")
+		}),
 		Script: func(arm Arm) Script {
 			work := []Step{
 				Calls(Call("search_files", "pattern", "APP_MODE", "path", "src")),
@@ -235,14 +280,14 @@ func codeSearch() Scenario {
 
 func research() Scenario {
 	const goal = "From the files in corpus/, find the current default retention period for ledger exports, who decided it and when, and the file that says so."
-	answer := "The current default retention period is 30 days. The Data Council decided it on 2026-03-04 (corpus/policy-2026.md)."
+	answer := "The 2024 rule (90 days, Finance Operations) is superseded.\nANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2026.md"
 	return Scenario{
 		Name:  "research",
 		Files: files("research"),
-		Grade: func(a, _ string) (bool, string) {
-			// The superseded policy's decider is the decoy.
-			return mentions(a, []string{"30 days", "Data Council", "2026-03-04", "policy-2026.md"}, "Finance Operations")
-		},
+		// The superseded policy's decider is the decoy.
+		Grade: graded(func(line string) (bool, string) {
+			return mentions(line, []string{"30 days", "Data Council", "2026-03-04", "policy-2026.md"}, "Finance Operations")
+		}),
 		Script: func(arm Arm) Script {
 			work := []Step{
 				Calls(Call("search_files", "pattern", "retention period", "path", "corpus")),
@@ -268,7 +313,7 @@ const reviewedLine = "Reviewed: 2026-11-20"
 
 func chore() Scenario {
 	const goal = "Append the line \"Reviewed: 2026-11-20\" at the end of every Markdown file in notes/, keeping the rest of each file, and report how many files changed."
-	answer := "I added the reviewed line to all 6 files in notes/."
+	answer := "Every note now ends with Reviewed: 2026-11-20.\nANSWER: 6"
 	s := Scenario{Name: "chore", Files: files("chore"), Writes: true}
 	s.Grade = func(a, ws string) (bool, string) {
 		for _, n := range choreNotes {
@@ -281,7 +326,11 @@ func chore() Scenario {
 				return false, fmt.Sprintf("notes/%s.md does not end with the reviewed line, or other text changed", n)
 			}
 		}
-		return says(a, 6, "six")
+		line, ok := answerLine(a)
+		if !ok {
+			return false, "no ANSWER: line"
+		}
+		return says(line, 6, "six")
 	}
 	s.Script = func(arm Arm) Script {
 		var reads, writes []ToolUse
@@ -308,24 +357,24 @@ func chore() Scenario {
 func council() Scenario {
 	const goal = "Review src/payment.go for bugs. Return each bug with its line number and a one-line fix."
 	angles := []string{"correctness", "safety", "clarity"}
-	answer := "Two bugs in src/payment.go. Line 17: the loop condition i <= len(items) is an off-by-one that reads past the end; use i < len(items). Line 25: Refund returns a negative amount unchecked; refuse or clamp negative amounts."
+	answer := "Two bugs in src/payment.go; use i < len(items) and refuse negative amounts.\nANSWER: 17: off-by-one loop reads past the end; 25: negative refund not refused"
 	return Scenario{
 		Name:     "council",
 		Files:    files("council"),
 		Requires: []string{"council"},
-		Grade: func(a, _ string) (bool, string) {
-			if ok, why := mentions(a, []string{"17", "25"}); !ok {
+		Grade: graded(func(line string) (bool, string) {
+			if ok, why := mentions(line, []string{"17", "25"}); !ok {
 				return ok, why
 			}
-			lower := strings.ToLower(a)
+			lower := strings.ToLower(line)
 			if !strings.Contains(lower, "negative") {
 				return false, "answer does not name the negative refund"
 			}
-			if !strings.Contains(lower, "off-by-one") && !strings.Contains(lower, "off by one") && !strings.Contains(a, "< len(items)") {
+			if !strings.Contains(lower, "off-by-one") && !strings.Contains(lower, "off by one") && !strings.Contains(line, "< len(items)") {
 				return false, "answer does not name the off-by-one loop"
 			}
 			return true, ""
-		},
+		}),
 		Script: func(arm Arm) Script {
 			if arm.Mode == Direct {
 				return Script{Root: []Step{Calls(Call("read_file", "path", "src/payment.go")), Say(answer)}}
@@ -360,20 +409,39 @@ func council() Scenario {
 func history() Scenario {
 	const goal = "Write notes/release.md with exactly three lines: the codename, the ship date and the owner of the release discussed earlier in this conversation."
 	release := "Codename: Juniper\nShip date: 2026-12-05\nOwner: Dana Reyes\n"
-	answer := "I wrote notes/release.md: codename Juniper, ship date 2026-12-05, owner Dana Reyes."
+	answer := "I wrote notes/release.md with the codename, ship date and owner.\nANSWER: Juniper"
 	s := Scenario{Name: "history", Files: files("history"), Writes: true, Requires: []string{"scribe"}}
-	for _, n := range []int{1, 20} {
-		s.Arms = append(s.Arms, Arm{Name: fmt.Sprintf("subtask last_n=%d", n), Mode: Subtask, LastN: n, Prepare: setLastN("variants/scribe.md", n)})
+	// With last_n 6 (the variant's) or 1 the facts are outside what the
+	// subtask is given, so a run where its first message held them did not
+	// test retrieval. With 20 they are given.
+	facts := []string{"Juniper", "Dana Reyes"}
+	s.Arms = []Arm{
+		{Name: "subtask", Mode: Subtask, LastN: 6, SeedLacks: facts},
+		{Name: "subtask last_n=1", Mode: Subtask, LastN: 1, Prepare: setLastN("variants/scribe.md", 1), SeedLacks: facts},
+		{Name: "subtask last_n=20", Mode: Subtask, LastN: 20, Prepare: setLastN("variants/scribe.md", 20)},
 	}
 	s.Grade = func(a, ws string) (bool, string) {
 		data, err := os.ReadFile(filepath.Join(ws, "notes", "release.md")) //nolint:gosec // a file of the run's own copy of the workspace
 		if err != nil {
 			return false, "notes/release.md was not written"
 		}
+		var lines []string
+		for _, l := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(l) != "" {
+				lines = append(lines, l)
+			}
+		}
+		if len(lines) != 3 {
+			return false, fmt.Sprintf("notes/release.md has %d lines, want 3", len(lines))
+		}
 		if ok, why := mentions(string(data), []string{"Juniper", "2026-12-05", "Dana Reyes"}, "Cedar"); !ok {
 			return false, "notes/release.md: " + why
 		}
-		return mentions(a, []string{"Juniper"}, "Cedar")
+		line, ok := answerLine(a)
+		if !ok {
+			return false, "no ANSWER: line"
+		}
+		return mentions(line, []string{"Juniper"}, "Cedar")
 	}
 	s.Script = func(arm Arm) Script {
 		var root []Step
@@ -419,7 +487,7 @@ var todoLine = regexp.MustCompile(`// TODO\((\w+)\): (.*)`)
 func inventory() Scenario {
 	const goal = "List every TODO comment in src/ as file:line: owner: text, one per line."
 	s := Scenario{Name: "inventory", Files: files("inventory"), Requires: []string{"research"}}
-	s.Arms = []Arm{{Name: "subtask result_cap=1500", Mode: Subtask, ResultCap: 1500,
+	s.Arms = []Arm{{Name: "subtask result_cap=1500", Mode: Subtask, ResultCap: 1500, NeedsStored: true,
 		Options: func(o *agent.Options) { o.SubtaskResultCap = 1500 }}}
 	// The list and the counts, from the fixture.
 	var list []string
@@ -441,13 +509,13 @@ func inventory() Scenario {
 		}
 	}
 	total := len(list)
-	answer := fmt.Sprintf("There are %d TODO comments in src/. %s has the most, with %d.", total, top, counts[top])
-	s.Grade = func(a, _ string) (bool, string) {
-		if ok, why := says(a, total, ""); !ok {
+	answer := fmt.Sprintf("%s has %d of them.\nANSWER: %d; %s", top, counts[top], total, top)
+	s.Grade = graded(func(line string) (bool, string) {
+		if ok, why := says(line, total, ""); !ok {
 			return ok, why
 		}
-		return mentions(a, []string{top})
-	}
+		return mentions(line, []string{top})
+	})
 	s.Script = func(arm Arm) Script {
 		search := Calls(Call("search_files", "pattern", `TODO\(`, "path", "src"))
 		if arm.Mode == Direct {

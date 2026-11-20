@@ -24,17 +24,28 @@ The graders are in `evals/scenario.go`.
 | `research` | Answer from a local corpus of seven documents, one of them superseded, and cite the source. | direct, subtask | period, decider, date, cited file; not the superseded decider |
 | `chore` | Append a line to each of six notes. Every write asks for approval. | direct, subtask | every file changed exactly; the count stated as 6 or "six", not the 6 in a date |
 | `council` | Review a file for bugs. The agent is told to review through the authored `council` lead variant, which starts three read-only `reviewer` subtasks. | direct, subtask | both planted bugs, with line numbers |
-| `history` | Write a file from facts given earlier: a codename that was later corrected, a date and an owner. They sit in the first three of eight earlier messages. The agent is told to delegate writing to the `scribe` variant. | direct, subtask (`last_n` 6), `last_n` 1, `last_n` 20 | the corrected codename, never the old one, plus the date and the owner |
+| `history` | Write a file from facts given earlier: a codename that was later corrected, a date and an owner. They sit in the first three of eight earlier messages. The agent is told to delegate writing to the `scribe` variant. | direct, subtask (`last_n` 6), `last_n` 1, `last_n` 20 | the file has exactly three lines with the corrected codename (never the old one, anywhere in the file), the date and the owner |
 | `inventory` | Collect all 150 TODO comments in `src/`, then report the total and the top owner. The full list is about 2,700 tokens. The agent is told to collect long lists through the `research` variant. | direct, subtask (cap about 5,900 tokens), `result_cap` 1,500 | the total and the top owner |
 
 The prompts are the same in every arm. Only whether `subtask` is offered, and the arm's setting,
 differ.
 
-A scenario can require a variant, and a subtask run that never runs it is marked **invalid**, not
-a success:
-- `council` requires `council`;
-- `history` requires `scribe`;
-- `inventory` requires `research`.
+Every task asks for a final line in a fixed form, such as
+`ANSWER: 30 days; Data Council; 2026-03-04; corpus/policy-2026.md`. The graders check facts and
+decoys on that line only, so an answer may name a decoy in its explanation to rule it out. An
+answer with no such line fails.
+
+A subtask run that did not test what its arm is for is marked **invalid**, not a success. The report
+says why:
+- **Required variant:** a scenario can require one, and the run never ran it. `council` requires
+  `council`, `history` requires `scribe`, and `inventory` requires `research`.
+- **Facts already given (`history`, `last_n` 6 and 1):** a subtask's first message already held one
+  of the facts it was meant to find, for example because the parent put them in the goal. Every
+  request is checked as it goes to the model.
+- **Context chosen by the parent:** a `subtask` call set `context.last_n` or `context.full`, so the
+  arm's `last_n` never applied.
+- **Nothing stored (`inventory`, small cap):** no subtask result was stored behind a pointer and
+  fetched by the parent.
 
 The graders are deterministic and check facts. The live run uses them too; there is no model
 grading.
@@ -62,6 +73,9 @@ and wall time. A prelude's turns are left out.
 - **Approvals:** how often the gate was asked, including a subtask's asks relayed to the root.
 - **Parent tool calls, subtasks and variants:** how much the root did itself, how many subtask
   conversations ran anywhere in the tree, and which variants they ran.
+- **Subtask tools and parent fetches:** the tools the subtasks called, such as
+  `parent_history_search`, and how many times the root called `fetch_tool_result`. They show
+  whether a run did what its arm is about.
 - **Compactions:** compaction passes anywhere in the tree.
 
 For a live run, the report adds one line per successful pair of a direct run and a subtask arm.
@@ -98,15 +112,20 @@ parent and its subtasks use it whatever the environment's default. A model that 
 - `-max-usd` above 0 and at most 50.
 - `-turn-tokens` above 0. It caps one run's task turn, subtasks included, through
   `TurnTokenBudget`.
-- Every `-price-*` above 0. The defaults are deliberately high.
+- Every `-price-*` at least $0.01 per million tokens. The defaults are deliberately high.
+- A `-model` made of lower-case letters, digits, dots and dashes.
 
 **Before it starts,** it prints the provider, the model, the prices and the caps.
 
 **The dollar cap:**
 - Every model request, compaction summaries and argument repair included, first reserves its most
-  expensive outcome: its input plus all of its `max_tokens` of output.
-- When the stream ends, the reservation settles to the reported usage. A summary or repair reports
-  no usage, so it is charged an estimate of four characters a token.
+  expensive outcome. That is its input, estimated generously at three characters a token, plus all
+  of its output allowance (`max_tokens`, or 16,384 when the request names none).
+- A stream that finishes settles to its reported usage.
+- A stream that is cut off, cancelled or reports no usage is charged at least its reservation. A
+  provider may bill more than it reported before the cut.
+- A failed request, or a failed summary or repair, is charged its reservation. A successful summary
+  or repair reports no usage, so it is charged an estimate of four characters a token.
 - A request that would pass the cap is refused. That ends the run in progress, and the rest are
   skipped.
 

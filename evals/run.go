@@ -111,6 +111,11 @@ type Result struct {
 	Variants        []string `json:"variants,omitempty"`
 	// Compactions counts the compaction passes in the tree.
 	Compactions int `json:"compactions"`
+	// SubtaskTools names the tools the subtasks called; ParentFetches counts
+	// the root's fetch_tool_result calls. They show whether a run exercised
+	// what its arm varies.
+	SubtaskTools  []string `json:"subtask_tools,omitempty"`
+	ParentFetches int      `json:"parent_fetches"`
 	// Skipped says why the run did not happen.
 	Skipped string `json:"skipped,omitempty"`
 }
@@ -221,7 +226,6 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	} else if model, err = cfg.Provider(s, arm); err != nil {
 		return res, err
 	}
-	model = &metered{Provider: model, meter: meter, cancel: cancel}
 
 	builtins := []agent.BuiltinGroup{agent.BuiltinFilesRead}
 	if s.Writes {
@@ -245,6 +249,12 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	if arm.Options != nil {
 		arm.Options(&opts)
 	}
+	// Every model request goes through the meter, whatever the arm set.
+	if len(opts.Providers) > 0 {
+		return res, errors.New("evals: an arm may not add named providers; they would bypass the dollar cap")
+	}
+	probe := &probe{seedLacks: arm.SeedLacks}
+	opts.Provider = &metered{Provider: opts.Provider, meter: meter, cancel: cancel, probe: probe}
 	a, err := agent.Open(runCtx, opts)
 	if err != nil {
 		return res, err
@@ -306,28 +316,111 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 			res.Success, res.Why = false, f[0]
 		}
 	}
-	if arm.Mode == Subtask {
-		for _, v := range s.Requires {
-			if !slices.Contains(res.Variants, v) {
-				res.Success, res.Invalid = false, true
-				res.Why = fmt.Sprintf("invalid: the %s variant did not run", v)
+	if why := invalid(s, arm, res, probe); why != "" {
+		res.Success, res.Invalid, res.Why = false, true, "invalid: "+why
+	}
+	return res, nil
+}
+
+// invalid says why a subtask run did not test what its arm is for, or "".
+func invalid(s Scenario, arm Arm, r Result, p *probe) string {
+	if arm.Mode != Subtask || r.Skipped != "" {
+		return ""
+	}
+	for _, v := range s.Requires {
+		if !slices.Contains(r.Variants, v) {
+			return fmt.Sprintf("the %s variant did not run", v)
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.override {
+		return "a subtask call set context.last_n or context.full, so the arm's last_n did not apply"
+	}
+	if p.seeded != "" {
+		return fmt.Sprintf("a subtask's first message already held %q, so it never had to look for it", p.seeded)
+	}
+	if arm.NeedsStored && (!p.stored || r.ParentFetches == 0) {
+		return "no subtask result was stored and fetched, so the result cap was not exercised"
+	}
+	return ""
+}
+
+// probe watches the requests of one run for what decides whether it tested
+// its arm.
+type probe struct {
+	seedLacks []string
+	mu        sync.Mutex
+	// seeded is a fact found in a subtask's first message; override is set
+	// when a subtask call chose its own context; stored when a subtask's
+	// result came back as a stored pointer.
+	seeded   string
+	override bool
+	stored   bool
+}
+
+func (p *probe) see(req llmtypes.ChatRequest) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if goalOf(req.Messages) != "" && p.seeded == "" {
+		first := firstUser(req.Messages)
+		for _, f := range p.seedLacks {
+			if strings.Contains(first, f) {
+				p.seeded = f
 				break
 			}
 		}
 	}
-	return res, nil
+	for _, m := range req.Messages {
+		for _, b := range m.ContentBlocks {
+			if b.Type == "tool_use" && b.Name == "subtask" && b.Input != nil {
+				if c, ok := (*b.Input)["context"].(map[string]any); ok {
+					if _, set := c["last_n"]; set {
+						p.override = true
+					}
+					if full, _ := c["full"].(bool); full {
+						p.override = true
+					}
+				}
+			}
+			if b.Type == "tool_result" && strings.Contains(b.Content, `"result_ref"`) {
+				p.stored = true
+			}
+		}
+	}
+}
+
+// firstUser is the text of the first user message.
+func firstUser(msgs []llmtypes.ChatMessage) string {
+	for _, m := range msgs {
+		if m.Role != "user" {
+			continue
+		}
+		text := m.Content
+		for _, b := range m.ContentBlocks {
+			if b.Type == "text" {
+				text += b.Text
+			}
+		}
+		return text
+	}
+	return ""
 }
 
 // fill takes the metrics from the task turn's trace records.
 func (r *Result) fill(recs []agent.TraceRecord, root string, price Price) {
 	children := map[string]bool{}
 	variants := map[string]bool{}
+	tools := map[string]bool{}
 	for _, rec := range recs {
 		r.Compactions += len(rec.Compactions)
 		if rec.ParentConversationID != "" {
 			children[rec.ConversationID] = true
 			if rec.Role != "" {
 				variants[rec.Role] = true
+			}
+			for _, c := range rec.ToolCalls {
+				tools[c.Tool] = true
 			}
 			continue
 		}
@@ -339,6 +432,11 @@ func (r *Result) fill(recs []agent.TraceRecord, root string, price Price) {
 		r.TotalTokens += u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
 		r.CostUSD += price.usage(u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 		r.ParentToolCalls += len(rec.ToolCalls)
+		for _, c := range rec.ToolCalls {
+			if c.Tool == "fetch_tool_result" {
+				r.ParentFetches++
+			}
+		}
 		for _, st := range rec.Subtasks {
 			variants[st.Variant] = true
 			// A background subtask still running when the turn ended is
@@ -359,6 +457,10 @@ func (r *Result) fill(recs []agent.TraceRecord, root string, price Price) {
 		r.Variants = append(r.Variants, v)
 	}
 	slices.Sort(r.Variants)
+	for t := range tools {
+		r.SubtaskTools = append(r.SubtaskTools, t)
+	}
+	slices.Sort(r.SubtaskTools)
 }
 
 // setModel writes the model into the run's host.yaml, so each run uses the
@@ -451,13 +553,24 @@ func (m *meter) spentUSD() float64 {
 	return m.spent
 }
 
-// worst is a request's most expensive outcome: its input (estimated from its
-// size) and its whole output allowance.
-func (m *meter) worst(inputTokens, maxTokens int) float64 {
-	if maxTokens <= 0 {
-		maxTokens = 8192
+// defaultMaxOutput is the output allowance assumed for a request that names
+// none: the largest the providers give by default.
+const defaultMaxOutput = 16384
+
+// worst is a request's most expensive outcome: its whole input, estimated
+// generously at three characters a token, and its whole output allowance.
+func (m *meter) worst(req llmtypes.ChatRequest) float64 {
+	n := len(req.SystemPrompt)
+	for _, s := range req.SlotBlocks {
+		n += len(s.Content)
 	}
-	return m.price.usage(inputTokens, maxTokens, 0, 0)
+	msgs, _ := json.Marshal(req.Messages)
+	tools, _ := json.Marshal(req.Tools)
+	out := req.MaxTokens
+	if out <= 0 {
+		out = defaultMaxOutput
+	}
+	return m.price.usage((n+len(msgs)+len(tools))/3+1, out, 0, 0)
 }
 
 var errCapped = errors.New("evals: dollar cap reached")
@@ -468,42 +581,60 @@ type metered struct {
 	llmcontracts.Provider
 	meter  *meter
 	cancel context.CancelFunc
+	probe  *probe
 }
 
 func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
-	hold := p.meter.worst(requestTokens(req, nil), req.MaxTokens)
+	if p.probe != nil {
+		p.probe.see(req)
+	}
+	hold := p.meter.worst(req)
 	if !p.meter.reserve(hold) {
 		p.cancel()
 		return nil, errCapped
 	}
 	in, err := p.Provider.StreamChat(ctx, req)
 	if err != nil {
-		p.meter.settle(hold, 0)
+		// A request that failed to start may still have been billed.
+		p.meter.settle(hold, hold)
 		return nil, err
 	}
 	out := make(chan llmtypes.StreamEvent)
 	go func() {
 		defer close(out)
-		// The reservation holds until the stream ends, then settles to the
-		// usage reported, or stays as the cost when none was.
-		var cost float64
-		reported := false
+		// The reservation holds until the stream ends. A stream that finished
+		// settles to its reported usage; one that did not (cancelled, cut
+		// off, or reporting no usage) is charged at least the reservation,
+		// since the provider may have billed more than it reported.
+		var reported float64
+		finished := false
+		account := func(ev llmtypes.StreamEvent) {
+			switch {
+			case ev.Type == llmtypes.EventDone:
+				finished = true
+			case ev.Type == llmtypes.EventUsage && ev.Usage != nil:
+				u := ev.Usage
+				reported += p.meter.price.usage(u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens)
+				if u.StopReason != "" {
+					finished = true
+				}
+			}
+		}
 		defer func() {
-			if !reported {
-				cost = hold
+			cost := max(hold, reported)
+			if finished && reported > 0 {
+				cost = reported
 			}
 			p.meter.settle(hold, cost)
 		}()
 		for ev := range in {
-			if ev.Type == llmtypes.EventUsage && ev.Usage != nil {
-				u := ev.Usage
-				reported = true
-				cost += p.meter.price.usage(u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens)
-			}
+			account(ev)
 			select {
 			case out <- ev:
 			case <-ctx.Done():
-				for range in {
+				// Nobody reads any more; keep accounting what still arrives.
+				for ev := range in {
+					account(ev)
 				}
 				return
 			}
@@ -513,15 +644,19 @@ func (p *metered) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-c
 }
 
 // Complete serves compaction summaries and argument repair. It reports no
-// usage, so it is charged an estimate of four characters a token.
+// usage, so a call that returns is charged an estimate of four characters a
+// token, and one that fails is charged its reservation.
 func (p *metered) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
-	in := requestTokens(req, nil)
-	hold := p.meter.worst(in, req.MaxTokens)
+	hold := p.meter.worst(req)
 	if !p.meter.reserve(hold) {
 		p.cancel()
 		return "", errCapped
 	}
 	text, err := p.Provider.Complete(ctx, req)
-	p.meter.settle(hold, p.meter.price.usage(in, len(text)/4+1, 0, 0))
-	return text, err
+	if err != nil {
+		p.meter.settle(hold, hold)
+		return text, err
+	}
+	p.meter.settle(hold, p.meter.price.usage(requestTokens(req, nil), len(text)/4+1, 0, 0))
+	return text, nil
 }

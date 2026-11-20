@@ -5,22 +5,22 @@ same calls in every arm, and its token counts are estimates from request size. T
 that the harness, the engine and the trace records fit together; they are not evidence about Code
 Mode or any model. See code-mode.md.
 
-Model: scripted. Price per million tokens: $15 input, $75 output, $1.5 cache read, $18.75 cache write. Estimated spend: $5.0475.
+Model: scripted. Price per million tokens: $15 input, $75 output, $1.5 cache read, $18.75 cache write. Estimated spend: $5.0717.
 
-| Scenario | Arm | Success | Parent context tokens | Total tokens | Est. cost (USD) | Wall | Approvals | Parent tool calls | Subtasks | Variants | Compactions |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
-| code-search | direct | yes | 10392 | 10460 | 0.1610 | - | 0 | 4 | 0 | - | 0 |
-| code-search | subtask | yes | 5007 | 17586 | 0.2732 | - | 0 | 1 | 1 | research | 0 |
-| research | direct | yes | 8045 | 8110 | 0.1255 | - | 0 | 3 | 0 | - | 0 |
-| research | subtask | yes | 4991 | 15252 | 0.2386 | - | 0 | 1 | 1 | research | 0 |
-| chore | direct | yes | 11799 | 12778 | 0.2504 | - | 6 | 13 | 0 | - | 0 |
-| chore | subtask | yes | 5216 | 20658 | 0.3730 | - | 6 | 1 | 1 | worker | 0 |
-| council | direct | yes | 4194 | 4259 | 0.0678 | - | 0 | 1 | 0 | - | 0 |
-| council | subtask | yes | 5095 | 28983 | 0.4619 | - | 0 | 1 | 4 | council, reviewer | 0 |
-| history | direct | yes | 5121 | 5170 | 0.0805 | - | 1 | 1 | 0 | - | 0 |
-| history | subtask | yes | 6078 | 14568 | 0.2273 | - | 1 | 1 | 1 | scribe | 0 |
-| history | subtask last_n=1 | yes | 6078 | 14436 | 0.2254 | - | 1 | 1 | 1 | scribe | 0 |
-| history | subtask last_n=20 | yes | 6078 | 14950 | 0.2331 | - | 1 | 1 | 1 | scribe | 0 |
-| inventory | direct | yes | 6968 | 6996 | 0.1066 | - | 0 | 1 | 0 | - | 0 |
-| inventory | subtask | yes | 7729 | 18860 | 0.4531 | - | 0 | 1 | 1 | research | 0 |
-| inventory | subtask result_cap=1500 | yes | 11208 | 22353 | 0.5063 | - | 0 | 2 | 1 | research | 0 |
+| Scenario | Arm | Success | Parent context tokens | Total tokens | Est. cost (USD) | Wall | Approvals | Parent tool calls | Subtasks | Variants | Subtask tools | Parent fetches | Compactions |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|
+| code-search | direct | yes | 10491 | 10575 | 0.1637 | - | 0 | 4 | 0 | - | - | 0 | 0 |
+| code-search | subtask | yes | 5073 | 17767 | 0.2768 | - | 0 | 1 | 1 | research | read_file, return_result, search_files | 0 | 0 |
+| research | direct | yes | 8125 | 8192 | 0.1269 | - | 0 | 3 | 0 | - | - | 0 | 0 |
+| research | subtask | yes | 5043 | 15384 | 0.2407 | - | 0 | 1 | 1 | research | read_file, return_result, search_files | 0 | 0 |
+| chore | direct | yes | 11889 | 12870 | 0.2519 | - | 6 | 13 | 0 | - | - | 0 | 0 |
+| chore | subtask | yes | 5262 | 20798 | 0.3753 | - | 6 | 1 | 1 | worker | list_dir, read_file, return_result, write_file | 0 | 0 |
+| council | direct | yes | 4240 | 4288 | 0.0672 | - | 0 | 1 | 0 | - | - | 0 | 0 |
+| council | subtask | yes | 5141 | 29196 | 0.4640 | - | 0 | 1 | 4 | council, reviewer | read_file, return_result, subtask | 0 | 0 |
+| history | direct | yes | 5167 | 5216 | 0.0812 | - | 1 | 1 | 0 | - | - | 0 | 0 |
+| history | subtask | yes | 6125 | 14685 | 0.2291 | - | 1 | 1 | 1 | scribe | parent_history_search, return_result, write_file | 0 | 0 |
+| history | subtask last_n=1 | yes | 6125 | 14552 | 0.2271 | - | 1 | 1 | 1 | scribe | parent_history_search, return_result, write_file | 0 | 0 |
+| history | subtask last_n=20 | yes | 6125 | 15068 | 0.2348 | - | 1 | 1 | 1 | scribe | parent_history_search, return_result, write_file | 0 | 0 |
+| inventory | direct | yes | 7022 | 7044 | 0.1070 | - | 0 | 1 | 0 | - | - | 0 | 0 |
+| inventory | subtask | yes | 7783 | 18962 | 0.4542 | - | 0 | 1 | 1 | research | return_result, search_files | 0 | 0 |
+| inventory | subtask result_cap=1500 | yes | 11289 | 22482 | 0.5079 | - | 0 | 2 | 1 | research | return_result, search_files | 1 | 0 |

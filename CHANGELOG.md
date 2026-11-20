@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## 0.6.0
+
+Code Mode: an agent can hand work to a `subtask` running a chosen variant,
+with forked parent context, a validated result contract, inherited approvals,
+side-by-side fan-out under shared budgets, progress events and trace links,
+plus base-prompt guidance, docs (`docs/code-mode.md`) and evals. Schema
+validation is now bounded, compaction counts tool schemas, per-turn
+context no longer breaks the prompt cache, and no slot entry is dropped
+silently. Hosts can start subtasks themselves (`Conversation.Dispatch`), and
+notices reach the chat wire.
+
+Breaking (no aliases or compatibility layer):
+
+- `subagent_spawn`, `subagent_status` and `subagent_cancel` are removed;
+  use `subtask`. The builtin group `subagents` is now `subtasks`.
+- `providers.yaml`: the use `subagent` is renamed `subtask`.
+- `subtask`, `return_result`, `parent_history_search` and
+  `parent_history_get` are reserved tool names.
+- Tool calls in a step run in model order; only consecutive read-only or
+  `subtask` calls run side by side.
+- Subtask limits: `agent.Options.SubtaskLimit` (or `runtime.subtask_limit`)
+  sets the worker and lead pools; above 8 is refused. A foreground subtask
+  over the limit waits for a slot.
+- Events: `SubagentStarted` replaces `Role` with `Variant`, `Goal` and
+  `Background`; `SubagentStarted`/`SubagentFinished` gain `ParentID` and
+  `Depth`; the `nanite.subagent` activity carries `variant`, `parent_id`
+  and `depth` instead of `role`.
+- Trace records (libs `agent/trace` v0.2.0): `usage` is the turn's own
+  requests only, without its subtasks'.
+- Dependencies: libs `agent/trace` v0.2.0 and `agent/agentdir` v0.2.0.
+- Schemas: unsafe schemas are refused with `ErrUnsafeSchema`; tool input
+  nested deeper than 64 levels is refused; tool schemas over 256KB are
+  refused.
+- OpenAI usage: `InputTokens` excludes cached and cache-written tokens.
+- Per-turn context (`user_context`, including chatrunner's turn context)
+  moves from the system prompt into the turn, as a `nanite.turn_context`
+  block stored with the user's message, so it now appears in history.
+- Notices: `Agent.Notices()` and the `agent.Notice` alias are removed; use
+  `Agent.SubscribeNotices(ctx)`. A notice turn uses
+  `Input.Source = agent.SourceNotice`; an unknown `Input.Source` is refused.
+- chatrunner: a second run on a conversation that already has one active is
+  refused before it starts, instead of replacing the active run's entry.
+
 - Per-turn context no longer breaks the prompt cache. Slots now have a
   placement. `user_context` (including chatrunner's turn context) is
   placed in the turn: it goes in a `nanite.turn_context` text block in front
@@ -29,8 +72,6 @@
   which is its meaning on the Anthropic wire and everywhere Nanite sums
   usage. Cached tokens were previously counted twice in turn usage, the
   turn token budget, traces and chatstream's uncached input.
-Breaking (next minor version): the subagent tools are replaced by `subtask`.
-
 - Host dispatch: `Conversation.Dispatch` starts subtasks for the host without
   a model call. It keeps the agent's gates: it needs the `subtask` tool (and
   the background tools for a background start), and each start is evaluated

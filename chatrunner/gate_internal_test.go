@@ -12,7 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 )
 
-func openRunner(t *testing.T) *Runner {
+func openRunner(t *testing.T, tweaks ...func(*Options)) *Runner {
 	t.Helper()
 	dir := t.TempDir()
 	definition := "---\nschema_version: \"2\"\ndefinition_id: def:chat-test\nrevision: \"1\"\nname: chat-test\ndescription: Chat test.\nbehavior:\n  purpose: Test.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: default\ncontinuity:\n  mode: durable\n---\nTest instructions.\n"
@@ -22,7 +22,11 @@ func openRunner(t *testing.T) *Runner {
 			t.Fatal(err)
 		}
 	}
-	r, err := Open(t.Context(), Options{Agent: agent.Options{Dir: dir, Provider: fake.New(fake.Text("ok")), GlobalSkillsDir: "-"}})
+	opts := Options{Agent: agent.Options{Dir: dir, Provider: fake.New(fake.Text("ok")), GlobalSkillsDir: "-"}}
+	for _, tweak := range tweaks {
+		tweak(&opts)
+	}
+	r, err := Open(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}

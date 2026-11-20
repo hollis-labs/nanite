@@ -113,6 +113,12 @@ type noticeWorker struct {
 const maxDispatchAttempts = 3
 
 type deskChat struct {
+	// delivery serializes editor release, persistence and publication.
+	delivery sync.Mutex
+	// dispatching fences completion classification until dispatched jobs
+	// have been registered to their plans. Never hold it while settling:
+	// settling may dispatch the next wave.
+	dispatching sync.Mutex
 	editor      *desk.Editor
 	timer       *time.Timer
 	typing      bool
@@ -266,6 +272,8 @@ func (d *Desk) Flush(chatID string) bool {
 	if c == nil {
 		return false
 	}
+	c.delivery.Lock()
+	defer c.delivery.Unlock()
 	m, ok := c.editor.Flush()
 	if ok {
 		d.persist(chatID) // released before it goes out, as in pump
@@ -615,6 +623,11 @@ type pick struct {
 }
 
 func (d *Desk) dispatch(ctx context.Context, chatID string, c *agent.Conversation, picks []pick) error {
+	d.mu.Lock()
+	chat := d.chat(chatID)
+	d.mu.Unlock()
+	chat.dispatching.Lock()
+	defer chat.dispatching.Unlock()
 	starts := make([]agent.DispatchStart, len(picks))
 	for i, p := range picks {
 		starts[i] = agent.DispatchStart{Variant: d.variant(p.item.Kind), Goal: d.goal(p.run, p.item), Background: true,
@@ -728,7 +741,12 @@ func (d *Desk) notice(ctx context.Context, n agent.NoticePosted) {
 	if chatID == "" {
 		return
 	}
+	d.mu.Lock()
+	chat := d.chat(chatID)
+	d.mu.Unlock()
+	chat.dispatching.Lock()
 	run, job, retired := d.jobFor(n)
+	chat.dispatching.Unlock()
 	if retired {
 		return // its finish was applied already (Recover read it first)
 	}
@@ -994,6 +1012,8 @@ func (d *Desk) pump(chatID string) {
 	if c == nil {
 		return
 	}
+	c.delivery.Lock()
+	defer c.delivery.Unlock()
 	st := d.state(chatID)
 	if m, ok := c.editor.Due(st); ok {
 		// Save that it was released before it goes out: a crash in

@@ -73,8 +73,7 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) (retErr er
 		if name == "" {
 			name = providers.Anthropic
 		}
-		model.Provider, err = providers.New(providers.Config{Name: name, KeyRef: opts.Gateway.KeyRef,
-			BaseURL: opts.Gateway.BaseURL, Headers: opts.Gateway.Headers, Auth: opts.Gateway.Auth})
+		model.Provider, err = providers.New(providers.Config{Name: name, Gateway: opts.Gateway})
 		if err != nil {
 			return err
 		}

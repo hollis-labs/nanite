@@ -91,19 +91,23 @@ explicitly through `agent.Options.Provider`, uses
 
 ```go
 p, err := providers.New(providers.Config{
-    Name:   providers.OpenAI,                  // or providers.Anthropic
-    KeyRef: "keychain://nanite/provider/openai", // optional; a reference, never the key
+    Name:    providers.OpenAI, // or providers.Anthropic
+    Gateway: agent.Gateway{KeyRef: "keychain://nanite/provider/openai"}, // a reference, never the key
+    Options: providers.Options{Redactor: scope}, // the scope your logs are scrubbed with
 })
 // A named provider, as providers.yaml defines one:
-q, err := providers.NewNamed(spec, providers.Options{})
+q, err := providers.NewNamed(spec, providers.Options{Redactor: scope})
 ```
 
-A built-in provider looks for its key at `KeyRef`, then at
+A built-in provider looks for its key at `Gateway.KeyRef`, then at
 `keychain://nanite/provider/<name>`, then, only with
 `NANITE_PROVIDER_KEY_ENV=1`, in `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
-`BaseURL`, `Headers` and `Auth` route it through a gateway, as
-`agent.Gateway` does. Keys are resolved on each request and redacted; a key
-that cannot be resolved fails the request, not `New`.
+`Gateway.BaseURL`, `Headers` and `Auth` route it through a gateway, as for
+`agent.Open`; with a third-party gateway, make sure `KeyRef` resolves, or the
+provider's own key is sent there. Keys are resolved on each request and
+added to `Options.Redactor`: pass the scope you scrub logs and traces with,
+since with none the key goes to a scope nothing reads. A key that cannot be
+resolved fails the request, not `New`.
 
 ## Steering
 

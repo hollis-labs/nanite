@@ -123,7 +123,7 @@ func run(ctx context.Context, args []string, w, status io.Writer) error {
 		cfg.MaxUSD, cfg.Model = *maxUSD, *model
 		gw := agent.Gateway{BaseURL: os.Getenv("NANITE_GATEWAY_URL"), KeyRef: os.Getenv("NANITE_GATEWAY_KEY_REF"), Auth: os.Getenv("NANITE_GATEWAY_AUTH")}
 		cfg.Gateway = gw
-		p, err := providers.New(providers.Config{Name: *providerName, KeyRef: gw.KeyRef, BaseURL: gw.BaseURL, Auth: gw.Auth})
+		p, err := providers.New(providers.Config{Name: *providerName, Gateway: gw})
 		if err != nil {
 			return err
 		}

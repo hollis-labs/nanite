@@ -90,7 +90,7 @@ for mistakes ...
 | `tools.allow` | When set, the child is offered only tools matching one of these names or globs (`mcp__notes__*`). |
 | `tools.deny` | Removes tools matching any of these. |
 | `read_only` | Offers only read-only tools. |
-| `provider`, `model` | Runs the child on another provider and model. `model` alone runs on the provider of the `subagent` use in `providers.yaml` (else `chat`), which must serve that model. `provider` needs `model`. |
+| `provider`, `model` | Runs the child on another provider and model. `model` alone runs on the provider of the `subtask` use in `providers.yaml` (else `chat`), which must serve that model. `provider` needs `model`. |
 | `budgets.steps` | Most model steps the child may take. It only lowers the agent's `max_steps`. |
 | `budgets.tokens` | Most tokens the child may use: input, output and cached. |
 | `budgets.wall` | A time limit such as `10m`. It also stops a step in progress. |

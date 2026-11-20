@@ -308,8 +308,8 @@ in `providers.yaml`.
 
 A variant with `provider` and `model` runs its children on that selection,
 resolved like a use in `providers.yaml` (a host-defined provider name works
-too). `model` without `provider` keeps the agent's subagent provider (the
-`subagent` use, else `chat`), which must serve that model. Compaction
+too). `model` without `provider` runs on the provider of the `subtask` use
+(else `chat`), which must serve that model. Compaction
 summaries in a child use the `summarizer` use when `providers.yaml` sets one,
 and otherwise the provider and model the child runs on.
 

@@ -233,7 +233,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	use := definition.UseChat
 	if info.ParentID != "" {
-		use = definition.UseSubagent
+		use = definition.UseSubtask
 	}
 	var model llmcontracts.Provider
 	var sel definition.Selection

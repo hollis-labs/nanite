@@ -32,8 +32,8 @@ type Variant struct {
 	// tools the parent agent has; it cannot add one.
 	Allow, Deny []string
 	// Provider and Model select what the child runs on, like a use in
-	// providers.yaml. Model alone keeps the agent's subagent provider (the
-	// "subagent" use, else chat), which must serve that model.
+	// providers.yaml. Model alone runs on the provider of the "subtask" use
+	// (else chat), which must serve that model.
 	Provider, Model string
 	Budgets         Budgets
 	// LastN is how many parent messages the child sees by default; zero

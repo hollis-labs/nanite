@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,11 +22,6 @@ const (
 	// maxHistoryOutput bounds everything one history_get returns; it stops
 	// at a whole message and says where to continue.
 	maxHistoryOutput = 32000
-	// snippetWindow is how much raw text on each side of a match is redacted
-	// to make a snippet, so a long message is not redacted whole. It is far
-	// wider than the snippet, so a secret cut at the window's edge never
-	// reaches the snippet.
-	snippetWindow = 2000
 )
 
 // historyTools names the tools a root conversation reads its own transcript
@@ -64,50 +58,37 @@ func (e *Engine) SearchHistory(ctx context.Context, conversation, query string, 
 	out := make([]HistoryHit, 0, len(found))
 	for _, m := range found {
 		out = append(out, HistoryHit{ConversationID: conversation, Seq: m.Seq, Role: m.Role, At: m.CreatedAt,
-			Snippet: windowedSnippet(messageText(m), words, e.scrub.Text)})
+			Snippet: redactedSnippet(messageText(m), words, e.scrub.Text)})
 	}
 	return out, nil
 }
 
-// windowedSnippet is snippet over a redacted window of raw text around the
-// first match, so a long message is not redacted whole. The window is
-// snippetWindow characters on each side, far wider than the snippet, so a
-// secret the window cuts never reaches the snippet; a short message is
-// redacted whole.
-func windowedSnippet(raw string, words []string, scrub func(string) string) string {
-	runes := []rune(raw)
-	if len(runes) <= 4*snippetWindow {
-		return snippet(scrub(raw), words)
+// redactedSnippet is snippet over the whole message after redaction. A
+// window of the raw text would be cheaper but can cut a secret where
+// redaction no longer recognizes it (no whitespace near the edge, or a secret
+// that contains whitespace, such as a PEM block). If the match is gone after
+// redaction (it was inside a secret), no text is shown.
+func redactedSnippet(raw string, words []string, scrub func(string) string) string {
+	text := scrub(raw)
+	if !containsAny(text, words) {
+		return redactedMatch
 	}
-	at := firstMatch(runes, words)
-	from, to := max(0, at-snippetWindow), min(len(runes), at+snippetWindow)
-	text := snippet(scrub(string(runes[from:to])), words)
-	return text
+	return snippet(text, words)
 }
 
-// firstMatch is the rune index of the first case-insensitive match of any of
-// words in runes, or 0.
-func firstMatch(runes []rune, words []string) int {
-	lower := []rune(strings.ToLower(string(runes)))
-	if len(lower) != len(runes) {
-		lower = runes // lowercasing changed the length; match case-sensitively
-	}
-	best := -1
+// redactedMatch is the snippet of a hit whose matching words were inside
+// redacted text.
+const redactedMatch = "(the match is inside redacted text)"
+
+// containsAny reports whether text contains any of words, ignoring case.
+func containsAny(text string, words []string) bool {
+	lower := strings.ToLower(text)
 	for _, w := range words {
-		target := []rune(strings.ToLower(w))
-		if len(target) == 0 {
-			continue
-		}
-		for i := 0; i+len(target) <= len(lower); i++ {
-			if slices.Equal(lower[i:i+len(target)], target) {
-				if best < 0 || i < best {
-					best = i
-				}
-				break
-			}
+		if w != "" && strings.Contains(lower, strings.ToLower(w)) {
+			return true
 		}
 	}
-	return max(best, 0)
+	return false
 }
 
 // rootConversation checks that id names a root conversation of this agent.

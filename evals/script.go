@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -61,8 +62,8 @@ func Call(name string, kv ...any) ToolUse {
 type scripted struct {
 	script Script
 	model  string
-	// dirs are the run's directory, as given and resolved: they are counted
-	// as one word, so the estimate does not depend on where the run is.
+	// dirs are the run's directory: it is counted as one word, so the
+	// estimate does not depend on where the run is.
 	dirs []string
 	mu   sync.Mutex
 	errs []string
@@ -163,7 +164,8 @@ func goalOf(msgs []llmtypes.ChatMessage) string {
 }
 
 // requestTokens estimates a request's input tokens from its size. The run's
-// directory, IDs and numbers (times, dates) are counted as one fixed-size word,
+// directory, the platform, IDs and numbers (times, dates) are counted as one
+// fixed-size word,
 // so the estimate is the same on every run.
 func requestTokens(req llmtypes.ChatRequest, dirs []string) int {
 	var b strings.Builder
@@ -181,6 +183,7 @@ func requestTokens(req llmtypes.ChatRequest, dirs []string) int {
 			text = strings.ReplaceAll(text, d, "/run")
 		}
 	}
+	text = strings.ReplaceAll(text, runtime.GOOS+"/"+runtime.GOARCH, "os/arch")
 	return len(volatile.ReplaceAllString(text, "#")) / 4
 }
 

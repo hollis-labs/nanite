@@ -7,14 +7,14 @@ default price. See code-mode.md.
 
 | Scenario | Mode | Success | Parent context tokens | Total tokens | Est. cost (USD) | Wall | Approvals | Parent tool calls | Subtasks |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| code-search | direct | yes | 10107 | 10167 | 0.1561 | - | 0 | 3 | 0 |
-| code-search | subtask | yes | 5007 | 17293 | 0.2683 | - | 0 | 1 | 1 |
-| research | direct | yes | 8045 | 8119 | 0.1262 | - | 0 | 3 | 0 |
-| research | subtask | yes | 4991 | 15261 | 0.2393 | - | 0 | 1 | 1 |
-| chore | direct | yes | 11799 | 12780 | 0.2506 | - | 6 | 13 | 0 |
-| chore | subtask | yes | 5216 | 20660 | 0.3732 | - | 6 | 1 | 1 |
-| council | direct | yes | 4158 | 4223 | 0.0672 | - | 0 | 1 | 0 |
-| council | subtask | yes | 5059 | 28801 | 0.4591 | - | 0 | 1 | 4 |
+| code-search | direct | yes | 10102 | 10162 | 0.1560 | - | 0 | 3 | 0 |
+| code-search | subtask | yes | 5004 | 17285 | 0.2682 | - | 0 | 1 | 1 |
+| research | direct | yes | 8041 | 8115 | 0.1262 | - | 0 | 3 | 0 |
+| research | subtask | yes | 4987 | 15251 | 0.2391 | - | 0 | 1 | 1 |
+| chore | direct | yes | 11791 | 12772 | 0.2504 | - | 6 | 13 | 0 |
+| chore | subtask | yes | 5212 | 20650 | 0.3730 | - | 6 | 1 | 1 |
+| council | direct | yes | 4154 | 4219 | 0.0672 | - | 0 | 1 | 0 |
+| council | subtask | yes | 5055 | 28783 | 0.4589 | - | 0 | 1 | 4 |
 
 - code-search: the subtask run's parent context is 50% of the direct run's; its total tokens are 170%.
 - research: the subtask run's parent context is 62% of the direct run's; its total tokens are 188%.

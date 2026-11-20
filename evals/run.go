@@ -128,6 +128,11 @@ func runOne(ctx context.Context, cfg Config, meter *meter, s Scenario, m Mode) (
 	if err != nil {
 		return res, err
 	}
+	// Resolve symlinks (macOS's temporary directory is one), so the working
+	// directory and the agent directory are the same single workspace root.
+	if dir, err = filepath.EvalSymlinks(dir); err != nil {
+		return res, err
+	}
 	if err := s.install(dir); err != nil {
 		return res, err
 	}
@@ -149,9 +154,6 @@ func runOne(ctx context.Context, cfg Config, meter *meter, s Scenario, m Mode) (
 	if cfg.Provider == nil {
 		script = newScripted(s.Script(m))
 		script.dirs = []string{dir}
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != dir {
-			script.dirs = append([]string{resolved}, script.dirs...)
-		}
 		model = script
 	} else if model, err = cfg.Provider(s, m); err != nil {
 		return res, err

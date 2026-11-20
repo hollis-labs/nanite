@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Front-desk completion notices wait for dispatched jobs to be registered,
+  so fast jobs cannot leave accepted plans waiting forever. Concurrent pumps
+  and explicit flushes publish each chat’s releases in order.
+
 - Compaction protects both host context slots and checks the threshold before
   a root turn’s first model request, including text-only conversations.
   In-turn host context that would be lost is kept in the summary under a

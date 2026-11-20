@@ -32,7 +32,7 @@ func TestLoadProviders(t *testing.T) {
 use:
   chat: {provider: local, model: llama-3.1-8b}
   summarizer: {provider: anthropic, model: claude-haiku-5-5}
-  subagent: {provider: station, model: claude-sonnet-5-5}
+  subtask: {provider: station, model: claude-sonnet-5-5}
 `)
 	specs, use, err := loadProviders(dir)
 	if err != nil {
@@ -53,7 +53,8 @@ use:
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, headers: {api-key: secret}}\n":       "looks like a credential",
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, extra: 1}\n":                         "field extra not found",
 		"use:\n  chat: {provider: anthropic}\n":                                                        "needs provider and model",
-		"use:\n  review: {provider: anthropic, model: m}\n":                                            "chat, summarizer or subagent",
+		"use:\n  review: {provider: anthropic, model: m}\n":                                            "chat, summarizer or subtask",
+		"use:\n  subagent: {provider: anthropic, model: m}\n":                                          "chat, summarizer or subtask",
 	} {
 		write(text)
 		if _, _, err := loadProviders(dir); err == nil || !strings.Contains(err.Error(), want) {

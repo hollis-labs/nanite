@@ -107,14 +107,14 @@ func sendAndWaitText(t *testing.T, e *Engine, id, want string) error {
 	return err
 }
 
-func TestSubagentUsesItsOwnProvider(t *testing.T) {
+func TestSubtaskUsesItsOwnProvider(t *testing.T) {
 	srv, models := streamingCompatServer(t, "sub")
 	spawn := subtaskCall("worker", "child work", false)
 	// The parent runs on the host's injected fake provider; the child is
 	// selected onto a provider only the host defines.
 	e, db, id := setupEngine(t, fake.New(spawn, fake.Text("parent done")), "")
 	e.cfg.Providers = map[string]provider.Spec{"sub": {Name: "sub", Wire: provider.WireOpenAIChat, BaseURL: srv.URL + "/v1", Auth: provider.AuthNone}}
-	file := "use:\n  subagent: {provider: sub, model: small-model}\n"
+	file := "use:\n  subtask: {provider: sub, model: small-model}\n"
 	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "providers.yaml"), []byte(file), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSubagentUsesItsOwnProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := models(); len(got) != 1 || got[0] != "small-model" {
-		t.Fatalf("subagent models %v", got)
+		t.Fatalf("subtask models %v", got)
 	}
 	history, err := db.History(t.Context(), id)
 	if err != nil || len(history) < 3 || !strings.Contains(history[2].Blocks[0].Content, "hello from sub") {
@@ -168,15 +168,15 @@ func TestInjectedProviderWinsOverFileProviders(t *testing.T) {
 	}
 }
 
-func TestSubagentSummarizerFallsBackToTheSubagentSelection(t *testing.T) {
+func TestSubtaskSummarizerFallsBackToTheSubtaskSelection(t *testing.T) {
 	e, _, _ := setupEngine(t, nil, "")
 	e.cfg.Provider = nil
 	e.cfg.Providers = map[string]provider.Spec{"sub": {Name: "sub", Wire: provider.WireOpenAIChat, BaseURL: "http://127.0.0.1:1/v1", Auth: provider.AuthNone}}
 	def := definition.Definition{Runtime: agentdir.Runtime{Provider: "anthropic", Model: "claude-sonnet-5-5"},
-		Use: map[string]definition.Selection{definition.UseSubagent: {Provider: "sub", Model: "small-model"}}}
-	_, sel, err := e.provider(def, definition.UseSubagent)
+		Use: map[string]definition.Selection{definition.UseSubtask: {Provider: "sub", Model: "small-model"}}}
+	_, sel, err := e.provider(def, definition.UseSubtask)
 	if err != nil || sel.Model != "small-model" || sel.Provider != "sub" {
-		t.Fatalf("subagent selection %+v, %v", sel, err)
+		t.Fatalf("subtask selection %+v, %v", sel, err)
 	}
 	if _, _, err := e.provider(definition.Definition{Use: map[string]definition.Selection{definition.UseChat: {Provider: "nowhere", Model: "m"}}}, definition.UseChat); err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("unknown provider: %v", err)

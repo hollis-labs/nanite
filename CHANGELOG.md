@@ -37,6 +37,15 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   then the default. A `subtask_limit` above 8 is refused at open and by
   `nanite validate`, not clamped. The effective default result cap is about
   5,900 tokens (6,000 clamped to what one tool result shows in full).
+- Code Mode guidance: the base prompt gains a short section on when to
+  delegate with `subtask`, how to choose a variant, that a subtask sees only
+  what it is passed and cannot ask the person, and how to read its status
+  (only `ok` is finished work). The built-in variant prompts state their contract more fully:
+  `code` names the files it changed and what it checked, `research` gives a
+  source for each finding, `planner` names what each step touches.
+- `nanite init` writes a commented example variant, `variants/reviewer.md`.
+  An example lead variant is at `examples/variants/council.md`.
+- New guide: `docs/code-mode.md`.
 - New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
   context?, background?})`. `variant` is required; the model chooses and
   there is no default.
@@ -102,7 +111,7 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   turn. Frontmatter sets tool allow and deny patterns, `read_only`, `model`,
   `budgets` (steps, tokens, wall, cost), `last_n`, `result_cap` and
   `can_spawn`, plus an optional `provider` with `model`, resolved like a
-  `providers.yaml` use (`model` alone stays on the subagent provider). A
+  `providers.yaml` use (`model` alone stays on the `subtask` use's provider). A
   variant only narrows tools. `nanite validate` checks them, rejects
   `read_only` with `can_spawn`, and checks that a variant's provider exists.
 - Depth is one level; a `can_spawn` variant (a lead) may go one level
@@ -147,11 +156,12 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   alias. `background_status` and `background_cancel` now also serve
   background subtasks. The built-in group `BuiltinSubagents` ("subagents") is
   now `BuiltinSubtasks` ("subtasks").
+- The `providers.yaml` use `subagent` is renamed `subtask`, with no
+  fallback: a file that still says `subagent` is refused like any unknown
+  use.
 - `SubagentStarted` replaces `Role` with `Variant`, `Goal` and `Background`;
   `SubagentFinished` gains `Variant` and `Status`. The `nanite.subagent`
   activity carries `variant` (and `status` when done) instead of `role`.
-- `context` is recorded and passed to the child; forked context comes in a
-  later release.
 - Subtask progress: a running subtask's parent run gets `SubtaskProgress`
   events (ID, parent ID, depth, variant, step, tool, status line,
   background, and the final status of a background subtask), rate-limited
@@ -206,7 +216,7 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   by wire (`anthropic`, `openai`, `openai-chat`, `openai-responses`), base
   URL, key reference, auth and headers, so any OpenAI-compatible server or a
   model gateway can be used. Its `use` section picks a provider and model for
-  chat, compaction summaries and subagents. Hosts can add providers with
+  chat, compaction summaries and subtasks. Hosts can add providers with
   `agent.Options.Providers`.
 - Every agent now gets a base prompt in the Universal slot, replacing the
   one-line rule. It frames tool results as the record of what happened,

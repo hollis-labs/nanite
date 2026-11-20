@@ -58,7 +58,7 @@ type ToolCallFinished = events.ToolCallFinished
 // and validate the response against the JSON Schema.
 type Question = events.Question
 
-// SubagentStarted identifies the child conversation and its assigned role.
+// SubagentStarted identifies the child conversation and its variant.
 type SubagentStarted = events.SubagentStarted
 
 // SubagentFinished reports the result or error of a foreground child.

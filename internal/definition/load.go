@@ -24,7 +24,7 @@ type Definition struct {
 	Rules    []byte
 	// Providers are the named providers from providers.yaml.
 	Providers map[string]provider.Spec
-	// Use selects a provider and model per use (chat, summarizer, subagent)
+	// Use selects a provider and model per use (chat, summarizer, subtask)
 	// from providers.yaml. A use not listed falls back to chat; chat not
 	// listed uses host.yaml's runtime.provider and runtime.model.
 	Use map[string]Selection
@@ -34,7 +34,7 @@ type Definition struct {
 const (
 	UseChat       = "chat"
 	UseSummarizer = "summarizer"
-	UseSubagent   = "subagent"
+	UseSubtask    = "subtask"
 )
 
 // Selection names a provider (built in or named) and a model.
@@ -81,9 +81,9 @@ func loadProviders(dir string) (map[string]provider.Spec, map[string]Selection, 
 	}
 	for use, sel := range file.Use {
 		switch use {
-		case UseChat, UseSummarizer, UseSubagent:
+		case UseChat, UseSummarizer, UseSubtask:
 		default:
-			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer or subagent", use)
+			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer or subtask", use)
 		}
 		// A name not defined here may be one the host supplies; the engine
 		// reports a name nobody defines when the use is resolved.

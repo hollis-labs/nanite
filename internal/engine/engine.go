@@ -383,7 +383,8 @@ func (e *Engine) Close() {
 // larger result is cached and shown as a preview the model pages through.
 const toolResultBudget = 24 << 10
 
-// provider returns the adapter and model for one use (chat or subagent),
+// provider returns the adapter and model for one use (chat, summarizer or
+// subtask),
 // and resolve does so for an explicit selection.
 //
 // A use without its own selection in providers.yaml falls back to chat, and

@@ -32,8 +32,8 @@ type Variant struct {
 	// tools the parent agent has; it cannot add one.
 	Allow, Deny []string
 	// Provider and Model select what the child runs on, like a use in
-	// providers.yaml. Model alone keeps the agent's subagent provider (the
-	// "subagent" use, else chat), which must serve that model.
+	// providers.yaml. Model alone runs on the provider of the "subtask" use
+	// (else chat), which must serve that model.
 	Provider, Model string
 	Budgets         Budgets
 	// LastN is how many parent messages the child sees by default; zero
@@ -75,22 +75,22 @@ func matchAny(patterns []string, name string) bool {
 	})
 }
 
-const contract = " Return only what the return spec asks for; do not paste raw tool output. End by calling return_result: it is the only thing your parent receives."
+const contract = " Return only what the return spec asks for, in its shape; never paste raw tool output, and keep what you return short enough for your parent to use. If you could not finish, return status partial or error and say what is missing. End by calling return_result: it is the only thing your parent receives."
 
 // Builtins are the variants every agent has.
 func Builtins() map[string]Variant {
 	return map[string]Variant{
 		"code": {Name: "code", Builtin: true, Description: "Tool-heavy work: run tools, edit files, return the outcome.",
-			Prompt: "You are a code subtask. Do the tool work needed to reach the goal and report the outcome, not the steps." + contract},
+			Prompt: "You are a code subtask. Do the tool work needed to reach the goal and report the outcome, not the steps: what changed (name the files), what you ran to check it, and what you did not verify." + contract},
 		"research": {Name: "research", Builtin: true, Description: "Broad reading and search; returns findings with sources.",
-			Prompt: "You are a research subtask. Read and search broadly, then return findings with their sources." + contract},
+			Prompt: "You are a research subtask. Read and search broadly, then return findings, each with its source (a path, URL or record id) so your parent can check it. Say which findings you inferred rather than read." + contract},
 		"worker": {Name: "worker", Builtin: true, Description: "General work on a focused task.",
 			Prompt: "You are a worker subtask. Complete the assigned goal and report the result to your parent." + contract},
 		// MCP tools are denied: a server's readOnlyHint is the server's claim,
 		// not Nanite's, so it does not make a tool safe for a read-only
 		// planner. An authored variant may allow them explicitly.
 		"planner": {Name: "planner", Builtin: true, ReadOnly: true, Deny: []string{"mcp__*"}, Description: "Read-only; gathers context and returns a plan.",
-			Prompt: "You are a planner subtask. Use read-only tools to gather context and return a concrete plan." + contract},
+			Prompt: "You are a planner subtask. Use read-only tools to gather context and return a concrete plan: ordered steps that name the files, commands or records each one touches, and the open questions you could not settle. You cannot change anything." + contract},
 	}
 }
 

@@ -154,16 +154,58 @@ file tools resolve relative paths against the working directory. The harness the
 scenarios one at a time. Nothing else in the process may rely on the working directory while it
 runs.
 
+## Live results, 2026-11-20
+
+One live run: `claude-sonnet-5-5` as parent and subtasks, with the $10 cap and 150,000 tokens a
+run. The full table is in [live-2026-11-20/results.md](live-2026-11-20/results.md) (and `.json`).
+
+**Spend.** The estimate at the conservative price was $4.83, under the $10 cap, and nothing was
+skipped. At Sonnet 5.5's list price ($2 input and $10 output per million tokens, both 7.5 times
+below the conservative price, with cache reads cheaper still), the run cost about $0.64 at most.
+The estimate is above the sum of the per-run costs ($3.90), because requests that reported no
+usage are charged their whole reservation.
+
+**Outcomes.** 15 runs:
+- 9 valid successes;
+- 1 failure: the direct council review found the loop bug but missed the negative refund;
+- 5 invalid: all three `history` subtask arms, and both `inventory` subtask arms.
+
+**What the numbers show:**
+- **Small tasks were not delegated.** In `code-search`, `research` and `chore`, the model had
+  `subtask` and did not use it: no subtasks, and the same work as the direct run. The parent's
+  context was 10–12% larger, which is the cost of offering the tool (its schema and the base
+  prompt's delegation section). All six runs succeeded. These tasks fit easily in one context, so
+  not delegating them was a reasonable choice.
+- **The council worked, and costs what it buys.** Told to review through the `council` variant,
+  the model started the lead, and the lead started three reviewers (4 subtasks). The review found
+  both bugs where the direct review missed one. It used 8.2 times the tokens (60,728 against
+  7,402) and took 25 seconds against 7.
+- **`history` did not test `last_n`.** The model delegated to `scribe` in all three arms, but every
+  call set the subtask's context itself (`context.last_n` or `context.full`), so the variant's
+  `last_n` never applied. The harness marks these runs invalid: the 1, 6 and 20 arms ran the same
+  context and used the same tokens (about 37,900). The subtasks read and wrote files; none needed
+  `parent_history_search`.
+- **`inventory` did not test the result cap.** Despite the instruction to collect long lists
+  through `research`, the model read the files itself in both subtask arms. No subtask ran, so
+  nothing was stored or fetched (0 parent fetches anywhere in the run).
+- **Approvals** were as expected: 6 in each `chore` run, all the parent's own because no subtask
+  ran, and 1 in each `history` run.
+- **Compactions:** none.
+
 ## Recommendations
 
-**None yet.**
-- The scripted check can't support one.
-- No live run has been made.
-- Only `history` and `inventory` exercise `last_n` and `result_cap`.
+These are recommendations only; nothing here changes the defaults.
 
-The first live comparison will report on:
-- **`history`:** whether the subtask finds early facts with `parent_history_search` when `last_n` is
-  small, or needs a larger default.
-- **`inventory`:** what a small cap costs when the parent has to fetch the stored result.
-
-Nothing here changes the defaults.
+- **`last_n`: keep the default of 6.** The live run gives no evidence either way. When Sonnet 5.5
+  delegated work that depended on history, it chose the subtask's context itself instead of
+  relying on the variant's `last_n`. So the default matters less than how well the parent picks
+  context, and that is what the next `history` run should measure. Either count a parent's own
+  context choice as data rather than invalid, or add an arm where the call cannot set context.
+- **`result_cap`: keep the default of about 5,900 tokens.** No live run returned a large result
+  through a subtask, so the cap was never exercised. The scripted check shows the mechanism works:
+  at 1,500 tokens the parent fetches the stored result. Whether a smaller default saves anything
+  needs a scenario the model actually delegates.
+- **For the evals themselves:**
+  - Give `inventory` a task too big to do in one context, so delegation is the natural choice.
+  - Make `history` require delegation without suggesting a context.
+  - Keep the council scenario as the reference case: it is where Code Mode changed the outcome.

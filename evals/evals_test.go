@@ -233,8 +233,11 @@ func TestDollarCapWithParallelRuns(t *testing.T) {
 			capped++
 		}
 	}
-	if passed == 0 || capped == 0 || capped > 8 || !strings.Contains(rep.Stopped, "dollar cap") {
-		t.Fatalf("want some runs passed and the cap stopping the rest; %d passed, %d capped, stopped %q", passed, capped, rep.Stopped)
+	// Parallel multi-request runs may all spend their initial requests before
+	// any run finishes. Zero completed runs is allowed when the cap is reached
+	// on real spend; completion order is not a scheduling guarantee.
+	if capped == 0 || capped > 8 || !strings.Contains(rep.Stopped, "dollar cap") {
+		t.Fatalf("want the cap to stop in-flight runs; %d passed, %d capped, stopped %q", passed, capped, rep.Stopped)
 	}
 	// One request's worst case is about $1.25 at the conservative price, so
 	// the cap refuses once about $0.75 is spent, as a serial run does.

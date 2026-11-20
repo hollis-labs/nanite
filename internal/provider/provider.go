@@ -32,6 +32,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/provider/anthropic"
 	"github.com/hollis-labs/nanite/internal/provider/openai"
 	"github.com/hollis-labs/nanite/internal/provider/station"
+	"github.com/hollis-labs/nanite/internal/warden"
 )
 
 type Gateway struct {
@@ -49,6 +50,9 @@ type Config struct {
 	// Panics contains panics in the adapters' stream goroutines. Nil uses a
 	// guard that withholds panic values and reports to standard error.
 	Panics *panics.Guard
+	// Warden mints the tokens for named providers with auth warden; nil
+	// when the agent has no identity.yaml warden section.
+	Warden *warden.Source
 }
 
 func New(cfg Config) (llmcontracts.Provider, error) {

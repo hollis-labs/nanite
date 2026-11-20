@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Warden auth. A new agent-directory file, `identity.yaml`, names the
+  agent's principal, its Warden URL and parent credential file, and which
+  `.mcp.json` HTTP servers get Warden tokens and claimed correlation headers
+  (`X-Nanite-Principal`, `X-Nanite-Conversation`). A provider in
+  `providers.yaml` (or `Options.Providers`) with `auth: warden`, `audience`
+  and `scopes` sends a fresh bearer token on every request. Tokens are cached
+  per audience and scope set and renewed at two thirds of their life; the
+  parent credential rotates under `<file>.lock`, is written atomically, and a
+  lost answer leaves `<file>.inflight` (with the presented parent's hash) so
+  the spent parent is never presented again (`agent.ErrReenroll`). Mints are
+  detached from the caller's context, never follow redirects and back off
+  after failures; a 401 retries once with a fresh token. A missing grant files a Warden request and
+  reports it through `Options.OnAuthWaiting` (`agent.AuthWaiting`,
+  `agent.ActivityAuthWaiting` = `nanite.auth.waiting`). `nanite validate`
+  checks `identity.yaml` and refuses a provider with `auth: warden` and no
+  `warden` section. `authored.AuthWarden` and `ProviderSpec.Audience` and
+  `Scopes` are new. `.mcp.json` and `host.yaml` are unchanged.
 - evals: `Scenario.Stubs` declares stub host tools (name, description,
   schema, read-only, canned results matched by input fields or served in
   order) offered in every arm; `Result.StubCalls` counts the task turn's

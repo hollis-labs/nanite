@@ -43,7 +43,7 @@ func TestMCPTransports(t *testing.T) {
 	defer streamable.Close()
 	sse := httptest.NewServer(sdk.NewSSEHandler(func(*http.Request) *sdk.Server { return testServer("sse") }, nil))
 	defer sse.Close()
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{
 		"stdio": {Type: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestMCPTransports$"}, Env: map[string]string{
@@ -78,7 +78,7 @@ func TestReconcileKeepsActiveTurnConnections(t *testing.T) {
 	first, second := local("first"), local("second")
 	defer first.Close()
 	defer second.Close()
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	acquire := func(url string) *Lease {
 		t.Helper()
@@ -134,7 +134,7 @@ func TestToolCacheRefreshAfterUnknownTool(t *testing.T) {
 	})
 	web := httptest.NewServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{Stateless: true}))
 	defer web.Close()
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	cfg := agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"fixture": {Type: "http", URL: web.URL}}}
 	lease, warnings := client.Reconcile(t.Context(), cfg)
@@ -205,7 +205,7 @@ func TestToolCacheRefreshAfterSSENotification(t *testing.T) {
 		frames <- fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,%s}`, request.ID, reply)
 	}))
 	defer web.Close()
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"fixture": {Type: "sse", URL: web.URL}}})
 	defer lease.Close()
@@ -248,7 +248,7 @@ func TestDiscoveryStartsServersConcurrently(t *testing.T) {
 		defer web.Close()
 		cfg.Servers[name] = agentdir.MCPServer{Type: "http", URL: web.URL}
 	}
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
@@ -281,7 +281,7 @@ func TestCyclicToolSchemaLeavesOnlyThatToolOut(t *testing.T) {
 		})
 	httpServer := httptest.NewServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil))
 	defer httpServer.Close()
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"fixture": {Type: "http", URL: httpServer.URL}}})
 	if len(warnings) > 0 {
@@ -307,7 +307,7 @@ func TestOversizedToolSchemaLeavesOnlyThatToolOut(t *testing.T) {
 		})
 	httpServer := httptest.NewServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil))
 	defer httpServer.Close()
-	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default())
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
 	defer client.Close()
 	lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"fixture": {Type: "http", URL: httpServer.URL}}})
 	if len(warnings) > 0 {

@@ -29,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/slots"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/nanite/internal/warden"
 )
 
 var (
@@ -137,6 +138,12 @@ type Options struct {
 	// the model), work slots, reflexes and classifier. Classifier results
 	// are suggested, not applied, unless Steering.Policy sets a facet to auto.
 	Steering *Steering
+	// OnAuthWaiting sees each Warden grant request Nanite files, or finds
+	// still pending, because the agent has no grant for a provider's or MCP
+	// server's audience (identity.yaml). A host can show it as an activity
+	// of kind ActivityAuthWaiting. The turn that needed the token fails with
+	// an error naming the request; a later turn mints once it is approved.
+	OnAuthWaiting func(AuthWaiting)
 	// SlotPlacement moves the slots it names between the system prefix and
 	// the turn (see SlotInSystem and SlotInTurn). By default only
 	// user_context is placed in the turn. Universal, System and Agent always
@@ -299,6 +306,18 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
+	var identity *authored.Identity
+	if id, ok, err := authored.LoadIdentity(def.Directory); err != nil {
+		_ = db.Close()
+		_ = lock.Close()
+		return nil, fmt.Errorf("load agent: %w", err)
+	} else if ok {
+		identity = &id
+	}
+	var onWaiting func(warden.Waiting)
+	if opts.OnAuthWaiting != nil {
+		onWaiting = func(w warden.Waiting) { opts.OnAuthWaiting(AuthWaiting(w)) }
+	}
 	providers := make(map[string]provider.Spec, len(opts.Providers))
 	for _, spec := range opts.Providers {
 		if err := spec.Validate(); err != nil {
@@ -310,7 +329,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	a.engine, err = engine.New(engine.Config{
 		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
-		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
+		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
 		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt, Steering: opts.Steering,
@@ -408,3 +427,22 @@ func subtaskSettings(opts Options, runtime agentdir.Runtime) (subtaskConfig, err
 		resultCap:  pick(opts.SubtaskResultCap, runtime.SubtaskResultCap),
 	}, nil
 }
+
+// ActivityAuthWaiting is the activity kind for an AuthWaiting.
+const ActivityAuthWaiting = warden.AuthWaitingActivity
+
+// AuthWaiting is a Warden grant request Nanite filed, or found pending, for
+// an audience and scopes the agent has no grant for. Nothing in it is secret.
+type AuthWaiting struct {
+	RequestID string   `json:"request_id"`
+	Status    string   `json:"status"`
+	Tier      string   `json:"tier,omitempty"`
+	Audience  string   `json:"audience"`
+	Scopes    []string `json:"scopes,omitempty"`
+}
+
+// ErrReenroll means the agent's Warden parent credential can no longer be
+// used: a token request's answer was lost, the rotated credential could not
+// be saved, or Warden refused it. Whoever enrolled the agent places a new
+// credential and removes the <credential_file>.inflight marker.
+var ErrReenroll = warden.ErrReenroll

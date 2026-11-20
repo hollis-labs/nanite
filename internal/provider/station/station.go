@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -52,6 +53,82 @@ type Settings struct {
 	// Auth selects how the Anthropic adapter presents the key: "" for the
 	// adapter default (x-api-key) or "bearer".
 	Auth string
+	// Bearer, when set, supplies a fresh bearer token for every request
+	// (Warden auth). It replaces the key: the adapters send
+	// "Authorization: Bearer <token>" and no x-api-key, and drop the cached
+	// token when the server answers 401.
+	Bearer Bearer `json:"-"`
+}
+
+// Bearer supplies short-lived bearer tokens.
+type Bearer interface {
+	Token(ctx context.Context) (string, error)
+	// Invalidate drops token if it is still the cached one.
+	Invalidate(token string)
+}
+
+// BearerMiddleware sets the Authorization header from b on each request and
+// removes any x-api-key. On a 401 it drops the token it sent (not a newer
+// one) and retries once with a fresh token, when the body can be replayed.
+// It has the shape both SDKs' middleware takes.
+func BearerMiddleware(b Bearer) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		return SendWithBearer(req, b, next)
+	}
+}
+
+// SendWithBearer sends req through next with a bearer token from b, retrying
+// once after a 401 as BearerMiddleware describes.
+func SendWithBearer(req *http.Request, b Bearer, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	token, err := b.Token(req.Context())
+	if err != nil {
+		return nil, err
+	}
+	first := req
+	if req.GetBody != nil {
+		first = req.Clone(req.Context())
+		if first.Body, err = req.GetBody(); err != nil {
+			return nil, err
+		}
+	}
+	first.Header.Del("X-Api-Key")
+	first.Header.Set("Authorization", "Bearer "+token)
+	resp, err := next(first)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	b.Invalidate(token)
+	if req.GetBody == nil && req.Body != nil && req.Body != http.NoBody {
+		return resp, nil
+	}
+	// Without a fresh token or a replayable body, the 401 is the answer.
+	retry, fresh := retryRequest(req, b, token)
+	if retry == nil {
+		return resp, nil
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	_ = resp.Body.Close()
+	retry.Header.Del("X-Api-Key")
+	retry.Header.Set("Authorization", "Bearer "+fresh)
+	return next(retry)
+}
+
+// retryRequest is a copy of req to send again with a new token, or nil when
+// there is no new token or the body cannot be replayed.
+func retryRequest(req *http.Request, b Bearer, refused string) (*http.Request, string) {
+	fresh, err := b.Token(req.Context())
+	if err != nil || fresh == refused {
+		return nil, ""
+	}
+	retry := req.Clone(req.Context())
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, ""
+		}
+		retry.Body = body
+	}
+	return retry, fresh
 }
 
 // forbiddenHeaders may not be set from settings: a credential does not belong

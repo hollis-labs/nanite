@@ -40,6 +40,10 @@ const (
 	AuthBearer = "bearer"
 	// AuthNone sends no real key, for a local server without auth.
 	AuthNone = "none"
+	// AuthWarden sends a short-lived Warden token for Audience and Scopes
+	// as a bearer token on every request, minted from the agent's parent
+	// credential (identity.yaml).
+	AuthWarden = "warden"
 )
 
 // Built-in provider names. They are configured by the host's Gateway and
@@ -68,6 +72,10 @@ type Spec struct {
 	Auth string `yaml:"auth,omitempty" json:"auth,omitempty"`
 	// Headers are sent on every request. Credentials do not belong here.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	// Audience and Scopes are the Warden token's audience (the gateway's app
+	// name, such as llm-gateway) and scopes, with auth warden.
+	Audience string   `yaml:"audience,omitempty" json:"audience,omitempty"`
+	Scopes   []string `yaml:"scopes,omitempty" json:"scopes,omitempty"`
 	// DisableAnthropicBeta and DisableCacheControl turn off the Anthropic
 	// wire's beta header and cache_control markers, for a gateway or
 	// compatible server that rejects them.
@@ -91,13 +99,23 @@ func (s Spec) Validate() error {
 		return fmt.Errorf("provider %s: wire %q must be one of anthropic, openai, openai-chat, openai-responses", s.Name, s.Wire)
 	}
 	switch s.Auth {
+	case AuthWarden:
+		if s.KeyRef != "" || s.KeyEnv != "" {
+			return fmt.Errorf("provider %s: auth warden takes no key_ref or key_env", s.Name)
+		}
+		if err := ValidateAudience(s.Audience, s.Scopes); err != nil {
+			return fmt.Errorf("provider %s: %w", s.Name, err)
+		}
 	case AuthDefault, AuthNone:
 	case AuthBearer:
 		if s.Wire != WireAnthropic {
 			return fmt.Errorf("provider %s: auth bearer applies to the anthropic wire; the openai wires always use a bearer token", s.Name)
 		}
 	default:
-		return fmt.Errorf("provider %s: auth %q must be empty, bearer or none", s.Name, s.Auth)
+		return fmt.Errorf("provider %s: auth %q must be empty, bearer, none or warden", s.Name, s.Auth)
+	}
+	if s.Auth != AuthWarden && (s.Audience != "" || len(s.Scopes) > 0) {
+		return fmt.Errorf("provider %s: audience and scopes apply to auth warden", s.Name)
 	}
 	if s.Auth == AuthNone && (s.KeyRef != "" || s.KeyEnv != "") {
 		return fmt.Errorf("provider %s: auth none takes no key_ref or key_env", s.Name)
@@ -128,6 +146,21 @@ func (s Spec) settings() station.Settings {
 	}
 	return station.Settings{BaseURL: s.BaseURL, Headers: maps.Clone(s.Headers), Auth: auth,
 		DisableAnthropicBeta: s.DisableAnthropicBeta, DisableCacheControl: s.DisableCacheControl}
+}
+
+var tokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+
+// ValidateAudience checks a Warden audience and scope set.
+func ValidateAudience(audience string, scopes []string) error {
+	if !tokenPattern.MatchString(audience) {
+		return fmt.Errorf("audience %q must be an app name (letters, digits, . _ : / -)", audience)
+	}
+	for _, scope := range scopes {
+		if !tokenPattern.MatchString(scope) {
+			return fmt.Errorf("scope %q must be letters, digits, . _ : / -", scope)
+		}
+	}
+	return nil
 }
 
 // keylessPlaceholder is the key sent to a server configured with auth none.
@@ -168,12 +201,20 @@ func NewNamed(spec Spec, cfg Config) (llmcontracts.Provider, error) {
 		return "", fmt.Errorf("resolve %s provider key: %w", spec.Name, errors.Join(err))
 	}
 	settings := spec.settings()
+	keyless := spec.Auth == AuthNone
+	if spec.Auth == AuthWarden {
+		if cfg.Warden == nil {
+			return nil, fmt.Errorf("provider %s: auth warden needs identity.yaml with a warden section", spec.Name)
+		}
+		settings.Bearer = cfg.Warden.Bearer(spec.Audience, spec.Scopes)
+		keyless = true
+	}
 	switch spec.Wire {
 	case WireAnthropic:
 		client := anthropic.New()
 		client.SetPanicGuard(cfg.Panics)
 		client.SetGateway(settings)
-		if spec.Auth == AuthNone {
+		if keyless {
 			client.SetAPIKey(keylessPlaceholder)
 		} else {
 			client.SetKeyFunc(load)
@@ -189,7 +230,7 @@ func NewNamed(spec Spec, cfg Config) (llmcontracts.Provider, error) {
 		case WireOpenAIResponses:
 			client.SetAPI(openai.APIResponses)
 		}
-		if spec.Auth != AuthNone {
+		if !keyless {
 			client.SetKeyFunc(load)
 		}
 		return client, nil

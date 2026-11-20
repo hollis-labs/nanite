@@ -14,6 +14,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/recovery"
+	"github.com/hollis-labs/nanite/internal/warden"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
@@ -46,8 +47,14 @@ type Config struct {
 	Builtins       tools.Builtins
 	Provider       llmcontracts.Provider
 	ProviderConfig provider.Config
-	Store          *store.Store
-	Gate           permission.Gate
+	// Identity is identity.yaml (nil without one): the principal, Warden
+	// minting for providers with auth warden, and MCP server auth.
+	Identity *authored.Identity
+	// OnAuthWaiting sees each Warden grant request Nanite files or finds
+	// pending.
+	OnAuthWaiting func(warden.Waiting)
+	Store         *store.Store
+	Gate          permission.Gate
 	// AskWait bounds how long a subtask's relayed ask waits, in total, for
 	// its root conversation to have a running turn; zero is DefaultAskWait.
 	AskWait        time.Duration
@@ -185,7 +192,23 @@ func New(cfg Config) (*Engine, error) {
 	}
 	guard := newGuard(cfg.Logger, scrub, cfg.PanicReporter)
 	cfg.ProviderConfig.Panics = guard
-	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), noticeQueueLimit: NoticeQueueLimit, noticeJobs: make(map[string]bool), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
+	var mcpAuth *mcpclient.Auth
+	if cfg.Identity != nil {
+		if w := cfg.Identity.Warden; w != nil {
+			file, err := authored.ExpandHome(w.CredentialFile)
+			if err != nil {
+				return nil, err
+			}
+			src, err := warden.New(warden.Config{URL: w.URL, CredentialFile: file, Principal: cfg.Identity.Principal, Purpose: w.Purpose,
+				Redactor: cfg.ProviderConfig.Redactor, Logger: cfg.Logger, OnWaiting: cfg.OnAuthWaiting})
+			if err != nil {
+				return nil, err
+			}
+			cfg.ProviderConfig.Warden = src
+		}
+		mcpAuth = &mcpclient.Auth{Principal: cfg.Identity.Principal, Warden: cfg.ProviderConfig.Warden, Servers: cfg.Identity.MCP}
+	}
+	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), noticeQueueLimit: NoticeQueueLimit, noticeJobs: make(map[string]bool), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger, mcpAuth), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
 		// A subtask result is already held under the budget (result.go); a
 		// preview would break its JSON.
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),

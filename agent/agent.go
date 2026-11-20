@@ -229,6 +229,8 @@ type Agent struct {
 	slots     Slots
 	tools     ToolSet
 	skills    SkillSet
+	// ensureMu serializes EnsureConversation's check-then-create.
+	ensureMu sync.Mutex
 }
 
 // Info describes the current definition loaded from disk.

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/engine"
@@ -46,6 +47,27 @@ func (a *Agent) NewConversation(ctx context.Context, options ...ConversationOpti
 		return nil, err
 	}
 	return &Conversation{id: info.ID, agent: a}, nil
+}
+
+// EnsureConversation opens the conversation with this ID, creating it with
+// the options on first use. Concurrent calls for the same ID on one Agent
+// create it once; every caller gets the conversation, none gets an error
+// because another created it first. Options apply only when it is created,
+// and the ID always wins over an option that sets one.
+func (a *Agent) EnsureConversation(ctx context.Context, id string, options ...ConversationOption) (*Conversation, error) {
+	if id == "" {
+		return nil, errors.New("nanite: EnsureConversation needs an ID")
+	}
+	if c, err := a.Conversation(ctx, id); !errors.Is(err, ErrNoConversation) {
+		return c, err
+	}
+	a.ensureMu.Lock()
+	defer a.ensureMu.Unlock()
+	if c, err := a.Conversation(ctx, id); !errors.Is(err, ErrNoConversation) {
+		return c, err
+	}
+	options = append(options[:len(options):len(options)], func(info *ConversationInfo) { info.ID = id })
+	return a.NewConversation(ctx, options...)
 }
 
 // Conversation opens an existing conversation by ID.

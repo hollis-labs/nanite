@@ -133,6 +133,9 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	// after the guard, so a panic anywhere in the turn is recorded as failed
 	// with its ref.
 	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil, e.subtaskLinkOf(info.ID))}
+	if input.Source == SourceNotice && interrupted == nil {
+		tr.rec.Source = trace.SourceReflex
+	}
 	// A panic while preparing the turn fails it with a ref; the host and the
 	// conversation stay usable.
 	err := e.panics.Call("turn", func() (err error) {
@@ -304,7 +307,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if depth > 0 {
 		// The title's goal was scrubbed when the child was created.
 		x.origin = &permission.SubtaskOrigin{ChildID: info.ID, Variant: variant.Name, Goal: strings.TrimPrefix(info.Title, subtaskTitlePrefix),
-			Depth: depth, CallID: e.subtaskCall(info.ID)}
+			Depth: depth, CallID: e.subtaskCall(info.ID), Dispatched: e.dispatchedChain(lineage[:len(lineage)-1])}
 	}
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)

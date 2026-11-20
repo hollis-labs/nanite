@@ -32,6 +32,20 @@ type Result struct {
 	Text, StopReason string
 	Usage            Usage
 	Steps            int
+	// Dispatched holds a host dispatch's outcomes, one per start in the
+	// order given; it is empty for a model turn.
+	Dispatched []Dispatched
+}
+
+// Dispatched is the outcome of one subtask a host started with Dispatch.
+// Result is the JSON the model would get from the subtask tool: a foreground
+// subtask's result contract, or a background subtask's job handle. Err is set
+// instead when the subtask could not start (an unknown variant, the budget
+// spent, a cancelled wait). IsError marks a result whose status is not ok.
+type Dispatched struct {
+	Result  json.RawMessage
+	IsError bool
+	Err     string
 }
 
 // RunStarted marks the beginning of a run.
@@ -142,6 +156,17 @@ type SubtaskProgress struct {
 	// a last event with Status cancelled, refused or error.
 	Background bool
 	Status     string
+}
+
+// NoticePosted reports a notice posted to a conversation: a background job's
+// completion, a relayed ask waiting for a turn, or a host's own PostNotice.
+// It is reported on the conversation's running turn, if any, and to every
+// notice subscriber. RunID in EventMeta is the turn it was reported on, or
+// empty when the conversation had none; the notice itself waits in the store
+// for the next turn either way.
+type NoticePosted struct {
+	EventMeta
+	ID, ConversationID, Kind, Body string
 }
 
 // LimitReason returns stop when it reports that a turn stopped at a step,

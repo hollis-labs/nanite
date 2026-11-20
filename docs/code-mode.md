@@ -317,6 +317,16 @@ result a foreground subtask returns, and a notice arrives when the subtask
 finishes. `background_cancel` stops it. Its token usage is reported with the
 notice, not counted into whichever turn happens to be running.
 
+## Host dispatch
+
+A host can start subtasks itself, without a model call, with
+`Conversation.Dispatch` (or `chatrunner.Runner.Dispatch` on the chat wire).
+Each start has the same fields as a `subtask` call and takes the same path
+(variants, budgets, slot limits, the turn budget, forked context, the result
+contract, approvals, progress). Outcomes come back in the order given, as the
+JSON a model's call would have received. See
+[architecture.md](architecture.md#host-dispatch).
+
 ## Not yet
 
 - `budgets.cost` and any cost (USD) budget are accepted but not enforced,

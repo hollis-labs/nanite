@@ -62,32 +62,38 @@ func (r *Run) Wait() (events.Result, error) {
 func (r *Run) Cancel() { r.cancel() }
 
 func (r *Run) emit(ctx context.Context, event func(events.EventMeta) events.Event) {
-	r.send(ctx, event, true)
+	_ = r.send(ctx, event, true)
 }
 
 // forward emits an event that another run already reported to the runtime
 // sink, such as a depth-2 subtask's lifecycle passed up by its lead: the
 // host's stream gets it, telemetry does not count it twice.
 func (r *Run) forward(ctx context.Context, event func(events.EventMeta) events.Event) {
-	r.send(ctx, event, false)
+	_ = r.send(ctx, event, false)
 }
 
-func (r *Run) send(ctx context.Context, event func(events.EventMeta) events.Event, observe bool) {
+// post emits an event and reports whether the run took it: false once the
+// run is closing or ctx ended first.
+func (r *Run) post(ctx context.Context, event func(events.EventMeta) events.Event) bool {
+	return r.send(ctx, event, true)
+}
+
+func (r *Run) send(ctx context.Context, event func(events.EventMeta) events.Event, observe bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closing {
-		return
+		return false
 	}
 	// Reserve one buffer position for the terminal event even on cancellation.
 	for len(r.events) >= cap(r.events)-1 {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	r.seq++
 	value := event(events.EventMeta{RunID: r.id, Seq: r.seq})
@@ -95,6 +101,7 @@ func (r *Run) send(ctx context.Context, event func(events.EventMeta) events.Even
 		r.report(ctx, value)
 	}
 	r.events <- value
+	return true
 }
 
 func (r *Run) report(ctx context.Context, event events.Event) {

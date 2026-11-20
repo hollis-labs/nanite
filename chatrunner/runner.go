@@ -35,6 +35,17 @@ type Options struct {
 	// ContextSlot is the slot the turn's context is placed in. Default
 	// agent.SlotUserContext.
 	ContextSlot agent.SlotName
+	// Observe publishes a run the runner began itself on a chat
+	// conversation; set it to the chat Service's Observe. With it, a notice
+	// posted while no turn runs (a background subtask finishing, a relayed
+	// ask waiting) reaches the wire as a nanite.notice activity, and Dispatch
+	// can publish a host dispatch. Without it, such notices wait for the
+	// conversation's next turn.
+	Observe func(ctx context.Context, conversationID string, turn chat.Turn, run chat.Run) error
+	// NoticeTurns makes a notice posted while no turn runs start a turn
+	// (source notice) that tells the conversation about it, instead of only
+	// announcing it. It needs Observe. Off by default.
+	NoticeTurns bool
 }
 
 // Runner is a chat.Runner backed by one Nanite agent.
@@ -50,6 +61,10 @@ type Runner struct {
 	// kept after its turn ends: a background subtask's ask may be decided
 	// between turns.
 	chats map[string]string
+	// stopNotices ends the notice listener; noticesDone is closed when it
+	// has stopped.
+	stopNotices context.CancelFunc
+	noticesDone chan struct{}
 }
 
 var _ chat.Runner = (*Runner)(nil)
@@ -76,6 +91,10 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		_ = a.Close()
 		return nil, err
 	}
+	listen, stop := context.WithCancel(context.WithoutCancel(ctx))
+	r.stopNotices, r.noticesDone = stop, make(chan struct{})
+	notices := a.SubscribeNotices(listen)
+	go r.listen(listen, notices)
 	return r, nil
 }
 
@@ -84,7 +103,11 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 func (r *Runner) Agent() *agent.Agent { return r.agent }
 
 // Close stops running turns and releases the agent directory.
-func (r *Runner) Close() error { return r.agent.Close() }
+func (r *Runner) Close() error {
+	r.stopNotices()
+	<-r.noticesDone
+	return r.agent.Close()
+}
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
@@ -131,26 +154,37 @@ func TurnFromContext(ctx context.Context) (chat.Turn, bool) {
 
 // Start begins a turn.
 func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
-	c, err := r.conversation(ctx, turn.ConversationID)
-	if err != nil {
-		return nil, err
-	}
 	in := agent.Input{Text: turn.Text}
 	if text := contextText(turn.Context); text != "" {
 		in.Slots = []agent.SlotUpdate{{Slot: r.opts.ContextSlot, Entry: agent.SlotEntry{Owner: "chat", Key: "turn-context", Content: text}}}
 	}
-	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}}
+	return r.begin(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) { return c.Send(runCtx, in) })
+}
+
+// begin opens the chat conversation's Nanite conversation and starts a run
+// on it with start, registered so its approvals are answered on the wire.
+func (r *Runner) begin(ctx context.Context, turn chat.Turn, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
+	c, err := r.conversation(ctx, turn.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}, ended: make(chan struct{})}
 	if info, err := r.agent.Info(ctx); err == nil {
 		out.provider, out.model = info.Definition.Profile.Runtime.Provider, info.Definition.Profile.Runtime.Model
 	}
-	// The turn outlives the call that started it, and is stopped with Cancel.
+	// The run outlives the call that started it, and is stopped with Cancel.
 	runCtx, cancel := context.WithCancel(context.WithValue(context.WithoutCancel(ctx), turnKey{}, turn))
 	out.ctx, out.stop = runCtx, cancel
 
 	r.mu.Lock()
+	if r.active[out.nanite] != nil {
+		r.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("chatrunner: %w", agent.ErrBusy)
+	}
 	r.active[out.nanite] = out
 	r.mu.Unlock()
-	inner, err := c.Send(runCtx, in)
+	inner, err := start(c, runCtx)
 	if err != nil {
 		cancel()
 		r.release(out)
@@ -158,6 +192,41 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	}
 	out.inner = inner
 	return out, nil
+}
+
+// Dispatch starts subtasks for the host on a chat conversation, without a
+// model call (see agent.Conversation.Dispatch), and publishes the dispatch
+// as a run on the wire through Options.Observe: its subtask activity and any
+// approvals its subtasks relay, which are answered on the wire like a turn's.
+// It returns once every foreground start has ended, with one outcome per
+// start; a background start's outcome is its job handle, and its finish is
+// announced as a nanite.notice. It needs Options.Observe.
+func (r *Runner) Dispatch(ctx context.Context, conversationID string, starts []agent.DispatchStart) ([]agent.Dispatched, error) {
+	if r.opts.Observe == nil {
+		return nil, errors.New("chatrunner: Dispatch needs Options.Observe")
+	}
+	turn := chat.Turn{ConversationID: conversationID}
+	x, err := r.begin(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
+		return c.Dispatch(runCtx, starts)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := r.opts.Observe(ctx, conversationID, turn, x); err != nil {
+		// Nobody will read the run; stop it and let it finish.
+		x.Cancel()
+		_, _ = x.inner.Wait()
+		r.release(x)
+		return nil, fmt.Errorf("chatrunner: publish dispatch: %w", err)
+	}
+	select {
+	case <-x.ended:
+	case <-ctx.Done():
+		x.Cancel()
+		<-x.ended
+	}
+	result, err := x.inner.Wait()
+	return result.Dispatched, err
 }
 
 // contextText is the turn's context as the text placed in the slot: a JSON

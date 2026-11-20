@@ -32,6 +32,11 @@ const (
 	// ActivityCompact reports history compaction. Value: state ("start",
 	// "done" or "failed"), with before, after or error.
 	ActivityCompact = "nanite.compact"
+	// ActivityNotice reports a notice posted to the conversation: a
+	// background subtask or job finishing, a relayed ask waiting for a turn,
+	// or the host's own. Value: id, kind and body. It arrives on the running
+	// turn, or, when none runs, as a run of its own (Options.Observe).
+	ActivityNotice = "nanite.notice"
 )
 
 // CodeTurnFailed is the run.error code of a turn Nanite could not finish.
@@ -62,6 +67,11 @@ type run struct {
 	mu       sync.Mutex
 	pending  map[string]*pending
 	canceled bool
+	// ended is closed once Events has finished (nil for a run nobody
+	// waits on).
+	ended chan struct{}
+	// notice is the notice that started a notice turn.
+	notice *agent.NoticePosted
 
 	// Translation state, used only by the goroutine reading Events.
 	asked    map[string]bool // call IDs an approval.request was emitted for
@@ -116,6 +126,9 @@ func (x *run) Answer(_ context.Context, approvalID string, d chat.Decision) erro
 // Events yields the turn's chatstream events. It is read once.
 func (x *run) Events() iter.Seq2[chatstream.Event, error] {
 	return func(yield func(chatstream.Event, error) bool) {
+		if x.ended != nil {
+			defer close(x.ended)
+		}
 		defer x.runner.release(x)
 		defer x.stop()
 		terminal := false
@@ -150,6 +163,10 @@ func raw(v any) json.RawMessage {
 
 func activity(kind string, value any) chatstream.Event {
 	return chatstream.Event{Verb: chatstream.VerbActivity, Kind: kind, Value: raw(value)}
+}
+
+func noticeActivity(n agent.NoticePosted) chatstream.Event {
+	return activity(ActivityNotice, map[string]any{"id": n.ID, "kind": n.Kind, "body": n.Body})
 }
 
 func (x *run) stepID() string    { return fmt.Sprintf("step-%d", x.step) }
@@ -238,7 +255,12 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 	var out []chatstream.Event
 	switch e := ev.(type) {
 	case agent.RunStarted:
-		return []chatstream.Event{{Verb: chatstream.VerbRunStart, Provider: x.provider, Model: x.model}}
+		out = append(out, chatstream.Event{Verb: chatstream.VerbRunStart, Provider: x.provider, Model: x.model})
+		if x.notice != nil {
+			// A notice turn says first which notice started it.
+			out = append(out, noticeActivity(*x.notice))
+		}
+		return out
 
 	case agent.SlotsAssembled:
 		type slot struct {
@@ -336,7 +358,11 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			// It is answered once: the chat Service would keep a standing
 			// grant against the root chat, which would reach the root and
 			// the subtask's siblings.
-			descriptor["description"] = fmt.Sprintf("subtask %q wants %s: %s (this call only)", o.Goal, e.Request.Tool, descriptor["description"])
+			who := "subtask"
+			if o.Dispatched {
+				who = "subtask (started by the host)"
+			}
+			descriptor["description"] = fmt.Sprintf("%s %q wants %s: %s (this call only)", who, o.Goal, e.Request.Tool, descriptor["description"])
 			descriptor["subtask"] = o
 			descriptor["standing"] = false
 			descriptor["grant_scope"] = "once"
@@ -396,6 +422,9 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			v["state"], v["limit"] = "limit", e.Limit
 		}
 		return []chatstream.Event{activity(ActivitySubagent, v)}
+
+	case agent.NoticePosted:
+		return []chatstream.Event{noticeActivity(e)}
 
 	case agent.CompactionStarted:
 		return []chatstream.Event{activity(ActivityCompact, map[string]any{"state": "start", "before": e.Before})}

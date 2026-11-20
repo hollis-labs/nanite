@@ -157,6 +157,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ to
 	e.mu.Lock()
 	e.subtaskCalls[child.ID] = rootCall
 	e.subtaskLinks[child.ID] = subtaskLink{ParentTurnID: x.run.id, ParentCallID: callIDFrom(ctx), Depth: x.depth + 1}
+	if ctx.Value(dispatchKey{}) != nil {
+		e.dispatched[child.ID] = true
+	}
 	e.mu.Unlock()
 	// Once the child ends, its call mapping, trace link and own grants go too.
 	forget := func() {
@@ -164,6 +167,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ to
 		delete(e.subtaskCalls, child.ID)
 		delete(e.subtaskLinks, child.ID)
 		delete(e.grants, child.ID)
+		delete(e.dispatched, child.ID)
 		e.mu.Unlock()
 	}
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: message}) }

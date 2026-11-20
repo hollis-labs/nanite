@@ -203,6 +203,18 @@ Nanite's own tools as usual. Leave `Gate` nil: approvals are answered on the
 chat wire. `r.Agent()` gives the agent for slots, skills and notices, and
 `r.Close()` releases the directory.
 
+**Notices and host work.** Set `Options.Observe` to the chat Service's
+`Observe`. A notice posted while a turn runs reaches the wire on that turn as
+a `nanite.notice` activity (id, kind, body). With `Observe`, one posted while
+no turn runs is published as a short run of its own; with `NoticeTurns` it
+starts a turn instead (`agent.SourceNotice`), which opens with the
+`nanite.notice` activity. `r.Dispatch(ctx, chatID, starts)` starts subtasks
+for the host without a model call and publishes the dispatch as a run on the
+wire, so the subtasks' activity and relayed approvals are seen and answered
+like a turn's; it returns the outcomes once every foreground start has ended.
+A background start's finish reaches the wire as a `nanite.notice`. Without
+`Observe`, notices wait for the conversation's next turn and `Dispatch` fails.
+
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
 `runner_ref` on the chat conversation record. A turn the previous process

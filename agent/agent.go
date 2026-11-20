@@ -185,10 +185,6 @@ type Info struct {
 	Definition agentdir.Snapshot
 }
 
-// Notice describes a completed job. ID identifies the notification, ConversationID
-// selects the recipient, Kind identifies the job type, and Body is the display text.
-type Notice = nanitestore.Notice
-
 // Open validates the authored agent directory and takes its exclusive lock.
 func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if err := ctx.Err(); err != nil {
@@ -336,8 +332,14 @@ func (a *Agent) Tools() *ToolSet { return &a.tools }
 // Skills returns the host skill groups.
 func (a *Agent) Skills() *SkillSet { return &a.skills }
 
-// Notices returns asynchronous job and subagent notices.
-func (a *Agent) Notices() <-chan Notice { return a.engine.Notices() }
+// SubscribeNotices returns every notice posted from now on (a background
+// job or subtask finishing, a relayed ask waiting for a turn, a host's
+// PostNotice), in order and without loss, until ctx ends or the agent
+// closes; then the channel is closed. Each subscriber gets every notice. A
+// notice also waits in the store for its conversation's next turn.
+func (a *Agent) SubscribeNotices(ctx context.Context) <-chan NoticePosted {
+	return a.engine.SubscribeNotices(ctx)
+}
 
 // RebuildIndex reconstructs the SQLite conversation projection from transcripts.
 func (a *Agent) RebuildIndex(ctx context.Context) error {

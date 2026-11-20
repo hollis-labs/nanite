@@ -189,8 +189,35 @@ to `SKILL.md` take effect on the next turn.
 
 The `ask_user` tool and MCP form elicitation pause an active tool call until a
 host answers or the turn is cancelled. The REPL prompts for an answer. One-shot
-CLI commands decline questions. A completion notice goes to the host's notice
-channel and stays in SQLite until it appears in a later turn's session slot.
+CLI commands decline questions.
+
+A notice (a background job or subtask finishing, a relayed ask waiting for a
+turn, or one a host posts with `Conversation.PostNotice`) stays in SQLite until
+it appears in a later turn's session slot. When it is posted it is also
+announced: as a `NoticePosted` event on the conversation's running turn, if
+any, and to every `Agent.SubscribeNotices` channel. Each subscriber has its own
+unbounded queue, so none is lost; `EventMeta.RunID` names the turn that carried
+it, or is empty when none ran. A host can start a turn because of a notice
+with `Input.Source = agent.SourceNotice`; its trace record has source `reflex`.
+
+## Host dispatch
+
+`Conversation.Dispatch` starts subtasks for the host without a model call.
+Each start has the subtask call's fields, and goes through the same path: the
+variant (required) and its budgets, the subtask slot limits, the agent's
+per-turn token budget, forked context, the result contract, relayed approvals
+and progress. A dispatch runs as a run on the conversation and holds it like a
+turn (`ErrBusy` while a turn runs, and the other way round). The run reports
+the subtasks' events and relayed asks, makes no model request, and adds
+nothing to the conversation's history. `Result.Dispatched` has one outcome
+per start, in the order given: the JSON the model's `subtask` call would have
+returned (a result contract, or a background job handle), or `Err` when it
+could not start. Every start is checked before anything runs. A dispatched
+subtask's forked context is the conversation's latest settled messages, and
+its relayed asks carry `subtask.dispatched: true`. The dispatch run's trace
+record has source `host`; its children's records link to it with
+`parent_turn_id` and a `parent_call_id` of the form `dispatch-<run>-<n>`.
+`Conversation.Job` reads a background job as `background_status` reports it.
 
 Before running a tool, Nanite validates the arguments against its schema. For
 invalid arguments, it can ask the provider for one structural repair using

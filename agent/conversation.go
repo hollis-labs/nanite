@@ -6,6 +6,7 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // ConversationInfo identifies a stored chat or subagent, its optional
@@ -102,4 +103,48 @@ func (c *Conversation) Record(ctx context.Context, userText, answer string) erro
 // History reads the persisted messages in order.
 func (c *Conversation) History(ctx context.Context) ([]Message, error) {
 	return c.agent.store.History(ctx, c.id)
+}
+
+// SourceNotice is the Input.Source of a turn a host starts because a notice
+// arrived. Its trace record has source "reflex".
+const SourceNotice = engine.SourceNotice
+
+// DispatchStart is one subtask a host starts with Dispatch: the same fields
+// as the model's subtask call (goal, return_spec, variant, inputs, context,
+// background). The variant is required.
+type DispatchStart = subagent.Request
+
+// ErrNoStarts is returned by Dispatch when it is given nothing to start.
+var ErrNoStarts = engine.ErrNoStarts
+
+// Dispatch starts subtasks for the host, without a model call. They take the
+// same path as a model's subtask call: variants and their budgets, the
+// subtask slot limits, the agent's per-turn token budget, forked context
+// (the conversation's latest settled messages), the result contract, relayed
+// approvals (attributed as dispatched) and progress events.
+//
+// Dispatch holds the conversation like a turn until every foreground start
+// has ended; it fails with ErrBusy while a turn runs. Read the returned run's
+// Events as for a turn (subtask lifecycle, progress, relayed approvals), then
+// Wait: Result.Dispatched has one outcome per start, in order. A background
+// start's outcome is its job handle; it posts a notice when it finishes, and
+// Job reads its result. Every start is checked before anything runs. The
+// conversation must be a root chat; its history does not change.
+func (c *Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error) {
+	return c.agent.engine.Dispatch(ctx, c.id, starts)
+}
+
+// PostNotice posts a notice to the conversation: it is announced at once (on
+// the running turn, if any, and to every notice subscriber) and waits in the
+// store for the next turn, which delivers it in the session slot.
+func (c *Conversation) PostNotice(ctx context.Context, kind, body string) error {
+	return c.agent.engine.PostNotice(ctx, c.id, kind, body)
+}
+
+// Job reads one of the conversation's background jobs (a dispatched or
+// model-started background subtask, or a shell command) as the
+// background_status tool reports it: JSON with id, kind, status and, for a
+// finished subtask, its result.
+func (c *Conversation) Job(ctx context.Context, id string) (string, error) {
+	return c.agent.engine.Job(ctx, c.id, id)
 }

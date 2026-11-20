@@ -129,8 +129,9 @@ type Options struct {
 	// uses 80% of host.yaml's runtime.context_window (200,000 when unset).
 	CompactAt int
 	// SlotBudgets overrides the token budget of the slots it names (sizes
-	// are estimated at about 4 bytes a token). The Universal slot keeps its
-	// own budget. An entry over budget is replaced by its pointer, trimmed
+	// are estimated at about 4 bytes a token). Budgets must be positive, and
+	// the Universal slot cannot be named: its budget is set by the base
+	// prompt. An entry over budget is replaced by its pointer, trimmed
 	// with a marker, or, with no room left at all, left out; trims and
 	// omissions are logged and reported in SlotsAssembled.
 	SlotBudgets map[SlotName]int
@@ -194,8 +195,13 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
 	}
 	for name, size := range opts.SlotBudgets {
-		if size < 0 {
-			return nil, fmt.Errorf("nanite: slot %s budget must not be negative", name)
+		switch {
+		case !slices.Contains(SlotNames(), name):
+			return nil, fmt.Errorf("nanite: SlotBudgets names unknown slot %q", name)
+		case name == SlotUniversal:
+			return nil, fmt.Errorf("nanite: the universal slot's budget is fixed by the base prompt")
+		case size <= 0:
+			return nil, fmt.Errorf("nanite: slot %s budget must be positive", name)
 		}
 	}
 	if opts.SubtaskResultCap < 0 {

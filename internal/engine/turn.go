@@ -877,10 +877,14 @@ func (x *execution) budgetStop() string {
 }
 
 // warnCuts logs every entry the selector trimmed or left out, so a host
-// never loses context without a trace of it. Pointers are by design and are
-// not warned about.
+// never loses context without a trace of it, once each time the slot
+// changes. Pointers are by design and are not warned about.
 func (e *Engine) warnCuts(ctx context.Context, conversation string, report slots.Report) {
 	for _, name := range slots.Names() {
+		// An unchanged slot was warned about when it last changed.
+		if !report[name].Changed {
+			continue
+		}
 		for _, d := range report[name].Decisions {
 			if d.Disposition == slots.Trim || d.Disposition == slots.Skip {
 				e.cfg.Logger.WarnContext(ctx, "nanite: slot entry cut", "conversation", conversation, "slot", string(name),

@@ -258,3 +258,60 @@ func TestNoRoomLeftIsReportedSkip(t *testing.T) {
 		t.Fatalf("decisions %+v", d)
 	}
 }
+
+func TestTrimEdgeCases(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	assemble := func(t *testing.T, snap Snapshot, plan Plan, budgets map[Name]int, prev map[string]string) Assembled {
+		t.Helper()
+		got, err := Assemble(context.Background(), snap, plan, prev, 0, est, budgets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	content := func(a Assembled, slot Name) string {
+		for _, b := range a.Blocks {
+			if b.SlotName == string(slot) {
+				return b.Content
+			}
+		}
+		return ""
+	}
+	budgets := map[Name]int{Context: 200}
+
+	t.Run("invalid UTF-8 stays a byte prefix", func(t *testing.T) {
+		raw := "BEGIN \xff\xfe " + strings.Repeat("bytes \xc3 ", 900)
+		snap, _ := NewStore().Snapshot().With(Update{Slot: Context, Entry: Entry{Owner: "host", Key: "k", Content: raw}})
+		plan, _ := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+		got := content(assemble(t, snap, plan, budgets, nil), Context)
+		cut := got[:strings.Index(got, "\n[trimmed")]
+		if !strings.HasPrefix(raw, cut) || len(cut) == 0 {
+			t.Fatalf("shipped text is not a prefix of the original")
+		}
+	})
+
+	t.Run("a Trim that fits ships unchanged", func(t *testing.T) {
+		snap, _ := NewStore().Snapshot().With(Update{Slot: Context, Entry: Entry{Owner: "host", Key: "k", Content: "small"}})
+		plan := Plan{Decisions: map[Name][]Decision{Context: {{Owner: "host", Key: "k", Disposition: Trim}}}}
+		if got := content(assemble(t, snap, plan, budgets, nil), Context); got != "small" {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("several entries with headers, stable across turns", func(t *testing.T) {
+		snap, _ := NewStore().Snapshot().With(
+			Update{Slot: Context, Entry: Entry{Owner: "host", Key: "a", Priority: 10, Content: strings.Repeat("alpha ", 60)}},
+			Update{Slot: Context, Entry: Entry{Owner: "host", Key: "b", Content: strings.Repeat("beta ", 400)}},
+		)
+		plan, _ := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+		first := assemble(t, snap, plan, budgets, nil)
+		text := content(first, Context)
+		if !strings.Contains(text, "### host/a") || !strings.Contains(text, "### host/b") || !strings.Contains(text, "[trimmed") || est.Estimate(text) > 200 {
+			t.Fatalf("content (%d tokens): %q", est.Estimate(text), text)
+		}
+		second := assemble(t, snap, plan, budgets, first.Hashes)
+		if second.Report[Context].Changed || content(second, Context) != text {
+			t.Fatal("a stable trim changed between turns")
+		}
+	})
+}

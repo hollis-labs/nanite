@@ -95,11 +95,20 @@ func trimToFit(est ctxpkg.TokenEstimator, text string, e Entry, slot Name, heade
 		return "", false
 	}
 	marker := fmt.Sprintf("\n[trimmed to fit the %s slot budget of %d tokens]", slot, budget)
-	runes := []rune(e.Content)
-	lo, hi := 0, len(runes)
+	// Candidate cut points are rune boundaries, as byte offsets, so the
+	// shipped text is always a byte prefix of the original, even when the
+	// content holds invalid UTF-8.
+	cuts := []int{0}
+	for i := range e.Content {
+		if i > 0 {
+			cuts = append(cuts, i)
+		}
+	}
+	cuts = append(cuts, len(e.Content))
+	lo, hi := 0, len(cuts)-1
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		if est.Estimate(appendEntry(text, e, string(runes[:mid])+marker, header)) <= budget {
+		if est.Estimate(appendEntry(text, e, e.Content[:cuts[mid]]+marker, header)) <= budget {
 			lo = mid
 		} else {
 			hi = mid - 1
@@ -108,7 +117,7 @@ func trimToFit(est ctxpkg.TokenEstimator, text string, e Entry, slot Name, heade
 	if lo == 0 {
 		return "", false
 	}
-	return string(runes[:lo]) + marker, true
+	return e.Content[:cuts[lo]] + marker, true
 }
 
 func appendEntry(dst string, e Entry, content string, header bool) string {
@@ -180,8 +189,8 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 				body = e.Pointer
 			case Trim:
 				limit := window.Slot(string(slot)).MaxTokens
-				if limit <= 0 {
-					body = e.Content
+				if limit <= 0 || est.Estimate(appendEntry(text.String(), e, e.Content, len(entries) > 1)) <= limit {
+					body = e.Content // it fits; nothing to cut
 					break
 				}
 				trimmed, ok := trimToFit(est, text.String(), e, slot, len(entries) > 1, limit)

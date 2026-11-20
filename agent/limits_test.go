@@ -21,7 +21,7 @@ func (p *limitProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest
 }
 
 func TestEmbeddingRuntimeLimits(t *testing.T) {
-	for _, invalid := range []agent.Options{{MaxSteps: -1}, {MaxOutputTokens: -1}} {
+	for _, invalid := range []agent.Options{{MaxSteps: -1}, {MaxOutputTokens: -1}, {DailyTokenBudget: -1}} {
 		invalid.Dir = t.TempDir()
 		writeAgent(t, invalid.Dir)
 		invalid.GlobalSkillsDir = "-"

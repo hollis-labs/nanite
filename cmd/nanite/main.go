@@ -14,6 +14,7 @@ import (
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
+	"github.com/hollis-labs/nanite/internal/control"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/substrate/boot"
 	"github.com/hollis-labs/substrate/module"
@@ -65,6 +66,12 @@ func runArgs(ctx context.Context, argv []string) error {
 	if err != nil {
 		return err
 	}
+	if len(args) > 0 && args[0] == "stop" && !hasHelpFlag(args) {
+		if len(args) != 2 || args[1] != "--all" {
+			return fmt.Errorf("usage: nanite stop --all --dir <agent-directory>")
+		}
+		return control.Stop(ctx, filepath.Join(dir, ".nanite"))
+	}
 	restore, err := useConfigFile(configIndependent(args))
 	if err != nil {
 		return err
@@ -96,7 +103,7 @@ func configIndependent(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "version", "init", "validate", "help", "completion":
+	case "version", "init", "validate", "help", "completion", "stop":
 		return true
 	default:
 		return false

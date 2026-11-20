@@ -15,6 +15,9 @@ import (
 // closingReply permits exactly one extra request, with tool calls disabled and no retries.
 // Keep the original limit reason so callers still know work was cut short.
 func (x *execution) closingReply(ctx context.Context, req llmtypes.ChatRequest, text *strings.Builder) error {
+	if err := x.engine.checkDaily(); err != nil {
+		return err
+	}
 	reason := x.result.StopReason
 	defer func() { x.result.StopReason = reason }()
 	if err := ctx.Err(); err != nil {

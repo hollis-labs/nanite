@@ -107,3 +107,6 @@ type RunFailed = events.RunFailed
 
 // AutoApproved reports an approval prompt skipped by Options.AutoApprove.
 type AutoApproved = events.AutoApproved
+
+// BudgetWarning reports the first 80% crossing of a UTC-day token cap.
+type BudgetWarning = events.BudgetWarning

@@ -23,6 +23,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/libs/security/secrets"
+	"github.com/hollis-labs/nanite/internal/control"
 	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/recovery"
@@ -43,6 +44,8 @@ var (
 
 // Options configures an embedded agent.
 type Options struct {
+	// DailyTokenBudget caps total agent tokens per UTC day. Zero uses host.yaml.
+	DailyTokenBudget int
 	// MaxOutputTokens overrides runtime.max_output_tokens when positive.
 	// Zero uses host.yaml; negative values are rejected.
 	MaxOutputTokens int
@@ -230,6 +233,7 @@ type ProviderSpec = provider.Spec
 
 // Agent owns one authored agent directory and its mutable host contributions.
 type Agent struct {
+	control   *control.Server
 	engine    *engine.Engine
 	dir       string
 	lock      *os.File
@@ -273,6 +277,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
 	}
+	if opts.DailyTokenBudget < 0 {
+		return nil, fmt.Errorf("nanite: DailyTokenBudget must not be negative")
+	}
 	if opts.CompactKeepTokens < 0 || opts.CompactionInputTokens < 0 {
 		return nil, fmt.Errorf("nanite: CompactKeepTokens and CompactionInputTokens must not be negative")
 	}
@@ -301,6 +308,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	def, err := agentdir.Load(opts.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("load agent: %w", err)
+	}
+	if opts.DailyTokenBudget == 0 {
+		opts.DailyTokenBudget = def.Profile.Runtime.DailyTokenBudget
 	}
 	subtasks, err := subtaskSettings(opts, def.Profile.Runtime)
 	if err != nil {
@@ -400,7 +410,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		MaxOutputTokens: opts.MaxOutputTokens, MaxSteps: opts.MaxSteps,
+		DailyTokenBudget: opts.DailyTokenBudget, MaxOutputTokens: opts.MaxOutputTokens, MaxSteps: opts.MaxSteps,
 		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: rt.idleTimeout, CompactAt: rt.compactAt, CompactKeepTokens: rt.keepTokens, CompactionPrompt: rt.prompt, CompactionInputTokens: rt.inputTokens, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
@@ -409,14 +419,20 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
+	a.control, err = control.Start(data, a.StopAll)
+	if err != nil {
+		_ = a.Close()
+		return nil, fmt.Errorf("start agent control: %w", err)
+	}
 	return a, nil
 }
 
 // Close releases this agent's resources and directory lock.
 func (a *Agent) Close() error {
 	a.closeOnce.Do(func() {
+		controlErr := a.control.Close()
 		a.engine.Close()
-		a.closeErr = errors.Join(a.store.Close(), a.lock.Close())
+		a.closeErr = errors.Join(controlErr, a.store.Close(), a.lock.Close())
 	})
 	return a.closeErr
 }

@@ -61,6 +61,7 @@ runtime:
   tool_concurrency: 4
   subtask_limit: 4
   turn_token_budget: 200000
+  daily_token_budget: 1000000
   subtask_result_cap: 6000
   compact_at: 110000
   compact_keep_tokens: 22000
@@ -487,3 +488,13 @@ Custom Anthropic cache hints must put one-hour markers before five-minute
 markers in logical prompt order (tools, system, then messages). If hints
 violate that order, the adapter uses five minutes for the request’s cache
 markers, preserving omitted TTL fields and avoiding a longer billed lifetime.
+
+`runtime.daily_token_budget` caps agent tokens per UTC day (zero disables it).
+The persisted count includes cached tokens and all root/background/subtask
+usage; helper completions and compaction use estimates. The owner receives one
+80% warning each day. At the cap, new work and model requests are refused, but
+usage from requests already running may cross it. This local token cap is not a
+dollar or gateway billing ceiling.
+
+Run `nanite stop --all --dir <agent-directory>` to cancel the running agent's
+turns, subtasks and jobs. It stays stopped until closed and reopened.

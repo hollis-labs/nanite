@@ -45,6 +45,7 @@ var ErrBusy = errors.New("nanite: conversation is busy")
 var ErrNoInterrupted = errors.New("conversation has no interrupted turn")
 
 type Config struct {
+	DailyTokenBudget          int
 	MaxOutputTokens, MaxSteps int
 	AutoApprove               bool // Testing only; convert approval asks to allows, not denies.
 	Events                    events.Sink
@@ -133,6 +134,11 @@ type Config struct {
 }
 
 type Engine struct {
+	stopCtx     context.Context
+	stopCancel  context.CancelFunc
+	daily       dailyBudget
+	stopped     bool
+	stopDone    chan struct{}
 	profileMu   sync.Mutex
 	profiles    map[string]*turnProfile
 	profileBase definition.Definition
@@ -251,9 +257,13 @@ func New(cfg Config) (*Engine, error) {
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
 		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval,
 		steerers: make(map[string]*steering), toolJobs: make(chan struct{}, MaxBackgroundToolJobs)}
+	e.stopCtx, e.stopCancel = context.WithCancel(context.Background())
 	e.profiles = make(map[string]*turnProfile)
 	e.profileBase, err = definition.Load(cfg.Dir, cfg.GlobalSkillsDir)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.loadDaily(); err != nil {
 		return nil, err
 	}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
@@ -508,6 +518,12 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if e.closed {
 		return nil, fmt.Errorf("nanite: agent is closed")
 	}
+	if e.stopped {
+		return nil, ErrStopped
+	}
+	if err := e.checkDaily(); err != nil {
+		return nil, err
+	}
 	if e.active[id] != nil {
 		return nil, ErrBusy
 	}
@@ -564,6 +580,7 @@ func (e *Engine) newRunLocked(ctx context.Context, id, runID string) (*Run, cont
 func (e *Engine) Close() {
 	e.mu.Lock()
 	e.closed = true
+	e.stopCancel()
 	for id, q := range e.noticeSubs {
 		q.stop()
 		delete(e.noticeSubs, id)

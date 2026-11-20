@@ -90,6 +90,12 @@ func (e *Engine) Dispatch(ctx context.Context, id string, starts []subagent.Requ
 	if e.closed {
 		return nil, fmt.Errorf("nanite: agent is closed")
 	}
+	if e.stopped {
+		return nil, ErrStopped
+	}
+	if err := e.checkDaily(); err != nil {
+		return nil, err
+	}
 	if e.active[id] != nil {
 		return nil, ErrBusy
 	}

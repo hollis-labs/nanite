@@ -228,6 +228,10 @@ type Input struct {
 	// in front, the open windows, the layout). Input and Source are filled
 	// in by the engine. Nil when the host has none or steering is off.
 	Situation *steer.Situation
+	// Steer is steering run ahead of this message by Engine.Steer; the turn
+	// uses it instead of steering again. It must be for this conversation
+	// and text, and is used once.
+	Steer *PreparedSteer
 }
 
 // SourceNotice marks a turn started because a notice arrived. Its trace
@@ -240,6 +244,9 @@ const SourceNotice = "notice"
 const NoticeTurnText = "A notice arrived."
 
 func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error) {
+	if p := input.Steer; p != nil && (p.conversation != id || p.text != input.Text || input.Source != "") {
+		return nil, errors.New("nanite: Input.Steer was prepared for another message")
+	}
 	return e.startRun(ctx, id, input, false)
 }
 
@@ -438,6 +445,9 @@ func (e *Engine) Close() {
 		r.Cancel()
 	}
 	e.mu.Unlock()
+	e.steerMu.Lock()
+	clear(e.steerers)
+	e.steerMu.Unlock()
 	e.jobs.Close()
 	for _, r := range runs {
 		<-r.done

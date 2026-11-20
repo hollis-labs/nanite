@@ -14,6 +14,13 @@
   a mode; there is no model tool for it, and it is kept across restarts
   (store migration 8, `conversation_settings`).
 - `agent.Input.Situation`: what is in front of the person, for steering.
+- `Conversation.Steer` steers a person's message ahead of its turn, so a host
+  sees a reflex halt first; the turn takes the result in `Input.Steer`.
+  chatrunner steers before front-desk intake and does not plan a halted
+  message; `DeskOptions.Mode` defaults to the conversation's mode.
+- chatrunner `Options.Situation` (the situation for each turn) and
+  `Options.OnSteered` (each `Steered` event, with the reflex actions that
+  never go on the wire).
 - New event `Steered`, sent by chatrunner as the `nanite.steer` activity.
 - Dependencies: libs `agent/steer` v0.1.0, through the Substrate BOM (which
   also moves libs `harness/core` forward).

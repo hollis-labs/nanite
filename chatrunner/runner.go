@@ -13,6 +13,7 @@ import (
 	"time"
 
 	chat "github.com/hollis-labs/libs/agent/chat"
+	"github.com/hollis-labs/libs/agent/steer"
 	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
 	"github.com/hollis-labs/nanite/agent"
 )
@@ -58,6 +59,15 @@ type Options struct {
 	// composed messages. Nil leaves notices published one by one as they
 	// arrive. It needs Observe.
 	Desk *DeskOptions
+	// Situation, with Agent.Steering, says what is in front of the person
+	// for a turn (the window in front, the open windows, the layout), for
+	// steering. Nil steers with no situation.
+	Situation func(turn chat.Turn) steer.Situation
+	// OnSteered, with Agent.Steering, sees what steering decided for each
+	// root turn, including the reflex actions for the host to carry out.
+	// Those actions never go on the wire; the nanite.steer activity carries
+	// the rest.
+	OnSteered func(chatID string, s agent.Steered)
 }
 
 // Runner is a chat.Runner backed by one Nanite agent.
@@ -105,7 +115,11 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	}
 	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}, publishers: map[string]*publisher{}}
 	if opts.Desk != nil {
-		d, err := newDesk(r, *opts.Desk)
+		desk := *opts.Desk
+		if desk.Mode == nil && opts.Agent.Steering != nil {
+			desk.Mode = r.mode
+		}
+		d, err := newDesk(r, desk)
 		if err != nil {
 			return nil, err
 		}
@@ -128,6 +142,21 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	notices := a.SubscribeNotices(listen)
 	go r.listen(listen, notices)
 	return r, nil
+}
+
+// mode is a chat's deliberate mode, "" when it has none or no conversation
+// yet: the desk's default Mode when steering is on.
+func (r *Runner) mode(chatID string) string {
+	ctx := context.Background()
+	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	if err != nil {
+		return ""
+	}
+	m, err := c.Mode(ctx)
+	if err != nil {
+		return ""
+	}
+	return m
 }
 
 // Agent returns the Nanite agent, for its slots, skills and notices. Use
@@ -198,13 +227,27 @@ func TurnFromContext(ctx context.Context) (chat.Turn, bool) {
 // chat agent is told about the plan in the turn's context.
 func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	in := agent.Input{Text: turn.Text}
+	if r.opts.Situation != nil {
+		sit := r.opts.Situation(turn)
+		in.Situation = &sit
+	}
 	text := contextText(turn.Context)
 	var prelude []chatstream.Event
 	x, err := r.beginAfterDesk(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
+		halted := false
+		if r.desk != nil && r.opts.Agent.Steering != nil {
+			// Steer first: a reflex that halts answers the message, and the
+			// desk must not plan it.
+			prepared, err := c.Steer(runCtx, in)
+			if err != nil {
+				return nil, err
+			}
+			in.Steer, halted = prepared, prepared.Halted()
+		}
 		// The desk works only once the turn holds the conversation, so a
 		// turn that could not start has not answered or planned anything.
 		var plan *planRun
-		if r.desk != nil {
+		if r.desk != nil && !halted {
 			var note string
 			note, prelude, plan = r.desk.beforeTurn(runCtx, turn.ConversationID, turn.Text)
 			if note != "" {

@@ -143,6 +143,9 @@ func (x *run) Events() iter.Seq2[chatstream.Event, error] {
 		defer x.stop()
 		terminal := false
 		for ev := range x.inner.Events() {
+			if s, ok := ev.(agent.Steered); ok && x.runner.opts.OnSteered != nil {
+				x.runner.opts.OnSteered(x.turn.ConversationID, s)
+			}
 			for _, out := range x.translate(ev) {
 				terminal = terminal || out.IsTerminal()
 				if !yield(out, nil) {

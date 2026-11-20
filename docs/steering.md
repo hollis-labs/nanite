@@ -29,7 +29,12 @@ Steering runs for root conversations only; a subtask works under its variant.
 | --- | --- | --- | --- | --- |
 | A person's message | yes | yes | yes, if `Classify` is set | yes |
 | A notice turn | yes | yes | no | no |
-| A resumed turn | no | no | no | no |
+| A resumed turn | yes | no | no | no |
+
+Subtasks and `Dispatch` do not inherit the mode: a subtask conversation has
+none, and its turns are not steered. A notice or resumed turn keeps a preset
+the classifier applied (`auto`) on the person's last message, as long as the
+policy still applies it; it is not classified again.
 
 - **Mode.** The preset in force: the conversation's deliberate mode, otherwise
   a classified preset the policy applies, otherwise the registry's default. Its
@@ -49,12 +54,27 @@ Steering runs for root conversations only; a subtask works under its variant.
   situation, `Situation.Signals`, and whatever `Steering.StateFill` adds
   (unread mail, prefix tokens, scope tier).
 
+The host's hooks are guarded: a panic in `Slots`, `Reflexes`, `NewSelector`,
+the selector or `StateFill` leaves that turn unsteered, with a warning, and
+the turn still runs. The classifier gets 15 seconds per message; past that,
+or on an error, the message is not classified.
+
 Each root turn emits a `Steered` event before the model runs (chatrunner
 sends it as the `nanite.steer` activity). The turn's trace record carries the
 decision in its `situation`, `classified`, `why` and `fired` fields, with no
 prompt content: the views and module in front, the mode and its source, the
 layout, the turn source and the slots, but no message text, selection, window
-titles or signals.
+titles or signals. `fired` is null on a notice or resumed turn, where no
+reflex layer runs. A turn a reflex halted has `why` starting with `halted`,
+no provider or model, and no steps.
+
+## Steering ahead of the turn
+
+A host that acts on a message before its turn (chatrunner's front desk does)
+steers it first with `Conversation.Steer`. If the result is `Halted`, a reflex
+answered the message and nothing else should act on it. Send the turn with
+the result in `Input.Steer`: the turn uses it instead of steering again, so a
+reflex fires once. It is for that conversation and text only, and used once.
 
 ## Modes
 
@@ -69,6 +89,10 @@ titles or signals.
   preset becomes the deliberate mode, a work slot is pinned until the window in
   front changes. Only a suggestion for a known preset or offered slot is
   accepted.
+- The mode and reflex cooldowns are kept in the store (`conversation_settings`),
+  which rebuilding the index from the transcripts leaves alone. A slot pin is
+  kept in memory only: a restart, or a conversation idle for 30 minutes, drops
+  it. Owner changes to the mode are written to the store before they apply.
 
 **Layers.** Presets come from the shipped defaults, from modules, and from the
 app. A preset of the same name in a higher layer replaces a lower one whole,

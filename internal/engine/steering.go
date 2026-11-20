@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hollis-labs/libs/agent/core/reflexes"
@@ -57,11 +59,26 @@ const (
 	settingCooldowns = "reflex_cooldowns"
 )
 
+// classifyTimeout bounds the host's classifier on each person's message.
+var classifyTimeout = 15 * time.Second
+
+// steererIdle is how long a conversation's steering state is kept in memory
+// unused. Its mode and cooldowns are kept in the store; a slot pin is not.
+var steererIdle = 30 * time.Minute
+
 // steering is one root conversation's steering state.
 type steering struct {
 	steer     *steer.Steer
 	owner     *steer.OwnerControls
 	cooldowns *steer.MemoryCooldowns
+	// mu orders the owner's changes with what the store keeps, so the mode
+	// in memory is the mode on disk; it also guards last.
+	mu sync.Mutex
+	// last is the classified preset the latest person's turn applied. The
+	// notice and resumed turns after it keep that mode.
+	last *steer.FacetResult
+	// used is when the state was last asked for, under Engine.steerMu.
+	used time.Time
 }
 
 func (s *Steering) validate() error {
@@ -78,7 +95,7 @@ func (s *Steering) validate() error {
 
 // steerer is a root conversation's steering state: its mode, its selector's
 // pin and its reflexes' cooldowns. It is made on first use, with the mode and
-// cooldowns kept for the conversation.
+// cooldowns kept for the conversation, and dropped once it idles.
 func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, error) {
 	cfg := e.cfg.Steering
 	if cfg == nil {
@@ -86,7 +103,14 @@ func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, e
 	}
 	e.steerMu.Lock()
 	defer e.steerMu.Unlock()
+	now := time.Now()
+	for id, st := range e.steerers {
+		if id != conversation && now.Sub(st.used) > steererIdle {
+			delete(e.steerers, id)
+		}
+	}
 	if st, ok := e.steerers[conversation]; ok {
+		st.used = now
 		return st, nil
 	}
 	vocab := cfg.Vocabulary
@@ -127,19 +151,50 @@ func (e *Engine) steerer(ctx context.Context, conversation string) (*steering, e
 			e.cfg.Logger.WarnContext(ctx, "a conversation's mode is no longer registered", "conversation", conversation, "mode", mode)
 		}
 	}
-	st := &steering{steer: s, owner: owner, cooldowns: cooldowns}
+	st := &steering{steer: s, owner: owner, cooldowns: cooldowns, used: now}
 	e.steerers[conversation] = st
 	return st, nil
 }
 
-// rootConversation refuses a subtask conversation: only a root has a mode.
-func (e *Engine) rootConversation(ctx context.Context, id string) error {
+// rootSteerer is a root conversation's steering state; a subtask has none.
+func (e *Engine) rootSteerer(ctx context.Context, id string) (*steering, error) {
+	if e.cfg.Steering == nil {
+		return nil, ErrNoSteering
+	}
 	info, err := e.cfg.Store.Conversation(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if info.ParentID != "" {
-		return errors.New("nanite: only a root conversation has a mode")
+		return nil, errors.New("nanite: only a root conversation has a mode")
+	}
+	var st *steering
+	err = e.guardHost(id, func() (err error) {
+		st, err = e.steerer(ctx, id)
+		return err
+	})
+	return st, err
+}
+
+// knownPreset refuses a name the registry does not hold; "" is no mode.
+func (e *Engine) knownPreset(name string) error {
+	if name == "" {
+		return nil
+	}
+	if _, _, ok := e.cfg.Steering.Registry.Get(name); !ok {
+		return fmt.Errorf("%w: %s", steer.ErrUnknownPreset, name)
+	}
+	return nil
+}
+
+// keepMode records a conversation's deliberate mode, then applies it with
+// apply; if apply fails, the record goes back to prev. The caller holds st.mu.
+func (e *Engine) keepMode(ctx context.Context, conversation, prev, name string, apply func() error) error {
+	if err := e.cfg.Store.SetSetting(ctx, conversation, settingMode, name); err != nil {
+		return err
+	}
+	if err := apply(); err != nil {
+		return errors.Join(err, e.cfg.Store.SetSetting(context.WithoutCancel(ctx), conversation, settingMode, prev))
 	}
 	return nil
 }
@@ -148,25 +203,22 @@ func (e *Engine) rootConversation(ctx context.Context, id string) error {
 // it. It is kept across restarts. There is no model tool for this: a host
 // calls it when the person picks a mode.
 func (e *Engine) SetMode(ctx context.Context, conversation, name string) error {
-	if err := e.rootConversation(ctx, conversation); err != nil {
-		return err
-	}
-	st, err := e.steerer(ctx, conversation)
+	st, err := e.rootSteerer(ctx, conversation)
 	if err != nil {
 		return err
 	}
-	if err := st.owner.SetMode(name); err != nil {
+	if err := e.knownPreset(name); err != nil {
 		return err
 	}
-	return e.cfg.Store.SetSetting(ctx, conversation, settingMode, name)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	prev := st.steer.Modes().Current()
+	return e.keepMode(ctx, conversation, prev, name, func() error { return st.owner.SetMode(name) })
 }
 
 // Mode is a root conversation's deliberate mode, "" when none is set.
 func (e *Engine) Mode(ctx context.Context, conversation string) (string, error) {
-	if err := e.rootConversation(ctx, conversation); err != nil {
-		return "", err
-	}
-	st, err := e.steerer(ctx, conversation)
+	st, err := e.rootSteerer(ctx, conversation)
 	if err != nil {
 		return "", err
 	}
@@ -175,26 +227,34 @@ func (e *Engine) Mode(ctx context.Context, conversation string) (string, error) 
 
 // AcceptSuggestion applies a classifier suggestion the owner accepted: a
 // preset becomes the deliberate mode (and is kept), a slot is pinned until
-// the window in front changes. view is the view in front.
+// the window in front changes (in memory only). view is the view in front.
 func (e *Engine) AcceptSuggestion(ctx context.Context, conversation string, v steer.Verdict, view string) error {
-	if err := e.rootConversation(ctx, conversation); err != nil {
-		return err
-	}
-	st, err := e.steerer(ctx, conversation)
+	st, err := e.rootSteerer(ctx, conversation)
 	if err != nil {
 		return err
 	}
 	var all []steer.Slot
 	if e.cfg.Steering.Slots != nil {
-		all = e.cfg.Steering.Slots()
+		if err := e.guardHost(conversation, func() error { all = e.cfg.Steering.Slots(); return nil }); err != nil {
+			return err
+		}
 	}
-	if err := st.owner.Accept(v, view, all); err != nil {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if v.Facet != steer.FacetPreset || v.Outcome != steer.OutcomeSuggest {
+		return e.guardHost(conversation, func() error { return st.owner.Accept(v, view, all) })
+	}
+	if err := e.knownPreset(v.Label); err != nil {
 		return err
 	}
-	if v.Facet == steer.FacetPreset {
-		return e.cfg.Store.SetSetting(ctx, conversation, settingMode, v.Label)
-	}
-	return nil
+	prev := st.steer.Modes().Current()
+	return e.keepMode(ctx, conversation, prev, v.Label, func() error { return st.owner.Accept(v, view, all) })
+}
+
+// guardHost runs fn, which calls into the host's steering hooks, turning a
+// panic into an error.
+func (e *Engine) guardHost(conversation string, fn func() error) error {
+	return e.panics.Call("steering", fn, panics.With("conversation", conversation))
 }
 
 // steered is what steering adds to a turn.
@@ -202,15 +262,92 @@ type steered struct {
 	updates  []slots.Update
 	halt     string
 	decision steer.Decision
+	event    events.Steered
+}
+
+// steerKind is the kind of turn being steered.
+type steerKind int
+
+const (
+	// steerPerson is a person's message: reflexes and the classifier run.
+	steerPerson steerKind = iota
+	// steerNotice is a turn a notice started: the mode and work slots only.
+	steerNotice
+	// steerResumed is an interrupted turn resumed: the mode only.
+	steerResumed
+)
+
+// PreparedSteer is steering run ahead of a person's turn (Engine.Steer), so a
+// host sees a reflex halt before it does anything else with the message. The
+// turn sent with it in Input.Steer uses it instead of steering again.
+type PreparedSteer struct {
+	conversation string
+	text         string
+	out          *steered
+	taken        atomic.Bool
+}
+
+// Halted reports whether a reflex answered the message: its turn replies
+// with the reflex's message and calls no model.
+func (p *PreparedSteer) Halted() bool { return p != nil && p.out != nil && p.out.halt != "" }
+
+// take hands the prepared steering to the turn it was prepared for, once.
+func (p *PreparedSteer) take(conversation, text string) (*steered, error) {
+	if p.conversation != conversation || p.text != text {
+		return nil, errors.New("nanite: Input.Steer was prepared for another message")
+	}
+	if p.taken.Swap(true) {
+		return nil, errors.New("nanite: Input.Steer was already used by a turn")
+	}
+	return p.out, nil
+}
+
+// Steer runs steering for a person's message ahead of its turn: the mode,
+// work slots, classifier and reflexes, firing what fires (a reflex's
+// cooldown starts now). Send the turn with the result in Input.Steer.
+func (e *Engine) Steer(ctx context.Context, conversation string, input Input) (*PreparedSteer, error) {
+	if e.cfg.Steering == nil {
+		return nil, ErrNoSteering
+	}
+	if input.Source != "" {
+		return nil, errors.New("nanite: only a person's message is steered ahead of its turn")
+	}
+	info, err := e.cfg.Store.Conversation(ctx, conversation)
+	if err != nil {
+		return nil, err
+	}
+	if info.ParentID != "" {
+		return nil, errors.New("nanite: only a root conversation is steered")
+	}
+	out, err := e.steerTurn(ctx, info, input, steerPerson)
+	if err != nil {
+		return nil, err
+	}
+	return &PreparedSteer{conversation: conversation, text: input.Text, out: out}, nil
 }
 
 // priorSignals is how many earlier messages predicate reflexes see.
 const priorSignals = 8
 
-// steerTurn runs steering for a root turn and reports it on the run. A person's
-// message gets the classifier and the reflexes; a turn another source started
-// (a notice) gets only the mode in force.
-func (e *Engine) steerTurn(ctx context.Context, r *Run, info store.Conversation, input Input) (*steered, error) {
+// steerTurn runs steering for a root turn. A person's message gets the
+// classifier and the reflexes; a notice turn gets the mode in force and the
+// work slots; a resumed turn the mode only. A panic in the host's hooks (its
+// slots, reflexes, selector, state fill) leaves the turn unsteered, with a
+// warning: the result is nil.
+func (e *Engine) steerTurn(ctx context.Context, info store.Conversation, input Input, kind steerKind) (*steered, error) {
+	var out *steered
+	err := e.guardHost(info.ID, func() (err error) {
+		out, err = e.steerWith(ctx, info, input, kind)
+		return err
+	})
+	if _, ok := panics.Ref(err); ok {
+		e.cfg.Logger.WarnContext(ctx, "steering failed; the turn runs without it", "conversation", info.ID, "err", err.Error())
+		return nil, nil
+	}
+	return out, err
+}
+
+func (e *Engine) steerWith(ctx context.Context, info store.Conversation, input Input, kind steerKind) (*steered, error) {
 	cfg := e.cfg.Steering
 	st, err := e.steerer(ctx, info.ID)
 	if err != nil {
@@ -225,9 +362,9 @@ func (e *Engine) steerTurn(ctx context.Context, r *Run, info store.Conversation,
 	if input.Source != "" {
 		sit.Source = input.Source
 	}
-	person := input.Source == ""
+	person := kind == steerPerson
 	var all []steer.Slot
-	if cfg.Slots != nil {
+	if cfg.Slots != nil && kind != steerResumed {
 		all = cfg.Slots()
 	}
 	in := steer.Input{Sit: sit, Slots: all}
@@ -251,19 +388,41 @@ func (e *Engine) steerTurn(ctx context.Context, r *Run, info store.Conversation,
 			}
 		}
 		if cfg.Classify != nil {
+			cctx, cancel := context.WithTimeout(ctx, classifyTimeout)
 			err := e.panics.Call("classifier", func() (err error) {
-				in.Classified, err = cfg.Classify(ctx, sit, all)
+				in.Classified, err = cfg.Classify(cctx, sit, all)
 				return err
 			}, panics.With("conversation", info.ID))
+			cancel()
 			if err != nil {
 				in.Classified = nil
 				e.cfg.Logger.WarnContext(ctx, "the message was not classified", "err", e.scrub.Text(err.Error()))
 			}
 		}
+	} else {
+		// Keep the preset the last person's message was classified into.
+		st.mu.Lock()
+		if st.last != nil {
+			in.Classified = steer.Classification{steer.FacetPreset: *st.last}
+		}
+		st.mu.Unlock()
 	}
 	turn, err := st.steer.Prepare(ctx, in)
 	if err != nil {
 		e.cfg.Logger.WarnContext(ctx, "a reflex could not be evaluated or fired", "err", e.scrub.Text(err.Error()))
+	}
+	if person {
+		st.mu.Lock()
+		st.last = nil
+		if turn.Mode.Source == steer.SourceClassified {
+			r := in.Classified[steer.FacetPreset]
+			st.last = &r
+		}
+		st.mu.Unlock()
+	} else {
+		// Nothing was classified and no reflex layer ran for this turn.
+		turn.Decision.Classified, turn.Decision.Verdicts, turn.Decision.Fired = nil, nil, nil
+		turn.Suggestions, turn.Fired = nil, steer.Fired{}
 	}
 	if len(turn.Fired.Names) > 0 {
 		// Keep the cooldowns, so a restart does not fire these again too soon.
@@ -277,13 +436,17 @@ func (e *Engine) steerTurn(ctx context.Context, r *Run, info store.Conversation,
 	if text := modeText(turn.Mode.Preset); text != "" {
 		out.updates = append(out.updates, slots.Update{Slot: slots.Mode, Entry: slots.Entry{Owner: "steer", Key: "preset", Content: text}})
 	}
-	if text := workText(turn); text != "" {
-		out.updates = append(out.updates, slots.Update{Slot: slots.UserContext, Entry: slots.Entry{Owner: "steer", Key: "work", Content: text}})
+	if kind != steerResumed {
+		if text := workText(turn); text != "" {
+			out.updates = append(out.updates, slots.Update{Slot: slots.UserContext, Entry: slots.Entry{Owner: "steer", Key: "work", Content: text}})
+		}
 	}
-	r.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.Steered{EventMeta: meta, Mode: turn.Mode.Preset.Name, ModeSource: turn.Mode.Source, Slots: turn.Selection.Names(),
-			Why: turn.Selection.Why, Fired: turn.Fired.Names, Halted: out.halt != "", Suggestions: turn.Suggestions, Actions: turn.Fired.Actions}
-	})
+	out.event = events.Steered{Mode: turn.Mode.Preset.Name, ModeSource: turn.Mode.Source, Slots: turn.Selection.Names(),
+		Why: turn.Selection.Why, Fired: turn.Fired.Names, Halted: out.halt != "", Suggestions: turn.Suggestions, Actions: turn.Fired.Actions}
+	if kind == steerResumed {
+		out.event.Slots, out.event.Why = nil, ""
+		out.decision.Slots, out.decision.Why = nil, ""
+	}
 	return out, nil
 }
 

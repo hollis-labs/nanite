@@ -181,6 +181,16 @@ func (c *Conversation) Mode(ctx context.Context) (string, error) {
 	return c.agent.engine.Mode(ctx, c.id)
 }
 
+// Steer runs steering for a person's message ahead of its turn, for a host
+// that acts on the message before the turn (a front desk): if Halted, a
+// reflex answered it, and nothing else should act on it. Send the turn with
+// the result in Input.Steer, which then uses it instead of steering again;
+// a reflex's cooldown starts here. It returns ErrNoSteering when the agent
+// was opened without Steering.
+func (c *Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error) {
+	return c.agent.engine.Steer(ctx, c.id, in)
+}
+
 // AcceptSuggestion applies a classifier suggestion (from a Steered event)
 // the person accepted: a preset becomes the deliberate mode, a work slot is
 // pinned until the window in front changes. view is the view in front.

@@ -292,12 +292,29 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		e.cfg.Logger.WarnContext(ctx, warnings[i])
 	}
 	var steerOut *steered
-	if e.cfg.Steering != nil && depth == 0 && interrupted == nil {
-		if steerOut, err = e.steerTurn(ctx, r, info, input); err != nil {
+	if e.cfg.Steering != nil && depth == 0 {
+		switch {
+		case interrupted != nil:
+			steerOut, err = e.steerTurn(ctx, info, input, steerResumed)
+		case input.Steer != nil:
+			steerOut, err = input.Steer.take(info.ID, input.Text)
+		case input.Source != "":
+			steerOut, err = e.steerTurn(ctx, info, input, steerNotice)
+		default:
+			steerOut, err = e.steerTurn(ctx, info, input, steerPerson)
+		}
+		if err != nil {
 			return events.Result{}, err
 		}
+	}
+	if steerOut != nil {
 		input.Slots = append(append([]slots.Update(nil), input.Slots...), steerOut.updates...)
 		tr.rec.Situation, tr.rec.Classified, tr.rec.Why, tr.rec.Fired = steerOut.decision.TraceFields()
+		r.emit(ctx, func(meta events.EventMeta) events.Event {
+			ev := steerOut.event
+			ev.EventMeta = meta
+			return ev
+		})
 	}
 	pending, err := e.cfg.Store.PendingNotices(ctx, info.ID)
 	if err != nil {
@@ -398,6 +415,8 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		})
 		if steerOut != nil && steerOut.halt != "" {
 			// A reflex answered: the reply is its message, and no model is called.
+			tr.rec.Provider, tr.rec.Model = "", ""
+			tr.rec.Why = strings.TrimSuffix("halted; "+tr.rec.Why, "; ")
 			err = x.halt(ctx, steerOut.halt)
 		} else {
 			// Mark delivery only after a model request has received the session

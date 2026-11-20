@@ -22,3 +22,8 @@ var GeneralSlot = engine.GeneralSlot
 // ErrNoSteering is returned by the mode calls when the agent was opened
 // without Steering.
 var ErrNoSteering = engine.ErrNoSteering
+
+// PreparedSteer is steering run ahead of a person's message by
+// Conversation.Steer. Halted reports whether a reflex answered it; send the
+// turn with it in Input.Steer.
+type PreparedSteer = engine.PreparedSteer

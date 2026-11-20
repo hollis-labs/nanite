@@ -200,7 +200,12 @@ func (n *noticeTurn) Events() iter.Seq2[chatstream.Event, error] {
 			return
 		}
 		x, err := n.runner.begin(context.Background(), n.turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
-			return c.Send(runCtx, agent.Input{Source: agent.SourceNotice})
+			in := agent.Input{Source: agent.SourceNotice}
+			if n.runner.opts.Situation != nil {
+				sit := n.runner.opts.Situation(n.turn)
+				in.Situation = &sit
+			}
+			return c.Send(runCtx, in)
 		})
 		if err == nil {
 			x.notice = &n.notice

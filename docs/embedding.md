@@ -88,6 +88,12 @@ root turns (libs `agent/steer`). Pass what is in front of the person in
 `Input.Situation`, and set the mode only from the person's own choice with
 `Conversation.SetMode`. See [steering.md](steering.md).
 
+With chatrunner, `Options.Situation` supplies the situation for each turn,
+and `Options.OnSteered` sees each `Steered` event, including the reflex
+actions for the host, which never go on the wire. With a front desk, a message
+is steered before intake, a halted message is not planned, and
+`DeskOptions.Mode` defaults to the conversation's mode.
+
 ## Slot budgets
 
 Every slot except the agent's instructions has a token budget (estimated at

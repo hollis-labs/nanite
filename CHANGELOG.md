@@ -4,6 +4,13 @@
 
 Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
+- Code Mode evals: four scenarios (code search, research from a local corpus,
+  a tool-heavy chore, a council review through a lead variant), each run with
+  direct tool use and with `subtask`, compared from the trace records (parent
+  context tokens, total tokens, estimated cost, wall time, approvals). The
+  offline run uses a scripted model and runs in CI (`go test ./evals`);
+  `go run ./cmd/nanite-eval -live` runs them against the configured provider
+  under a per-run token cap and a dollar cap. See `docs/evals/code-mode.md`.
 - Breaking, tool call order: a step's calls now run in model order, and
   only consecutive calls that may run side by side (read-only tools and
   `subtask`) run together, bounded by `runtime.tool_concurrency`. Before,

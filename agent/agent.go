@@ -43,6 +43,13 @@ var (
 
 // Options configures an embedded agent.
 type Options struct {
+	// MaxOutputTokens overrides runtime.max_output_tokens when positive.
+	// Zero uses host.yaml; negative values are rejected.
+	MaxOutputTokens int
+	// MaxSteps overrides runtime.max_steps when positive. Zero uses
+	// host.yaml (50 by default); negative values are rejected. A limit
+	// permits one additional tool-less closing reply.
+	MaxSteps int
 	// Dir is the required authored agent directory.
 	Dir string
 	// DataDir defaults to .nanite inside Dir. When explicitly set, tool-package
@@ -257,6 +264,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 			return nil, fmt.Errorf("nanite: WorkDir %q must be an existing directory", opts.WorkDir)
 		}
 	}
+	if opts.MaxOutputTokens < 0 || opts.MaxSteps < 0 {
+		return nil, fmt.Errorf("nanite: MaxOutputTokens and MaxSteps must not be negative")
+	}
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
 	}
@@ -387,6 +397,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
+		MaxOutputTokens: opts.MaxOutputTokens, MaxSteps: opts.MaxSteps,
 		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: rt.idleTimeout, CompactAt: rt.compactAt, CompactKeepTokens: rt.keepTokens, CompactionPrompt: rt.prompt, CompactionInputTokens: rt.inputTokens, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})

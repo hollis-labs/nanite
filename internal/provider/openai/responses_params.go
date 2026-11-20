@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/provider/toolchoice"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
 	sdk "github.com/openai/openai-go/v3"
@@ -47,6 +48,9 @@ func buildResponseParams(ctx context.Context, req llmtypes.ChatRequest) (respons
 			fn.Description = sdk.String(tool.Description)
 		}
 		params.Tools = append(params.Tools, responses.ToolUnionParam{OfFunction: &fn})
+	}
+	if toolchoice.IsNone(ctx) {
+		params.ToolChoice.OfToolChoiceMode = sdk.Opt(responses.ToolChoiceOptionsNone)
 	}
 	return params, nil
 }

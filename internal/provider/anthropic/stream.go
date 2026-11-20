@@ -47,7 +47,7 @@ func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-cha
 	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
 	interleavedThinking := c.interleavedThinking(reasoningCfg, model)
-	params := c.buildMessageParams(in, model, interleavedThinking, reasoningCfg)
+	params := c.buildRequestParams(ctx, in, model, interleavedThinking, reasoningCfg)
 
 	// Marshal the params once so the rate-budget pre-flight estimate uses
 	// the exact bytes the SDK will send. Same heuristic as the deleted

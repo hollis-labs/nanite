@@ -60,6 +60,10 @@ type execution struct {
 	validators      map[string]recover.Validator
 	catalog         map[string]tools.Tool
 	specs           []llmtypes.ToolDefinition
+	deferredSpecs   map[string]llmtypes.ToolDefinition
+	described       map[string]bool
+	describeMu      sync.Mutex
+	toolNotes       string
 	loop            *loopdetect.Detector
 	result          events.Result
 	// lastRequestTokens is the input the provider reported for the latest
@@ -217,6 +221,12 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	if err != nil {
 		return events.Result{}, err
+	}
+	if e.cfg.MaxOutputTokens > 0 {
+		def.Runtime.MaxOutputTokens = e.cfg.MaxOutputTokens
+	}
+	if e.cfg.MaxSteps > 0 {
+		def.Runtime.MaxSteps = e.cfg.MaxSteps
 	}
 	pdp, err := permission.Rules(def.Snapshot.Profile.Permissions.Mode, def.Rules)
 	if err != nil {
@@ -390,6 +400,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
 		return events.Result{}, err
 	}
+	if slot := x.assembled.Window.Slot(ctxpkg.SlotTools); slot != nil {
+		x.toolNotes = slot.Content
+	}
 	x.sizeWindow()
 	if x.schemaTokens > 0 {
 		// The trace shows the tool schemas' share of the request.
@@ -494,6 +507,9 @@ func (e *Engine) finalizeInterrupted(ctx context.Context, conversation string, t
 		return events.Result{}, err
 	}
 	record := store.Turn{ID: turn.ID, UserMessageID: turn.UserMessageID, Status: "completed", StopReason: llmtypes.StopReasonEndTurn}
+	if plan.ClosingReason != "" {
+		record.StopReason = plan.ClosingReason
+	}
 	if planErr != nil {
 		record.Status = "failed"
 		record.Error = planErr.Error()
@@ -568,6 +584,7 @@ func (x *execution) generate(ctx context.Context) error {
 	var runErr error
 	var retries int
 	var allText strings.Builder
+	var lastRequest llmtypes.ChatRequest
 	blocks := make([]llmtypes.SlotBlock, 0, len(x.assembled.Blocks))
 	for _, b := range x.assembled.Blocks {
 		if x.engine.placement(slots.Name(b.SlotName)) == slots.InTurn {
@@ -576,14 +593,20 @@ func (x *execution) generate(ctx context.Context) error {
 		blocks = append(blocks, llmtypes.SlotBlock{Name: b.SlotName, Content: b.Content, Changed: b.Changed, CacheKey: b.CacheKey})
 	}
 	request := func(ctx context.Context) (attempt, runloop.Directive) {
+		// Resumed tool steps must not spend a fresh step allowance.
+		if x.result.Steps >= x.definition.Runtime.MaxSteps {
+			x.result.Steps = x.definition.Runtime.MaxSteps
+			x.run.steps.Store(int64(x.result.Steps))
+			x.result.StopReason = events.StopMaxSteps
+			return attempt{}, runloop.Finish
+		}
 		if ctx.Err() != nil {
 			runErr = ctx.Err()
 			return attempt{}, runloop.Terminate
 		}
 		req := llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens,
-			SlotBlocks: blocks, Messages: requestMessages(x.messages, x.messageIDs), Tools: x.specs, CacheHints: []llmtypes.CacheHint{
-				{Position: "system", TTL: x.definition.Runtime.CacheTTL}, {Position: "tools", TTL: x.definition.Runtime.CacheTTL}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
-			}}
+			SlotBlocks: blocks, Messages: requestMessages(x.messages, x.messageIDs), Tools: x.specs, CacheHints: x.cacheHints()}
+		lastRequest = req
 		safeModel := x.engine.scrub.Text(req.Model)
 		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)
 		callCtx, cancelCall := context.WithCancel(keepalive.WithIdle(spanCtx, x.engine.idleTimeout()))
@@ -638,6 +661,7 @@ func (x *execution) generate(ctx context.Context) error {
 		if runErr = x.callTools(ctx, got.calls); runErr != nil {
 			return runloop.Terminate
 		}
+		x.promoteTools()
 		if x.returned.Load() {
 			// return_result ends a subtask: the parent has what it needs.
 			x.result.StopReason = llmtypes.StopReasonEndTurn
@@ -659,6 +683,15 @@ func (x *execution) generate(ctx context.Context) error {
 	_, err := runloop.Execute[attempt, step](ctx, runloop.Ports[attempt, step]{
 		Request: request, Consume: consume, Settle: settle, Finalize: func(context.Context) runloop.Directive { return runloop.Finish },
 	})
+	if runErr == nil && err == nil && (x.result.StopReason == events.StopMaxSteps || x.result.StopReason == llmtypes.StopReasonTurnLimit) && x.budgetStop() == "" {
+		if lastRequest.Model == "" {
+			lastRequest = llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens, SlotBlocks: blocks, Tools: x.specs,
+				CacheHints: x.cacheHints()}
+		}
+		if closeErr := x.engine.panics.Call("closing reply", func() error { return x.closingReply(ctx, lastRequest, &allText) }); closeErr != nil {
+			x.engine.cfg.Logger.WarnContext(ctx, "closing reply failed; preserving limit result", "error", x.engine.scrub.Text(closeErr.Error()))
+		}
+	}
 	x.result.Text = x.engine.scrub.Text(allText.String())
 	if x.result.StopReason == "" && runErr == nil {
 		x.result.StopReason = llmtypes.StopReasonEndTurn
@@ -1127,4 +1160,11 @@ func dispositionName(d slots.Disposition) string {
 	case slots.Skip:
 	}
 	return "skip"
+}
+
+// cacheHints marks the system prompt, tools and two most recent user messages
+// for prompt caching; host.yaml's runtime.cache_ttl applies to system and tools.
+func (x *execution) cacheHints() []llmtypes.CacheHint {
+	ttl := x.definition.Runtime.CacheTTL
+	return []llmtypes.CacheHint{{Position: "system", TTL: ttl}, {Position: "tools", TTL: ttl}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1}}
 }

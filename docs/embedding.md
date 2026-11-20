@@ -178,6 +178,45 @@ reply, the transcript or the events. A stream that receives no frames at all
 still stalls. There is no `host.yaml` key for the idle timeout yet; it needs
 a field in libs `agent/agentdir`.
 
+## Turn limits and deferred schemas
+
+`Options.MaxOutputTokens` and `Options.MaxSteps` override the matching
+`host.yaml` runtime limits when positive. Zero keeps the authored value
+(and the default of 50 steps); negative values are rejected. The options
+also apply to subtasks, whose variant budgets may narrow the step limit.
+
+A turn that reaches `max_steps` or a provider turn limit makes one best-effort
+closing request with `tool_choice: none`, retaining the preceding request's
+tool schemas and cache hints. The original stop reason and step count are
+preserved; closing usage counts, but errors are logged without failing the
+turn. The closing prompt is journaled. A resumed turn at its step limit
+cannot run more tool steps. Text-length stops (`max_tokens`) finish without
+an extra reply, as do exhausted token or wall-clock budgets.
+
+For large host tool catalogs, set `Deferred: true` on tools that are not
+needed in every turn:
+
+```go
+tool := agent.Tool{
+    Name: "report_lookup",
+    Description: "Look up a saved report.",
+    Deferred: true,
+    ReadOnly: true,
+    InputSchema: schema,
+    Handler: lookupReport,
+}
+```
+
+Ordinary tools are sent with full schemas. Deferred tools appear by name
+and a one-line description (up to 240 characters) in `tool_describe`.
+Calling `tool_describe` with `{"name":"report_lookup"}` returns the full
+schema and adds it to subsequent requests in that turn. The next turn
+starts with the compact catalog again. Promotion changes the tools prefix,
+so it can invalidate the prompt cache for the rest of that turn. Discovery honors subtask tool
+filters and tool calls still pass through normal permissions and input
+validation. `tool_describe` is reserved and only offered when there are
+deferred tools.
+
 ## Choosing the built-in tools
 
 The application decides what its embedded agent can do. An agent whose

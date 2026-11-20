@@ -504,7 +504,7 @@ func TestWallBudgetStopsAChildMidStep(t *testing.T) {
 }
 
 func TestStepBudgetOnlyNarrows(t *testing.T) {
-	p := &routedProvider{root: fake.New(subtaskCall("roomy", "child work", false)),
+	p := &routedProvider{root: fake.New(subtaskCall("roomy", "child work", false), fake.Text("parent closing")),
 		children: map[string]*fake.Provider{"child work": fake.New(toolResponse("unknown"), toolResponse("unknown"), fake.Text("never"))}}
 	e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
 	writeVariant(t, e.cfg.Dir, "roomy", "---\nbudgets:\n  steps: 5\n---\nTake your time.\n")

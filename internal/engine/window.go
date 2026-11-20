@@ -41,10 +41,10 @@ func (x *execution) sizeWindow() {
 	}
 	content := string(raw)
 	x.schemaTokens = ctxpkg.DefaultEstimator{}.Estimate(content)
-	if host := window.Slot(ctxpkg.SlotTools); host != nil && host.Content != "" {
+	if x.toolNotes != "" {
 		// Host-written tool notes are in the request's system blocks; count
 		// both.
-		content = host.Content + "\n" + content
+		content = x.toolNotes + "\n" + content
 	}
 	window.SetContent(ctxpkg.SlotTools, content)
 }

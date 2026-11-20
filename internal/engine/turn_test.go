@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
+	"github.com/hollis-labs/nanite/internal/provider/toolchoice"
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -98,7 +99,11 @@ func TestToolResultPairingAndStepLimit(t *testing.T) {
 				t.Fatalf("result %+v, %v", result, err)
 			}
 			h, err := db.History(t.Context(), id)
-			if err != nil || len(h) != tc.steps+2 || !h[2].Blocks[0].IsError || h[2].Blocks[0].ToolUseID != h[1].Blocks[0].ID ||
+			wantMessages := tc.steps + 2
+			if tc.stop == "max_steps" {
+				wantMessages += 2
+			}
+			if err != nil || len(h) != wantMessages || !h[2].Blocks[0].IsError || h[2].Blocks[0].ToolUseID != h[1].Blocks[0].ID ||
 				!strings.Contains(h[2].Blocks[0].Content, "unavailable") {
 				t.Fatalf("history %+v, %v", h, err)
 			}
@@ -164,13 +169,15 @@ func TestPartialStreamFailure(t *testing.T) {
 
 type watchedProvider struct {
 	llmcontracts.Provider
-	requests  []llmtypes.ChatRequest
-	summaries int
+	requests       []llmtypes.ChatRequest
+	toolChoiceNone []bool
+	summaries      int
 }
 
 func (p *watchedProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	req.Messages = append([]llmtypes.ChatMessage(nil), req.Messages...)
 	p.requests = append(p.requests, req)
+	p.toolChoiceNone = append(p.toolChoiceNone, toolchoice.IsNone(ctx))
 	return p.Provider.StreamChat(ctx, req)
 }
 

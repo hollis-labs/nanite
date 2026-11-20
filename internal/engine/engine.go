@@ -45,9 +45,10 @@ var ErrBusy = errors.New("nanite: conversation is busy")
 var ErrNoInterrupted = errors.New("conversation has no interrupted turn")
 
 type Config struct {
-	Events               events.Sink
-	Logger               *slog.Logger
-	Dir, GlobalSkillsDir string
+	MaxOutputTokens, MaxSteps int
+	Events                    events.Sink
+	Logger                    *slog.Logger
+	Dir, GlobalSkillsDir      string
 	// ToolPackageEnv names credential-like host variables tool packages may
 	// pass through (authored.CheckToolEnv).
 	ToolPackageEnv []string

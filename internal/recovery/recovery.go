@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -48,7 +49,12 @@ func Recover(ctx context.Context, db *store.Store) error {
 
 const SyntheticResult = "interrupted before completion; not retried"
 
+// ClosingPromptPrefix marks a persisted closing prompt. It records the limit
+// reason and separates the closing reply from counted tool-capable steps.
+const ClosingPromptPrefix = "nanite_closing_reply:"
+
 type Plan struct {
+	ClosingReason string
 	UserText      string
 	AssistantText string
 	Steps         int
@@ -68,6 +74,11 @@ func ResumePlan(history []store.Message, turn store.InterruptedTurn) (Plan, erro
 		}
 		switch m.Role {
 		case "user":
+			for _, b := range m.Blocks {
+				if strings.HasPrefix(b.Name, ClosingPromptPrefix) {
+					out.ClosingReason = strings.TrimPrefix(b.Name, ClosingPromptPrefix)
+				}
+			}
 			if m.ID == turn.UserMessageID {
 				userFound = true
 				for _, b := range m.Blocks {
@@ -77,7 +88,9 @@ func ResumePlan(history []store.Message, turn store.InterruptedTurn) (Plan, erro
 				}
 			}
 		case "assistant":
-			out.Steps++
+			if out.ClosingReason == "" {
+				out.Steps++
+			}
 			sawSynthetic = false
 			for _, b := range m.Blocks {
 				if b.Type == "text" {

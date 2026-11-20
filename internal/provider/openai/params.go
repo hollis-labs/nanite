@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/provider/toolchoice"
 	"strings"
 
 	llmtypes "github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -225,4 +227,12 @@ func textOf(m llmtypes.ChatMessage) string {
 		return m.Content
 	}
 	return b.String()
+}
+
+func buildChatParamsForContext(ctx context.Context, req llmtypes.ChatRequest) (sdk.ChatCompletionNewParams, error) {
+	params, err := buildChatParams(req)
+	if err == nil && toolchoice.IsNone(ctx) {
+		params.ToolChoice.OfAuto = sdk.String("none")
+	}
+	return params, err
 }

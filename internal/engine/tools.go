@@ -93,7 +93,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 		x.validators[tool.Name] = recover.NewValidator(tool.InputSchema)
 		x.specs = append(x.specs, llmtypes.ToolDefinition{Name: tool.Name, Description: tool.Description, InputSchema: schema})
 	}
-	return nil
+	return x.deferTools()
 }
 
 // authorize decides a call. asked reports that the decision came from the

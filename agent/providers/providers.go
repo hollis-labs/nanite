@@ -106,8 +106,8 @@ type WardenOptions struct {
 
 // NewWarden builds a Warden from the identity of the agent in dir
 // (authored.LoadIdentity(dir)), which must have a warden section whose
-// credential file is outside dir. It reads nothing until the first token is
-// needed.
+// credential file is outside dir. dir must be the path given to
+// LoadIdentity. It reads nothing until the first token is needed.
 func NewWarden(dir string, id authored.Identity, opts WardenOptions) (*Warden, error) {
 	if dir == "" {
 		return nil, errors.New("providers: NewWarden needs the agent directory")

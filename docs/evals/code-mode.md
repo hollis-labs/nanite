@@ -188,8 +188,8 @@ usage are charged their whole reservation.
 - **`inventory` did not test the result cap.** Despite the instruction to collect long lists
   through `research`, the model read the files itself in both subtask arms. No subtask ran, so
   nothing was stored or fetched (0 parent fetches anywhere in the run).
-- **Approvals** were as expected: 6 in each `chore` run (relayed from no subtask, since none
-  ran), and 1 in each `history` run.
+- **Approvals** were as expected: 6 in each `chore` run, all the parent's own because no subtask
+  ran, and 1 in each `history` run.
 - **Compactions:** none.
 
 ## Recommendations

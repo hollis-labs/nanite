@@ -119,8 +119,9 @@ func (s *Source) saveWaiters(k string, e *entry) {
 }
 
 // sweepWaiters releases abandoned in-memory associations too. It runs outside
-// token-entry locks, so concurrent token requests never acquire each other's
-// locks while retaining their own.
+// token-entry locks and skips an entry that is busy (a mint can hold its lock
+// across calls to Warden), so a token request never waits on another
+// audience's mint; the busy entry prunes itself under its own lock.
 func (s *Source) sweepWaiters() {
 	s.mu.Lock()
 	entries := make(map[string]*entry, len(s.tokens))
@@ -129,7 +130,9 @@ func (s *Source) sweepWaiters() {
 	}
 	s.mu.Unlock()
 	for k, e := range entries {
-		e.mu.Lock()
+		if !e.mu.TryLock() {
+			continue
+		}
 		if pruneLiveWaiters(e, s.cfg.Now()) {
 			s.saveWaiters(k, e)
 		}

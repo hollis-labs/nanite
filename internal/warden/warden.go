@@ -454,10 +454,18 @@ func (s *Source) Request(ctx context.Context, id string) (Waiting, error) {
 // Decided tells the source a grant request has been decided. On approval
 // ("approved" or "granted") the next token request looks it up at once
 // instead of waiting out the recheck interval; on any other decision the
-// request is forgotten, so the next token request files a new one.
+// request is forgotten ("denied", "expired" or "withdrawn"), so the next
+// token request files a new one. An empty or unknown status is not a
+// decision and changes nothing.
 func (s *Source) Decided(id, status string) {
-	status = strings.ToLower(strings.TrimSpace(status))
-	approved := status == "approved" || status == "granted"
+	var approved bool
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "approved", "granted":
+		approved = true
+	case "denied", "expired", "withdrawn":
+	default:
+		return
+	}
 	s.mu.Lock()
 	entries := make(map[string]*entry, len(s.tokens))
 	for k, e := range s.tokens {

@@ -137,6 +137,12 @@ func packageNodes(root *os.Root, dir string) ([]packageNode, [32]byte, error) {
 // packageDigest retains the original content digest format. Only a bounded
 // cache of metadata fingerprints and final digests survives between calls.
 func packageDigest(root *os.Root, dir string) (string, error) {
+	return packageDigestWithReader(root, dir, readPackageFile)
+}
+
+// Inject the read operation to exercise changes between the two metadata
+// snapshots deterministically. Production always uses readPackageFile.
+func packageDigestWithReader(root *os.Root, dir string, read func(*os.Root, string, fs.FileInfo, int64) ([]byte, error)) (string, error) {
 	nodes, signature, err := packageNodes(root, dir)
 	if err != nil {
 		return "", fmt.Errorf("digest: %w", err)
@@ -161,7 +167,7 @@ func packageDigest(root *os.Root, dir string) (string, error) {
 		case n.info.Mode()&fs.ModeSymlink != 0:
 			_, _ = fmt.Fprintf(h, "link\x00%s\x00%s\x00", n.rel, n.target)
 		default:
-			data, err := readPackageFile(root, n.path, n.info, remaining)
+			data, err := read(root, n.path, n.info, remaining)
 			if err != nil {
 				return "", fmt.Errorf("digest: %w", err)
 			}

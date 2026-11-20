@@ -90,12 +90,28 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		return tools.Result{}, err
 	}
 	now := time.Now().UTC()
-	child := store.Conversation{ID: store.NewID(now), ParentID: x.info.ID, Role: variant.Name, Title: subtaskTitle(request.Goal), Status: "active", CreatedAt: now, UpdatedAt: now}
+	// The goal is scrubbed before it is stored or reported anywhere.
+	child := store.Conversation{ID: store.NewID(now), ParentID: x.info.ID, Role: variant.Name, Title: subtaskTitle(e.scrub.Text(request.Goal)), Status: "active", CreatedAt: now, UpdatedAt: now}
 	if err := e.cfg.Store.CreateConversation(ctx, child); err != nil {
 		release()
 		return tools.Result{}, err
 	}
 	e.openSubtask(child.ID, schema)
+	// A relayed ask names the root's subtask call that started this chain.
+	rootCall := callIDFrom(ctx)
+	if x.origin != nil {
+		rootCall = x.origin.CallID
+	}
+	e.mu.Lock()
+	e.subtaskCalls[child.ID] = rootCall
+	e.mu.Unlock()
+	// Once the child ends, its call mapping and its own grants go too.
+	forget := func() {
+		e.mu.Lock()
+		delete(e.subtaskCalls, child.ID)
+		delete(e.grants, child.ID)
+		e.mu.Unlock()
+	}
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: message}) }
 	if request.Background {
 		spec, _ := json.Marshal(struct {
@@ -112,6 +128,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 				}
 				return background.Task{Wait: func() background.Outcome {
 					defer release()
+					defer forget()
 					defer stopWall()
 					result, err := run.Wait()
 					status, reason := subtaskStatus(jobCtx, runCtx, result, err)
@@ -119,6 +136,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 					bg := context.WithoutCancel(jobCtx)
 					e.reportUsage(bg, x.info.ID, child.ID, result.Usage)
 					out := e.composeSubtaskResult(bg, x.info.ID, child.ID, variant, result, status, reason, returned)
+					// A person's refusal overrides an ok or partial ending,
+					// whatever the child returned.
+					out.Status, out.Reason = withDenials(out.Status, out.Reason, e.takeDenials(child.ID))
 					outcome, marshalErr := outcomeFor(out, err)
 					if marshalErr != nil {
 						outcome = background.Outcome{Err: marshalErr}
@@ -132,6 +152,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 			// The release is idempotent if the job already joined the child.
 			release()
 			e.closeSubtask(child.ID)
+			forget()
 			return tools.Result{}, err
 		}
 		x.emitSubtaskStarted(ctx, child, request)
@@ -140,6 +161,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	}
 	defer release()
 	defer e.closeSubtask(child.ID)
+	defer forget()
 	runCtx, stopWall := wallContext(ctx, variant)
 	defer stopWall()
 	run, err := start(runCtx)
@@ -151,6 +173,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)
 	out := e.composeSubtaskResult(ctx, x.info.ID, child.ID, variant, result, status, reason, e.closeSubtask(child.ID))
+	// A person's refusal overrides an ok or partial ending, whatever the
+	// child returned.
+	out.Status, out.Reason = withDenials(out.Status, out.Reason, e.takeDenials(child.ID))
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Variant: variant.Name, Status: string(out.Status), Result: result, Err: err, Limit: events.LimitReason(result.StopReason)}
 	})
@@ -185,6 +210,24 @@ func subtaskStatus(parent, run context.Context, result events.Result, err error)
 	default:
 		return subagent.StatusPartial, result.StopReason
 	}
+}
+
+// withDenials turns an ok or partial ending into denied when a person
+// refused an approval the subtask relayed; limits, errors and cancellation
+// keep their own status. A refusal no person gave (a default gate, a gate
+// failure, an expiry) is only the tool's own error result.
+func withDenials(status subagent.Status, reason string, denied []denial) (subagent.Status, string) {
+	if len(denied) == 0 || (status != subagent.StatusOK && status != subagent.StatusPartial) {
+		return status, reason
+	}
+	return subagent.StatusDenied, denialReason(denied)
+}
+
+// subtaskCall is the root's subtask call that started a child's chain.
+func (e *Engine) subtaskCall(child string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.subtaskCalls[child]
 }
 
 func parenthesize(reason string) string {
@@ -234,8 +277,11 @@ func subtaskTitle(goal string) string {
 	if r := []rune(goal); len(r) > 60 {
 		goal = string(r[:59]) + "…"
 	}
-	return "Subtask: " + goal
+	return subtaskTitlePrefix + goal
 }
+
+// subtaskTitlePrefix starts a child conversation's title, before its goal.
+const subtaskTitlePrefix = "Subtask: "
 
 func (x *execution) emitSubtaskStarted(ctx context.Context, child store.Conversation, request subagent.Request) {
 	goal := x.engine.scrub.Text(request.Goal)

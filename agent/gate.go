@@ -10,6 +10,11 @@ type Gate = permission.Gate
 // conversation and turn IDs, side-effect metadata, and the reason for asking.
 type PermissionRequest = permission.PermissionRequest
 
+// SubtaskOrigin attributes an approval request or question that a subtask
+// relayed to its root conversation: the child conversation, its variant and
+// goal, and its depth below the root.
+type SubtaskOrigin = permission.SubtaskOrigin
+
 // PermissionScope determines how long an approval can satisfy later asks.
 type PermissionScope = permission.PermissionScope
 

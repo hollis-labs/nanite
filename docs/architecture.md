@@ -313,6 +313,56 @@ Background Bash uses the same permission check, environment, and denylist as
 foreground Bash. A job can outlive its turn and streams bounded, redacted output
 to `.nanite/jobs/`. The status tool includes the current 8 KiB log tail. Completion writes a notice for the parent conversation.
 
+
+### Subtask approvals and questions
+
+A subtask inherits its root conversation's permissions. Its calls are
+evaluated as the root's: the same `permissions.yaml` and mode, and the host
+PDP with the root's conversation as scope and the root's role. The PDP
+request ID is `<child>:<call>`, and the request context adds
+`subtask_variant` (the variant, for rules that treat subtasks differently),
+`subtask_conversation` and `subtask_depth`. A variant only narrows which
+tools a subtask is offered; it never loosens a decision.
+
+Grants flow down, never up or across. An allow for the conversation covers
+the conversation it was given on and the subtasks under it: one given in the
+root covers every subtask, and one given on a subtask's relayed ask covers
+that subtask and its own subtasks only, not the root or a sibling.
+
+A call those rules and grants do not cover is relayed to the root: the
+`agent.Gate` gets a `PermissionRequest` with the root's `ConversationID`, ID
+`<child>:<call>` and `Subtask` (child conversation, variant, scrubbed goal,
+depth, and the root's subtask call ID), and the root's turn reports the
+matching `PermissionAsked` and `PermissionResolved`. Only the asking subtask
+waits. An MCP elicitation inside a subtask is relayed the same way, as a
+`Question` on the root's turn with `Subtask` set.
+
+One ask is open at a time per root conversation: the root's own approvals and
+questions and every relayed one take turns, each holding the turn from its
+`PermissionAsked` (or `Question`) to its answer, so prompts never overlap and
+the stream shows asks in the order the gate gets them.
+
+A gate decides how far an allow reaches. chatrunner's chat cards for a
+subtask's ask take only a once answer; the REPL's "always" for a subtask's ask
+covers that subtask and its own subtasks.
+
+A refusal reaches the subtask as a tool result with the gate's reason. A
+subtask that then ends normally reports status `denied` (reason `approval
+denied for <tool>: <reason>`) only when a person refused: a gate sets
+`PermissionDecision.Human` for an answer a person gave. A default gate, a
+gate failure, an expiry or a policy is not a person's refusal. Only the
+engine sets `denied`, after the subtask ends, so it overrides an `ok` or
+`partial` the child returned; `return_result` refuses `denied`.
+
+A background subtask may ask after the turn that started it has ended. A
+notice tells the root conversation that an ask is waiting (it is withdrawn if
+the ask ends before a turn shows it), and the ask is put to the root's next
+turn. An ask still open when a turn ends, that nobody
+answered, is asked again on the next turn. After `Options.SubtaskAskWait`
+(default 30 minutes) in total without a root turn to ask on, the ask ends
+denied with reason `unanswered`. It also ends when the subtask is cancelled or
+reaches its wall budget.
+
 ## Recovery and observability
 
 On open, Nanite marks running turns as interrupted and running jobs as lost.

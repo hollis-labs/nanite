@@ -12,17 +12,23 @@ import (
 func (e *Engine) Notices() <-chan store.Notice { return e.notices }
 
 func (e *Engine) PostNotice(ctx context.Context, conversation, kind, body string) error {
+	_, err := e.postNotice(ctx, conversation, kind, body)
+	return err
+}
+
+// postNotice posts a notice and returns its ID.
+func (e *Engine) postNotice(ctx context.Context, conversation, kind, body string) (string, error) {
 	notice := store.Notice{ID: store.NewID(time.Now()), ConversationID: conversation, Kind: kind, Body: e.scrub.Text(body)}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
-		return fmt.Errorf("nanite: agent is closed")
+		return "", fmt.Errorf("nanite: agent is closed")
 	}
 	if err := e.cfg.Store.AddNotice(ctx, notice); err != nil {
-		return err
+		return "", err
 	}
 	e.sendNoticeLocked(notice)
-	return nil
+	return notice.ID, nil
 }
 
 func (e *Engine) publishNotice(notice store.Notice) {

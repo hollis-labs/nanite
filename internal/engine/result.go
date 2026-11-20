@@ -69,6 +69,10 @@ const maxValidationError = 600
 func (x *execution) returnResult(_ context.Context, in subagent.Return) (tools.Result, error) {
 	switch in.Status {
 	case subagent.StatusOK, subagent.StatusPartial, subagent.StatusError:
+	case subagent.StatusDenied:
+		// Only the engine reports denied, when a person refused an approval
+		// the subtask asked for; a child cannot claim it.
+		return tools.Result{}, fmt.Errorf("status denied is set by the engine when a person refuses an approval, not by return_result; use ok, partial or error and say what was refused in reason")
 	default:
 		return tools.Result{}, fmt.Errorf("status must be ok, partial or error")
 	}
@@ -319,6 +323,8 @@ func outcomeFor(out subtaskResult, runErr error) (background.Outcome, error) {
 		outcome.Limit = out.Reason
 	case subagent.StatusPartial:
 		outcome.Reason = out.Reason
+	case subagent.StatusDenied:
+		outcome.Reason = subagent.DeniedPrefix + out.Reason
 	case subagent.StatusCancelled:
 		outcome.Err = runErr
 		if outcome.Err == nil || !errors.Is(outcome.Err, context.Canceled) {

@@ -11,11 +11,27 @@ type Gate interface {
 }
 
 // PermissionRequest describes a tool call awaiting approval.
+//
+// A subtask's request is relayed to its root conversation: ConversationID is
+// then the root's, and Subtask names the child that asked.
 type PermissionRequest struct {
 	ID, ConversationID, TurnID, Tool string
 	Input                            json.RawMessage
 	ReadOnly, Destructive            bool
 	Reason                           string
+	Subtask                          *SubtaskOrigin `json:",omitempty"`
+}
+
+// SubtaskOrigin attributes a relayed approval or question to the subtask that
+// asked: its child conversation, variant, goal and depth below the root.
+type SubtaskOrigin struct {
+	ChildID string `json:"child_id"`
+	Variant string `json:"variant"`
+	Goal    string `json:"goal"`
+	Depth   int    `json:"depth"`
+	// CallID is the root conversation's subtask tool call that started this
+	// subtask's chain, so a client can attach the ask to it.
+	CallID string `json:"call_id,omitempty"`
 }
 
 // PermissionScope determines how long an approval applies.
@@ -33,6 +49,10 @@ type PermissionDecision struct {
 	Allow  bool
 	Scope  PermissionScope
 	Reason string
+	// Human is set by a gate when a person gave this answer, as opposed to a
+	// default, a timeout or a policy. A subtask reports status "denied" only
+	// for a refusal a person gave.
+	Human bool
 }
 
 type staticGate bool

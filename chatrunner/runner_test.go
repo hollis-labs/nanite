@@ -61,7 +61,19 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 			steps++
 		}
 	}
+	if goal, ok := strings.CutPrefix(script, "Goal: "); ok {
+		// A subtask's first message: its goal is the child's script.
+		script, _, _ = strings.Cut(goal, "\n")
+	}
 	switch {
+	case strings.HasPrefix(script, "subtask:"):
+		// "subtask:<variant>:<goal>" starts one subtask, then says "done".
+		if steps > 0 {
+			return fake.Text("done")
+		}
+		variant, goal, _ := strings.Cut(strings.TrimPrefix(script, "subtask:"), ":")
+		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-sub", Name: "subtask",
+			Input: map[string]any{"variant": variant, "goal": goal, "return_spec": "a line"}}}, {Type: llmtypes.EventDone}}}
 	case script == "long":
 		return fake.Response{Stall: true, Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "working"}}}
 	case script == "overflow" && !b.overflowed:
@@ -124,7 +136,7 @@ func (h *host) ran(tool string) int32 {
 
 const schema = `{"type":"object","properties":{"note":{"type":"string"}}}`
 
-func newHost(t *testing.T) *host {
+func newHost(t *testing.T, builtins ...agent.BuiltinGroup) *host {
 	t.Helper()
 	dir := t.TempDir()
 	definition := "---\nschema_version: \"2\"\ndefinition_id: def:chat-test\nrevision: \"1\"\nname: chat-test\ndescription: Chat test.\nbehavior:\n  purpose: Test.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: default\ncontinuity:\n  mode: durable\n---\nTest instructions.\n"
@@ -149,7 +161,7 @@ func newHost(t *testing.T) *host {
 			}}
 	}
 	r, err := chatrunner.Open(t.Context(), chatrunner.Options{
-		Agent: agent.Options{Dir: dir, Provider: h.brain, GlobalSkillsDir: "-"},
+		Agent: agent.Options{Dir: dir, Provider: h.brain, GlobalSkillsDir: "-", Builtins: builtins},
 		Tools: []chatrunner.Tool{
 			tool("read_note", chatrunner.LevelRead), tool("ping", chatrunner.LevelAct),
 			tool("write_note", chatrunner.LevelWrite), tool("wipe", chatrunner.LevelConfirm), tool("unmarked", ""),

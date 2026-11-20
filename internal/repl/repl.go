@@ -77,6 +77,11 @@ func (t Terminal) Decide(ctx context.Context, request permission.PermissionReque
 			return permission.PermissionDecision{}, err
 		}
 	}
+	if o := request.Subtask; o != nil {
+		if _, err := fmt.Fprintf(t.Output, "Subtask %q (%s, depth %d) asks; \"always\" covers this subtask and its own subtasks only:\n", o.Goal, o.Variant, o.Depth); err != nil {
+			return permission.PermissionDecision{}, err
+		}
+	}
 	if _, err := fmt.Fprintf(t.Output, "Allow %s (%s)? [y/N/always] ", request.Tool, request.Reason); err != nil {
 		return permission.PermissionDecision{}, err
 	}
@@ -86,11 +91,11 @@ func (t Terminal) Decide(ctx context.Context, request permission.PermissionReque
 	}
 	switch strings.TrimSpace(strings.ToLower(value)) {
 	case "y", "yes":
-		return permission.PermissionDecision{Allow: true, Reason: "approved at terminal"}, nil
+		return permission.PermissionDecision{Allow: true, Reason: "approved at terminal", Human: true}, nil
 	case "always":
-		return permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "approved for conversation"}, nil
+		return permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "approved for conversation", Human: true}, nil
 	default:
-		return permission.PermissionDecision{Reason: "denied at terminal"}, nil
+		return permission.PermissionDecision{Reason: "denied at terminal", Human: true}, nil
 	}
 }
 
@@ -266,6 +271,11 @@ func Output(run *engine.Run, format string, out io.Writer) error {
 func (t Terminal) answer(ctx context.Context, run *engine.Run, q events.Question) error {
 	var schema struct{ Type string }
 	_ = json.Unmarshal(q.Schema, &schema)
+	if o := q.Subtask; o != nil {
+		if _, err := fmt.Fprintf(t.Output, "\nSubtask %q (%s, depth %d) asks:", o.Goal, o.Variant, o.Depth); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(t.Output, "\n%s\n", q.Prompt); err != nil {
 		return err
 	}

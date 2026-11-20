@@ -45,6 +45,9 @@ type Config struct {
 	ProviderConfig provider.Config
 	Store          *store.Store
 	Gate           permission.Gate
+	// AskWait bounds how long a subtask's relayed ask waits, in total, for
+	// its root conversation to have a running turn; zero is DefaultAskWait.
+	AskWait        time.Duration
 	PDP            policy.PDP
 	Slots          *slots.Store
 	SlotSources    []slots.Source
@@ -74,14 +77,26 @@ type Engine struct {
 	active   map[string]*Run
 	previous map[string]map[string]string
 	grants   map[string]map[string]bool
-	closed   bool
-	scrub    *redact.Redactor
-	runtime  *events.Runtime
-	jobs     *background.Manager
-	children subagent.Limit
-	notices  chan store.Notice
-	mcp      *mcpclient.Client
-	cache    *toolresult.Cache
+	// changed is closed and replaced each time a run starts or ends, so a
+	// subtask waiting to relay an ask to its root conversation can wait for
+	// the root's next run.
+	changed chan struct{}
+	// askSlots holds one open ask at a time per root conversation.
+	askSlots map[string]chan struct{}
+	// denials are the approvals a person refused a subtask, by child
+	// conversation; the subtask's status reads them once it ends.
+	denials map[string][]denial
+	// subtaskCalls maps a child conversation to the root's tool call that
+	// started its subtask chain, so a relayed ask can name it.
+	subtaskCalls map[string]string
+	closed       bool
+	scrub        *redact.Redactor
+	runtime      *events.Runtime
+	jobs         *background.Manager
+	children     subagent.Limit
+	notices      chan store.Notice
+	mcp          *mcpclient.Client
+	cache        *toolresult.Cache
 	// subtaskResults stores over-cap subtask results in the same table as
 	// cache, for subtaskResultTTL rather than an hour (result.go).
 	subtaskResults *toolresult.Cache
@@ -121,7 +136,8 @@ func New(cfg Config) (*Engine, error) {
 		// preview would break its JSON.
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
 		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
-		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
+		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(),
+		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string)}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	// Expired tool results, cached for an hour or stored subtask results for
 	// 30 days, share one table; clear them once when the agent opens.
@@ -306,6 +322,7 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	prev := maps.Clone(e.previous[id])
 	state := e.cfg.Slots.Snapshot()
 	e.active[id] = r
+	e.signalLocked()
 	hostTools, hostSkills := e.cfg.Tools.Snapshot(), e.cfg.Skills.Snapshot()
 	e.panics.Go("turn", func() {
 		e.execute(ctx, r, info, input, state, prev, hostTools, hostSkills, interrupted)

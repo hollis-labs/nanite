@@ -84,7 +84,7 @@ func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, erro
 	}
 	properties += "}"
 	description := "Delegate a focused goal to a child conversation and get back its result, not its tool traffic. " +
-		"The result has a status: ok, partial, limit (stopped at a step, token or time budget; the result is incomplete), error or cancelled. Variants:" + listing.String()
+		"The result has a status: ok, partial, limit (stopped at a step, token or time budget; the result is incomplete), error, cancelled, or denied (the owner refused an approval it asked for). Variants:" + listing.String()
 	return specResult(subagent.ToolName, description, properties, []string{"goal", "return_spec", "variant"}, false, run)
 }
 

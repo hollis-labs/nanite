@@ -96,10 +96,19 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 	principal := "urn:nanite:agent:" + url.PathEscape(x.definition.Snapshot.Definition.DefinitionID)
 	req := permission.PermissionRequest{ID: call.ID, ConversationID: x.info.ID, TurnID: x.run.id, Tool: t.Name,
 		Input: x.engine.scrub.Bytes(raw), ReadOnly: t.ReadOnly, Destructive: t.Destructive}
+	// A subtask inherits its root conversation's permissions: it is evaluated
+	// as the root (scope and role), so the same rules, host PDP and grants
+	// apply. The variant has already narrowed which tools it is offered.
+	evalReq, role := req, x.info.Role
+	var extra map[string]any
+	if x.origin != nil {
+		evalReq.ID, evalReq.ConversationID, role = x.relayID(req.ID), x.root.ID, x.root.Role
+		extra = map[string]any{"subtask_variant": x.origin.Variant, "subtask_conversation": x.info.ID, "subtask_depth": x.origin.Depth}
+	}
 	// A panic while deciding fails closed: the call is denied.
 	var effect policy.Decision
 	err := x.engine.panics.Call("permission policy", func() (err error) {
-		effect, err = permission.Evaluate(ctx, x.engine.cfg.Logger, x.engine.cfg.PDP, x.policy, principal, x.info.Role, req, call.Input)
+		effect, err = permission.Evaluate(ctx, x.engine.cfg.Logger, x.engine.cfg.PDP, x.policy, principal, role, evalReq, call.Input, extra)
 		return err
 	}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
 	decision := permission.PermissionDecision{Allow: effect.Effect == policy.Allow && err == nil, Reason: effect.Reason}
@@ -108,31 +117,34 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 	}
 	if effect.Effect == policy.Ask && err == nil {
 		asked = true
-		e := x.engine
-		e.mu.Lock()
-		granted := e.grants[x.info.ID][t.Name]
-		e.mu.Unlock()
-		if granted {
+		// A conversation-scope allow covers the conversation it was given on
+		// and the subtasks under it: a root's grant reaches its children, a
+		// subtask's never reaches its parent or siblings.
+		if x.granted(t.Name) {
 			decision = permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "conversation approval"}
 		} else {
 			req.Reason = x.engine.scrub.Text(effect.Reason)
-			x.run.emit(ctx, func(meta events.EventMeta) events.Event { return events.PermissionAsked{EventMeta: meta, Request: req} })
 			gateReq := req
 			gateReq.Input = raw
-			err = e.panics.Call("approval gate", func() (err error) {
-				decision, err = e.cfg.Gate.Decide(ctx, gateReq)
-				return err
-			}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
-			if err != nil {
-				decision = permission.PermissionDecision{Reason: "approval gate failed"}
+			if x.origin != nil {
+				decision = x.relayApproval(ctx, req, gateReq)
+			} else {
+				// The root's own ask holds the ask slot from PermissionAsked
+				// through PermissionResolved, below.
+				release, err := x.engine.askTurn(ctx, x.root.ID)
+				if err != nil {
+					decision = permission.PermissionDecision{Reason: "approval not asked: " + err.Error()}
+				} else {
+					defer release()
+					x.run.emit(ctx, func(meta events.EventMeta) events.Event { return events.PermissionAsked{EventMeta: meta, Request: req} })
+					if askGap > 0 {
+						time.Sleep(askGap)
+					}
+					decision = x.decide(ctx, gateReq)
+				}
 			}
 			if decision.Allow && decision.Scope == permission.ScopeConversation {
-				e.mu.Lock()
-				if e.grants[x.info.ID] == nil {
-					e.grants[x.info.ID] = make(map[string]bool)
-				}
-				e.grants[x.info.ID][t.Name] = true
-				e.mu.Unlock()
+				x.engine.grant(x.info.ID, t.Name)
 			}
 		}
 	}
@@ -251,7 +263,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		var result tools.Result
 		// A panicking tool yields an error result carrying the panic ref.
 		err := x.engine.panics.Call("tool "+call.Name, func() (err error) {
-			result, err = x.catalog[call.Name].Handler(x.askContext(toolCtx, call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
+			result, err = x.catalog[call.Name].Handler(x.askContext(context.WithValue(toolCtx, callIDKey{}, call.ID), call.Name), tools.Call{ID: call.ID, Name: call.Name, Input: args[i]})
 			return err
 		}, panics.With("conversation", x.info.ID), panics.With("call", call.ID))
 		if err != nil {
@@ -312,17 +324,37 @@ func (x *execution) cancelledTools(calls []llmtypes.ToolUseBlock) error {
 	return x.message("tool", blocks)
 }
 
+// ask asks the root conversation's own question, one ask at a time.
 func (x *execution) ask(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error) {
-	return x.run.ask(ctx, x.engine.scrub.Text(prompt), schema, x.engine.scrub.Bytes(schema))
+	release, err := x.engine.askTurn(ctx, x.root.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return x.run.ask(ctx, x.engine.scrub.Text(prompt), schema, x.engine.scrub.Bytes(schema), nil)
 }
 
+// callIDKey carries the tool call ID into its handler's context.
+type callIDKey struct{}
+
+func callIDFrom(ctx context.Context) string {
+	id, _ := ctx.Value(callIDKey{}).(string)
+	return id
+}
+
+// askContext gives an MCP tool call the conversation's way to answer an
+// elicitation: a root chat asks on its own run; a subtask under a root chat
+// relays the question to the root, attributed to the subtask.
 func (x *execution) askContext(ctx context.Context, tool string) context.Context {
 	if !strings.HasPrefix(tool, "mcp__") {
 		return ctx
 	}
 	var ask mcpclient.Ask
-	if x.info.ParentID == "" && x.info.Role == "chat" {
+	if x.root.ParentID == "" && x.root.Role == "chat" {
 		ask = x.ask
+		if x.origin != nil {
+			ask = x.relayQuestion
+		}
 	}
 	return mcpclient.WithAsk(ctx, ask)
 }

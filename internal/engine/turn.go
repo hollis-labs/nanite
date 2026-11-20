@@ -70,6 +70,15 @@ type execution struct {
 	variant  subagent.Variant
 	chain    []subagent.Variant
 	depth    int
+	// root is the conversation at the top of this one's subtask chain (this
+	// conversation itself at depth 0). A subtask is evaluated under the
+	// root's permissions and grants, and relays the asks they do not cover
+	// to the root, attributed by origin (nil at depth 0).
+	root   store.Conversation
+	origin *permission.SubtaskOrigin
+	// lineage is this conversation and those above it, nearest first: the
+	// conversations whose grants cover it.
+	lineage []string
 	// deadline is the child's wall-clock budget, checked between steps.
 	deadline time.Time
 	// usageMu guards result.Usage, which subtask handlers add child usage to.
@@ -133,6 +142,7 @@ func (e *Engine) release(id string, r *Run, finish func()) {
 	defer e.mu.Unlock()
 	if e.active[id] == r {
 		delete(e.active, id)
+		e.signalLocked()
 	}
 	finish()
 }
@@ -179,13 +189,21 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	var variant subagent.Variant
 	var chain []subagent.Variant
 	depth := 0
+	root := info
+	lineage := []string{info.ID}
 	if info.ParentID != "" {
 		depth = 1
 		parentInfo, err := e.cfg.Store.Conversation(ctx, info.ParentID)
 		if err != nil {
 			return events.Result{}, err
 		}
+		root = parentInfo
+		lineage = append(lineage, parentInfo.ID)
 		if parentInfo.ParentID != "" {
+			if root, err = e.cfg.Store.Conversation(ctx, parentInfo.ParentID); err != nil {
+				return events.Result{}, err
+			}
+			lineage = append(lineage, root.ID)
 			// A depth-2 child is also bound by the lead variant that started it.
 			depth = 2
 			lead, ok := variants[parentInfo.Role]
@@ -263,7 +281,12 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	}
 	x := &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
-		variants: variants, variant: variant, chain: chain, depth: depth}
+		variants: variants, variant: variant, chain: chain, depth: depth, root: root, lineage: lineage}
+	if depth > 0 {
+		// The title's goal was scrubbed when the child was created.
+		x.origin = &permission.SubtaskOrigin{ChildID: info.ID, Variant: variant.Name, Goal: strings.TrimPrefix(info.Title, subtaskTitlePrefix),
+			Depth: depth, CallID: e.subtaskCall(info.ID)}
+	}
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)
 	}

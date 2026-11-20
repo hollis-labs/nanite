@@ -260,3 +260,65 @@ func TestDeskRequiresObserve(t *testing.T) {
 		t.Fatalf("open without Observe: %v", err)
 	}
 }
+
+// A plan accepted while a turn runs starts when the turn ends.
+func TestDeskAcceptWhileATurnRuns(t *testing.T) {
+	plan := desk.Plan{Confidence: 0.5, Items: []desk.PlanItem{
+		{ID: "a", Kind: desk.KindResearch, Goal: "report:alpha-result"},
+		{ID: "b", Kind: desk.KindResearch, Goal: "report:beta-result"},
+	}}
+	w := newWiredWith(t, false, &chatrunner.DeskOptions{
+		Intake: desk.Intake{Mode: desk.IntakeSuggest, Planner: fixedPlanner{plan}},
+		Policy: mergePolicy(200 * time.Millisecond),
+	})
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: twoSteps}); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	w.until(t, "the suggestion", func(ev chatstream.Event) bool {
+		if ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityDeskPlan {
+			id, _ = activityValue(t, ev)["id"].(string)
+		}
+		return ev.IsTerminal()
+	})
+	// A turn the runner runs holds the conversation.
+	x, err := w.runner.Start(t.Context(), chat.Turn{ConversationID: w.conv, Text: "long"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.runner.Desk().AcceptPlan(t.Context(), w.conv, id, nil); err != nil {
+		t.Fatalf("accept while a turn runs: %v", err)
+	}
+	topic := w.runner.Desk().Ledger().List(nil)[0]
+	if len(topic.InFlight()) != 2 || topic.Work[0].State != desk.WorkPlanned {
+		t.Fatalf("work started under a running turn: %+v", topic.Work)
+	}
+	x.Cancel()
+	for range x.Events() {
+	}
+	w.deskNotices(t, "the accepted plan's results", "alpha-result", "beta-result")
+}
+
+// An item whose dispatch keeps failing is given up after a few attempts
+// and the owner is told.
+func TestDeskGivesUpOnAnItemThatCannotStart(t *testing.T) {
+	plan := desk.Plan{Confidence: 0.95, Items: []desk.PlanItem{
+		{ID: "a", Kind: desk.KindResearch, Goal: "report:alpha-result"},
+		{ID: "b", Kind: desk.KindResearch, Goal: "report:beta-result"},
+	}}
+	w := newWiredWith(t, false, &chatrunner.DeskOptions{
+		Intake:   desk.Intake{Mode: desk.IntakeAuto, Planner: fixedPlanner{plan}},
+		Policy:   mergePolicy(200 * time.Millisecond),
+		Variants: map[desk.WorkKind]string{desk.KindResearch: "no-such-variant"},
+	})
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: twoSteps}); err != nil {
+		t.Fatal(err)
+	}
+	w.deskNotices(t, "the failures", "Failed: report:alpha-result: could not start", "Failed: report:beta-result: could not start")
+	topic := w.runner.Desk().Ledger().List(nil)[0]
+	for _, work := range topic.Work {
+		if work.State != desk.WorkFailed {
+			t.Fatalf("work %+v", work)
+		}
+	}
+}

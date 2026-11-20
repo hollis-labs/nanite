@@ -69,11 +69,29 @@ type Desk struct {
 	policy desk.Policy
 	logger *slog.Logger
 
-	mu    sync.Mutex
-	chats map[string]*deskChat // by chat conversation ID
-	jobs  map[string]*planRun  // background job ID → its plan
-	seq   int
+	// advancing serializes advances, so two never race each other for
+	// the conversation.
+	advancing sync.Mutex
+
+	mu      sync.Mutex
+	chats   map[string]*deskChat // by chat conversation ID
+	jobs    map[string]*planRun  // background job ID → its plan
+	workers map[string]*noticeWorker
+	seq     int
 }
+
+// noticeWorker handles one Nanite conversation's notices in order, so a
+// slow host call (Delegate, a dispatch) holds up only that conversation.
+type noticeWorker struct {
+	mu    sync.Mutex
+	queue []agent.NoticePosted
+	done  bool
+	wake  chan struct{}
+}
+
+// maxDispatchAttempts is how many times an item's dispatch may fail
+// (other than for a held conversation) before it is marked failed.
+const maxDispatchAttempts = 3
 
 type deskChat struct {
 	editor    *desk.Editor
@@ -89,8 +107,9 @@ type planRun struct {
 	chatID string
 	topic  desk.TopicID
 	plan   desk.Plan
-	state  map[string]desk.WorkState // item ID → state
-	result map[string]string         // item ID → result text
+	state    map[string]desk.WorkState // item ID → state
+	result   map[string]string         // item ID → result text
+	attempts map[string]int            // item ID → failed dispatch attempts
 	asked  map[string]string         // item ID → question ID, while open
 	refs   map[desk.Ref]string       // delegated ref → item ID
 }
@@ -147,7 +166,7 @@ func newDesk(r *Runner, opts DeskOptions) (*Desk, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Desk{r: r, opts: opts, ledger: ledger, policy: policy, logger: logger, chats: map[string]*deskChat{}, jobs: map[string]*planRun{}}, nil
+	return &Desk{r: r, opts: opts, ledger: ledger, policy: policy, logger: logger, chats: map[string]*deskChat{}, jobs: map[string]*planRun{}, workers: map[string]*noticeWorker{}}, nil
 }
 
 // Ledger returns the desk's topic ledger.
@@ -296,7 +315,7 @@ func (d *Desk) newRun(chatID string, p desk.Plan) (*planRun, error) {
 	}
 	d.mu.Lock()
 	run := &planRun{id: d.nextID("plan-"), chatID: chatID, topic: topic, plan: p, state: map[string]desk.WorkState{},
-		result: map[string]string{}, asked: map[string]string{}, refs: map[desk.Ref]string{}}
+		result: map[string]string{}, asked: map[string]string{}, refs: map[desk.Ref]string{}, attempts: map[string]int{}}
 	d.mu.Unlock()
 	for _, it := range p.Items {
 		run.state[it.ID] = desk.WorkPlanned
@@ -311,8 +330,7 @@ func (d *Desk) newRun(chatID string, p desk.Plan) (*planRun, error) {
 }
 
 // AcceptPlan runs a suggested plan, as suggested or as the owner edited
-// it. The conversation must be idle; while a turn runs it fails with
-// agent.ErrBusy and the plan stays suggested.
+// it. Its first steps start now, or as soon as a running turn ends.
 func (d *Desk) AcceptPlan(ctx context.Context, chatID, planID string, edited *desk.Plan) error {
 	d.mu.Lock()
 	proposed, ok := d.chat(chatID).suggested[planID]
@@ -328,10 +346,11 @@ func (d *Desk) AcceptPlan(ctx context.Context, chatID, planID string, edited *de
 	if err := final.Validate(); err != nil {
 		return err
 	}
-	if d.r.activeRun(ConversationID(chatID)) != nil {
-		return fmt.Errorf("chatrunner: %w", agent.ErrBusy)
-	}
 	d.mu.Lock()
+	if _, still := d.chat(chatID).suggested[planID]; !still {
+		d.mu.Unlock()
+		return fmt.Errorf("chatrunner: no suggested plan %q", planID)
+	}
 	delete(d.chat(chatID).suggested, planID)
 	d.mu.Unlock()
 	if d.opts.OnCorrection != nil {
@@ -340,7 +359,10 @@ func (d *Desk) AcceptPlan(ctx context.Context, chatID, planID string, edited *de
 	if _, err := d.newRun(chatID, final); err != nil {
 		return err
 	}
-	return d.advance(ctx, chatID)
+	if err := d.advance(ctx, chatID); err != nil && !errors.Is(err, agent.ErrBusy) {
+		return err
+	}
+	return nil
 }
 
 // DeclinePlan drops a suggested plan.
@@ -376,11 +398,17 @@ func (d *Desk) Complete(ctx context.Context, ref desk.Ref, ok bool, result strin
 		return fmt.Errorf("chatrunner: no delegated work for %s", ref)
 	}
 	d.finish(run, item, ok, result)
-	return d.advance(ctx, run.chatID)
+	if err := d.advance(ctx, run.chatID); err != nil && !errors.Is(err, agent.ErrBusy) {
+		return err
+	}
+	return nil
 }
 
 // answerOpen takes the owner's message as the answer to the desk's open
-// questions on the chat: the chat agent asked them on the last turn.
+// questions on the chat that have reached the owner (a question the
+// editor still holds has not been asked yet). The owner's next message is
+// taken as the answer: the desk has no way to tell an answer from a new
+// subject, so a plan with a question suits a conversation about that plan.
 func (d *Desk) answerOpen(chatID, text string) {
 	d.mu.Lock()
 	type open struct {
@@ -389,9 +417,15 @@ func (d *Desk) answerOpen(chatID, text string) {
 	}
 	var answered []open
 	if c := d.chats[chatID]; c != nil {
+		held := map[string]bool{}
+		for _, q := range c.editor.Pending() {
+			held[q.Item.ID] = true
+		}
 		for _, p := range c.plans {
 			for item, q := range p.asked {
-				answered = append(answered, open{p, item, q})
+				if !held[p.workID(item)] {
+					answered = append(answered, open{p, item, q})
+				}
 			}
 		}
 	}
@@ -431,6 +465,15 @@ func (d *Desk) advance(ctx context.Context, chatID string) error {
 // conversation directly (the caller holds it, as a turn does before it
 // sends), otherwise it takes the conversation like a host dispatch.
 func (d *Desk) advanceWith(ctx context.Context, chatID string, c *agent.Conversation) error {
+	if c == nil {
+		// A turn holding the conversation (c set) needs no lock: nothing
+		// else can dispatch on it meanwhile.
+		d.advancing.Lock()
+		defer d.advancing.Unlock()
+	}
+	if d.r.isClosed() {
+		return nil
+	}
 	var subtasks []pick
 	var asks []pick
 	var delegates []pick
@@ -489,12 +532,26 @@ func (d *Desk) advanceWith(ctx context.Context, chatID string, c *agent.Conversa
 	if len(subtasks) > 0 {
 		err = d.dispatch(ctx, chatID, c, subtasks)
 		if err != nil {
-			// Put them back to start later.
+			// Put them back to start later. A held conversation is
+			// retried when its run ends; any other failure counts, and an
+			// item that keeps failing is given up.
+			busy := errors.Is(err, agent.ErrBusy)
+			var failed []pick
 			d.mu.Lock()
 			for _, p := range subtasks {
 				p.run.state[p.item.ID] = desk.WorkPlanned
+				if !busy {
+					p.run.attempts[p.item.ID]++
+					if p.run.attempts[p.item.ID] >= maxDispatchAttempts {
+						failed = append(failed, p)
+					}
+				}
 			}
 			d.mu.Unlock()
+			for _, p := range failed {
+				d.finish(p.run, p.item.ID, false, "could not start: "+err.Error())
+				d.submit(chatID, desk.Item{ID: p.run.workID(p.item.ID), Topic: p.run.topic, Kind: desk.ItemFailure, Title: p.item.Goal, Text: "could not start: " + err.Error(), Source: "desk"})
+			}
 		}
 	}
 	d.prune(chatID)
@@ -624,9 +681,17 @@ func (d *Desk) notice(ctx context.Context, n agent.NoticePosted) {
 	if n.Kind == "subtask_ask" {
 		item.Kind = desk.ItemQuestion
 	}
-	run, job := d.jobFor(n.Body)
+	run, job := d.jobFor(n)
+	var ok bool
+	var result string
 	if run != nil {
-		ok, result := d.jobOutcome(ctx, n.ConversationID, job)
+		var finished bool
+		finished, ok, result = d.jobOutcome(ctx, n.ConversationID, job)
+		if !finished {
+			run = nil // not its finish: a question or progress from it
+		}
+	}
+	if run != nil {
 		d.mu.Lock()
 		itemID := run.refs[desk.Ref{Kind: "job", ID: job}]
 		d.mu.Unlock()
@@ -658,28 +723,118 @@ func (d *Desk) notice(ctx context.Context, n agent.NoticePosted) {
 	d.submit(chatID, item)
 }
 
-// jobFor finds the desk job a notice is about: the notice names its job.
-func (d *Desk) jobFor(body string) (*planRun, string) {
+// subtaskJobKind is the kind of the notice a background subtask's finish
+// posts.
+const subtaskJobKind = "subagent"
+
+// notIDRune separates the words of a notice when looking for a job ID.
+func notIDRune(r rune) bool {
+	idRune := r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r == '_' || r == '-'
+	return !idRune
+}
+
+// queue hands a notice to its conversation's worker, starting one when
+// there is none.
+func (d *Desk) queue(ctx context.Context, n agent.NoticePosted) {
+	d.r.mu.Lock()
+	defer d.r.mu.Unlock()
+	if d.r.closed {
+		return
+	}
+	d.mu.Lock()
+	w := d.workers[n.ConversationID]
+	d.mu.Unlock()
+	if w != nil && w.push(n) {
+		return
+	}
+	w = &noticeWorker{wake: make(chan struct{}, 1)}
+	w.push(n)
+	d.mu.Lock()
+	d.workers[n.ConversationID] = w
+	d.mu.Unlock()
+	d.r.publishing.Add(1)
+	go func(key string) {
+		defer d.r.publishing.Done()
+		w.run(ctx, d)
+		d.mu.Lock()
+		if d.workers[key] == w {
+			delete(d.workers, key)
+		}
+		d.mu.Unlock()
+	}(n.ConversationID)
+}
+
+func (w *noticeWorker) push(n agent.NoticePosted) bool {
+	w.mu.Lock()
+	if w.done {
+		w.mu.Unlock()
+		return false
+	}
+	w.queue = append(w.queue, n)
+	w.mu.Unlock()
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (w *noticeWorker) run(ctx context.Context, d *Desk) {
+	idle := time.NewTimer(publisherIdle)
+	defer idle.Stop()
+	for {
+		w.mu.Lock()
+		if len(w.queue) == 0 {
+			w.mu.Unlock()
+			select {
+			case <-w.wake:
+				continue
+			case <-ctx.Done():
+			case <-idle.C:
+			}
+			w.mu.Lock()
+			if len(w.queue) == 0 || ctx.Err() != nil {
+				w.done = true
+				w.mu.Unlock()
+				return
+			}
+			w.mu.Unlock()
+			continue
+		}
+		n := w.queue[0]
+		w.queue = w.queue[1:]
+		w.mu.Unlock()
+		d.notice(ctx, n)
+		idle.Reset(publisherIdle)
+	}
+}
+
+// jobFor finds the desk job whose finish a notice reports: a subtask job
+// notice naming the job's ID as a word.
+func (d *Desk) jobFor(n agent.NoticePosted) (*planRun, string) {
+	if n.Kind != subtaskJobKind {
+		return nil, ""
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	for job, run := range d.jobs {
-		if strings.Contains(body, job) {
-			return run, job
+	for _, word := range strings.FieldsFunc(n.Body, notIDRune) {
+		if run := d.jobs[word]; run != nil {
+			return run, word
 		}
 	}
 	return nil, ""
 }
 
-// jobOutcome reads a finished job: whether it succeeded and its result as
-// text for the owner and later steps.
-func (d *Desk) jobOutcome(ctx context.Context, naniteID, job string) (bool, string) {
+// jobOutcome reads a job: whether it has finished, whether it succeeded,
+// and its result as text for the owner and later steps.
+func (d *Desk) jobOutcome(ctx context.Context, naniteID, job string) (finished, ok bool, text string) {
 	c, err := d.r.agent.Conversation(ctx, naniteID)
 	if err != nil {
-		return false, err.Error()
+		return true, false, err.Error()
 	}
 	raw, err := c.Job(ctx, job)
 	if err != nil {
-		return false, err.Error()
+		return true, false, err.Error()
 	}
 	var view struct {
 		Status string          `json:"status"`
@@ -688,19 +843,22 @@ func (d *Desk) jobOutcome(ctx context.Context, naniteID, job string) (bool, stri
 		Output string          `json:"output"`
 	}
 	if json.Unmarshal([]byte(raw), &view) != nil {
-		return false, raw
+		return true, false, raw
 	}
-	text := resultText(view.Result)
+	if view.Status == "running" || view.Status == "queued" || view.Status == "" {
+		return false, false, ""
+	}
+	text = resultText(view.Result)
 	if text == "" {
 		text = strings.TrimSpace(view.Output)
 	}
-	ok := view.Status == "ok"
+	ok = view.Status == "ok"
 	if !ok && view.Reason != "" {
 		text = strings.TrimSpace(view.Status + " (" + view.Reason + ") " + text)
 	} else if !ok {
 		text = strings.TrimSpace(view.Status + " " + text)
 	}
-	return ok, clip(text, 4000)
+	return true, ok, clip(text, 4000)
 }
 
 // resultText is a subtask result as text: a string as is, an object's
@@ -764,6 +922,9 @@ func (d *Desk) state(chatID string) desk.State {
 // pump publishes what a chat's editor has due and sets its timer for the
 // next item due by time.
 func (d *Desk) pump(chatID string) {
+	if d.r.isClosed() {
+		return
+	}
 	d.mu.Lock()
 	c := d.chats[chatID]
 	d.mu.Unlock()

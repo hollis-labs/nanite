@@ -32,7 +32,7 @@ func (r *Runner) listen(ctx context.Context, notices <-chan agent.NoticePosted) 
 			continue
 		}
 		if r.desk != nil {
-			r.desk.notice(ctx, n)
+			r.desk.queue(ctx, n)
 			continue
 		}
 		r.enqueueNotice(n)

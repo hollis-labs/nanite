@@ -242,9 +242,12 @@ plans needs the `subtasks` and `background` builtin groups.
   `worker` (`Variants` overrides); `Delegate` hands delegate items to their
   owning seat instead, and the host reports the outcome with
   `r.Desk().Complete`. An answer item is left to the chat agent. A question
-  item goes to the owner at once, and the owner's next message answers it.
+  item goes to the owner at once, and the owner's next message after it has
+  gone out answers it (the desk cannot tell an answer from a new subject).
   A later step's goal carries the results of the steps it depends on. Steps
-  that come due while a turn runs start when it ends.
+  that come due while a turn runs start when it ends; a step that fails to
+  start three times is marked failed and the owner is told. Desk notices are
+  handled per conversation, so a slow `Delegate` holds up only its own chat.
 - *Ledger.* Every plan is a topic in `r.Desk().Ledger()` (pass your own in
   `DeskOptions.Ledger` to persist it): its work, results and the questions
   waiting on the owner.

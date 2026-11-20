@@ -200,18 +200,20 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	in := agent.Input{Text: turn.Text}
 	text := contextText(turn.Context)
 	var prelude []chatstream.Event
-	var plan *planRun
-	if r.desk != nil {
-		var note string
-		note, prelude, plan = r.desk.beforeTurn(ctx, turn.ConversationID, turn.Text)
-		if note != "" {
-			text = strings.TrimSpace(text + "\n\n" + note)
-		}
-	}
-	if text != "" {
-		in.Slots = []agent.SlotUpdate{{Slot: r.opts.ContextSlot, Entry: agent.SlotEntry{Owner: "chat", Key: "turn-context", Content: text}}}
-	}
 	x, err := r.beginAfterDesk(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
+		// The desk works only once the turn holds the conversation, so a
+		// turn that could not start has not answered or planned anything.
+		var plan *planRun
+		if r.desk != nil {
+			var note string
+			note, prelude, plan = r.desk.beforeTurn(runCtx, turn.ConversationID, turn.Text)
+			if note != "" {
+				text = strings.TrimSpace(text + "\n\n" + note)
+			}
+		}
+		if text != "" {
+			in.Slots = []agent.SlotUpdate{{Slot: r.opts.ContextSlot, Entry: agent.SlotEntry{Owner: "chat", Key: "turn-context", Content: text}}}
+		}
 		if r.desk != nil {
 			// Start what is ready (this message's plan, and later steps
 			// that waited for the conversation) before the turn holds it.
@@ -238,11 +240,17 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 // begin opens the chat conversation's Nanite conversation and starts a run
 // on it with start, registered so its approvals are answered on the wire.
 func (r *Runner) begin(ctx context.Context, turn chat.Turn, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
+	return r.beginRun(ctx, turn, false, start)
+}
+
+// beginRun is begin; hostDispatch marks the front desk's own dispatch
+// before the run is registered, so nothing sees it as the owner's turn.
+func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
 	c, err := r.conversation(ctx, turn.ConversationID)
 	if err != nil {
 		return nil, err
 	}
-	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}, ended: make(chan struct{})}
+	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}, ended: make(chan struct{}), hostDispatch: hostDispatch}
 	if info, err := r.agent.Info(ctx); err == nil {
 		out.provider, out.model = info.Definition.Profile.Runtime.Provider, info.Definition.Profile.Runtime.Model
 	}
@@ -368,14 +376,20 @@ func (r *Runner) release(x *run) {
 	}
 	r.mu.Unlock()
 	if released && r.desk != nil && x.turn.ConversationID != "" {
-		if x.hostDispatch {
-			// Nothing waits for the desk's own dispatch but what came due
-			// meanwhile.
-			go r.desk.pump(x.turn.ConversationID)
-		} else {
-			go r.desk.idle(x.turn.ConversationID)
-		}
+		// Start what waited for the conversation (an advance that found it
+		// held) and publish what waited for the owner.
+		go r.desk.idle(x.turn.ConversationID)
 	}
+}
+
+// isHostDispatch reports whether a run is the front desk's own dispatch.
+// The flag is set before the run is registered and never changes.
+func (r *Runner) isHostDispatch(x *run) bool { return x.hostDispatch }
+
+func (r *Runner) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
 }
 
 // ownerTurn reports whether a turn the owner sees runs on a conversation:
@@ -397,7 +411,7 @@ func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(
 			return x, err
 		}
 		held := r.activeRun(ConversationID(turn.ConversationID))
-		if held == nil || !held.hostDispatch {
+		if held == nil || !r.isHostDispatch(held) {
 			return nil, err
 		}
 		select {
@@ -416,15 +430,12 @@ func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(
 // starts return their job handles at once, and their finishes arrive as
 // notices.
 func (r *Runner) hostDispatch(ctx context.Context, chatID string, starts []agent.DispatchStart) ([]agent.Dispatched, error) {
-	x, err := r.begin(ctx, chat.Turn{ConversationID: chatID}, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
+	x, err := r.beginRun(ctx, chat.Turn{ConversationID: chatID}, true, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
 		return c.Dispatch(runCtx, starts)
 	})
 	if err != nil {
 		return nil, err
 	}
-	r.mu.Lock()
-	x.hostDispatch = true
-	r.mu.Unlock()
 	defer close(x.ended)
 	defer r.release(x)
 	defer x.stop()

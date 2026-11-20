@@ -67,17 +67,20 @@ func (f *fakeWarden) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func identity(t *testing.T, wardenURL string) (authored.Identity, string) {
+// identity returns an agent directory and its identity, whose credential
+// file is outside the directory.
+func identity(t *testing.T, wardenURL string) (string, authored.Identity, string) {
 	t.Helper()
 	cred := filepath.Join(t.TempDir(), "agent.cred")
 	if err := tokenfile.Write(cred, fixtureValue("parent-0")); err != nil {
 		t.Fatal(err)
 	}
-	id, err := authored.ParseIdentity([]byte("principal: agent:workbench-test\nwarden:\n  url: "+wardenURL+"\n  credential_file: "+cred+"\n"), t.TempDir())
+	dir := t.TempDir()
+	id, err := authored.ParseIdentity([]byte("principal: agent:workbench-test\nwarden:\n  url: "+wardenURL+"\n  credential_file: "+cred+"\n"), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return id, cred
+	return dir, id, cred
 }
 
 // TestNewNamedWithWarden: a named provider with auth warden sends a minted
@@ -87,9 +90,9 @@ func identity(t *testing.T, wardenURL string) (authored.Identity, string) {
 func TestNewNamedWithWarden(t *testing.T) {
 	fw, ws := newFakeWarden(t, fixtureValue("parent-0"))
 	srv, last := server(t)
-	id, cred := identity(t, ws.URL)
+	dir, id, cred := identity(t, ws.URL)
 	scope := redact.NewScope()
-	w, err := providers.NewWarden(id, providers.WardenOptions{Redactor: scope})
+	w, err := providers.NewWarden(dir, id, providers.WardenOptions{Redactor: scope})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,17 +143,52 @@ func TestNewNamedWardenNeedsAWarden(t *testing.T) {
 // TestNewWardenRefusesAnIdentityWithoutWarden: an identity with no warden
 // section, or an invalid one, builds no Warden.
 func TestNewWardenRefusesAnIdentityWithoutWarden(t *testing.T) {
-	if _, err := providers.NewWarden(authored.Identity{Principal: "agent:workbench-test"}, providers.WardenOptions{}); err == nil {
+	dir := t.TempDir()
+	if _, err := providers.NewWarden(dir, authored.Identity{Principal: "agent:workbench-test"}, providers.WardenOptions{}); err == nil {
 		t.Fatal("built a Warden from an identity without a warden section")
 	}
 	cred := filepath.Join(t.TempDir(), "agent.cred")
 	bad := authored.Identity{Principal: "nobody", Warden: &authored.WardenIdentity{URL: "https://warden.example", CredentialFile: cred}}
-	if _, err := providers.NewWarden(bad, providers.WardenOptions{}); err == nil {
+	if _, err := providers.NewWarden(dir, bad, providers.WardenOptions{}); err == nil {
 		t.Fatal("built a Warden from an identity with an invalid principal")
 	}
 	insecure := authored.Identity{Principal: "agent:workbench-test", Warden: &authored.WardenIdentity{URL: "http://warden.example", CredentialFile: cred}}
-	if _, err := providers.NewWarden(insecure, providers.WardenOptions{}); err == nil {
+	if _, err := providers.NewWarden(dir, insecure, providers.WardenOptions{}); err == nil {
 		t.Fatal("built a Warden for a plain-http, non-loopback URL")
+	}
+	good := authored.Identity{Principal: "agent:workbench-test", Warden: &authored.WardenIdentity{URL: "https://warden.example", CredentialFile: cred}}
+	if _, err := providers.NewWarden("", good, providers.WardenOptions{}); err == nil {
+		t.Fatal("built a Warden without the agent directory")
+	}
+	inside := authored.Identity{Principal: "agent:workbench-test", Warden: &authored.WardenIdentity{URL: "https://warden.example", CredentialFile: filepath.Join(dir, "agent.cred")}}
+	if _, err := providers.NewWarden(dir, inside, providers.WardenOptions{}); err == nil || !strings.Contains(err.Error(), "outside the agent directory") {
+		t.Fatalf("credential file inside the agent directory: err = %v", err)
+	}
+	if _, err := providers.NewWarden(dir, good, providers.WardenOptions{}); err != nil {
+		t.Fatalf("valid identity refused: %v", err)
+	}
+}
+
+// TestNewNamedWardenNeedsTheWardensScope: a provider whose Options.Redactor
+// is not the Warden's own scope is refused, so a minted token can never miss
+// the scope the caller's logs use.
+func TestNewNamedWardenNeedsTheWardensScope(t *testing.T) {
+	_, ws := newFakeWarden(t, fixtureValue("parent-0"))
+	dir, id, _ := identity(t, ws.URL)
+	spec := authored.ProviderSpec{Name: "gateway", Wire: authored.WireOpenAIChat, BaseURL: "https://gateway.example/v1", Auth: authored.AuthWarden,
+		Audience: "llm-gateway", Scopes: []string{"llm-gateway.chat"}}
+	scope := redact.NewScope()
+	w, err := providers.NewWarden(dir, id, providers.WardenOptions{Redactor: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, other := range map[string]*redact.Scope{"another scope": redact.NewScope(), "no scope": nil} {
+		if _, err := providers.NewNamed(spec, providers.Options{Redactor: other, Warden: w}); err == nil || !strings.Contains(err.Error(), "WardenOptions.Redactor") {
+			t.Fatalf("%s: err = %v; want a refusal naming WardenOptions.Redactor", name, err)
+		}
+	}
+	if _, err := providers.NewNamed(spec, providers.Options{Redactor: scope, Warden: w}); err != nil {
+		t.Fatalf("same scope refused: %v", err)
 	}
 }
 
@@ -160,10 +198,10 @@ func TestNewWardenRefusesAnIdentityWithoutWarden(t *testing.T) {
 func TestNewNamedWardenReportsAWaitingGrant(t *testing.T) {
 	fw, ws := newFakeWarden(t, fixtureValue("parent-0"))
 	srv, _ := server(t)
-	id, _ := identity(t, ws.URL)
+	dir, id, _ := identity(t, ws.URL)
 	var mu sync.Mutex
 	var seen []agent.AuthWaiting
-	w, err := providers.NewWarden(id, providers.WardenOptions{OnAuthWaiting: func(a agent.AuthWaiting) {
+	w, err := providers.NewWarden(dir, id, providers.WardenOptions{OnAuthWaiting: func(a agent.AuthWaiting) {
 		mu.Lock()
 		seen = append(seen, a)
 		mu.Unlock()

@@ -158,8 +158,11 @@ func TestDiscardedBranchesBuildNoText(t *testing.T) {
 	}
 }
 
-// The budget alone (no deadline) stops each of these: each was charged one
-// unit for unbounded work.
+// The budget alone (no deadline) stops each of these: each used to be charged
+// one unit for unbounded work. The checks are on the budget, not the clock:
+// every case must end in ErrBudget, which it only reaches when the key loops
+// and formatting are charged for what they do. The wall bound only catches a
+// hang (a loop that iterates the larger side would take minutes).
 func TestBudgetAloneStopsKeyLoopsAndFormatting(t *testing.T) {
 	keys := func(value string) string {
 		parts := make([]string, 20000)
@@ -168,15 +171,18 @@ func TestBudgetAloneStopsKeyLoopsAndFormatting(t *testing.T) {
 		}
 		return strings.Join(parts, ",")
 	}
-	empties := "[" + strings.TrimSuffix(strings.Repeat("{},", 150000), ",") + "]"
+	// 150,000 items, each with one key the schema does not name: one schema
+	// visit plus one key visit each, about 300,000 units against the default
+	// 200,000. Iterating the schema's 20,000 keys instead would be the old bug.
+	oneKey := "[" + strings.TrimSuffix(strings.Repeat(`{"z":1},`, 150000), ",") + "]"
 	ints := make([]string, 20000)
 	for i := range ints {
 		ints[i] = fmt.Sprint(i)
 	}
 	for name, tc := range map[string]struct{ schema, value string }{
-		"dependentRequired":     {`{"type":"array","items":{"dependentRequired":{` + keys("[]") + `}}}`, empties},
-		"dependentSchemas":      {`{"type":"array","items":{"dependentSchemas":{` + keys("true") + `}}}`, empties},
-		"draft-07 dependencies": {`{"$schema":"http://json-schema.org/draft-07/schema#","type":"array","items":{"dependencies":{` + keys(`["a"]`) + `}}}`, empties},
+		"dependentRequired":     {`{"type":"array","items":{"dependentRequired":{` + keys("[]") + `}}}`, oneKey},
+		"dependentSchemas":      {`{"type":"array","items":{"dependentSchemas":{` + keys("true") + `}}}`, oneKey},
+		"draft-07 dependencies": {`{"$schema":"http://json-schema.org/draft-07/schema#","type":"array","items":{"dependencies":{` + keys(`["a"]`) + `}}}`, oneKey},
 		"formatting refunded by anyOf": {`{"allOf":[` + strings.TrimSuffix(strings.Repeat(`{"$ref":"#/$defs/A"},`, 550), ",") +
 			`],"$defs":{"A":{"anyOf":[` + strings.Repeat(`{"type":"integer"},`, 15) + `{}]}}}`,
 			`{"blob":"` + strings.Repeat("x", 400000) + `","arr":[` + strings.Join(ints, ",") + `]}`},
@@ -186,13 +192,11 @@ func TestBudgetAloneStopsKeyLoopsAndFormatting(t *testing.T) {
 			v := decode(t, tc.value)
 			start := time.Now()
 			err := rs.Validate(context.Background(), v, Budget{})
-			if took := time.Since(start); took > 2*time.Second {
-				t.Fatalf("took %s: %v", took, err)
+			if !errors.Is(err, ErrBudget) {
+				t.Fatalf("want ErrBudget, got %.200v", err)
 			}
-			// Empty objects match no keys, so the key loops may finish
-			// valid within budget; the formatting case must hit it.
-			if name == "formatting refunded by anyOf" && !errors.Is(err, ErrBudget) {
-				t.Fatalf("err = %.200v", err)
+			if took := time.Since(start); took > 30*time.Second {
+				t.Fatalf("took %s: a loop is not charged for its work", took)
 			}
 		})
 	}

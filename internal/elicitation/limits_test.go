@@ -650,6 +650,12 @@ func TestCacheCostEstimate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spawns child processes")
 	}
+	if raceBuild {
+		// This measures heap bytes, not concurrency. Under -race each resolve of the
+		// 200KB webhook schema runs many times slower, so the measurement only
+		// tested how loaded the machine was. The non-race suite runs it.
+		t.Skip("heap measurement; run without -race")
+	}
 	for name := range costSchemas() {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
@@ -698,7 +704,10 @@ func TestCacheCostChild(t *testing.T) {
 		t.Skip("run by TestCacheCostEstimate")
 	}
 	raw := costSchemas()[name]
-	const n = 20
+	// Resolve about 1MB of schema text in all: enough copies of a small schema to
+	// average out allocator noise, few of a large one (whose per-entry cost of
+	// megabytes needs no averaging) so the child stays well under a second.
+	n := min(max(1<<20/len(raw), 3), 20)
 	keep := make([]*jsonschema.Resolved, n)
 	var before, after runtime.MemStats
 	runtime.GC()
@@ -721,6 +730,6 @@ func TestCacheCostChild(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	runtime.KeepAlive(keep)
-	measured := (float64(after.HeapAlloc) - float64(before.HeapAlloc)) / n
+	measured := (float64(after.HeapAlloc) - float64(before.HeapAlloc)) / float64(n)
 	fmt.Printf("COST: %.0f %d\n", measured, entryCost([]byte(raw), keep[0]))
 }

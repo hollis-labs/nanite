@@ -22,9 +22,11 @@ import (
 	mcp "github.com/hollis-labs/libs/mcp/plugin-mcp/go-mcp/client"
 	"github.com/hollis-labs/libs/security/redact"
 	"github.com/hollis-labs/libs/security/secrets"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/processenv"
 	"github.com/hollis-labs/nanite/internal/tools"
+	"github.com/hollis-labs/nanite/internal/warden"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -43,6 +45,15 @@ type Client struct {
 	resolver  *secrets.Resolver
 	scope     *redact.Scope
 	logger    *slog.Logger
+	auth      *Auth
+}
+
+// Auth adds identity to MCP HTTP servers: a Warden bearer token and claimed
+// correlation headers, per server name (identity.yaml's mcp section).
+type Auth struct {
+	Principal string
+	Warden    *warden.Source
+	Servers   map[string]authored.MCPIdentity
 }
 
 type registration struct {
@@ -66,14 +77,14 @@ type Lease struct {
 	once    sync.Once
 }
 
-func New(dir string, resolver *secrets.Resolver, scope *redact.Scope, logger *slog.Logger) *Client {
+func New(dir string, resolver *secrets.Resolver, scope *redact.Scope, logger *slog.Logger, auth *Auth) *Client {
 	if resolver == nil {
 		resolver = secrets.New()
 	}
-	c := &Client{dir: dir, resolver: resolver, scope: scope, logger: logger, servers: make(map[string]*registration),
+	c := &Client{dir: dir, resolver: resolver, scope: scope, logger: logger, auth: auth, servers: make(map[string]*registration),
 		discovery: make(chan struct{}, discoveryConcurrency)}
 	c.pool = mcp.NewPool(mcp.WithIdentity("nanite", "0.5.0"), mcp.WithRetries(1),
-		mcp.WithCommandEnv(commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes), mcp.WithHTTPClient(httpClient),
+		mcp.WithCommandEnv(commandEnv), mcp.WithMaxResponseBytes(maxResponseBytes), mcp.WithHTTPClient(c.httpClient),
 		mcp.WithDefaultCallTimeouts(map[string]time.Duration{"stdio": 60 * time.Second, "http": 60 * time.Second, "sse": 60 * time.Second}),
 		mcp.WithClientOptions(func(key string, options *sdk.ClientOptions) {
 			options.ElicitationHandler = c.elicit(key)
@@ -98,7 +109,7 @@ func (c *Client) Reconcile(ctx context.Context, cfg agentdir.MCPConfig) (*Lease,
 	next := make(map[string]prepared, len(cfg.Servers))
 	var warnings []string
 	for _, name := range slices.Sorted(maps.Keys(cfg.Servers)) {
-		resolved, err := c.resolve(ctx, cfg.Servers[name])
+		resolved, err := c.resolve(ctx, name, cfg.Servers[name])
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("MCP server %q configuration: %v", name, err))
 			continue
@@ -344,7 +355,7 @@ func toolResult(result *sdk.CallToolResult) (tools.Result, error) {
 	return tools.Result{Text: text, IsError: result.IsError}, nil
 }
 
-func (c *Client) resolve(ctx context.Context, input agentdir.MCPServer) (mcp.ServerConfig, error) {
+func (c *Client) resolve(ctx context.Context, name string, input agentdir.MCPServer) (mcp.ServerConfig, error) {
 	out := mcp.ServerConfig{Transport: input.Type, Command: input.Command, Args: input.Args, URL: input.URL}
 	if endpoint, err := url.Parse(out.URL); err == nil && endpoint.RawQuery != "" {
 		for key, values := range endpoint.Query() {
@@ -376,6 +387,24 @@ func (c *Client) resolve(ctx context.Context, input agentdir.MCPServer) (mcp.Ser
 			}
 			c.scope.Add(key, expanded)
 			out.Headers[key] = expanded
+		}
+	}
+	if c.auth != nil && out.Transport != "stdio" {
+		if id, ok := c.auth.Servers[name]; ok && (id.Audience != "" || id.Correlation) {
+			if id.Audience != "" && c.auth.Warden == nil {
+				return mcp.ServerConfig{}, fmt.Errorf("an audience needs identity.yaml's warden section")
+			}
+			for key := range out.Headers {
+				if strings.EqualFold(key, "Authorization") && id.Audience != "" {
+					return mcp.ServerConfig{}, fmt.Errorf("an Authorization header and Warden auth cannot both be set")
+				}
+			}
+			if out.Headers == nil {
+				out.Headers = map[string]string{}
+			}
+			// The transport replaces this marker with the token and the
+			// correlation headers on each request; it is never sent.
+			out.Headers[authMarker] = name
 		}
 	}
 	return out, nil

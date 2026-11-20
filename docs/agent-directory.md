@@ -5,6 +5,7 @@ my-agent/
   agent.md                required portable definition and instructions
   host.yaml               required local execution profile
   .mcp.json               optional MCP registrations
+  identity.yaml           optional mesh identity and Warden auth
   permissions.yaml        optional tool rules and default mode
   skills/<name>/SKILL.md  optional skill metadata and instructions
   variants/<name>.md      optional subtask variants
@@ -133,7 +134,11 @@ Each provider entry has:
 - Optional `key_env`: an environment variable, read only when
   `NANITE_PROVIDER_KEY_ENV=1`.
 - Optional `auth`: empty for the wire's own scheme, `bearer` for the
-  Anthropic wire, or `none` for a server without auth.
+  Anthropic wire, `none` for a server without auth, or `warden` for a
+  short-lived Warden token (see [Identity and Warden auth](#identity-and-warden-auth)).
+- With `auth: warden`, `audience` (the gateway's app name, such as
+  `llm-gateway`) and optional `scopes` (such as `[llm-gateway.chat]`). No
+  `key_ref` or `key_env`.
 - Optional `headers`: sent on every request. A header whose name looks like
   a credential (containing `key`, `token`, `secret`, `auth`, `password` or
   `credential`) is refused; put the credential behind `key_ref`.
@@ -166,6 +171,87 @@ A tool that edits an agent directory can check `providers.yaml` with
 `github.com/hollis-labs/nanite/agent/authored`: `ParseProviders` takes the
 content, `LoadProviders` reads the file. Nanite loads it through the same
 functions, so they apply exactly the engine's rules.
+
+## Identity and Warden auth
+
+`identity.yaml` says who the agent is on the mesh and lets it get short-lived
+Warden tokens for providers and MCP servers instead of static keys. It is
+Nanite's own file: `host.yaml` and `.mcp.json` stay as other tools read them.
+Nanite reads it when the agent opens, and `nanite validate` checks it.
+
+```yaml
+principal: agent:research-lead          # agent:, session:, app: or machine:
+warden:
+  url: https://warden.example.test      # https; http only for a loopback address
+  credential_file: ~/.config/nanite/research-lead.cred   # 0600, outside the agent directory
+  purpose: Research lead agent           # optional, shown on grant requests
+mcp:
+  gateway:                              # a server name in .mcp.json (http or sse)
+    audience: mcp-gateway
+    scopes: [mcp.profile.standard]
+    correlation: true                   # send claimed id headers
+```
+
+With a provider in `providers.yaml` set to `auth: warden` (and `use` selecting
+it), every request carries `Authorization: Bearer <token>` for the provider's
+`audience` and `scopes`, and no other key:
+
+```yaml
+providers:
+  gateway:
+    wire: openai-chat
+    base_url: https://llm-gateway.example.test/v1
+    auth: warden
+    audience: llm-gateway
+    scopes: [llm-gateway.chat]
+use:
+  chat: {provider: gateway, model: claude-sonnet-5-5}
+```
+
+An HTTP server in `.mcp.json` named under `mcp` with an `audience` gets the
+same per request; it may not also set an `Authorization` header. With
+`correlation: true` it also gets `X-Nanite-Principal` (the principal) and
+`X-Nanite-Conversation` (the conversation id). These are claimed, not
+verified, ids.
+
+How tokens are minted:
+
+- The credential file holds the agent's parent credential, placed when the
+  agent is enrolled. It rotates on every token request: Nanite takes an
+  exclusive lock on `<credential_file>.lock`, writes
+  `<credential_file>.inflight` (holding the hash of the parent it presents),
+  sends the request, writes the next parent atomically and removes the marker
+  before the token is used. A mint runs to completion even if the turn that
+  needed it is cancelled, bounded by its own 30-second timeout, and Warden
+  redirects are never followed.
+- If a request's answer is lost (a timeout, a cut connection, a server error,
+  a redirect or an answer that is not an OAuth refusal), the old parent may
+  already be spent, and presenting it again would revoke the whole credential
+  family. The marker stays and every later token request fails with
+  `agent.ErrReenroll` ("re-enrollment needed") without contacting Warden.
+  Recover by placing a new parent credential and removing the marker; a
+  marker whose hash no longer matches the file's parent is cleared on its own,
+  since that rotation was saved. A request whose connection was never made
+  clears the marker, and an OAuth refusal (`invalid_scope`, `invalid_request`
+  and the like) leaves the parent unspent; `invalid_grant` means the parent
+  was refused and needs re-enrollment.
+- The Warden Go client (and the `warden` CLI) takes the same lock but does not
+  honor the `.inflight` marker, so do not share a credential file with it.
+- Tokens are cached per audience and scope set and renewed at two thirds of
+  their life. A failed renewal is retried after 1 second, doubling to 30
+  seconds, while a still-valid token keeps being used. A server answering 401
+  drops the token it was sent (not a newer one) and the request is retried
+  once with a fresh token.
+- If Warden says the agent has no grant for the audience (`invalid_scope`),
+  Nanite files a grant request for it (audience, scopes and purpose, with a
+  `warden` token for `warden.request` and `warden.read`, which every enrolled
+  principal has), reports it to `agent.Options.OnAuthWaiting`, and fails the
+  request with an error naming the request id. It checks the request again at
+  most every 30 seconds and mints once it is approved; a denied or expired
+  request is filed afresh on the next attempt.
+- A token or parent credential never appears in an error, log line, event,
+  trace or transcript: each one minted is added to the agent's redaction
+  scope as well.
 
 ## MCP registrations
 

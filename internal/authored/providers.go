@@ -42,11 +42,13 @@ const (
 )
 
 // Auth schemes for a named provider (ProviderSpec.Auth): the wire's own
-// (empty), bearer on the Anthropic wire, or none for a local server.
+// (empty), bearer on the Anthropic wire, none for a local server, or a
+// Warden token for the provider's audience and scopes.
 const (
 	AuthDefault = provider.AuthDefault
 	AuthBearer  = provider.AuthBearer
 	AuthNone    = provider.AuthNone
+	AuthWarden  = provider.AuthWarden
 )
 
 // BuiltinProviders names the built-in providers, which providers.yaml can

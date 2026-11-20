@@ -1,3 +1,4 @@
+const ActivityAuthWaiting untyped string
 type Agent struct
   (*Agent) Close() error
   (*Agent) Complete(ctx context.Context, use string, system string, prompt string, maxTokens int) (string, error)
@@ -19,6 +20,12 @@ func AllBuiltins() []BuiltinGroup
 var AllowGate github.com/hollis-labs/nanite/internal/permission.Gate
 type Answer = github.com/hollis-labs/nanite/internal/events.Answer struct
   field Value encoding/json.RawMessage
+type AuthWaiting struct
+  field RequestID string
+  field Status string
+  field Tier string
+  field Audience string
+  field Scopes []string
 const BuiltinBackground github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesRead github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
 const BuiltinFilesWrite github.com/hollis-labs/nanite/internal/tools.BuiltinGroup
@@ -80,6 +87,7 @@ var ErrBusy error
 var ErrNoConversation error
 var ErrNoStarts error
 var ErrNoSteering error
+var ErrReenroll error
 type Event = github.com/hollis-labs/nanite/internal/events.Event interface
 type EventMeta = github.com/hollis-labs/nanite/internal/events.EventMeta struct
   field RunID string
@@ -150,6 +158,7 @@ type Options struct
   field SubtaskLimit int
   field TurnTokenBudget int
   field Steering *Steering
+  field OnAuthWaiting func(AuthWaiting)
   field SlotPlacement map[SlotName]SlotPlacement
   field CompactAt int
   field SlotBudgets map[SlotName]int
@@ -196,6 +205,8 @@ type ProviderSpec = github.com/hollis-labs/nanite/internal/provider.Spec struct
   field KeyEnv string
   field Auth string
   field Headers map[string]string
+  field Audience string
+  field Scopes []string
   field DisableAnthropicBeta bool
   field DisableCacheControl bool
   (ProviderSpec) Validate() error

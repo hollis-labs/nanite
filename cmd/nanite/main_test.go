@@ -84,6 +84,30 @@ func TestRootHasCommands(t *testing.T) {
 	if err := root.ExecuteContext(ctx); err != nil || !strings.Contains(warnings.String(), `provider "nowhere" is not defined here; it must come from the embedding host`) {
 		t.Fatalf("validate with a host-only variant provider: %v, warnings %q", err, warnings.String())
 	}
+	if err := os.Remove(filepath.Join(dir, "variants", "remote.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// identity.yaml is validated, and auth warden needs its warden section.
+	warden := "providers:\n  gateway:\n    wire: openai-chat\n    base_url: https://llm-gateway.example.test/v1\n    auth: warden\n    audience: llm-gateway\n"
+	if err := os.WriteFile(filepath.Join(dir, "providers.yaml"), []byte(warden), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "identity.yaml has no warden section") {
+		t.Fatalf("validate accepted auth warden without identity: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "identity.yaml"), []byte("principal: agent:a\nwarden:\n  url: https://warden.example.test\n  credential_file: "+filepath.Join(t.TempDir(), "agent.cred")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err != nil {
+		t.Fatalf("validate with identity.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "identity.yaml"), []byte("principal: agent:a\nwarden:\n  url: https://warden.example.test\n  credential_file: relative.cred\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.ExecuteContext(ctx); err == nil || !strings.Contains(err.Error(), "identity.yaml") {
+		t.Fatalf("validate accepted a bad identity.yaml: %v", err)
+	}
 }
 
 func TestPromptViaLocalGateway(t *testing.T) {

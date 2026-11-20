@@ -32,7 +32,9 @@ func BuiltinVariants() []string { return authored.BuiltinVariants() }
 func CheckVariantName(name string) error { return authored.CheckVariantName(name) }
 
 // ParseVariant parses and validates the content of variants/<name>.md.
-func ParseVariant(name string, data []byte) (Variant, error) { return authored.ParseVariant(name, data) }
+func ParseVariant(name string, data []byte) (Variant, error) {
+	return authored.ParseVariant(name, data)
+}
 
 // LoadVariants reads the authored variants in dir/variants (*.md; other
 // files are ignored). It returns every variant that loaded and, joined, an
@@ -77,6 +79,7 @@ const (
 	AuthDefault = authored.AuthDefault
 	AuthBearer  = authored.AuthBearer
 	AuthNone    = authored.AuthNone
+	AuthWarden  = authored.AuthWarden
 )
 
 // BuiltinProviders names the built-in providers, which providers.yaml can

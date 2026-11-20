@@ -31,6 +31,9 @@ func (c *Client) newSDK(key string) sdk.Client {
 		for name, v := range c.gw.Headers {
 			opts = append(opts, option.WithHeader(name, v))
 		}
+		if c.gw.Bearer != nil {
+			opts = append(opts, option.WithMiddleware(station.BearerMiddleware(c.gw.Bearer)))
+		}
 	}
 	return sdk.NewClient(opts...)
 }

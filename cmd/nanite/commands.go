@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -239,6 +241,11 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			def, err := definition.Load(path, "-")
 			if err != nil {
 				return err
+			}
+			for _, name := range slices.Sorted(maps.Keys(def.Providers)) {
+				if def.Providers[name].Auth == provider.AuthWarden && (def.Identity == nil || def.Identity.Warden == nil) {
+					return fmt.Errorf("providers.yaml: provider %s uses auth warden, but identity.yaml has no warden section", name)
+				}
 			}
 			for _, name := range subagent.Names(variants) {
 				p := variants[name].Provider

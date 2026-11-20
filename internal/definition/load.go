@@ -24,6 +24,9 @@ type Definition struct {
 	// from providers.yaml. A use not listed falls back to chat; chat not
 	// listed uses host.yaml's runtime.provider and runtime.model.
 	Use map[string]authored.Selection
+	// Identity is identity.yaml, nil without one. The agent reads it when it
+	// opens; loading it here validates it with the rest.
+	Identity *authored.Identity
 }
 
 func Load(dir, globalSkillsDir string) (Definition, error) {
@@ -37,6 +40,13 @@ func Load(dir, globalSkillsDir string) (Definition, error) {
 		return Definition{}, err
 	}
 	out.Providers, out.Use = providers.Named, providers.Use
+	identity, ok, err := authored.LoadIdentity(dir)
+	if err != nil {
+		return Definition{}, err
+	}
+	if ok {
+		out.Identity = &identity
+	}
 	if out.Runtime.Provider == "" {
 		out.Runtime.Provider = "anthropic"
 	}

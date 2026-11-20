@@ -396,3 +396,27 @@ it runs, and a background subtask's start and progress carry `background`) and
 has reason `turn_limit` at the step limit and `length` at the model's output
 limit. A cancelled turn ends in `run.abort`, a failed one in `run.error` with
 code `turn_failed`. The `ask_user` tool is declined.
+
+## Warden auth
+
+An agent directory with `identity.yaml` (see
+[agent-directory.md](agent-directory.md#identity-and-warden-auth)) gets
+short-lived Warden tokens for providers with `auth: warden` and for MCP
+servers named in its `mcp` section. Nothing else is needed from the host.
+`ProviderSpec` entries in `Options.Providers` take `Auth: authored.AuthWarden`
+with `Audience` and `Scopes` the same way, and use the directory's identity.
+
+When the agent has no grant for an audience, Nanite files a grant request
+and calls `Options.OnAuthWaiting` with an `agent.AuthWaiting` (request id,
+status, tier, audience and scopes; nothing secret). Show it to the owner,
+for example as an activity of kind `agent.ActivityAuthWaiting`
+(`nanite.auth.waiting`), so they can approve it. The turn that needed the
+token fails with an error naming the request; a later turn mints once the
+request is approved.
+
+`agent.ErrReenroll` (matched with `errors.Is`) means the parent credential
+can no longer be used safely; see the agent directory doc for recovery.
+
+Out of scope for now: launcher token exchange for subtasks or launched
+agents (each gets the agent's own tokens), signing a verified run token,
+and accepting Warden tokens on Nanite's own endpoints.

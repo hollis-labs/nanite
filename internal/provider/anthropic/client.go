@@ -135,6 +135,9 @@ func (c *Client) rebuildSDK() {
 		for name, v := range c.gw.Headers {
 			opts = append(opts, option.WithHeader(name, v))
 		}
+		if c.gw.Bearer != nil {
+			opts = append(opts, option.WithMiddleware(station.BearerMiddleware(c.gw.Bearer)))
+		}
 	}
 	c.sdk = sdk.NewClient(opts...)
 }

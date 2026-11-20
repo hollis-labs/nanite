@@ -259,3 +259,27 @@ func (x *execution) compactionContext(kept []llmtypes.ChatMessage) string {
 	}
 	return strings.Join(pinned, "\n")
 }
+
+// preserveLatestToolStep filters position-preserving pipeline edits. The model
+// has not read the trailing tool results yet: keep their assistant call and all
+// result messages verbatim, even if dedupe or strip rewrote them. Older steps
+// may still be compacted. Restoring the entire step preserves provider pairing.
+func preserveLatestToolStep(original, staged []llmtypes.ChatMessage) []llmtypes.ChatMessage {
+	if len(original) != len(staged) || len(original) == 0 {
+		return staged
+	}
+	last := original[len(original)-1]
+	if !slices.ContainsFunc(last.ContentBlocks, func(b llmtypes.ContentBlock) bool { return b.Type == "tool_result" }) {
+		return staged
+	}
+	for i := len(original) - 2; i >= 0; i-- {
+		if original[i].Role == "assistant" {
+			copy(staged[i:], cloneMessages(original[i:]))
+			break
+		}
+		if ownerMessage(original[i]) {
+			break
+		}
+	}
+	return staged
+}

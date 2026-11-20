@@ -870,8 +870,9 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			return err
 		}
 		if len(pipeline.ConversationMessages) == len(x.messages) {
-			x.messages = pipeline.ConversationMessages
+			x.messages = preserveLatestToolStep(x.messages, pipeline.ConversationMessages)
 			if remaining, err := json.Marshal(x.messages); err == nil {
+				window.SetContent(ctxpkg.SlotConversation, string(remaining))
 				after = min(after, est.Estimate(string(remaining)))
 			}
 		}
@@ -891,8 +892,9 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		// Stage-only changes preserve message positions. A durable summary must
 		// carry a message ID so future turns can reconstruct exactly its coverage.
 		if len(pipeline.ConversationMessages) == len(x.messageIDs) {
-			x.messages = pipeline.ConversationMessages
+			x.messages = preserveLatestToolStep(x.messages, pipeline.ConversationMessages)
 			if remaining, err := json.Marshal(x.messages); err == nil {
+				window.SetContent(ctxpkg.SlotConversation, string(remaining))
 				after = est.Estimate(string(remaining))
 			}
 		}

@@ -11,6 +11,7 @@
   - The Context slot is never dropped by compaction. Dropping it freed nothing, since its blocks were already in the request, and a pass then failed as "freed too little" on every turn.
   - `CompactionStarted` and `Compacted` carry `RequestBefore` and `RequestAfter` (the whole request, calibrated), and so does the `nanite.compact` activity.
   - Compaction no longer rewrites the live history's tool results while it dedupes.
+  - host.yaml `runtime.compact_at`, `compact_keep_tokens`, `compact_prompt`, `compact_input_tokens` and `idle_timeout` (libs agent/agentdir v0.3.0), read when the agent opens; a non-zero Option wins.
 
 ## 0.7.0
 

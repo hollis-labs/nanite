@@ -213,7 +213,7 @@ func (x *execution) keepTokens(window *ctxpkg.ContextWindow) int {
 // (a message with no id) is merged into the person's message after it, so
 // the request never has two user messages in a row.
 func requestMessages(msgs []llmtypes.ChatMessage, ids []string) []llmtypes.ChatMessage {
-	if len(msgs) < 2 || len(ids) < 1 || ids[0] != "" || msgs[0].Role != "user" || msgs[1].Role != "user" {
+	if len(msgs) < 2 || len(ids) < 1 || ids[0] != "" || msgs[0].Role != "user" || !ownerMessage(msgs[1]) {
 		return msgs
 	}
 	merged := msgs[1]

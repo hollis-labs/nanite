@@ -107,6 +107,11 @@ func TestRequestMessagesMergeTheSummary(t *testing.T) {
 	if len(msgs[1].ContentBlocks) != 1 {
 		t.Fatal("the history was changed")
 	}
+	// A tool result is the user's but not the person's: never merged.
+	result := llmtypes.ChatMessage{Role: "user", ContentBlocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "t", Content: "x"}}}
+	if got := requestMessages([]llmtypes.ChatMessage{{Role: "user", Content: "summary"}, result}, []string{"", "a"}); len(got) != 2 {
+		t.Fatalf("merged into a tool result: %d", len(got))
+	}
 	// Before a step of the agent's the summary stays its own message.
 	if got := requestMessages([]llmtypes.ChatMessage{{Role: "user", Content: "summary"}, text("assistant", "x")}, []string{"", "a"}); len(got) != 2 {
 		t.Fatalf("got %d", len(got))

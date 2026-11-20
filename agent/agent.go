@@ -286,6 +286,10 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load agent: %w", err)
 	}
+	rt, err := runtimeSettings(opts, def.Profile.Runtime)
+	if err != nil {
+		return nil, err
+	}
 	data := opts.DataDir
 	if data == "" {
 		data = filepath.Join(def.Directory, ".nanite")
@@ -369,7 +373,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: opts.IdleTimeout, CompactAt: opts.CompactAt, CompactKeepTokens: opts.CompactKeepTokens, CompactionPrompt: opts.CompactionPrompt, CompactionInputTokens: opts.CompactionInputTokens, Steering: opts.Steering,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: rt.idleTimeout, CompactAt: rt.compactAt, CompactKeepTokens: rt.keepTokens, CompactionPrompt: rt.prompt, CompactionInputTokens: rt.inputTokens, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {
@@ -448,6 +452,43 @@ type subtaskConfig struct{ limit, turnBudget, resultCap int }
 // host.yaml's runtime value, then the engine's default (zero). host.yaml is
 // read when the agent opens. A host.yaml subtask_limit above the most the
 // agent runs at once is refused, not clamped.
+// runtimeConfig is the compaction and stream settings an agent runs with.
+type runtimeConfig struct {
+	compactAt, keepTokens, inputTokens int
+	prompt                             string
+	idleTimeout                        time.Duration
+}
+
+// runtimeSettings resolves the compaction and stream settings: a non-zero
+// Option wins over host.yaml's runtime key, which is read when the agent
+// opens.
+func runtimeSettings(opts Options, runtime agentdir.Runtime) (runtimeConfig, error) {
+	idle, err := runtime.IdleTimeoutDuration()
+	if err != nil {
+		return runtimeConfig{}, fmt.Errorf("host.yaml runtime: %w", err)
+	}
+	if opts.IdleTimeout != 0 {
+		idle = opts.IdleTimeout
+	}
+	pick := func(option, file int) int {
+		if option != 0 {
+			return option
+		}
+		return file
+	}
+	prompt := opts.CompactionPrompt
+	if prompt == "" {
+		prompt = runtime.CompactPrompt
+	}
+	return runtimeConfig{
+		compactAt:   pick(opts.CompactAt, runtime.CompactAt),
+		keepTokens:  pick(opts.CompactKeepTokens, runtime.CompactKeepTokens),
+		inputTokens: pick(opts.CompactionInputTokens, runtime.CompactInputTokens),
+		prompt:      prompt,
+		idleTimeout: idle,
+	}, nil
+}
+
 func subtaskSettings(opts Options, runtime agentdir.Runtime) (subtaskConfig, error) {
 	if err := subagent.CheckLimit(runtime.SubtaskLimit); err != nil {
 		return subtaskConfig{}, fmt.Errorf("host.yaml runtime: %w", err)

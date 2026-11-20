@@ -199,3 +199,119 @@ func TestSnapshotWith(t *testing.T) {
 		t.Fatal("Names returned shared storage")
 	}
 }
+
+func TestOversizedEntryIsTrimmedNotDropped(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	for _, slot := range []Name{Universal, Context, UserContext} {
+		t.Run(string(slot), func(t *testing.T) {
+			owner := "host"
+			if slot == Universal {
+				owner = "engine"
+			}
+			store := NewStore()
+			snap, err := store.Snapshot().With(Update{Slot: slot, Entry: Entry{Owner: owner, Key: "big", Content: "BEGIN " + strings.Repeat("context word ", 2000)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			budgets := map[Name]int{slot: 200}
+			plan, err := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Assemble(context.Background(), snap, plan, nil, 0, est, budgets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := got.Report[slot].Decisions
+			if len(d) != 1 || d[0].Disposition != Trim || d[0].Reason == "" {
+				t.Fatalf("decisions %+v", d)
+			}
+			var content string
+			for _, b := range got.Blocks {
+				if b.SlotName == string(slot) {
+					content = b.Content
+				}
+			}
+			if !strings.HasPrefix(content, "BEGIN ") || !strings.Contains(content, "[trimmed to fit the "+string(slot)+" slot budget of 200 tokens]") || est.Estimate(content) > 200 {
+				t.Fatalf("content (%d tokens): %.80q ... %q", est.Estimate(content), content, content[max(0, len(content)-80):])
+			}
+		})
+	}
+}
+
+func TestNoRoomLeftIsReportedSkip(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	snap, err := NewStore().Snapshot().With(
+		Update{Slot: Context, Entry: Entry{Owner: "host", Key: "a", Priority: 10, Content: strings.Repeat("first ", 150)}},
+		Update{Slot: Context, Entry: Entry{Owner: "host", Key: "b", Content: strings.Repeat("second ", 100)}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgets := map[Name]int{Context: 240}
+	plan, err := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := plan.Decisions[Context]
+	if len(d) != 2 || d[0].Disposition != Ship || d[1].Disposition != Skip || d[1].Reason != "no room left in slot budget" {
+		t.Fatalf("decisions %+v", d)
+	}
+}
+
+func TestTrimEdgeCases(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	assemble := func(t *testing.T, snap Snapshot, plan Plan, budgets map[Name]int, prev map[string]string) Assembled {
+		t.Helper()
+		got, err := Assemble(context.Background(), snap, plan, prev, 0, est, budgets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	content := func(a Assembled, slot Name) string {
+		for _, b := range a.Blocks {
+			if b.SlotName == string(slot) {
+				return b.Content
+			}
+		}
+		return ""
+	}
+	budgets := map[Name]int{Context: 200}
+
+	t.Run("invalid UTF-8 stays a byte prefix", func(t *testing.T) {
+		raw := "BEGIN \xff\xfe " + strings.Repeat("bytes \xc3 ", 900)
+		snap, _ := NewStore().Snapshot().With(Update{Slot: Context, Entry: Entry{Owner: "host", Key: "k", Content: raw}})
+		plan, _ := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+		got := content(assemble(t, snap, plan, budgets, nil), Context)
+		cut := got[:strings.Index(got, "\n[trimmed")]
+		if !strings.HasPrefix(raw, cut) || len(cut) == 0 {
+			t.Fatalf("shipped text is not a prefix of the original")
+		}
+	})
+
+	t.Run("a Trim that fits ships unchanged", func(t *testing.T) {
+		snap, _ := NewStore().Snapshot().With(Update{Slot: Context, Entry: Entry{Owner: "host", Key: "k", Content: "small"}})
+		plan := Plan{Decisions: map[Name][]Decision{Context: {{Owner: "host", Key: "k", Disposition: Trim}}}}
+		if got := content(assemble(t, snap, plan, budgets, nil), Context); got != "small" {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("several entries with headers, stable across turns", func(t *testing.T) {
+		snap, _ := NewStore().Snapshot().With(
+			Update{Slot: Context, Entry: Entry{Owner: "host", Key: "a", Priority: 10, Content: strings.Repeat("alpha ", 60)}},
+			Update{Slot: Context, Entry: Entry{Owner: "host", Key: "b", Content: strings.Repeat("beta ", 400)}},
+		)
+		plan, _ := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+		first := assemble(t, snap, plan, budgets, nil)
+		text := content(first, Context)
+		if !strings.Contains(text, "### host/a") || !strings.Contains(text, "### host/b") || !strings.Contains(text, "[trimmed") || est.Estimate(text) > 200 {
+			t.Fatalf("content (%d tokens): %q", est.Estimate(text), text)
+		}
+		second := assemble(t, snap, plan, budgets, first.Hashes)
+		if second.Report[Context].Changed || content(second, Context) != text {
+			t.Fatal("a stable trim changed between turns")
+		}
+	})
+}

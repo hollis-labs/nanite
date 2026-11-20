@@ -8,6 +8,7 @@ import (
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/nanite/internal/tools"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -127,6 +128,13 @@ type Options struct {
 	// reported input for the last request is checked against it too. Zero
 	// uses 80% of host.yaml's runtime.context_window (200,000 when unset).
 	CompactAt int
+	// SlotBudgets overrides the token budget of the slots it names (sizes
+	// are estimated at about 4 bytes a token). Budgets must be positive, and
+	// the Universal slot cannot be named: its budget is set by the base
+	// prompt. An entry over budget is replaced by its pointer, trimmed
+	// with a marker, or, with no room left at all, left out; trims and
+	// omissions are logged and reported in SlotsAssembled.
+	SlotBudgets map[SlotName]int
 }
 
 // TraceRecord is one turn's trace record. Its schema is documented in
@@ -185,6 +193,16 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
+	}
+	for name, size := range opts.SlotBudgets {
+		switch {
+		case !slices.Contains(SlotNames(), name):
+			return nil, fmt.Errorf("nanite: SlotBudgets names unknown slot %q", name)
+		case name == SlotUniversal:
+			return nil, fmt.Errorf("nanite: the universal slot's budget is fixed by the base prompt")
+		case size <= 0:
+			return nil, fmt.Errorf("nanite: slot %s budget must be positive", name)
+		}
 	}
 	if opts.SubtaskResultCap < 0 {
 		return nil, fmt.Errorf("nanite: SubtaskResultCap must not be negative")
@@ -268,6 +286,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
 		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt,
+		SlotBudgets: maps.Clone(opts.SlotBudgets),
 	})
 	if err != nil {
 		_ = db.Close()
@@ -300,6 +319,10 @@ func (a *Agent) Info(ctx context.Context) (Info, error) {
 
 // Slots returns the host slot writer collection.
 func (a *Agent) Slots() *Slots { return &a.slots }
+
+// SlotBudget is the token budget of the named slot, so a host can size what
+// it writes there. Zero means the slot has no fixed budget.
+func (a *Agent) SlotBudget(name SlotName) int { return a.engine.SlotBudgets()[name] }
 
 // Tools returns the host tool groups.
 func (a *Agent) Tools() *ToolSet { return &a.tools }

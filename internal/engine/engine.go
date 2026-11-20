@@ -63,6 +63,9 @@ type Config struct {
 	TraceDir string
 	// TraceSink, when set, receives every turn's trace record.
 	TraceSink func(context.Context, trace.Turn)
+	// SlotBudgets overrides the token budget of the slots it names. The
+	// Universal slot (the base prompt) keeps its own budget.
+	SlotBudgets map[slots.Name]int
 	// PanicReporter also receives each contained panic. The engine always
 	// logs one; this adds the host's own record.
 	PanicReporter panics.Reporter
@@ -492,11 +495,7 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	if err != nil {
 		return slots.Assembled{}, err
 	}
-	budgets := make(map[slots.Name]int)
-	for name, size := range ctxpkg.DefaultBudgets() {
-		budgets[slots.Name(name)] = size
-	}
-	budgets[slots.Universal] = universalBudget
+	budgets := e.SlotBudgets()
 	var plan slots.Plan
 	err = e.panics.Call("slot selector", func() (err error) {
 		plan, err = e.cfg.SlotSelector.Select(ctx, info, snap, budgets)
@@ -518,4 +517,21 @@ func (e *Engine) Maintain(ctx context.Context, fn func(context.Context) error) e
 		return ErrBusy
 	}
 	return fn(ctx)
+}
+
+// SlotBudgets returns the token budget of each slot: the library defaults,
+// the base prompt's own Universal budget, then the host's overrides. Zero
+// means the slot has no fixed budget.
+func (e *Engine) SlotBudgets() map[slots.Name]int {
+	budgets := make(map[slots.Name]int)
+	for name, size := range ctxpkg.DefaultBudgets() {
+		budgets[slots.Name(name)] = size
+	}
+	budgets[slots.Universal] = universalBudget
+	for name, size := range e.cfg.SlotBudgets {
+		if name != slots.Universal && size > 0 {
+			budgets[name] = size
+		}
+	}
+	return budgets
 }

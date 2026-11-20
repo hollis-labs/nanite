@@ -174,6 +174,8 @@ func turnReport(turn int, report agent.SlotReport, offered, calls []string, resp
 				disposition = "pointer"
 			case agent.SlotSkip:
 				disposition = "skip"
+			case agent.SlotTrim:
+				disposition = "trim"
 			}
 			fmt.Fprintf(&out, "    %s/%s: %s\n", entry.Owner, entry.Key, disposition)
 		}

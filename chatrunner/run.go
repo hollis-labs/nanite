@@ -246,13 +246,39 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			Tokens  int    `json:"tokens"`
 			Changed bool   `json:"changed"`
 		}
+		type cut struct {
+			Slot        string `json:"slot"`
+			Owner       string `json:"owner"`
+			Key         string `json:"key"`
+			Disposition string `json:"disposition"`
+			Reason      string `json:"reason,omitempty"`
+		}
 		var slots []slot
+		var cuts []cut
 		for _, name := range agent.SlotNames() {
-			if s, ok := e.Report[name]; ok {
-				slots = append(slots, slot{string(name), s.Tokens, s.Changed})
+			s, ok := e.Report[name]
+			if !ok {
+				continue
+			}
+			slots = append(slots, slot{string(name), s.Tokens, s.Changed})
+			for _, d := range s.Decisions {
+				switch d.Disposition {
+				case agent.SlotTrim:
+					cuts = append(cuts, cut{string(name), d.Owner, d.Key, "trim", d.Reason})
+				case agent.SlotSkip:
+					cuts = append(cuts, cut{string(name), d.Owner, d.Key, "skip", d.Reason})
+				case agent.SlotPointer:
+					cuts = append(cuts, cut{string(name), d.Owner, d.Key, "pointer", d.Reason})
+				case agent.SlotShip:
+				}
 			}
 		}
-		return []chatstream.Event{activity(ActivitySlots, map[string]any{"slots": slots})}
+		value := map[string]any{"slots": slots}
+		if len(cuts) > 0 {
+			// Entries the host wrote that did not ship whole, so it can see them.
+			value["cuts"] = cuts
+		}
+		return []chatstream.Event{activity(ActivitySlots, value)}
 
 	case agent.TextDelta:
 		return x.stream(out, chatstream.PartText, e.Text)

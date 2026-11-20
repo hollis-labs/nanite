@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- No slot entry is dropped silently. An entry over what is left of its
+  slot's budget is replaced by its pointer, or else trimmed to fit with a
+  marker (new `SlotTrim`). It is left out only when no room is left. Trims
+  and omissions are logged, reported in `SlotsAssembled` and the
+  `nanite.slots` activity (`cuts`), and listed in the trace.
+  `Options.SlotBudgets` overrides budgets per slot (except Universal), and
+  `agent.SlotBudget` reports them.
 - Compaction counts everything a request carries. Tool schemas fill the
   Tools slot of the context window, and the provider's reported input for
   the last request is checked against the budget too. Before, a host with

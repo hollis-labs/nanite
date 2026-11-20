@@ -91,6 +91,10 @@ const (
 	SlotPointer = slots.Pointer
 	// SlotSkip omits it.
 	SlotSkip = slots.Skip
+	// SlotTrim ships the start of its content, cut to fit what is left of the
+	// slot's budget, with a marker. The default selector trims rather than
+	// skips an entry that does not fit.
+	SlotTrim = slots.Trim
 )
 
 // Slots manages host contributions to the next turn's context.

@@ -297,6 +297,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if err != nil {
 		return events.Result{}, err
 	}
+	e.warnCuts(ctx, info.ID, assembled.Report)
 	x := &execution{engine: e, run: r, info: info, definition: def, provider: model, assembled: assembled, policy: pdp, loop: loopdetect.New(),
 		summaryProvider: summaryProvider, summaryModel: summaryModel,
 		variants: variants, variant: variant, chain: chain, depth: depth, root: root, lineage: lineage}
@@ -873,4 +874,31 @@ func (x *execution) budgetStop() string {
 		return events.StopWallBudget
 	}
 	return ""
+}
+
+// warnCuts logs every entry the selector trimmed or left out, so a host
+// never loses context without a trace of it. Pointers are by design and are
+// not warned about.
+func (e *Engine) warnCuts(ctx context.Context, conversation string, report slots.Report) {
+	for _, name := range slots.Names() {
+		for _, d := range report[name].Decisions {
+			if d.Disposition == slots.Trim || d.Disposition == slots.Skip {
+				e.cfg.Logger.WarnContext(ctx, "nanite: slot entry cut", "conversation", conversation, "slot", string(name),
+					"owner", e.scrub.Text(d.Owner), "key", e.scrub.Text(d.Key), "disposition", dispositionName(d.Disposition), "reason", d.Reason)
+			}
+		}
+	}
+}
+
+func dispositionName(d slots.Disposition) string {
+	switch d {
+	case slots.Ship:
+		return "ship"
+	case slots.Pointer:
+		return "pointer"
+	case slots.Trim:
+		return "trim"
+	case slots.Skip:
+	}
+	return "skip"
 }

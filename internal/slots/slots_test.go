@@ -199,3 +199,62 @@ func TestSnapshotWith(t *testing.T) {
 		t.Fatal("Names returned shared storage")
 	}
 }
+
+func TestOversizedEntryIsTrimmedNotDropped(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	for _, slot := range []Name{Universal, Context, UserContext} {
+		t.Run(string(slot), func(t *testing.T) {
+			owner := "host"
+			if slot == Universal {
+				owner = "engine"
+			}
+			store := NewStore()
+			snap, err := store.Snapshot().With(Update{Slot: slot, Entry: Entry{Owner: owner, Key: "big", Content: "BEGIN " + strings.Repeat("context word ", 2000)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			budgets := map[Name]int{slot: 200}
+			plan, err := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Assemble(context.Background(), snap, plan, nil, 0, est, budgets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := got.Report[slot].Decisions
+			if len(d) != 1 || d[0].Disposition != Trim || d[0].Reason == "" {
+				t.Fatalf("decisions %+v", d)
+			}
+			var content string
+			for _, b := range got.Blocks {
+				if b.SlotName == string(slot) {
+					content = b.Content
+				}
+			}
+			if !strings.HasPrefix(content, "BEGIN ") || !strings.Contains(content, "[trimmed to fit the "+string(slot)+" slot budget of 200 tokens]") || est.Estimate(content) > 200 {
+				t.Fatalf("content (%d tokens): %.80q ... %q", est.Estimate(content), content, content[max(0, len(content)-80):])
+			}
+		})
+	}
+}
+
+func TestNoRoomLeftIsReportedSkip(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	snap, err := NewStore().Snapshot().With(
+		Update{Slot: Context, Entry: Entry{Owner: "host", Key: "a", Priority: 10, Content: strings.Repeat("first ", 150)}},
+		Update{Slot: Context, Entry: Entry{Owner: "host", Key: "b", Content: strings.Repeat("second ", 100)}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgets := map[Name]int{Context: 240}
+	plan, err := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := plan.Decisions[Context]
+	if len(d) != 2 || d[0].Disposition != Ship || d[1].Disposition != Skip || d[1].Reason != "no room left in slot budget" {
+		t.Fatalf("decisions %+v", d)
+	}
+}

@@ -81,6 +81,24 @@ Tools offered: ask_user, fetch_tool_result, find_files, list_dir, read_file, scr
 The workspace context is clear.
 ```
 
+## Slot budgets
+
+Every slot except the agent's instructions has a token budget (estimated at
+about 4 bytes a token). `agent.SlotBudget(name)` reports it, so a host can
+size what it writes. `Options.SlotBudgets` overrides it per slot; the
+Universal slot, which holds the base prompt, keeps its own.
+
+An entry that does not fit what is left of its slot is never dropped
+without a trace. In order, the default selector:
+1. ships the entry's pointer if it has one and the pointer fits;
+2. otherwise trims the entry to fit, keeping the start of the content and
+   adding a marker (`[trimmed to fit the <slot> slot budget of N tokens]`);
+3. leaves the entry out only when fewer than 32 tokens of room are left.
+
+Every trim and omission is logged as a warning. It is also reported in
+`SlotsAssembled` (`SlotTrim` and `SlotSkip`), in the `nanite.slots`
+activity, and in the trace's `trimmed` list.
+
 ## Choosing the built-in tools
 
 The application decides what its embedded agent can do. An agent whose
@@ -233,7 +251,9 @@ the subtask with status `denied`; an expiry does not count as one.
 
 **Events.** Each model step is a `step.start` / `step.finish` pair around one
 assistant message that holds the step's text, reasoning, tool calls and tool
-results. Activity kinds are `nanite.slots`, `nanite.subagent` (a subtask's
+results. Activity kinds are `nanite.slots` (each slot's tokens and whether it
+changed, plus `cuts`: entries that did not ship whole, with `disposition`
+`pointer`, `trim` or `skip` and the reason), `nanite.subagent` (a subtask's
 child conversation, with `variant`, `parent_id` and `depth`, and `status`
 when done; state `progress` carries `step`, `tool` and `status_line` while
 it runs, and a background subtask's start and progress carry `background`) and

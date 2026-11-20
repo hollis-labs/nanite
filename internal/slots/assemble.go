@@ -15,7 +15,14 @@ const (
 	Ship Disposition = iota
 	Pointer
 	Skip
+	// Trim ships the start of the entry's content, cut to fit what is left of
+	// the slot's budget, with a marker saying so.
+	Trim
 )
+
+// minTrimTokens is the least room worth trimming an entry into; with less,
+// the entry is skipped (and reported).
+const minTrimTokens = 32
 
 type Source interface {
 	Name() string
@@ -62,8 +69,15 @@ func (s defaultSelector) Select(ctx context.Context, _ TurnInfo, in Snapshot, bu
 				candidate = appendEntry(text, e, e.Pointer, len(entries) > 1)
 				pick.Disposition, pick.Reason = Pointer, "content exceeds slot budget"
 				if e.Pointer == "" || s.est.Estimate(candidate) > budget {
-					candidate = text
-					pick.Disposition, pick.Reason = Skip, "entry exceeds remaining slot budget"
+					// Never drop an entry silently: ship as much as fits, marked.
+					trimmed, ok := trimToFit(s.est, text, e, slot, len(entries) > 1, budget)
+					if ok {
+						candidate = appendEntry(text, e, trimmed, len(entries) > 1)
+						pick.Disposition, pick.Reason = Trim, "content cut to fit slot budget"
+					} else {
+						candidate = text
+						pick.Disposition, pick.Reason = Skip, "no room left in slot budget"
+					}
 				}
 			}
 			out.Decisions[slot] = append(out.Decisions[slot], pick)
@@ -71,6 +85,30 @@ func (s defaultSelector) Select(ctx context.Context, _ TurnInfo, in Snapshot, bu
 		}
 	}
 	return out, nil
+}
+
+// trimToFit returns the longest leading part of e's content, plus a marker,
+// that appended to text stays within budget. It reports false when less
+// than minTrimTokens of room is left.
+func trimToFit(est ctxpkg.TokenEstimator, text string, e Entry, slot Name, header bool, budget int) (string, bool) {
+	if est.Estimate(appendEntry(text, e, "x", header)) > budget-minTrimTokens {
+		return "", false
+	}
+	marker := fmt.Sprintf("\n[trimmed to fit the %s slot budget of %d tokens]", slot, budget)
+	runes := []rune(e.Content)
+	lo, hi := 0, len(runes)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if est.Estimate(appendEntry(text, e, string(runes[:mid])+marker, header)) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	if lo == 0 {
+		return "", false
+	}
+	return string(runes[:lo]) + marker, true
 }
 
 func appendEntry(dst string, e Entry, content string, header bool) string {
@@ -103,6 +141,9 @@ type Assembled struct {
 // per-slot budget for the slots it names, and should be the map the selector
 // planned with; nil keeps the defaults.
 func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]string, windowSize int, est ctxpkg.TokenEstimator, budgets map[Name]int) (Assembled, error) {
+	if est == nil {
+		est = ctxpkg.DefaultEstimator{}
+	}
 	window := ctxpkg.NewContextWindow(windowSize, est)
 	for name, size := range budgets {
 		if s := window.Slot(string(name)); s != nil && size > 0 {
@@ -137,6 +178,18 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 				body = e.Content
 			case Pointer:
 				body = e.Pointer
+			case Trim:
+				limit := window.Slot(string(slot)).MaxTokens
+				if limit <= 0 {
+					body = e.Content
+					break
+				}
+				trimmed, ok := trimToFit(est, text.String(), e, slot, len(entries) > 1, limit)
+				if !ok {
+					d.Disposition, d.Reason = Skip, "no room left in slot budget"
+					break
+				}
+				body = trimmed
 			case Skip:
 			default:
 				return Assembled{}, fmt.Errorf("slot %q has invalid selection mode %d", slot, d.Disposition)

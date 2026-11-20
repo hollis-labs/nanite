@@ -8,6 +8,7 @@ type Agent struct
   (*Agent) Notices() <-chan Notice
   (*Agent) RebuildIndex(ctx context.Context) error
   (*Agent) Skills() *SkillSet
+  (*Agent) SlotBudget(name SlotName) int
   (*Agent) Slots() *Slots
   (*Agent) Tools() *ToolSet
 func AllBuiltins() []BuiltinGroup
@@ -112,6 +113,7 @@ type Options struct
   field SubtaskLimit int
   field TurnTokenBudget int
   field CompactAt int
+  field SlotBudgets map[SlotName]int
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
   field Ref string
   field At time.Time
@@ -236,6 +238,7 @@ type SlotSource = github.com/hollis-labs/nanite/internal/slots.Source interface
   (SlotSource) Slots(ctx context.Context, turn github.com/hollis-labs/nanite/internal/slots.TurnInfo) ([]github.com/hollis-labs/nanite/internal/slots.Update, error)
 const SlotSystem github.com/hollis-labs/nanite/internal/slots.Name
 const SlotTools github.com/hollis-labs/nanite/internal/slots.Name
+const SlotTrim github.com/hollis-labs/nanite/internal/slots.Disposition
 type SlotTurnInfo = github.com/hollis-labs/nanite/internal/slots.TurnInfo struct
   field ConversationID string
   field TurnID string

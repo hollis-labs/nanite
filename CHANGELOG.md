@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- Steering (libs `agent/steer`), off unless `agent.Options.Steering` is set.
+  A root turn gets the conversation's mode (a preset: instructions and output
+  style in the `mode` slot), the work slots in front with their instructions
+  and top-of-mind tools (in `user_context`, before the message), reflexes
+  (`remind` adds a reminder; `halt` answers without calling the model; other
+  action kinds go to the host), and classifier suggestions that are never
+  applied unless the policy sets a facet to `auto`. A notice turn gets the
+  mode and work slots only. See `docs/steering.md`.
+- `Conversation.SetMode`, `Mode` and `AcceptSuggestion`. Only the person sets
+  a mode; there is no model tool for it, and it is kept across restarts
+  (store migration 8, `conversation_settings`).
+- `agent.Input.Situation`: what is in front of the person, for steering.
+- `Conversation.Steer` steers a person's message ahead of its turn, so a host
+  sees a reflex halt first; the turn takes the result in `Input.Steer`.
+  chatrunner steers before front-desk intake and does not plan a halted
+  message; `DeskOptions.Mode` defaults to the conversation's mode.
+- chatrunner `Options.Situation` (the situation for each turn) and
+  `Options.OnSteered` (each `Steered` event, with the reflex actions that
+  never go on the wire).
+- New event `Steered`, sent by chatrunner as the `nanite.steer` activity.
+- Dependencies: libs `agent/steer` v0.1.0, through the Substrate BOM (which
+  also moves libs `harness/core` forward).
+- Trace records of steered turns fill `situation`, `classified`, `why` and
+  `fired`, with no prompt content.
+- Reflex cooldowns are kept per conversation across restarts;
+  `Steering.StateFill` adds host facts for predicate reflexes.
 - providers.yaml: a `desk` use for the front desk's planner, falling back
   to chat. `agent.Agent.Complete` makes one model request for a use
   outside any conversation, and chatrunner `DeskOptions.PlanWithModel`

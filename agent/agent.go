@@ -123,6 +123,11 @@ type Options struct {
 	// runtime.turn_token_budget, else no shared budget": an embedder cannot
 	// turn off a host.yaml budget through Options, only set its own.
 	TurnTokenBudget int
+	// Steering, when set, runs libs agent/steer before each root turn: the
+	// conversation's mode (set only through Conversation.SetMode, never by
+	// the model), work slots, reflexes and classifier. Classifier results
+	// are suggested, not applied, unless Steering.Policy sets a facet to auto.
+	Steering *Steering
 	// SlotPlacement moves the slots it names between the system prefix and
 	// the turn (see SlotInSystem and SlotInTurn). By default only
 	// user_context is placed in the turn. Universal, System and Agent always
@@ -287,7 +292,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {

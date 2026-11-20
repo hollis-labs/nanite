@@ -6,10 +6,11 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/hollis-labs/libs/agent/agentdir v0.2.0
 	github.com/hollis-labs/libs/agent/chat v0.1.0
+	github.com/hollis-labs/libs/agent/steer v0.1.0
 	github.com/hollis-labs/libs/agent/trace v0.2.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/ui/ui-go v0.4.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261120070525-86095cf225a5
+	github.com/hollis-labs/substrate v0.1.1-0.20261120071756-768e5f7efbbd
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0

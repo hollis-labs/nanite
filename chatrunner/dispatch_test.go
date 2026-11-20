@@ -39,6 +39,12 @@ func newWired(t *testing.T, noticeTurns bool) *wired {
 
 func newWiredWith(t *testing.T, noticeTurns bool, desk *chatrunner.DeskOptions) *wired {
 	t.Helper()
+	return newWiredOpts(t, noticeTurns, desk, nil)
+}
+
+// newWiredOpts is newWiredWith with tweak applied to the runner's options.
+func newWiredOpts(t *testing.T, noticeTurns bool, desk *chatrunner.DeskOptions, tweak func(*chatrunner.Options)) *wired {
+	t.Helper()
 	dir := t.TempDir()
 	definition := "---\nschema_version: \"2\"\ndefinition_id: def:chat-test\nrevision: \"1\"\nname: chat-test\ndescription: Chat test.\nbehavior:\n  purpose: Test.\nrequirements: {}\nharness_profile:\n  permissions:\n    profile: default\ncontinuity:\n  mode: durable\n---\nTest instructions.\n"
 	profile := "kind: embedded\nlifetime: application\napplication_id: chat-test\nruntime:\n  provider: anthropic\n  model: test-model\n"
@@ -49,7 +55,7 @@ func newWiredWith(t *testing.T, noticeTurns bool, desk *chatrunner.DeskOptions) 
 	}
 	w := &wired{brain: &brain{}}
 	var svc atomic.Pointer[chat.Service]
-	r, err := chatrunner.Open(t.Context(), chatrunner.Options{
+	opts := chatrunner.Options{
 		Agent: agent.Options{Dir: dir, Provider: w.brain, GlobalSkillsDir: "-", Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks, agent.BuiltinBackground}},
 		Observe: func(ctx context.Context, conversationID string, turn chat.Turn, run chat.Run) error {
 			if hold := w.hold.Load(); hold != nil {
@@ -59,7 +65,11 @@ func newWiredWith(t *testing.T, noticeTurns bool, desk *chatrunner.DeskOptions) 
 		},
 		NoticeTurns: noticeTurns,
 		Desk:        desk,
-	})
+	}
+	if tweak != nil {
+		tweak(&opts)
+	}
+	r, err := chatrunner.Open(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}

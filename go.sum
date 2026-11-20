@@ -49,6 +49,8 @@ github.com/hollis-labs/libs/agent/core v0.5.0 h1:bk2GAHef+lH5ihYKBnQpir5SZoeRNTp
 github.com/hollis-labs/libs/agent/core v0.5.0/go.mod h1:AHtYM1ZFiaAVnPQYaZjJrI8trpmwomFMPknACIUe+4Y=
 github.com/hollis-labs/libs/agent/desk v0.1.0 h1:FwwMKVy1yvgDwkeLoEsKWfqQRL5KJ2+1BnolFXwcQ1I=
 github.com/hollis-labs/libs/agent/desk v0.1.0/go.mod h1:qxS+mHoXWnjobirZGKqea8BroZs03RMImfU86SAMx0U=
+github.com/hollis-labs/libs/agent/steer v0.1.0 h1:iMyWB2DKCMbCa7HDM1o0Pt8iQsVGxiQYvahT2wwRiGQ=
+github.com/hollis-labs/libs/agent/steer v0.1.0/go.mod h1:Eavm25W01c62JU6vUMqmrXecU/fd8phZwQeOVbebB6w=
 github.com/hollis-labs/libs/agent/trace v0.2.0 h1:02DO98Er1J5lKrvEP2Gt5BXpvcjgOAuzwFL8GevcVAg=
 github.com/hollis-labs/libs/agent/trace v0.2.0/go.mod h1:/X9cP7OTPpF+aM7I+4L/XdRVjFZdOMix8T7913NDm3s=
 github.com/hollis-labs/libs/core/panics v0.1.0 h1:mWJ9yPTRCBsLFprCNGIJrroehfh/g3UaDmLEH6gncB8=
@@ -73,8 +75,8 @@ github.com/hollis-labs/libs/security/secrets v0.1.0 h1:/wrYAM5viUnYMpDhvbQmPlTMe
 github.com/hollis-labs/libs/security/secrets v0.1.0/go.mod h1:Krd1kgmisOVmeN1G/ltaLMva58tIBki9xShsySqd86Y=
 github.com/hollis-labs/libs/ui/ui-go v0.4.0 h1:3TydDJElqD1ilgfY1FY+ei+joAuRcwMyuorGTDD1qIw=
 github.com/hollis-labs/libs/ui/ui-go v0.4.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
-github.com/hollis-labs/substrate v0.1.1-0.20261120070525-86095cf225a5 h1:lgZQaPNCkdZUUgsXY+Asscvr47p4IxaCOstHDTBg3zw=
-github.com/hollis-labs/substrate v0.1.1-0.20261120070525-86095cf225a5/go.mod h1:LNK7DIqGyVnvvKGYJIhnVKIdF1yIfNP9MtE252Y8G80=
+github.com/hollis-labs/substrate v0.1.1-0.20261120071756-768e5f7efbbd h1:ufslTI6bFwkvVISsMzVYyB0hOvfO96hfI8AGTAFdwE0=
+github.com/hollis-labs/substrate v0.1.1-0.20261120071756-768e5f7efbbd/go.mod h1:LNK7DIqGyVnvvKGYJIhnVKIdF1yIfNP9MtE252Y8G80=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/invopop/jsonschema v0.14.0 h1:MHQqLhvpNUZfw+hM3AZDYK7jxO8FZoQeQM77g8iyZjg=

@@ -36,16 +36,20 @@ type CompactionStarted = github.com/hollis-labs/nanite/internal/events.Compactio
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int
 type Conversation struct
+  (*Conversation) AcceptSuggestion(ctx context.Context, suggestion SteerVerdict, view string) error
   (*Conversation) Discard(ctx context.Context) error
   (*Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error)
   (*Conversation) History(ctx context.Context) ([]Message, error)
   (*Conversation) ID() string
   (*Conversation) Interrupted() *InterruptedTurn
   (*Conversation) Job(ctx context.Context, id string) (string, error)
+  (*Conversation) Mode(ctx context.Context) (string, error)
   (*Conversation) PostNotice(ctx context.Context, kind string, body string) error
   (*Conversation) Record(ctx context.Context, userText string, answer string) error
   (*Conversation) Resume(ctx context.Context) (*Run, error)
   (*Conversation) Send(ctx context.Context, in Input) (*Run, error)
+  (*Conversation) SetMode(ctx context.Context, name string) error
+  (*Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error)
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
   field ID string
   field ParentID string
@@ -70,6 +74,7 @@ type Dispatched = github.com/hollis-labs/nanite/internal/events.Dispatched struc
 var ErrBusy error
 var ErrNoConversation error
 var ErrNoStarts error
+var ErrNoSteering error
 type Event = github.com/hollis-labs/nanite/internal/events.Event interface
 type EventMeta = github.com/hollis-labs/nanite/internal/events.EventMeta struct
   field RunID string
@@ -83,6 +88,7 @@ type Gateway = github.com/hollis-labs/nanite/internal/provider.Gateway struct
   field Headers map[string]string
   field KeyRef string
   field Auth string
+var GeneralSlot github.com/hollis-labs/libs/agent/steer.Slot
 type Info struct
   field Dir string
   field Definition github.com/hollis-labs/libs/agent/agentdir.Snapshot
@@ -90,6 +96,8 @@ type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
   field Text string
   field Slots []github.com/hollis-labs/nanite/internal/slots.Update
   field Source string
+  field Situation *github.com/hollis-labs/libs/agent/steer.Situation
+  field Steer *github.com/hollis-labs/nanite/internal/engine.PreparedSteer
 type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
   field ID string
   field UserMessageID string
@@ -133,6 +141,7 @@ type Options struct
   field SubtaskResultCap int
   field SubtaskLimit int
   field TurnTokenBudget int
+  field Steering *Steering
   field SlotPlacement map[SlotName]SlotPlacement
   field CompactAt int
   field SlotBudgets map[SlotName]int
@@ -169,6 +178,8 @@ type PermissionResolved = github.com/hollis-labs/nanite/internal/events.Permissi
   field ID string
   field Decision github.com/hollis-labs/nanite/internal/permission.PermissionDecision
 type PermissionScope = github.com/hollis-labs/nanite/internal/permission.PermissionScope uint8
+type PreparedSteer = github.com/hollis-labs/nanite/internal/engine.PreparedSteer struct
+  (*PreparedSteer) Halted() bool
 type ProviderSpec = github.com/hollis-labs/nanite/internal/provider.Spec struct
   field Name string
   field Wire string
@@ -287,6 +298,32 @@ type SlotsAssembled = github.com/hollis-labs/nanite/internal/events.SlotsAssembl
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Report github.com/hollis-labs/nanite/internal/slots.Report
 const SourceNotice untyped string
+type SteerVerdict = github.com/hollis-labs/libs/agent/steer.Verdict struct
+  field Facet github.com/hollis-labs/libs/agent/steer.Facet
+  field Label string
+  field P float64
+  field Gate github.com/hollis-labs/libs/agent/steer.Gate
+  field Outcome github.com/hollis-labs/libs/agent/steer.Outcome
+  field Why string
+type Steered = github.com/hollis-labs/nanite/internal/events.Steered struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Mode string
+  field ModeSource string
+  field Slots []string
+  field Why string
+  field Fired []string
+  field Halted bool
+  field Suggestions []github.com/hollis-labs/libs/agent/steer.Verdict
+  field Actions []github.com/hollis-labs/libs/agent/steer.Action
+type Steering = github.com/hollis-labs/nanite/internal/engine.Steering struct
+  field Registry *github.com/hollis-labs/libs/agent/steer.Registry
+  field Vocabulary *github.com/hollis-labs/libs/agent/steer.Vocabulary
+  field Policy github.com/hollis-labs/libs/agent/steer.Policy
+  field NewSelector func() github.com/hollis-labs/libs/agent/steer.Selector
+  field Slots func() []github.com/hollis-labs/libs/agent/steer.Slot
+  field Reflexes func() []github.com/hollis-labs/libs/agent/steer.Reflex
+  field Classify func(ctx context.Context, sit github.com/hollis-labs/libs/agent/steer.Situation, slots []github.com/hollis-labs/libs/agent/steer.Slot) (github.com/hollis-labs/libs/agent/steer.Classification, error)
+  field StateFill github.com/hollis-labs/libs/agent/steer.StateFill
 type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFinished struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string

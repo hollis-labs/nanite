@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/steer"
 	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/permission"
@@ -156,6 +157,22 @@ type SubtaskProgress struct {
 	// a last event with Status cancelled, refused or error.
 	Background bool
 	Status     string
+}
+
+// Steered reports what steering decided for a root turn, before the model
+// runs: the mode in force and where it came from, the active work slots, the
+// reflexes that fired, classifier suggestions the owner may accept (they are
+// never applied on their own) and reflex actions the host carries out.
+// Halted means a reflex answered the message and the model was not called.
+type Steered struct {
+	EventMeta
+	Mode, ModeSource string
+	Slots            []string
+	Why              string
+	Fired            []string
+	Halted           bool
+	Suggestions      []steer.Verdict
+	Actions          []steer.Action
 }
 
 // NoticePosted reports a notice posted to a conversation: a background job's

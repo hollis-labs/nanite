@@ -166,3 +166,35 @@ func (c *Conversation) PostNotice(ctx context.Context, kind, body string) error 
 func (c *Conversation) Job(ctx context.Context, id string) (string, error) {
 	return c.agent.engine.Job(ctx, c.id, id)
 }
+
+// SetMode sets the conversation's deliberate mode, a preset in
+// Steering.Registry, for the person; "" clears it. A deliberate mode beats a
+// classified one and is kept across restarts. Only a root conversation has a
+// mode. This is the only way to set it: the model has no tool for it. It
+// returns ErrNoSteering when the agent was opened without Steering.
+func (c *Conversation) SetMode(ctx context.Context, name string) error {
+	return c.agent.engine.SetMode(ctx, c.id, name)
+}
+
+// Mode is the conversation's deliberate mode, "" when none is set.
+func (c *Conversation) Mode(ctx context.Context) (string, error) {
+	return c.agent.engine.Mode(ctx, c.id)
+}
+
+// Steer runs steering for a person's message ahead of its turn, for a host
+// that acts on the message before the turn (a front desk): if Halted, a
+// reflex answered it, and nothing else should act on it. Send the turn with
+// the result in Input.Steer, which then uses it instead of steering again;
+// a reflex's cooldown starts here, so a Send that then fails has still used
+// it. A PreparedSteer, or any copy of it, is used by one turn only. It returns ErrNoSteering when the agent
+// was opened without Steering.
+func (c *Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error) {
+	return c.agent.engine.Steer(ctx, c.id, in)
+}
+
+// AcceptSuggestion applies a classifier suggestion (from a Steered event)
+// the person accepted: a preset becomes the deliberate mode, a work slot is
+// pinned until the window in front changes. view is the view in front.
+func (c *Conversation) AcceptSuggestion(ctx context.Context, suggestion SteerVerdict, view string) error {
+	return c.agent.engine.AcceptSuggestion(ctx, c.id, suggestion, view)
+}

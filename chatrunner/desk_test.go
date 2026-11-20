@@ -2,6 +2,8 @@ package chatrunner_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -352,5 +354,32 @@ func TestDeskPlansWithTheAgentsModel(t *testing.T) {
 	if len(w.brain.planned) != 1 || !strings.Contains(w.brain.planned[0].SystemPrompt, "Seats: tether, nanite.") ||
 		w.brain.planned[0].Model != "test-model" || !strings.Contains(w.brain.planned[0].Messages[0].Content, "research alpha") {
 		t.Fatalf("planner request %+v", w.brain.planned)
+	}
+}
+
+// A desk entry in providers.yaml picks the planner's model.
+func TestDeskPlannerUsesTheDeskSelection(t *testing.T) {
+	w := newWiredWith(t, false, &chatrunner.DeskOptions{Intake: desk.Intake{Mode: desk.IntakeShadow}, PlanWithModel: true})
+	info, err := w.runner.Agent().Info(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Dir, "providers.yaml"), []byte("use:\n  desk: {provider: anthropic, model: planner-model}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w.brain.mu.Lock()
+	w.brain.plan = `{"items":[{"id":"1","kind":"answer","goal":"x"}],"confidence":0.9}`
+	w.brain.mu.Unlock()
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: twoSteps}); err != nil {
+		t.Fatal(err)
+	}
+	w.until(t, "the turn's end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	w.brain.mu.Lock()
+	defer w.brain.mu.Unlock()
+	if len(w.brain.planned) != 1 || w.brain.planned[0].Model != "planner-model" {
+		t.Fatalf("planner request %+v", w.brain.planned)
+	}
+	if last := w.brain.requests[len(w.brain.requests)-1]; last.Model != "test-model" {
+		t.Fatalf("the chat turn used %q", last.Model)
 	}
 }

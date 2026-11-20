@@ -24,7 +24,7 @@ type Definition struct {
 	Rules    []byte
 	// Providers are the named providers from providers.yaml.
 	Providers map[string]provider.Spec
-	// Use selects a provider and model per use (chat, summarizer, subtask)
+	// Use selects a provider and model per use (chat, summarizer, subtask, desk)
 	// from providers.yaml. A use not listed falls back to chat; chat not
 	// listed uses host.yaml's runtime.provider and runtime.model.
 	Use map[string]Selection

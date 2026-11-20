@@ -14,11 +14,11 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/agent"
-	"github.com/hollis-labs/nanite/internal/definition"
-	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/agent/providers"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 )
 
@@ -65,11 +65,15 @@ func demo(ctx context.Context, w io.Writer, dir string, offline bool) (retErr er
 		model.Provider = fake.New(call("1", "notes_search"), fake.Text("The notes mention a planning meeting."),
 			call("2", "files_list"), fake.Text("The workspace contains agenda.md."), fake.Text("The workspace context is clear."))
 	} else {
-		def, err := definition.Load(dir, "-")
+		snap, err := agentdir.Load(dir)
 		if err != nil {
 			return err
 		}
-		model.Provider, err = provider.New(provider.Config{Provider: def.Runtime.Provider, Gateway: opts.Gateway})
+		name := snap.Profile.Runtime.Provider
+		if name == "" {
+			name = providers.Anthropic
+		}
+		model.Provider, err = providers.New(providers.Config{Name: name, Gateway: opts.Gateway})
 		if err != nil {
 			return err
 		}

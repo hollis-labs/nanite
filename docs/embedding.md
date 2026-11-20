@@ -81,6 +81,34 @@ Tools offered: ask_user, fetch_tool_result, find_files, list_dir, read_file, scr
 The workspace context is clear.
 ```
 
+## Building a provider yourself
+
+`agent.Open` builds the providers that `host.yaml` and `providers.yaml`
+select, so most hosts never build one. A host that wants a provider outside
+an agent (a live eval, a workbench, a one-off request), or wants to choose it
+explicitly through `agent.Options.Provider`, uses
+`github.com/hollis-labs/nanite/agent/providers`:
+
+```go
+p, err := providers.New(providers.Config{
+    Name:    providers.OpenAI, // or providers.Anthropic
+    Gateway: agent.Gateway{KeyRef: "keychain://nanite/provider/openai"}, // a reference, never the key
+    Options: providers.Options{Redactor: scope}, // the scope your logs are scrubbed with
+})
+// A named provider, as providers.yaml defines one:
+q, err := providers.NewNamed(spec, providers.Options{Redactor: scope})
+```
+
+A built-in provider looks for its key at `Gateway.KeyRef`, then at
+`keychain://nanite/provider/<name>`, then, only with
+`NANITE_PROVIDER_KEY_ENV=1`, in `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+`Gateway.BaseURL`, `Headers` and `Auth` route it through a gateway, as for
+`agent.Open`; with a third-party gateway, make sure `KeyRef` resolves, or the
+provider's own key is sent there. Keys are resolved on each request and
+added to `Options.Redactor`: pass the scope you scrub logs and traces with,
+since with none the key goes to a scope nothing reads. A key that cannot be
+resolved fails the request, not `New`.
+
 ## Steering
 
 `Options.Steering` turns on modes, work slots, reflexes and a classifier for

@@ -16,6 +16,7 @@ import (
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
+	"github.com/hollis-labs/libs/agent/steer"
 	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
@@ -90,6 +91,9 @@ type Config struct {
 	// (system blocks, tool schemas and conversation together) at which the
 	// conversation is compacted. Zero uses 80% of the runtime context window.
 	CompactAt int
+	// Steering, when set, runs libs agent/steer before each root turn: the
+	// conversation's mode, work slots, reflexes and classifier.
+	Steering *Steering
 }
 
 type Engine struct {
@@ -118,11 +122,14 @@ type Engine struct {
 	progressEvery time.Duration
 	// backgroundProgressEvery is the same for a background subtask.
 	backgroundProgressEvery time.Duration
-	closed                  bool
-	scrub                   *redact.Redactor
-	runtime                 *events.Runtime
-	jobs                    *background.Manager
-	children                subagent.Limit
+	// steerers holds each root conversation's steering state.
+	steerMu  sync.Mutex
+	steerers map[string]*steering
+	closed   bool
+	scrub    *redact.Redactor
+	runtime  *events.Runtime
+	jobs     *background.Manager
+	children subagent.Limit
 	// leads limits subtasks that may start their own (a can_spawn variant
 	// at depth 1), apart from children, so a council never starves itself.
 	leads subagent.Limit
@@ -170,6 +177,11 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Steering != nil {
+		if err := cfg.Steering.validate(); err != nil {
+			return nil, err
+		}
+	}
 	guard := newGuard(cfg.Logger, scrub, cfg.PanicReporter)
 	cfg.ProviderConfig.Panics = guard
 	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), noticeSubs: make(map[uint64]*noticeQueue), noticeQueueLimit: NoticeQueueLimit, noticeJobs: make(map[string]bool), dispatched: make(map[string]bool), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
@@ -179,7 +191,8 @@ func New(cfg Config) (*Engine, error) {
 		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(cfg.SubtaskLimit), leads: subagent.NewLimit(cfg.SubtaskLimit),
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
-		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval}
+		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval,
+		steerers: make(map[string]*steering)}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	// Expired tool results, cached for an hour or stored subtask results for
 	// 30 days, share one table; clear them once when the agent opens.
@@ -211,6 +224,10 @@ type Input struct {
 	// Source says what started the turn: empty for a person's message, or
 	// SourceNotice for a turn a host starts because a notice arrived.
 	Source string
+	// Situation is what is in front of the person, for steering (the window
+	// in front, the open windows, the layout). Input and Source are filled
+	// in by the engine. Nil when the host has none or steering is off.
+	Situation *steer.Situation
 }
 
 // SourceNotice marks a turn started because a notice arrived. Its trace

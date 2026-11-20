@@ -78,6 +78,13 @@ type SubagentFinished = events.SubagentFinished
 // rate-limited per subtask. It is for the host; the model never sees it.
 type SubtaskProgress = events.SubtaskProgress
 
+// Steered reports what steering decided for a root turn before the model
+// ran: the mode and its source, the active work slots, the reflexes that
+// fired, suggestions the person may accept with
+// Conversation.AcceptSuggestion, and reflex actions for the host to carry
+// out. Halted means a reflex answered and the model was not called.
+type Steered = events.Steered
+
 // CompactionStarted reports that history compaction is beginning. Exactly one
 // Compacted or CompactionFailed follows it.
 type CompactionStarted = events.CompactionStarted

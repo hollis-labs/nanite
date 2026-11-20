@@ -2,8 +2,10 @@ package chatrunner
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/steer"
 	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
 	"github.com/hollis-labs/nanite/agent"
 )
@@ -82,5 +84,29 @@ func TestSubtaskActivityCarriesParentAndDepth(t *testing.T) {
 	}
 	if started := value(agent.SubagentStarted{ID: "b", ParentID: "root", Depth: 1, Variant: "worker", Background: true}); started["background"] != true {
 		t.Fatalf("background start %v", started)
+	}
+}
+
+// What steering decided is a nanite.steer activity: the mode and its source,
+// the slots, and suggestions the person may accept. Reflex actions stay with
+// the host.
+func TestSteeredIsActivity(t *testing.T) {
+	x := &run{asked: map[string]bool{}}
+	out := x.translate(agent.Steered{Mode: "focus", ModeSource: "deliberate", Slots: []string{"notes"}, Why: "focus", Fired: []string{"hush"},
+		Suggestions: []agent.SteerVerdict{{Facet: "slot", Label: "mail", P: 0.9, Outcome: "suggest"}},
+		Actions:     []steer.Action{{Reflex: "r", Kind: "call_tool", Spec: json.RawMessage(`{"tool":"secret"}`)}}})
+	if len(out) != 1 || out[0].Kind != ActivitySteer {
+		t.Fatalf("mapped to %+v", out)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(out[0].Value, &v); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := v["suggestions"].([]any)
+	if v["mode"] != "focus" || v["mode_source"] != "deliberate" || len(s) != 1 || s[0].(map[string]any)["label"] != "mail" {
+		t.Fatalf("value %v", v)
+	}
+	if strings.Contains(string(out[0].Value), "secret") {
+		t.Fatal("a reflex action reached the wire")
 	}
 }

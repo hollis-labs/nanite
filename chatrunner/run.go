@@ -37,6 +37,11 @@ const (
 	// or the host's own. Value: id, kind and body. It arrives on the running
 	// turn, or, when none runs, as a run of its own (Options.Observe).
 	ActivityNotice = "nanite.notice"
+	// ActivitySteer reports what steering decided before the model ran.
+	// Value: mode, mode_source ("deliberate", "classified", "default"),
+	// slots, why, fired, halted, and suggestions the person may accept
+	// (each: facet, label, p). Reflex actions for the host are not sent.
+	ActivitySteer = "nanite.steer"
 )
 
 // CodeTurnFailed is the run.error code of a turn Nanite could not finish.
@@ -430,6 +435,14 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 
 	case agent.NoticePosted:
 		return []chatstream.Event{noticeActivity(e)}
+
+	case agent.Steered:
+		suggestions := make([]map[string]any, 0, len(e.Suggestions))
+		for _, v := range e.Suggestions {
+			suggestions = append(suggestions, map[string]any{"facet": string(v.Facet), "label": v.Label, "p": v.P})
+		}
+		return []chatstream.Event{activity(ActivitySteer, map[string]any{"mode": e.Mode, "mode_source": e.ModeSource, "slots": e.Slots,
+			"why": e.Why, "fired": e.Fired, "halted": e.Halted, "suggestions": suggestions})}
 
 	case agent.CompactionStarted:
 		return []chatstream.Event{activity(ActivityCompact, map[string]any{"state": "start", "before": e.Before})}

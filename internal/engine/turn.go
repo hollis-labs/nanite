@@ -291,6 +291,14 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		warnings[i] = e.scrub.Text(warning)
 		e.cfg.Logger.WarnContext(ctx, warnings[i])
 	}
+	var steerOut *steered
+	if e.cfg.Steering != nil && depth == 0 && interrupted == nil {
+		if steerOut, err = e.steerTurn(ctx, r, info, input); err != nil {
+			return events.Result{}, err
+		}
+		input.Slots = append(append([]slots.Update(nil), input.Slots...), steerOut.updates...)
+		tr.rec.Situation, tr.rec.Classified, tr.rec.Why, tr.rec.Fired = steerOut.decision.TraceFields()
+	}
 	pending, err := e.cfg.Store.PendingNotices(ctx, info.ID)
 	if err != nil {
 		return events.Result{}, err
@@ -388,9 +396,14 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		r.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.SlotsAssembled{EventMeta: meta, Report: assembled.Report}
 		})
-		// Mark delivery only after a model request has received the session
-		// slot. A panic in the model loop records the turn as failed.
-		err = e.panics.Call("model loop", func() error { return x.generate(ctx) }, panics.With("conversation", info.ID), panics.With("run", r.id))
+		if steerOut != nil && steerOut.halt != "" {
+			// A reflex answered: the reply is its message, and no model is called.
+			err = x.halt(ctx, steerOut.halt)
+		} else {
+			// Mark delivery only after a model request has received the session
+			// slot. A panic in the model loop records the turn as failed.
+			err = e.panics.Call("model loop", func() error { return x.generate(ctx) }, panics.With("conversation", info.ID), panics.With("run", r.id))
+		}
 		if x.submitted {
 			err = errors.Join(err, e.cfg.Store.MarkNoticesDelivered(context.WithoutCancel(ctx), info.ID, r.id, deliveredNoticeIDs(assembled.Report, pending)))
 		}
@@ -445,6 +458,18 @@ func (x *execution) append(message store.Message) error {
 		return err
 	}
 	x.addMessage(message)
+	return nil
+}
+
+// halt answers the turn with a reflex's message instead of calling the model.
+func (x *execution) halt(ctx context.Context, text string) error {
+	if err := x.message("assistant", []llmtypes.ContentBlock{{Type: "text", Text: x.engine.scrub.Text(text)}}); err != nil {
+		return err
+	}
+	clean := x.engine.scrub.Text(text)
+	x.run.emit(ctx, func(meta events.EventMeta) events.Event { return events.TextDelta{EventMeta: meta, Text: clean} })
+	x.result.Text = clean
+	x.result.StopReason = llmtypes.StopReasonEndTurn
 	return nil
 }
 

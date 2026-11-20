@@ -81,6 +81,13 @@ Tools offered: ask_user, fetch_tool_result, find_files, list_dir, read_file, scr
 The workspace context is clear.
 ```
 
+## Steering
+
+`Options.Steering` turns on modes, work slots, reflexes and a classifier for
+root turns (libs `agent/steer`). Pass what is in front of the person in
+`Input.Situation`, and set the mode only from the person's own choice with
+`Conversation.SetMode`. See [steering.md](steering.md).
+
 ## Slot budgets
 
 Every slot except the agent's instructions has a token budget (estimated at

@@ -1,0 +1,87 @@
+# Steering
+
+Steering decides how the agent approaches a turn before the model sees it:
+which mode is in force, which kinds of work are in front, which reflexes fire,
+and what a classifier may suggest. Nanite runs it with the
+[`agent/steer`](https://github.com/hollis-labs/libs/tree/main/agent/steer)
+library. A host turns it on with `agent.Options.Steering`; without it, turns
+are assembled exactly as before.
+
+```go
+reg, _ := steer.NewRegistry(steer.DefaultPresets()...)  // general, focus, triage, research
+_ = reg.Add(steer.LayerModule, "drafts", steer.Preset{Name: "writing", Slots: []string{"drafts"}, Instructions: "Help the owner write."})
+a, _ := agent.Open(ctx, agent.Options{Dir: dir, Steering: &agent.Steering{
+	Registry: reg,
+	Slots:    func() []steer.Slot { return mySlots },       // kinds of work the host offers
+	Reflexes: func() []steer.Reflex { return myReflexes },  // standing rules, as config
+	Classify: myClassifier,                                  // optional
+}})
+c, _ := a.Conversation(ctx, id)
+_ = c.SetMode(ctx, "writing") // the person picked a mode in the host's UI
+run, _ := c.Send(ctx, agent.Input{Text: msg, Situation: &steer.Situation{Focused: &steer.Focus{View: "drafts"}}})
+```
+
+## What a root turn gets
+
+Steering runs for root conversations only; a subtask works under its variant.
+
+| Turn | Mode | Work slots | Classifier | Reflexes |
+| --- | --- | --- | --- | --- |
+| A person's message | yes | yes | yes, if `Classify` is set | yes |
+| A notice turn | yes | yes | no | no |
+| A resumed turn | no | no | no | no |
+
+- **Mode.** The preset in force: the conversation's deliberate mode, otherwise
+  a classified preset the policy applies, otherwise the registry's default. Its
+  instructions and output style go in the `mode` slot, in the system blocks;
+  they change only when the mode changes.
+- **Work slots.** The kinds of work in front (from the window in front, the
+  mode and the preset), with their instructions and the tools top of mind. They
+  go in the `user_context` slot, in front of the person's message, so the
+  system blocks and the prompt cache stay the same as focus moves.
+- **Reflexes.** Those enabled everywhere plus those the preset lists. A
+  `remind` reminder is told with the message. A `halt` answers the message
+  itself: the reply is the reflex's message and no model is called. Any other
+  action kind in the vocabulary is the host's: it arrives in the `Steered`
+  event's `Actions`. An invalid reflex, or one whose action kind is not in the
+  vocabulary, is skipped with a warning. Cooldowns are kept per conversation,
+  so a restart does not fire a cooling reflex again. Predicates see the
+  situation, `Situation.Signals`, and whatever `Steering.StateFill` adds
+  (unread mail, prefix tokens, scope tier).
+
+Each root turn emits a `Steered` event before the model runs (chatrunner
+sends it as the `nanite.steer` activity). The turn's trace record carries the
+decision in its `situation`, `classified`, `why` and `fired` fields, with no
+prompt content: the views and module in front, the mode and its source, the
+layout, the turn source and the slots, but no message text, selection, window
+titles or signals.
+
+## Modes
+
+- **Only the person sets the mode**, through `Conversation.SetMode`. There is
+  no model tool for it. Nanite holds the library's owner-control capability
+  internally and never exposes it to the model. The mode is kept across
+  restarts, and `""` clears it.
+- The default preset is not a mode: it does not select slots that list a mode,
+  and `mode` attributes stay empty for it.
+- A deliberate mode beats a classified one.
+- `Conversation.AcceptSuggestion` applies a suggestion the person accepted: a
+  preset becomes the deliberate mode, a work slot is pinned until the window in
+  front changes. Only a suggestion for a known preset or offered slot is
+  accepted.
+
+**Layers.** Presets come from the shipped defaults, from modules, and from the
+app. A preset of the same name in a higher layer replaces a lower one whole,
+and **the app wins over modules, which win over the defaults**
+(app > module > default). Between two modules, the one registered first wins.
+
+## Classifier
+
+The host classifies; Nanite never sends the message anywhere to do it. Per
+facet the policy is `shadow` (record only), `suggest` (offer to the person
+above a threshold) or `auto` (apply above a threshold). The default suggests
+`slot` at 0.7 and `preset` at 0.8, and nothing applies on its own. Set a facet
+to `auto` only once replay shows enough precision.
+
+In this version the `act` and `affect` facets are **recorded as data only**:
+they appear in the trace and are never suggested or applied.

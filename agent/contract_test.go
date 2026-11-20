@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
@@ -201,5 +202,59 @@ func TestEmbeddedAgentGetsNoBuiltinsUnlessTheHostOptsIn(t *testing.T) {
 	}
 	if got := offeredTools(t, agentDirOfKind(t, stable), nil); !slices.Contains(got, "bash") || !slices.Contains(got, "write_file") {
 		t.Fatalf("stable agent with no option was offered %v", got)
+	}
+}
+
+func TestSubtaskSettingsPrecedence(t *testing.T) {
+	file := agentdir.Runtime{SubtaskLimit: 6, TurnTokenBudget: 9000, SubtaskResultCap: 3000}
+	for _, tc := range []struct {
+		name string
+		opts Options
+		file agentdir.Runtime
+		want subtaskConfig
+	}{
+		{"defaults", Options{}, agentdir.Runtime{}, subtaskConfig{}},
+		{"host.yaml", Options{}, file, subtaskConfig{limit: 6, turnBudget: 9000, resultCap: 3000}},
+		{"options win", Options{SubtaskLimit: 2, TurnTokenBudget: 100, SubtaskResultCap: 500}, file, subtaskConfig{limit: 2, turnBudget: 100, resultCap: 500}},
+		{"per field", Options{TurnTokenBudget: 100}, file, subtaskConfig{limit: 6, turnBudget: 100, resultCap: 3000}},
+	} {
+		got, err := subtaskSettings(tc.opts, tc.file)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: %+v, %v; want %+v", tc.name, got, err, tc.want)
+		}
+	}
+}
+
+func TestOpenRefusesAHostYAMLSubtaskLimitOverEight(t *testing.T) {
+	dir := t.TempDir()
+	definition := `---
+schema_version: "2"
+definition_id: def:limit-test
+revision: "1"
+name: limit-test
+description: Subtask limit fixture.
+behavior:
+  purpose: Test the subtask limit.
+requirements: {}
+harness_profile:
+  permissions:
+    profile: default
+continuity:
+  mode: ephemeral
+---
+Test instructions.
+`
+	for name, raw := range map[string]string{"agent.md": definition, "host.yaml": "kind: embedded\nlifetime: application\napplication_id: test\nruntime:\n  subtask_limit: 9\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := Open(context.Background(), Options{Dir: dir})
+	if err == nil {
+		_ = a.Close()
+		t.Fatal("a host.yaml subtask_limit of 9 was accepted")
+	}
+	if !strings.Contains(err.Error(), "subtask_limit 9") || !strings.Contains(err.Error(), "host.yaml") {
+		t.Fatalf("unclear refusal: %v", err)
 	}
 }

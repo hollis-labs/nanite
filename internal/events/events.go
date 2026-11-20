@@ -128,7 +128,8 @@ const (
 	// StopMaxSteps is the stop reason of a turn that reached its step limit.
 	StopMaxSteps = "max_steps"
 	// StopTokenBudget is the stop reason of a subtask that spent its
-	// variant's token budget.
+	// variant's token budget, or of a turn or subtask that reached the token
+	// budget a root turn shares with its subtasks.
 	StopTokenBudget = "token_budget"
 	// StopWallBudget is the stop reason of a subtask that ran past its
 	// variant's wall-clock budget.

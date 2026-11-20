@@ -47,6 +47,14 @@ func (e *Engine) openSubtask(child string, schema *jsonschema.Resolved) {
 	e.subtasks[child] = &subtaskState{schema: schema}
 }
 
+// hasReturned reports whether a running child has handed back its result.
+func (e *Engine) hasReturned(child string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state := e.subtasks[child]
+	return state != nil && state.returned != nil
+}
+
 // closeSubtask forgets a child and returns what it returned, if anything.
 func (e *Engine) closeSubtask(child string) *returnedResult {
 	e.mu.Lock()
@@ -179,7 +187,7 @@ const noReturnReason = "no_return_result"
 // subtaskCapBytes is the cap on the whole result envelope: the variant's or
 // agent's cap, never more than subtaskEnvelopeLimit.
 func (e *Engine) subtaskCapBytes(variant subagent.Variant) int {
-	return min(subagent.ResultCapBytes(variant, e.cfg.SubtaskResultCap), subtaskEnvelopeLimit)
+	return subagent.ResultCapBytes(variant, e.cfg.SubtaskResultCap, subtaskEnvelopeLimit)
 }
 
 // composeSubtaskResult builds the parent's view of a finished child. status

@@ -3,12 +3,12 @@ module github.com/hollis-labs/nanite
 go 1.26.11
 
 require (
-	github.com/hollis-labs/libs/agent/agentdir v0.1.0
+	github.com/hollis-labs/libs/agent/agentdir v0.2.0
 	github.com/hollis-labs/libs/agent/chat v0.1.0
-	github.com/hollis-labs/libs/agent/trace v0.1.0
+	github.com/hollis-labs/libs/agent/trace v0.2.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/ui/ui-go v0.4.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261119234216-69cc75f4b360
+	github.com/hollis-labs/substrate v0.1.1-0.20261120013640-a617597c4092
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0

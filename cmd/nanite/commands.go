@@ -229,6 +229,9 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := subagent.CheckLimit(info.Profile.Runtime.SubtaskLimit); err != nil {
+				return fmt.Errorf("host.yaml runtime: %w", err)
+			}
 			variants, err := subagent.Load(path)
 			if err != nil {
 				return err

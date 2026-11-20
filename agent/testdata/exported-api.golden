@@ -109,6 +109,8 @@ type Options struct
   field TraceSink func(context.Context, TraceRecord)
   field PanicReporter PanicReporter
   field SubtaskResultCap int
+  field SubtaskLimit int
+  field TurnTokenBudget int
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
   field Ref string
   field At time.Time
@@ -316,6 +318,9 @@ type TraceRecord = github.com/hollis-labs/libs/agent/trace.Turn struct
   field RunID string
   field TurnID string
   field ParentConversationID string
+  field ParentTurnID string
+  field ParentCallID string
+  field Depth int
   field Role string
   field Source github.com/hollis-labs/libs/agent/trace.Source
   field Provider string
@@ -324,6 +329,7 @@ type TraceRecord = github.com/hollis-labs/libs/agent/trace.Turn struct
   field Trimmed []string
   field ToolsOffered []string
   field ToolCalls []github.com/hollis-labs/libs/agent/trace.ToolCall
+  field Subtasks []github.com/hollis-labs/libs/agent/trace.Subtask
   field Compactions []github.com/hollis-labs/libs/agent/trace.Compaction
   field Usage github.com/hollis-labs/libs/agent/trace.Usage
   field Outcome github.com/hollis-labs/libs/agent/trace.Outcome

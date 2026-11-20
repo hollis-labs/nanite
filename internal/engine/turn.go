@@ -81,6 +81,9 @@ type execution struct {
 	lineage []string
 	// deadline is the child's wall-clock budget, checked between steps.
 	deadline time.Time
+	// shared is the root turn's token budget, shared with its foreground
+	// subtasks at every depth; nil when the agent sets none.
+	shared *turnBudget
 	// usageMu guards result.Usage, which subtask handlers add child usage to.
 	usageMu sync.Mutex
 	// returned is set once this child has called return_result; the turn
@@ -290,6 +293,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)
 	}
+	x.shared = sharedBudget(ctx, depth, e.cfg.TurnTokenBudget)
 	tr.x = x
 	tr.rec.Slots, tr.rec.Trimmed = traceSlots(assembled, e.scrub.Text)
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
@@ -620,7 +624,16 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	if summaryProvider == nil {
 		summaryProvider, summaryModel = x.provider, x.definition.Runtime.Model
 	}
-	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(summaryProvider, summaryModel), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(summaryModel)}
+	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(summaryProvider, summaryModel), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(summaryModel),
+		// A summary is model spend too. The summarizer's Complete call
+		// reports no usage, so the shared budget is charged an estimate.
+		spend: func(prompt string, span []llmtypes.ChatMessage, summary string) {
+			if x.shared == nil {
+				return
+			}
+			raw, _ := json.Marshal(span)
+			x.shared.add(est.Estimate(prompt) + est.Estimate(string(raw)) + est.Estimate(summary))
+		}}
 	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
 	if force {
 		_, err = pipeline.RunForce(ctx)
@@ -674,6 +687,8 @@ type capturingSummarizer struct {
 	model      string
 	count      int
 	summary    string
+	// spend, when set, is told of each summary call made.
+	spend func(prompt string, span []llmtypes.ChatMessage, summary string)
 }
 
 func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span []llmtypes.ChatMessage) (string, error) {
@@ -688,6 +703,10 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 	spanCtx, endSpan := events.ModelSpan(ctx, s.model)
 	defer endSpan()
 	summary, err := s.Summarizer.Summarize(spanCtx, prompt, span[:end])
+	if s.spend != nil && err == nil {
+		// A failed summary call is not charged: it reports nothing to count.
+		s.spend(prompt, span[:end], summary)
+	}
 	if err == nil && strings.TrimSpace(summary) == "" {
 		// An empty summary would drop the span with nothing in its place.
 		err = errEmptySummary
@@ -775,6 +794,7 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			x.result.Usage.CacheReadTokens += u.CacheReadTokens
 			x.result.Usage.CacheWriteTokens += u.CacheCreationTokens
 			x.usageMu.Unlock()
+			x.shared.add(u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens)
 			if u.StopReason != "" {
 				x.result.StopReason = u.StopReason
 			}
@@ -798,7 +818,8 @@ func appendStepText(all *strings.Builder, text string) {
 }
 
 // budgetStop is the stop reason when a child has spent its variant's token
-// or wall-clock budget, checked between steps; "" while within budget.
+// or wall-clock budget, or any turn has spent the token budget its root turn
+// shares with its subtasks, checked between steps; "" while within budget.
 func (x *execution) budgetStop() string {
 	if limit := x.variant.Budgets.Tokens; limit > 0 {
 		// Every token counts, cached ones included, and a lead's spend
@@ -810,6 +831,9 @@ func (x *execution) budgetStop() string {
 		if spent >= limit {
 			return events.StopTokenBudget
 		}
+	}
+	if x.shared.spent() {
+		return events.StopTokenBudget
 	}
 	if !x.deadline.IsZero() && !time.Now().Before(x.deadline) {
 		return events.StopWallBudget

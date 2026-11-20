@@ -3,6 +3,7 @@
 package subagent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -191,10 +192,11 @@ const DefaultResultCap = 6000
 // BytesPerToken converts a token cap to bytes of result JSON.
 const BytesPerToken = 4
 
-// ResultCapBytes is the configured cap on a child's whole result, in bytes:
+// ResultCapBytes is the configured cap on a child's whole result, in bytes,
+// never more than maxBytes (when positive):
 // the variant's result_cap, else the agent's, else DefaultResultCap. The
 // engine clamps it to what one tool result can carry.
-func ResultCapBytes(variant Variant, agent int) int {
+func ResultCapBytes(variant Variant, agent, maxBytes int) int {
 	tokens := DefaultResultCap
 	switch {
 	case variant.ResultCap > 0:
@@ -202,17 +204,73 @@ func ResultCapBytes(variant Variant, agent int) int {
 	case agent > 0:
 		tokens = agent
 	}
+	// Clamp in tokens first, so a huge setting cannot overflow the product.
+	if maxBytes > 0 {
+		tokens = min(tokens, maxBytes/BytesPerToken)
+	}
 	return tokens * BytesPerToken
 }
 
+// CheckLimit refuses a subtask limit the agent cannot run; zero is the
+// default.
+func CheckLimit(n int) error {
+	if n < 0 || n > MaxLimit {
+		return fmt.Errorf("subtask_limit %d is out of range: it must be between 0 (the default, %d) and %d", n, DefaultLimit, MaxLimit)
+	}
+	return nil
+}
+
+// DefaultLimit is how many subtasks may run at once on one agent when the
+// host sets no limit; MaxLimit is the most a host may set.
+const (
+	DefaultLimit = 4
+	MaxLimit     = 8
+)
+
+// Limit bounds how many subtasks of one kind run at once across the whole
+// agent: every conversation and background subtasks included. The engine
+// keeps two: one for leads (variants that may start subtasks) and one for
+// every other subtask, so a lead never holds a slot its own children need.
 type Limit chan struct{}
 
-func NewLimit() Limit { return make(Limit, 4) }
-func (l Limit) Acquire() (func(), error) {
+// NewLimit returns a limit of n subtasks at once; n <= 0 is DefaultLimit and
+// n above MaxLimit is MaxLimit.
+func NewLimit(n int) Limit {
+	switch {
+	case n <= 0:
+		n = DefaultLimit
+	case n > MaxLimit:
+		n = MaxLimit
+	}
+	return make(Limit, n)
+}
+
+// Acquire takes a slot, waiting for one while ctx lasts. Waiting cannot
+// deadlock: a subtask waiting for a slot of its kind holds none, and a lead
+// holds a lead slot only while its workers wait on the other limit.
+func (l Limit) Acquire(ctx context.Context) (func(), error) {
+	select {
+	case l <- struct{}{}:
+		return sync.OnceFunc(func() { <-l }), nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for one of the %d subtask slots: %w", cap(l), context.Cause(ctx))
+	}
+}
+
+// TryAcquire takes a slot or refuses at once, for a background subtask,
+// which must not hold up the turn that starts it.
+func (l Limit) TryAcquire() (func(), error) {
 	select {
 	case l <- struct{}{}:
 		return sync.OnceFunc(func() { <-l }), nil
 	default:
-		return nil, fmt.Errorf("four subtasks are already running")
+		return nil, fmt.Errorf("%s already running, the most this agent runs at once; this background subtask did not start. Wait for one to finish", subtaskCount(cap(l)))
 	}
+}
+
+func subtaskCount(n int) string {
+	if n == 1 {
+		return "1 subtask is"
+	}
+	return fmt.Sprintf("%d subtasks are", n)
 }

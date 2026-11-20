@@ -84,10 +84,32 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	if seed != "" {
 		message += "\n\n" + seed
 	}
+	if !request.Background && x.shared.spent() {
+		return tools.Result{}, errBudgetSpent
+	}
 	e := x.engine
-	release, err := e.children.Acquire()
+	// A lead (a can_spawn variant one level down) takes a lead slot, every
+	// other subtask a child slot, so a lead never holds a slot its own
+	// children wait for. A foreground subtask waits for a slot while its
+	// turn lasts; a background one must not hold up the turn, so it is
+	// refused at once.
+	limit := e.children
+	if x.depth == 0 && variant.CanSpawn {
+		limit = e.leads
+	}
+	var release func()
+	if request.Background {
+		release, err = limit.TryAcquire()
+	} else {
+		release, err = limit.Acquire(ctx)
+	}
 	if err != nil {
 		return tools.Result{}, err
+	}
+	if !request.Background && x.shared.spent() {
+		// The budget ran out while this subtask waited for a slot.
+		release()
+		return tools.Result{}, errBudgetSpent
 	}
 	now := time.Now().UTC()
 	// The goal is scrubbed before it is stored or reported anywhere.
@@ -120,7 +142,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		}{child.ID, variant.Name, request.Goal, request.ReturnSpec, request.Context})
 		job, err := e.jobs.Start(ctx, store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: subtaskJobKind, Spec: string(spec)},
 			func(jobCtx context.Context, _ io.Writer) (background.Task, error) {
-				runCtx, stopWall := wallContext(jobCtx, variant)
+				// A background subtask outlives the turn, so it has only its
+				// variant's budget, never the turn's shared one.
+				runCtx, stopWall := wallContext(withBudget(jobCtx, nil), variant)
 				run, err := start(runCtx)
 				if err != nil {
 					stopWall()
@@ -162,7 +186,11 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	defer release()
 	defer e.closeSubtask(child.ID)
 	defer forget()
-	runCtx, stopWall := wallContext(ctx, variant)
+	// A foreground child spends from the turn's shared budget, and is
+	// stopped mid-step when the budget runs out.
+	budgetCtx, endBudget := x.shared.guard(withBudget(ctx, x.shared), func() bool { return e.hasReturned(child.ID) })
+	defer endBudget()
+	runCtx, stopWall := wallContext(budgetCtx, variant)
 	defer stopWall()
 	run, err := start(runCtx)
 	if err != nil {
@@ -172,7 +200,13 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	result, err := run.Wait()
 	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)
-	out := e.composeSubtaskResult(ctx, x.info.ID, child.ID, variant, result, status, reason, e.closeSubtask(child.ID))
+	returned := e.closeSubtask(child.ID)
+	if returned != nil && ctx.Err() == nil && errors.Is(context.Cause(runCtx), errTokenBudget) {
+		// The child had already handed back its result when the budget ran
+		// out; the result stands.
+		status, reason = subagent.StatusOK, ""
+	}
+	out := e.composeSubtaskResult(ctx, x.info.ID, child.ID, variant, result, status, reason, returned)
 	// A person's refusal overrides an ok or partial ending, whatever the
 	// child returned.
 	out.Status, out.Reason = withDenials(out.Status, out.Reason, e.takeDenials(child.ID))
@@ -197,6 +231,9 @@ func wallContext(ctx context.Context, variant subagent.Variant) (context.Context
 // carries the wall-clock budget.
 func subtaskStatus(parent, run context.Context, result events.Result, err error) (subagent.Status, string) {
 	switch {
+	case err != nil && errors.Is(context.Cause(run), errTokenBudget):
+		// The turn's shared budget ran out while this child was running.
+		return subagent.StatusLimit, events.StopTokenBudget
 	case err != nil && parent.Err() == nil && errors.Is(run.Err(), context.DeadlineExceeded):
 		return subagent.StatusLimit, events.StopWallBudget
 	case err != nil && (errors.Is(err, context.Canceled) || parent.Err() != nil):

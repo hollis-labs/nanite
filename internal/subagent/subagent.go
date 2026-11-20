@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/hollis-labs/nanite/internal/elicitation"
 )
 
 // MaxDepth is the deepest a child conversation may run. A root chat is depth
@@ -40,8 +43,30 @@ func (r Request) Validate(variants map[string]Variant) error {
 	if spec := strings.TrimSpace(string(r.ReturnSpec)); spec == "" || spec == "null" || spec == `""` {
 		return fmt.Errorf("subtask return_spec required")
 	}
+	if _, err := r.Schema(); err != nil {
+		return err
+	}
 	_, err := r.ContextSpec()
 	return err
+}
+
+// Schema resolves return_spec when it is a JSON Schema object; prose (a JSON
+// string) has no schema and yields nil. A malformed schema is an error the
+// caller sees before any child starts.
+func (r Request) Schema() (*jsonschema.Resolved, error) {
+	spec := strings.TrimSpace(string(r.ReturnSpec))
+	if !strings.HasPrefix(spec, "{") {
+		var prose string
+		if err := json.Unmarshal(r.ReturnSpec, &prose); err != nil {
+			return nil, fmt.Errorf("subtask return_spec must be prose or a JSON Schema object")
+		}
+		return nil, nil
+	}
+	resolved, err := elicitation.ResolveLimited(r.ReturnSpec)
+	if err != nil {
+		return nil, fmt.Errorf("subtask return_spec is not a valid JSON Schema: %w", err)
+	}
+	return resolved, nil
 }
 
 // Message is the child's first user message: the goal, its inputs and what
@@ -62,7 +87,16 @@ func (r Request) Message() string {
 		b.WriteString("a result matching this JSON Schema:\n")
 		b.WriteString(string(r.ReturnSpec))
 	}
+	b.WriteString("\n\nFinish by calling " + ReturnToolName + " with the result. Only what you pass to it reaches your parent.")
 	return b.String()
+}
+
+// Return is a child's return_result call.
+type Return struct {
+	Status    Status          `json:"status"`
+	Result    json.RawMessage `json:"result"`
+	Artifacts []string        `json:"artifacts,omitempty"`
+	Notes     string          `json:"notes,omitempty"`
 }
 
 // Status is how a subtask ended.
@@ -89,6 +123,22 @@ func AllowsTool(root bool, chain []Variant, canSpawn bool, name string, readOnly
 	}
 	if name == "ask_user" {
 		return false
+	}
+	switch name {
+	case ReturnToolName:
+		// Every child must be able to end its subtask, whatever its variant
+		// narrows.
+		return true
+	case "fetch_tool_result", "search_tool_result":
+		// A child reads the pointers its tools and subtasks hand back, so an
+		// allow list need not name these; an explicit deny still removes
+		// them.
+		for _, v := range chain {
+			if matchAny(v.Deny, name) {
+				return false
+			}
+		}
+		return true
 	}
 	for _, v := range chain {
 		if !v.Allows(name, readOnly) {
@@ -119,6 +169,30 @@ func StatusOf(job, reason string) string {
 
 // ToolName is the subtask tool's name.
 const ToolName = "subtask"
+
+// ReturnToolName is the tool a child calls to end its subtask with a result.
+const ReturnToolName = "return_result"
+
+// DefaultResultCap is the result size cap, in tokens, when neither the
+// variant nor the agent sets one.
+const DefaultResultCap = 6000
+
+// BytesPerToken converts a token cap to bytes of result JSON.
+const BytesPerToken = 4
+
+// ResultCapBytes is the configured cap on a child's whole result, in bytes:
+// the variant's result_cap, else the agent's, else DefaultResultCap. The
+// engine clamps it to what one tool result can carry.
+func ResultCapBytes(variant Variant, agent int) int {
+	tokens := DefaultResultCap
+	switch {
+	case variant.ResultCap > 0:
+		tokens = variant.ResultCap
+	case agent > 0:
+		tokens = agent
+	}
+	return tokens * BytesPerToken
+}
 
 type Limit chan struct{}
 

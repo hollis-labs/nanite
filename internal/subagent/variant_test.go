@@ -99,6 +99,8 @@ func TestRequestValidateAndMessage(t *testing.T) {
 		"no spec":    func(r *Request) { r.ReturnSpec = nil },
 		"null spec":  func(r *Request) { r.ReturnSpec = json.RawMessage("null") },
 		"empty spec": func(r *Request) { r.ReturnSpec = json.RawMessage(`""`) },
+		"bad schema": func(r *Request) { r.ReturnSpec = json.RawMessage(`{"type":42}`) },
+		"not prose":  func(r *Request) { r.ReturnSpec = json.RawMessage(`[1,2]`) },
 	} {
 		r := base
 		mutate(&r)
@@ -112,8 +114,33 @@ func TestRequestValidateAndMessage(t *testing.T) {
 	if msg := schema.Message(); !strings.HasPrefix(msg, "Goal: find it\n") || !strings.Contains(msg, `{"path":"a.go"}`) || !strings.Contains(msg, `JSON Schema:`+"\n"+`{"type":"object"}`) {
 		t.Fatalf("message %q", msg)
 	}
-	if msg := base.Message(); !strings.HasSuffix(msg, "Return: a list") {
+	if msg := base.Message(); !strings.Contains(msg, "Return: a list\n") || !strings.HasSuffix(msg, "Finish by calling return_result with the result. Only what you pass to it reaches your parent.") {
 		t.Fatalf("message %q", msg)
+	}
+	if resolved, err := schema.Schema(); err != nil || resolved == nil {
+		t.Fatalf("schema %v, %v", resolved, err)
+	}
+	if resolved, err := base.Schema(); err != nil || resolved != nil {
+		t.Fatalf("prose spec gave a schema: %v, %v", resolved, err)
+	}
+}
+
+func TestResultCapBytes(t *testing.T) {
+	if got := ResultCapBytes(Variant{}, 0); got != DefaultResultCap*BytesPerToken {
+		t.Errorf("default %d", got)
+	}
+	if got := ResultCapBytes(Variant{}, 1000); got != 4000 {
+		t.Errorf("agent cap %d", got)
+	}
+	if got := ResultCapBytes(Variant{ResultCap: 50}, 1000); got != 200 {
+		t.Errorf("variant cap %d", got)
+	}
+}
+
+func TestReturnResultAlwaysOfferedToAChild(t *testing.T) {
+	narrow := Variant{Name: "narrow", ReadOnly: true, Allow: []string{"read_file"}, Deny: []string{"return_*"}}
+	if !AllowsTool(false, []Variant{narrow}, false, ReturnToolName, false) {
+		t.Error("a variant took return_result away from its child")
 	}
 }
 
@@ -134,5 +161,21 @@ func TestAllowsToolNeedsTheWholeChain(t *testing.T) {
 	}
 	if !AllowsTool(true, nil, true, "anything", false) || AllowsTool(false, []Variant{code}, false, "ask_user", true) {
 		t.Error("root or ask_user handling changed")
+	}
+}
+
+func TestResultReadersFollowDenyButNotAllow(t *testing.T) {
+	allowOnly := Variant{Name: "narrow", Allow: []string{"read_file"}}
+	denying := Variant{Name: "sealed", Allow: []string{"read_file"}, Deny: []string{"fetch_tool_result", "search_*"}}
+	for _, tool := range []string{"fetch_tool_result", "search_tool_result"} {
+		if !AllowsTool(false, []Variant{allowOnly}, false, tool, true) {
+			t.Errorf("an allow list that does not name %s removed it", tool)
+		}
+		if AllowsTool(false, []Variant{denying}, false, tool, true) {
+			t.Errorf("an explicit deny did not remove %s", tool)
+		}
+		if AllowsTool(false, []Variant{denying, allowOnly}, false, tool, true) {
+			t.Errorf("a lead's deny did not remove %s from its child", tool)
+		}
 	}
 }

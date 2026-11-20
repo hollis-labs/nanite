@@ -161,6 +161,13 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		traced[i] = trace.ToolCall{ToolCallID: call.ID, Tool: x.engine.scrub.Text(call.Name), Permission: trace.PermissionNone, ErrorKind: trace.ErrorCancelled}
 	}
 	defer func() { x.toolCalls = append(x.toolCalls, traced...) }()
+	// A step with return_result runs only its first return_result: once the
+	// result is handed back nothing else may act, and a second return_result
+	// in the same step must not use up the first one's repair.
+	returnAt := -1
+	if _, offered := x.catalog[subagent.ReturnToolName]; offered {
+		returnAt = slices.IndexFunc(calls, func(c llmtypes.ToolUseBlock) bool { return c.Name == subagent.ReturnToolName })
+	}
 	// Resolve approvals in model order so interactive prompts cannot overlap.
 	for i, call := range calls {
 		results[i] = llmtypes.ContentBlock{Type: "tool_result", ToolUseID: call.ID, Content: "tool did not complete", IsError: true}
@@ -178,6 +185,11 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
 			return events.ToolCallStarted{EventMeta: meta, CallID: call.ID, Name: x.engine.scrub.Text(call.Name), Input: started}
 		})
+		if returnAt >= 0 && i != returnAt {
+			// Not run, like a call a cancelled turn never reached.
+			results[i].Content = "ignored: this step calls return_result, which must be the only call in its step; this call did not run"
+			continue
+		}
 		traced[i].ErrorKind = trace.ErrorInvalidArgs
 		if err != nil {
 			results[i].Content = "invalid tool arguments"
@@ -201,12 +213,16 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			}
 		}
 
-		d, asked := x.authorize(ctx, t, call, raw)
-		traced[i].Permission = tracePermission(d, asked)
-		if !d.Allow {
-			traced[i].ErrorKind = trace.ErrorDenied
-			results[i].Content = "permission denied: " + d.Reason
-			continue
+		// return_result only hands the result to the engine, so no policy is
+		// asked: nothing may stop a child from ending its subtask.
+		if t.Name != subagent.ReturnToolName {
+			d, asked := x.authorize(ctx, t, call, raw)
+			traced[i].Permission = tracePermission(d, asked)
+			if !d.Allow {
+				traced[i].ErrorKind = trace.ErrorDenied
+				results[i].Content = "permission denied: " + d.Reason
+				continue
+			}
 		}
 		if _, loop := x.loop.Record(loopdetect.Signal{SessionID: x.info.ID, TurnID: x.run.id, ToolName: call.Name, Args: raw, Timestamp: time.Now()}); loop {
 			traced[i].ErrorKind = trace.ErrorLoop

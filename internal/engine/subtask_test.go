@@ -133,7 +133,7 @@ func TestSubtaskRequiresAVariant(t *testing.T) {
 
 func TestAuthoredVariantNarrowsTools(t *testing.T) {
 	p := &routedProvider{root: fake.New(subtaskCall("scout", "look around", false), fake.Text("parent done")),
-		children: map[string]*fake.Provider{"look around": fake.New(fake.Text("found it"))}}
+		children: map[string]*fake.Provider{"look around": fake.New(returnCall("ok", "found it"))}}
 	e, db, id := setupEngine(t, p, "")
 	// Allow names a tool the agent does not have (narrowing cannot add it) and
 	// a host tool the deny list then removes.
@@ -153,7 +153,9 @@ func TestAuthoredVariantNarrowsTools(t *testing.T) {
 	}
 	got := p.offered("look around", 0)
 	slices.Sort(got)
-	if want := []string{"host_read", "list_dir", "read_file"}; !slices.Equal(got, want) {
+	// return_result and the tools that read cached results are always offered
+	// to a child, whatever its variant allows.
+	if want := []string{"fetch_tool_result", "host_read", "list_dir", "read_file", "return_result", "search_tool_result"}; !slices.Equal(got, want) {
 		t.Fatalf("scout offered %v, want %v", got, want)
 	}
 	if root := p.offered("", 0); !slices.Contains(root, "subtask") || !slices.Contains(root, "host_write") {
@@ -304,7 +306,7 @@ func TestSubtaskUsageRollsUpIntoParent(t *testing.T) {
 	}
 	p := &routedProvider{
 		root:     fake.New(withUsage(subtaskCall("worker", "child work", false), 100, 10), withUsage(fake.Text("parent done"), 200, 20)),
-		children: map[string]*fake.Provider{"child work": fake.New(withUsage(fake.Text("child done"), 30, 3))},
+		children: map[string]*fake.Provider{"child work": fake.New(withUsage(returnCall("ok", "child done"), 30, 3))},
 	}
 	e, db, id := setupEngine(t, p, "")
 	run, err := e.Send(t.Context(), id, Input{Text: "go"})
@@ -333,13 +335,14 @@ func TestSubtaskUsageRollsUpIntoParent(t *testing.T) {
 		t.Fatalf("turn usage %+v; events summed to %d/%d", result.Usage, in, out)
 	}
 	var reported struct {
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+		Status string
+		Cost   struct {
+			TokensIn  int `json:"tokens_in"`
+			TokensOut int `json:"tokens_out"`
 		}
 	}
-	if results := toolResults(t, db, id); json.Unmarshal([]byte(results[0].Content), &reported) != nil || reported.Usage.InputTokens != 30 {
-		t.Fatalf("subtask result usage %+v", results)
+	if results := toolResults(t, db, id); json.Unmarshal([]byte(results[0].Content), &reported) != nil || reported.Status != "ok" || reported.Cost.TokensIn != 30 || reported.Cost.TokensOut != 3 {
+		t.Fatalf("subtask result cost %+v", results)
 	}
 }
 
@@ -549,7 +552,7 @@ func TestBackgroundSubtaskReportsInSubtaskTerms(t *testing.T) {
 	// parent still has a running turn to report usage on.
 	wait := toolResponse("await_notice")
 	wait.Events[0].ToolUse.ID = "call-2"
-	child := fake.Text("child output")
+	child := returnCall("ok", "child output")
 	child.Events = append([]llmtypes.StreamEvent{{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 30, OutputTokens: 3}}}, child.Events...)
 	p := &routedProvider{root: fake.New(subtaskCall("worker", "child work", true), wait, fake.Text("parent finished")),
 		children: map[string]*fake.Provider{"child work": fake.New(child)}}

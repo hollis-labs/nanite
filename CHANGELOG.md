@@ -6,8 +6,32 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
 - New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
   context?, background?})`. `variant` is required; the model chooses and
-  there is no default. Results carry `status` (`ok`, `partial`, `limit`,
-  `error` or `cancelled`), the child's text, steps and token usage.
+  there is no default.
+- Result contract: a child ends by calling the new `return_result({status,
+  result, artifacts[], notes})`. A JSON Schema `return_spec` is validated
+  (a malformed one is refused up front), with one repair, then `partial`
+  with the validation error. The parent gets `{status, result, artifacts,
+  notes, reason, cost{tokens_in, tokens_out}, child_id, variant, steps}`;
+  status is `ok`, `partial`, `limit`, `error` or `cancelled`. A child that
+  never calls `return_result` gives `partial` (`no_return_result`) with the
+  last 2KB of its output. The whole result is capped for every status
+  (variant `result_cap`, else the new `agent.Options.SubtaskResultCap`, else
+  about 6,000 tokens, clamped to the 23KB a tool result shows in full), with
+  at most 50 artifacts. A larger return is scrubbed and stored for 30 days,
+  and the parent gets a `result_ref` pointer for `fetch_tool_result` with
+  `result_expires_at`. `return_result` must be the only call in its step,
+  and is now a reserved tool name. A child gets `fetch_tool_result` and
+  `search_tool_result` even when its variant's allow list leaves them out;
+  an explicit deny removes them.
+- Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
+  subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
+  keywords spelled exactly, `$ref` only to `#/$defs/<name>` or
+  `#/definitions/<name>`, and no
+  reference cycle that never moves into a value, which jsonschema-go would
+  otherwise overflow the stack on. Tool input schemas are unchanged.
+- `background_status` for a subtask embeds its result as JSON under
+  `result`. Expired cached and stored tool results are purged when the
+  agent opens.
 - Variants: built-in `code`, `research`, `worker` and `planner` (read-only,
   and denying `mcp__*` tools, since MCP `readOnlyHint` is not trusted),
   plus authored `variants/<name>.md` in the agent directory, re-read every
@@ -62,8 +86,8 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
 - `SubagentStarted` replaces `Role` with `Variant`, `Goal` and `Background`;
   `SubagentFinished` gains `Variant` and `Status`. The `nanite.subagent`
   activity carries `variant` (and `status` when done) instead of `role`.
-- `return_spec` and `context` are recorded and passed to the child; result
-  validation and forked context come in later releases.
+- `context` is recorded and passed to the child; forked context comes in a
+  later release.
 
 - Every turn writes one trace record (`libs/agent/trace`, schema version 1),
   however it ends. It holds identity and source, provider and model, slots

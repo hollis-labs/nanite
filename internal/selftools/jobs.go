@@ -20,6 +20,9 @@ type JobTools struct {
 	// unless background_status is offered too, so the model never gets a job
 	// id it cannot poll.
 	SubtaskBackground bool
+	// Return, set only in a child conversation, serves return_result: the
+	// tool a subtask ends with.
+	Return func(context.Context, subagent.Return) (tools.Result, error)
 	// Status and Cancel serve background shell commands and background
 	// subtasks alike, by job id.
 	Status func(context.Context, string) (tools.Result, error)
@@ -41,6 +44,9 @@ func (t JobTools) Tools() []tools.Tool {
 	}
 	if t.Subtask != nil {
 		out = append(out, subtaskTool(t.Subtask, t.Variants, t.SubtaskBackground))
+	}
+	if t.Return != nil {
+		out = append(out, returnTool(t.Return))
 	}
 	if t.StartShell != nil || t.Subtask != nil {
 		out = append(out,
@@ -80,4 +86,15 @@ func subtaskTool(run func(context.Context, subagent.Request) (tools.Result, erro
 	description := "Delegate a focused goal to a child conversation and get back its result, not its tool traffic. " +
 		"The result has a status: ok, partial, limit (stopped at a step, token or time budget; the result is incomplete), error or cancelled. Variants:" + listing.String()
 	return specResult(subagent.ToolName, description, properties, []string{"goal", "return_spec", "variant"}, false, run)
+}
+
+func returnTool(run func(context.Context, subagent.Return) (tools.Result, error)) tools.Tool {
+	properties := `{"status":{"type":"string","enum":["ok","partial","error"],"description":"ok when the goal is met; partial when only part of it is; error when it cannot be done."},` +
+		`"result":{"description":"The result, shaped as the return spec asks. When the spec is a JSON Schema it is checked against it."},` +
+		`"artifacts":{"type":"array","items":{"type":"string"},"description":"Pointers to what you produced: file paths, tool_result:// refs, memory ids."},` +
+		`"notes":{"type":"string","description":"A short note for the parent: caveats, what is left. Optional."}}`
+	description := "End this subtask and hand your result to the parent. Call it once, last; nothing else you write reaches the parent. " +
+		"If the result does not match the return spec you get one chance to fix it."
+	// Not read-only: it never runs alongside another call (callTools).
+	return specResult(subagent.ReturnToolName, description, properties, []string{"status", "result"}, false, run)
 }

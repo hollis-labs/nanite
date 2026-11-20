@@ -107,6 +107,7 @@ type Options struct
   field TraceFiles bool
   field TraceSink func(context.Context, TraceRecord)
   field PanicReporter PanicReporter
+  field SubtaskResultCap int
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
   field Ref string
   field At time.Time

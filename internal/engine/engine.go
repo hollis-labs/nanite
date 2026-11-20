@@ -56,6 +56,8 @@ type Config struct {
 	// OnAuthWaiting sees each Warden grant request Nanite files or finds
 	// pending.
 	OnAuthWaiting func(warden.Waiting)
+	// OnAuthGranted sees a conversation that waited on a grant get its token.
+	OnAuthGranted func(warden.Waiting)
 	Store         *store.Store
 	Gate          permission.Gate
 	// AskWait bounds how long a subtask's relayed ask waits, in total, for
@@ -199,7 +201,7 @@ func New(cfg Config) (*Engine, error) {
 	cfg.ProviderConfig.Panics = guard
 	var mcpAuth *mcpclient.Auth
 	if cfg.Identity != nil {
-		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting)
+		src, err := authored.NewWardenSource(*cfg.Identity, cfg.ProviderConfig.Redactor, cfg.Logger, cfg.OnAuthWaiting, cfg.OnAuthGranted)
 		if err != nil {
 			return nil, err
 		}

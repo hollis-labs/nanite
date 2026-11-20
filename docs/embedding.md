@@ -485,9 +485,18 @@ kept in host state, so a restart goes on watching). When the request is
 decided, each chat that waited gets a notice of kind `auth`
 (`chatrunner.NoticeKindAuth`): on approval it says to continue, and with
 `Options.NoticeTurns` it starts a notice turn that retries; on a denial or
-expiry it says so. A host that is pushed decisions (from Gatecrasher or
+expiry it says so, and the next attempt files a new request. A chat whose
+own later turn already got the token is not told again; when several chats
+waited, their notices are spaced out; and a chat with no notice turn left
+(or without `NoticeTurns`) is asked to send its message again instead. The
+watch stops when Warden no longer shows the request (not found or
+forbidden), when the agent has no Warden identity, or after
+`Options.AuthWaitMax` (default 24 hours) without a decision; each chat that
+waited is told. A host that is pushed decisions (from Gatecrasher or
 Warden) calls `Runner.AuthDecided(ctx, requestID, status)` itself;
 `Options.AuthStatus` replaces the lookup the polling uses.
+`Options.Agent.OnAuthGranted` sees a conversation that waited get its
+token.
 
 `agent.ErrReenroll` (matched with `errors.Is`) means the parent credential
 can no longer be used safely; see the agent directory doc for recovery.

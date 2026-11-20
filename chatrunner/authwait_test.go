@@ -69,7 +69,15 @@ func newFakeWarden(t *testing.T) *fakeWarden {
 			f.mu.Lock()
 			status := f.status
 			f.mu.Unlock()
-			_, _ = fmt.Fprintf(w, `{"id":"req-1","status":%q}`, status)
+			switch status {
+			case "gone":
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, `{"error":"not_found"}`)
+			case "error":
+				w.WriteHeader(http.StatusBadGateway)
+			default:
+				_, _ = fmt.Fprintf(w, `{"id":"req-1","status":%q}`, status)
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -82,6 +90,12 @@ func (f *fakeWarden) set(status string) {
 	f.mu.Lock()
 	f.status = status
 	f.mu.Unlock()
+}
+
+func (f *fakeWarden) requests() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.filed
 }
 
 func (f *fakeWarden) requestBodies() string {
@@ -131,16 +145,61 @@ func wardenAgentDir(t *testing.T, dir string, ws *fakeWarden, llm *httptest.Serv
 	}
 }
 
-func wardenRunner(t *testing.T, dir string, ws *fakeWarden, llm *httptest.Server, status chatrunner.AuthStatus) *wired {
+func wardenRunner(t *testing.T, dir string, ws *fakeWarden, llm *httptest.Server, tweak func(*chatrunner.Options)) *wired {
 	t.Helper()
 	wardenAgentDir(t, dir, ws, llm)
 	return newWiredIn(t, dir, false, func(o *chatrunner.Options) {
 		o.Agent.Provider = nil
 		o.NoticeTurns = true
-		o.AuthPoll = 20 * time.Millisecond
-		o.AuthStatus = status
+		if tweak != nil {
+			tweak(o)
+		}
 	})
 }
+
+// waitForGrant submits a message that needs the missing grant and returns
+// the turn's run error once the chat shows the waiting activity.
+func (w *wired) waitForGrant(t *testing.T) chatstream.Event {
+	t.Helper()
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	var failed chatstream.Event
+	w.until(t, "the turn's end", func(ev chatstream.Event) bool {
+		if ev.IsTerminal() {
+			failed = ev
+			return true
+		}
+		return false
+	})
+	w.until(t, "the waiting activity", isAuthWaiting)
+	return failed
+}
+
+// authNotice waits for an auth notice whose body holds every text in has.
+func (w *wired) authNotice(t *testing.T, what string, has ...string) string {
+	t.Helper()
+	var body string
+	w.until(t, what, func(ev chatstream.Event) bool {
+		if ev.Verb != chatstream.VerbActivity || ev.Kind != chatrunner.ActivityNotice {
+			return false
+		}
+		v := activityValue(t, ev)
+		body, _ = v["body"].(string)
+		if v["kind"] != chatrunner.NoticeKindAuth {
+			return false
+		}
+		for _, s := range has {
+			if !strings.Contains(body, s) {
+				return false
+			}
+		}
+		return true
+	})
+	return body
+}
+
+func pending(context.Context, string) (string, error) { return "pending", nil }
 
 func isAuthWaiting(ev chatstream.Event) bool {
 	return ev.Verb == chatstream.VerbActivity && ev.Kind == agent.ActivityAuthWaiting
@@ -150,6 +209,7 @@ func isAuthWaiting(ev chatstream.Event) bool {
 // chat shows the request, and once Warden approves it a notice turn retries
 // and the model answers.
 func TestAuthWaitingShowsInTheChatAndRetriesOnApproval(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
 	ws := newFakeWarden(t)
 	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), nil)
 
@@ -165,7 +225,7 @@ func TestAuthWaitingShowsInTheChatAndRetriesOnApproval(t *testing.T) {
 		return false
 	})
 	if failed.Verb != chatstream.VerbRunError || !strings.Contains(failed.Message, "Waiting for approval of Warden grant request req-1") ||
-		!strings.Contains(failed.Message, "provider gateway") {
+		!strings.Contains(failed.Message, "provider gateway") || !strings.Contains(failed.Message, "continues once it is approved") {
 		t.Fatalf("turn ended with %+v", failed)
 	}
 	var waiting chatstream.Event
@@ -185,40 +245,38 @@ func TestAuthWaitingShowsInTheChatAndRetriesOnApproval(t *testing.T) {
 	}
 
 	ws.set("approved")
-	w.until(t, "the retried answer", func(ev chatstream.Event) bool {
-		return answered(ev)
-	})
+	if !clock.Tick() {
+		t.Fatal("no watcher polled the request")
+	}
+	w.authNotice(t, "the approval notice", "approved grant request req-1", "Continue the work")
+	w.until(t, "the retried answer", answered)
 }
 
-// A denial is told to the chat and nothing retries.
-func TestAuthWaitingDenialIsTold(t *testing.T) {
+// A denial is told to the chat, and the next attempt files a new request
+// instead of reusing the denied one.
+func TestAuthWaitingDenialIsToldAndANewRequestIsFiled(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
 	ws := newFakeWarden(t)
 	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), nil)
-	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hi"}); err != nil {
-		t.Fatal(err)
-	}
-	w.until(t, "the waiting activity", isAuthWaiting)
+	w.waitForGrant(t)
 	ws.set("denied")
-	w.until(t, "the denial notice", func(ev chatstream.Event) bool {
-		if ev.Verb != chatstream.VerbActivity || ev.Kind != chatrunner.ActivityNotice {
-			return false
-		}
-		v := activityValue(t, ev)
-		body, _ := v["body"].(string)
-		return v["kind"] == chatrunner.NoticeKindAuth && strings.Contains(body, "req-1") && strings.Contains(body, "was denied")
-	})
+	if !clock.Tick() {
+		t.Fatal("no watcher polled the request")
+	}
+	w.authNotice(t, "the denial notice", "req-1", "was denied")
+	ws.set("pending")
+	// The denial notice's turn (or the owner's next message) tries again.
+	waitFor(t, "a new grant request", func() bool { return ws.requests() >= 2 })
 }
 
 // A restart keeps watching the request and still retries on approval.
 func TestAuthWaitingSurvivesARestart(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
 	ws := newFakeWarden(t)
 	llm := gatewayLLM(t)
 	dir := t.TempDir()
-	first := wardenRunner(t, dir, ws, llm, func(context.Context, string) (string, error) { return "pending", nil })
-	if _, err := first.svc.Submit(t.Context(), first.conv, chat.Turn{Text: "hi"}); err != nil {
-		t.Fatal(err)
-	}
-	first.until(t, "the waiting activity", isAuthWaiting)
+	first := wardenRunner(t, dir, ws, llm, func(o *chatrunner.Options) { o.AuthStatus = pending })
+	first.waitForGrant(t)
 	if err := first.runner.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -230,11 +288,117 @@ func TestAuthWaitingSurvivesARestart(t *testing.T) {
 	if second.conv != first.conv {
 		t.Fatalf("restarted chat is %s, want %s", second.conv, first.conv)
 	}
-	second.until(t, "the retried answer after the restart", func(ev chatstream.Event) bool {
-		return answered(ev)
-	})
+	if !clock.Tick() {
+		t.Fatal("the restarted runner does not watch the request")
+	}
+	second.until(t, "the retried answer after the restart", answered)
 	if ws.lookups.Load() == before {
 		t.Fatal("the restarted runner never looked the request up")
+	}
+}
+
+// A request Warden no longer shows is given up at once, and the chat is
+// told.
+func TestAuthWaitingStopsWhenTheRequestIsGone(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
+	ws := newFakeWarden(t)
+	// No notice turns: the stop notice must not start a turn that files a
+	// new request (and a new watcher) for the check below.
+	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), func(o *chatrunner.Options) { o.NoticeTurns = false })
+	if failed := w.waitForGrant(t); !strings.Contains(failed.Message, "You will get a notice when it is decided") {
+		t.Fatalf("without notice turns the turn ended with %q", failed.Message)
+	}
+	ws.set("gone")
+	if !clock.Tick() {
+		t.Fatal("no watcher polled the request")
+	}
+	w.authNotice(t, "the stop notice", "Stopped watching Warden grant request req-1", "404")
+	if clock.Tick() {
+		t.Fatal("the watcher went on after the request was gone")
+	}
+}
+
+// A request with no decision is given up after AuthWaitMax.
+func TestAuthWaitingStopsAfterTheMaximumWait(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
+	ws := newFakeWarden(t)
+	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), func(o *chatrunner.Options) {
+		o.AuthStatus = pending
+		o.AuthWaitMax = time.Hour
+	})
+	w.waitForGrant(t)
+	if !clock.Tick() {
+		t.Fatal("no watcher polled the request")
+	}
+	clock.Advance(2 * time.Hour)
+	if !clock.Tick() {
+		t.Fatal("the watcher stopped too early")
+	}
+	w.authNotice(t, "the stop notice", "Stopped watching Warden grant request req-1", "no decision after 1h0m0s")
+}
+
+// Lookup errors keep the watcher going; the decision still arrives.
+func TestAuthWaitingRidesOutLookupErrors(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
+	ws := newFakeWarden(t)
+	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), nil)
+	w.waitForGrant(t)
+	ws.set("error")
+	for range 3 {
+		before := ws.lookups.Load()
+		if !clock.Tick() {
+			t.Fatal("the watcher stopped on a lookup error")
+		}
+		// Let the lookup finish before the next change.
+		waitFor(t, "the lookup", func() bool { return ws.lookups.Load() > before })
+	}
+	ws.set("approved")
+	if !clock.Tick() {
+		t.Fatal("the watcher stopped on a lookup error")
+	}
+	w.until(t, "the retried answer", answered)
+}
+
+// A pushed decision racing the watcher's own poll tells the chat once.
+func TestAuthWaitingPushRacingThePollTellsOnce(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
+	ws := newFakeWarden(t)
+	release := make(chan struct{})
+	polled := make(chan struct{}, 1)
+	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), func(o *chatrunner.Options) {
+		o.AuthStatus = func(ctx context.Context, _ string) (string, error) {
+			polled <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return "approved", nil
+		}
+	})
+	w.waitForGrant(t)
+	ws.set("approved")
+	if !clock.Tick() {
+		t.Fatal("no watcher polled the request")
+	}
+	<-polled
+	pushed := make(chan error, 1)
+	go func() { pushed <- w.runner.AuthDecided(t.Context(), "req-1", "approved") }()
+	close(release)
+	if err := <-pushed; err != nil {
+		t.Fatal(err)
+	}
+	w.until(t, "the retried answer", answered)
+	// Read what else arrives for a moment: no second approval notice.
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	for {
+		ev, err := w.stream.Next(ctx)
+		if err != nil {
+			break
+		}
+		if ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityNotice && activityValue(t, ev)["kind"] == chatrunner.NoticeKindAuth {
+			t.Fatal("the chat was told about the approval twice")
+		}
 	}
 }
 

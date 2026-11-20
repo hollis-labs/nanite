@@ -490,7 +490,7 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 		}
 		message := "the turn failed"
 		if w, ok := agent.IsAuthWaiting(e.Err); ok {
-			message = authWaitingText(x.runner.authFor(w))
+			message = x.runner.authWaitingText(x.nanite, w)
 		} else if e.Err != nil {
 			message = e.Err.Error()
 		}

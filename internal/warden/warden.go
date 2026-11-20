@@ -59,6 +59,10 @@ import (
 // place a new parent credential and remove the <file>.inflight marker.
 var ErrReenroll = errors.New("warden: the parent credential needs re-enrollment")
 
+// ErrRequestGone means Warden no longer shows a grant request to this agent
+// (not found, or not its own): it will never be decided for it.
+var ErrRequestGone = errors.New("warden: the grant request is gone")
+
 // AuthWaitingActivity is the activity kind a host publishes for a Waiting
 // (see Config.OnWaiting).
 const AuthWaitingActivity = "nanite.auth.waiting"
@@ -150,6 +154,9 @@ type Config struct {
 	Logger *slog.Logger
 	// OnWaiting sees each grant request filed or found still pending.
 	OnWaiting func(Waiting)
+	// OnGranted sees a conversation that waited on a grant request get its
+	// token (Waiting.Conversation; Status "granted").
+	OnGranted func(Waiting)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 }
@@ -167,7 +174,10 @@ type entry struct {
 	renewAt   time.Time
 	expiresAt time.Time
 	request   string // a pending grant request's ID
-	checked   time.Time
+	// waiters is the conversations a token request failed for while a
+	// grant request was pending, with that request's ID.
+	waiters map[string]string
+	checked time.Time
 	// After a failed mint, nothing is tried again before retryAt; the wait
 	// doubles from minBackoff to maxBackoff.
 	failed  error
@@ -296,6 +306,27 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 	e := s.entry(audience, scopes)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	tok, err := s.token(ctx, e, audience, scopes)
+	conversation := conversationFrom(ctx)
+	var missing *MissingGrantError
+	switch {
+	case err == nil && conversation != "" && e.waiters[conversation] != "":
+		// A conversation that waited got its token: it no longer waits.
+		id := e.waiters[conversation]
+		delete(e.waiters, conversation)
+		if s.cfg.OnGranted != nil {
+			s.cfg.OnGranted(Waiting{RequestID: id, Status: "granted", Audience: audience, Scopes: slices.Clone(scopes), Conversation: conversation, For: forFrom(ctx)})
+		}
+	case errors.As(err, &missing) && conversation != "":
+		if e.waiters == nil {
+			e.waiters = map[string]string{}
+		}
+		e.waiters[conversation] = missing.Waiting.RequestID
+	}
+	return tok, err
+}
+
+func (s *Source) token(ctx context.Context, e *entry, audience string, scopes []string) (string, error) {
 	now := s.cfg.Now()
 	if e.token != "" && now.Before(e.renewAt) {
 		return e.token, nil
@@ -394,10 +425,12 @@ func (s *Source) Request(ctx context.Context, id string) (Waiting, error) {
 	return s.lookup(ctx, id)
 }
 
-// Decided tells the source a grant request has been decided, so the next
-// token request looks it up at once instead of waiting out the recheck
-// interval.
-func (s *Source) Decided(id string) {
+// Decided tells the source a grant request has been decided. On approval
+// ("approved" or "granted") the next token request looks it up at once
+// instead of waiting out the recheck interval; on any other decision the
+// request is forgotten, so the next token request files a new one.
+func (s *Source) Decided(id, status string) {
+	approved := status == "approved" || status == "granted"
 	s.mu.Lock()
 	entries := make([]*entry, 0, len(s.tokens))
 	for _, e := range s.tokens {
@@ -407,7 +440,18 @@ func (s *Source) Decided(id string) {
 	for _, e := range entries {
 		e.mu.Lock()
 		if e.request == id {
-			e.checked = time.Time{}
+			if approved {
+				e.checked = time.Time{}
+			} else {
+				e.request = ""
+			}
+		}
+		if !approved {
+			for c, req := range e.waiters {
+				if req == id {
+					delete(e.waiters, c)
+				}
+			}
 		}
 		e.mu.Unlock()
 	}
@@ -579,7 +623,10 @@ func (s *Source) lookup(ctx context.Context, id string) (Waiting, error) {
 		Status string `json:"status"`
 		Tier   string `json:"tier"`
 	}
-	if _, err := s.do(ctx, http.MethodGet, "/api/v1/requests/"+url.PathEscape(id), "", nil, bearer, &r); err != nil {
+	if status, err := s.do(ctx, http.MethodGet, "/api/v1/requests/"+url.PathEscape(id), "", nil, bearer, &r); err != nil {
+		if status == http.StatusNotFound || status == http.StatusForbidden {
+			return Waiting{}, fmt.Errorf("%w (status %d)", ErrRequestGone, status)
+		}
 		return Waiting{}, err
 	}
 	return Waiting{RequestID: id, Status: r.Status, Tier: r.Tier}, nil

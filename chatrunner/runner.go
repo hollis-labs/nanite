@@ -88,6 +88,11 @@ type Options struct {
 	// (agent.Agent.AuthRequest). A host pushed decisions calls
 	// Runner.AuthDecided instead.
 	AuthStatus AuthStatus
+	// AuthWaitMax is how long a grant request is watched without a decision
+	// before the runner gives up and tells the chats that waited (default
+	// 24 hours). A request Warden no longer shows (not found or forbidden)
+	// is given up at once.
+	AuthWaitMax time.Duration
 }
 
 // Runner is a chat.Runner backed by one Nanite agent.
@@ -161,6 +166,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	ao.Gate = gate{r}
 	ao.PDP = pdp{runner: r, host: opts.Agent.PDP}
 	ao.OnAuthWaiting = r.onAuthWaiting
+	ao.OnAuthGranted = r.onAuthGranted
 	a, err := agent.Open(ctx, ao)
 	if err != nil {
 		return nil, err
@@ -181,6 +187,8 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	r.stopNotices, r.noticesDone, r.noticeCtx = stop, make(chan struct{}), listen
 	notices := a.SubscribeNotices(listen)
 	go r.listen(listen, notices)
+	// Watched grant requests are back before recovery can add to them.
+	r.loadAuthWaits(ctx)
 	if r.desk != nil {
 		// A failure here leaves the step for the next turn's advance.
 		if err := r.desk.Recover(ctx); err != nil {
@@ -188,7 +196,6 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		}
 	}
 	r.holdInterrupted(ctx)
-	r.loadAuthWaits(ctx)
 	return r, nil
 }
 

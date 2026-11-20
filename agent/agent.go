@@ -150,6 +150,10 @@ type Options struct {
 	// of kind ActivityAuthWaiting. The turn that needed the token fails with
 	// an error naming the request; a later turn mints once it is approved.
 	OnAuthWaiting func(AuthWaiting)
+	// OnAuthGranted sees a conversation whose token request had found a
+	// grant missing get its token: AuthWaiting.Conversation no longer waits
+	// on AuthWaiting.RequestID (Status "granted").
+	OnAuthGranted func(AuthWaiting)
 	// SlotPlacement moves the slots it names between the system prefix and
 	// the turn (see SlotInSystem and SlotInTurn). By default only
 	// user_context is placed in the turn. Universal, System and Agent always
@@ -320,9 +324,12 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	} else if ok {
 		identity = &id
 	}
-	var onWaiting func(warden.Waiting)
+	var onWaiting, onGranted func(warden.Waiting)
 	if opts.OnAuthWaiting != nil {
 		onWaiting = func(w warden.Waiting) { opts.OnAuthWaiting(AuthWaiting(w)) }
+	}
+	if opts.OnAuthGranted != nil {
+		onGranted = func(w warden.Waiting) { opts.OnAuthGranted(AuthWaiting(w)) }
 	}
 	providers := make(map[string]provider.Spec, len(opts.Providers))
 	for _, spec := range opts.Providers {
@@ -335,7 +342,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	a.engine, err = engine.New(engine.Config{
 		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
-		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting,
+		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
 		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt, Steering: opts.Steering,
@@ -466,13 +473,19 @@ func (a *Agent) AuthRequest(ctx context.Context, id string) (AuthWaiting, error)
 	return AuthWaiting(w), err
 }
 
-// AuthDecided tells the agent a grant request has been decided, so the next
-// token request looks it up at once instead of after the recheck interval.
-func (a *Agent) AuthDecided(id string) {
+// AuthDecided tells the agent a grant request has been decided with status.
+// On approval the next token request looks it up at once instead of after
+// the recheck interval; on a refusal ("denied", "expired", "withdrawn", ...)
+// the request is forgotten and the next token request files a new one.
+func (a *Agent) AuthDecided(id, status string) {
 	if src := a.engine.Warden(); src != nil {
-		src.Decided(id)
+		src.Decided(id, status)
 	}
 }
+
+// ErrAuthRequestGone means Warden no longer shows a grant request to the
+// agent (not found or forbidden): it will never be decided for it.
+var ErrAuthRequestGone = warden.ErrRequestGone
 
 // IsAuthWaiting reports whether err is a turn failing because a Warden grant
 // is still pending, and returns the request.

@@ -23,8 +23,9 @@ const NoticeKindAuth = "auth"
 const authWaitsKey = "auth.waits"
 
 const (
-	defaultAuthPoll = 30 * time.Second
-	maxAuthPoll     = 5 * time.Minute
+	defaultAuthPoll    = 30 * time.Second
+	maxAuthPoll        = 5 * time.Minute
+	defaultAuthWaitMax = 24 * time.Hour
 )
 
 // AuthStatus looks up a Warden grant request's status. The default asks
@@ -53,6 +54,13 @@ type authWaits struct {
 	wg       sync.WaitGroup
 }
 
+// Clock and stagger, replaced by tests.
+var (
+	authAfter        = time.After
+	authNow          = time.Now
+	authRetryStagger = 250 * time.Millisecond
+)
+
 // onAuthWaiting sees each grant request a token request found missing. It
 // runs inside the token request, so it only records and hands off.
 func (r *Runner) onAuthWaiting(w agent.AuthWaiting) {
@@ -68,16 +76,12 @@ func (r *Runner) onAuthWaiting(w agent.AuthWaiting) {
 	}
 	a := &r.auth
 	a.mu.Lock()
-	if r.isClosed() {
-		a.mu.Unlock()
-		return
-	}
 	if a.waits == nil {
 		a.waits, a.watching = map[string]*authWait{}, map[string]bool{}
 	}
 	wait := a.waits[w.RequestID]
 	if wait == nil {
-		wait = &authWait{RequestID: w.RequestID, Audience: w.Audience, Scopes: slices.Clone(w.Scopes), For: w.For, Chats: map[string]string{}, Since: time.Now().UTC()}
+		wait = &authWait{RequestID: w.RequestID, Audience: w.Audience, Scopes: slices.Clone(w.Scopes), For: w.For, Chats: map[string]string{}, Since: authNow().UTC()}
 		a.waits[w.RequestID] = wait
 	}
 	_, known := wait.Chats[w.Conversation]
@@ -88,13 +92,52 @@ func (r *Runner) onAuthWaiting(w agent.AuthWaiting) {
 	if known && !start {
 		return // already announced on this chat and watched
 	}
-	go r.saveAuthWaits()
+	r.goAuth(r.saveAuthWaits)
 	if !known {
 		r.announce(chatID, authWaitingActivity(w))
 	}
 	if start {
 		r.watchAuth(w.RequestID)
 	}
+}
+
+// onAuthGranted sees a conversation that waited get its token: its own
+// later turn succeeded, so it is no longer told about the decision.
+func (r *Runner) onAuthGranted(w agent.AuthWaiting) {
+	if r.opts.Agent.OnAuthGranted != nil {
+		r.opts.Agent.OnAuthGranted(w)
+	}
+	a := &r.auth
+	a.mu.Lock()
+	wait := a.waits[w.RequestID]
+	if wait == nil {
+		a.mu.Unlock()
+		return
+	}
+	delete(wait.Chats, w.Conversation)
+	if len(wait.Chats) == 0 {
+		// Nobody is left waiting: stop watching.
+		delete(a.waits, w.RequestID)
+		delete(a.watching, w.RequestID)
+	}
+	a.mu.Unlock()
+	r.goAuth(r.saveAuthWaits)
+}
+
+// goAuth runs fn in the background, tracked so Close waits for it; after
+// Close it does nothing.
+func (r *Runner) goAuth(fn func()) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	r.auth.wg.Add(1)
+	r.mu.Unlock()
+	go func() {
+		defer r.auth.wg.Done()
+		fn()
+	}()
 }
 
 func authWaitingActivity(w agent.AuthWaiting) chatstream.Event {
@@ -104,45 +147,55 @@ func authWaitingActivity(w agent.AuthWaiting) chatstream.Event {
 	})
 }
 
-// watchAuth polls a grant request until it is decided or the runner closes:
-// every AuthPoll at first, doubling up to five minutes.
+// watchAuth polls a grant request until it is decided, gone or too old, or
+// the runner closes: every AuthPoll at first, doubling up to five minutes.
 func (r *Runner) watchAuth(id string) {
 	ctx := r.noticeCtx
 	if ctx == nil {
 		return
 	}
-	r.auth.wg.Add(1)
-	go func() {
-		defer r.auth.wg.Done()
+	r.goAuth(func() {
 		wait := r.opts.AuthPoll
 		if wait <= 0 {
 			wait = defaultAuthPoll
 		}
 		limit := max(maxAuthPoll, wait)
+		maxAge := r.opts.AuthWaitMax
+		if maxAge <= 0 {
+			maxAge = defaultAuthWaitMax
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(wait):
+			case <-authAfter(wait):
+			}
+			since, ok := r.authSince(id)
+			if !ok {
+				return // decided some other way, or nobody waits any more
 			}
 			status, err := r.authStatus(ctx, id)
 			switch {
+			case ctx.Err() != nil:
+				return
+			case errors.Is(err, agent.ErrAuthRequestGone), errors.Is(err, agent.ErrNoWarden):
+				r.stopAuthWatch(ctx, id, err.Error())
+				return
 			case err != nil:
-				if ctx.Err() == nil {
-					r.logger().Warn("chatrunner: grant request lookup", "request", id, "error", err.Error())
-				}
+				r.logger().Warn("chatrunner: grant request lookup", "request", id, "error", err.Error())
 			case status != "" && status != "pending":
 				if err := r.AuthDecided(ctx, id, status); err != nil && ctx.Err() == nil {
 					r.logger().Warn("chatrunner: grant request decided", "request", id, "error", err.Error())
 				}
 				return
 			}
-			if !r.authWatched(id) {
-				return // decided some other way
+			if authNow().Sub(since) > maxAge {
+				r.stopAuthWatch(ctx, id, fmt.Sprintf("no decision after %s", maxAge))
+				return
 			}
 			wait = min(wait*2, limit)
 		}
-	}()
+	})
 }
 
 func (r *Runner) authStatus(ctx context.Context, id string) (string, error) {
@@ -153,43 +206,99 @@ func (r *Runner) authStatus(ctx context.Context, id string) (string, error) {
 	return w.Status, err
 }
 
-func (r *Runner) authWatched(id string) bool {
+// authSince is when the runner started watching id, false when it no
+// longer does.
+func (r *Runner) authSince(id string) (time.Time, bool) {
 	r.auth.mu.Lock()
 	defer r.auth.mu.Unlock()
-	return r.auth.waits[id] != nil
+	w := r.auth.waits[id]
+	if w == nil {
+		return time.Time{}, false
+	}
+	return w.Since, true
+}
+
+// takeAuthWait removes and returns a watched request, nil when it is not
+// watched (so of a decision and a stop racing, only one acts).
+func (r *Runner) takeAuthWait(id string) *authWait {
+	a := &r.auth
+	a.mu.Lock()
+	wait := a.waits[id]
+	delete(a.waits, id)
+	delete(a.watching, id)
+	a.mu.Unlock()
+	if wait != nil {
+		r.saveAuthWaits()
+	}
+	return wait
+}
+
+// stopAuthWatch gives up on a request that will not be decided for this
+// agent, and tells each chat that waited.
+func (r *Runner) stopAuthWatch(ctx context.Context, id, reason string) {
+	wait := r.takeAuthWait(id)
+	if wait == nil {
+		return
+	}
+	r.agent.AuthDecided(id, "withdrawn") // forget it: the next attempt files anew
+	body := fmt.Sprintf("Stopped watching Warden grant request %s for %s: %s. Send your message again to file a new request.", id, authWhat(wait.Audience, wait.For), reason)
+	if err := r.tellAuthChats(ctx, wait, func(string) string { return body }, false); err != nil && ctx.Err() == nil {
+		r.logger().Warn("chatrunner: grant request stopped", "request", id, "error", err.Error())
+	}
 }
 
 // AuthDecided records a Warden grant request's decision ("approved" or
 // "granted", or a refusal such as "denied" or "expired") and tells each chat
-// that waited on it with a notice: on approval the notice starts a notice
-// turn (with Options.NoticeTurns) so the agent retries what needed the
-// grant. The runner calls it when its own polling sees a decision; a host
-// that is pushed decisions calls it directly. Deciding a request the runner
-// does not watch does nothing.
+// still waiting on it with a notice. On approval the notice starts a notice
+// turn (with Options.NoticeTurns, while the chat has notice turns left) so
+// the agent retries what needed the grant; otherwise it asks the owner to
+// send the message again. A chat whose own later turn already got the token
+// is not told. The runner calls it when its own polling sees a decision; a
+// host that is pushed decisions calls it directly. Deciding a request the
+// runner does not watch does nothing.
 func (r *Runner) AuthDecided(ctx context.Context, requestID, status string) error {
 	if status == "" || status == "pending" {
 		return fmt.Errorf("chatrunner: %q is not a decision", status)
 	}
-	a := &r.auth
-	a.mu.Lock()
-	wait := a.waits[requestID]
-	delete(a.waits, requestID)
-	delete(a.watching, requestID)
-	a.mu.Unlock()
+	wait := r.takeAuthWait(requestID)
 	if wait == nil {
 		return nil
 	}
-	r.saveAuthWaits()
+	r.agent.AuthDecided(requestID, status)
 	approved := status == "approved" || status == "granted"
-	if approved {
-		r.agent.AuthDecided(requestID)
+	what := authWhat(wait.Audience, wait.For)
+	return r.tellAuthChats(ctx, wait, func(naniteID string) string {
+		switch {
+		case !approved:
+			return fmt.Sprintf("Warden grant request %s for %s was %s. The work that needed it cannot continue until a new request is approved.", requestID, what, status)
+		case r.noticeTurnAvailable(naniteID):
+			return fmt.Sprintf("Warden approved grant request %s for %s. Continue the work that was waiting for it.", requestID, what)
+		default:
+			return fmt.Sprintf("Warden approved grant request %s for %s. Send your message again to continue.", requestID, what)
+		}
+	}, approved)
+}
+
+// tellAuthChats posts a notice to each chat that waited, in a stable order,
+// spacing retries out so many chats do not all start turns at once.
+func (r *Runner) tellAuthChats(ctx context.Context, wait *authWait, body func(naniteID string) string, stagger bool) error {
+	ids := make([]string, 0, len(wait.Chats))
+	for id := range wait.Chats {
+		ids = append(ids, id)
 	}
-	body := authDecisionText(wait, status, approved)
+	slices.Sort(ids)
 	var errs []error
-	for naniteID := range wait.Chats {
+	for i, naniteID := range ids {
+		if stagger && i > 0 {
+			select {
+			case <-ctx.Done():
+				return errors.Join(append(errs, ctx.Err())...)
+			case <-authAfter(authRetryStagger):
+			}
+		}
 		c, err := r.agent.Conversation(ctx, naniteID)
 		if err == nil {
-			err = c.PostNotice(ctx, NoticeKindAuth, body)
+			err = c.PostNotice(ctx, NoticeKindAuth, body(naniteID))
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("conversation %s: %w", naniteID, err))
@@ -198,23 +307,34 @@ func (r *Runner) AuthDecided(ctx context.Context, requestID, status string) erro
 	return errors.Join(errs...)
 }
 
-func authDecisionText(w *authWait, status string, approved bool) string {
-	what := "audience " + w.Audience
-	if w.For != "" {
-		what = w.For + " (" + what + ")"
+// noticeTurnAvailable reports whether a notice on the conversation would
+// start a notice turn now.
+func (r *Runner) noticeTurnAvailable(naniteID string) bool {
+	if !r.opts.NoticeTurns {
+		return false
 	}
-	if approved {
-		return fmt.Sprintf("Warden approved grant request %s for %s. Continue the work that was waiting for it.", w.RequestID, what)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.noticeTurns[naniteID] < maxNoticeTurns
+}
+
+func authWhat(audience, label string) string {
+	what := "audience " + audience
+	if label != "" {
+		what = label + " (" + what + ")"
 	}
-	return fmt.Sprintf("Warden grant request %s for %s was %s. The work that needed it cannot continue until a new request is approved.", w.RequestID, what, status)
+	return what
 }
 
 // saveAuthWaits writes the watched requests to host state, one save at a
-// time, each with the latest set.
+// time, each with the latest set. After Close it writes nothing.
 func (r *Runner) saveAuthWaits() {
 	a := &r.auth
 	a.saveMu.Lock()
 	defer a.saveMu.Unlock()
+	if r.isClosed() {
+		return
+	}
 	a.mu.Lock()
 	var value string
 	if len(a.waits) > 0 {
@@ -231,8 +351,8 @@ func (r *Runner) saveAuthWaits() {
 	}
 }
 
-// loadAuthWaits restores the watched requests after a restart and watches
-// them again.
+// loadAuthWaits restores the watched requests after a restart, merging with
+// any registered meanwhile, and watches them again.
 func (r *Runner) loadAuthWaits(ctx context.Context) {
 	raw, err := r.agent.HostState(ctx, authWaitsKey)
 	if err != nil {
@@ -249,50 +369,64 @@ func (r *Runner) loadAuthWaits(ctx context.Context) {
 	}
 	a := &r.auth
 	a.mu.Lock()
-	a.waits, a.watching = map[string]*authWait{}, map[string]bool{}
-	var ids []string
+	if a.waits == nil {
+		a.waits, a.watching = map[string]*authWait{}, map[string]bool{}
+	}
+	var start []string
+	chats := map[string]string{}
 	for id, w := range waits {
 		if w == nil || w.RequestID != id || len(w.Chats) == 0 {
 			continue
 		}
-		a.waits[id], a.watching[id] = w, true
-		ids = append(ids, id)
+		if cur := a.waits[id]; cur != nil {
+			for naniteID, chatID := range w.Chats {
+				if _, ok := cur.Chats[naniteID]; !ok {
+					cur.Chats[naniteID] = chatID
+				}
+			}
+		} else {
+			a.waits[id] = w
+		}
+		for naniteID, chatID := range w.Chats {
+			chats[naniteID] = chatID
+		}
+		if !a.watching[id] {
+			a.watching[id] = true
+			start = append(start, id)
+		}
 	}
 	a.mu.Unlock()
 	r.mu.Lock()
-	for _, id := range ids {
-		for naniteID, chatID := range waits[id].Chats {
-			if r.chats[naniteID] == "" {
-				r.chats[naniteID] = chatID
-			}
+	for naniteID, chatID := range chats {
+		if r.chats[naniteID] == "" {
+			r.chats[naniteID] = chatID
 		}
 	}
 	r.mu.Unlock()
-	for _, id := range ids {
+	for _, id := range start {
 		r.watchAuth(id)
 	}
 }
 
-// authFor fills in what needed a grant request from the watched requests,
-// when the failure carried only its text.
-func (r *Runner) authFor(w agent.AuthWaiting) agent.AuthWaiting {
-	if w.For != "" {
-		return w
-	}
+// authWaitingText is the run error of a turn that failed for a pending
+// grant: what it waits on, and what happens next for this conversation.
+func (r *Runner) authWaitingText(naniteID string, w agent.AuthWaiting) string {
 	r.auth.mu.Lock()
-	defer r.auth.mu.Unlock()
-	if wait := r.auth.waits[w.RequestID]; wait != nil {
-		w.For = wait.For
+	wait := r.auth.waits[w.RequestID]
+	watched := false
+	if wait != nil {
+		if w.For == "" {
+			w.For = wait.For
+		}
+		_, watched = wait.Chats[naniteID]
 	}
-	return w
-}
-
-// authWaitingText is the turn's error message when it failed for a pending
-// grant.
-func authWaitingText(w agent.AuthWaiting) string {
-	what := "audience " + w.Audience
-	if w.For != "" {
-		what = w.For + " (" + what + ")"
+	r.auth.mu.Unlock()
+	next := "Send your message again once it is approved."
+	switch {
+	case watched && r.opts.NoticeTurns:
+		next = "The agent continues once it is approved."
+	case watched:
+		next = "You will get a notice when it is decided; then send your message again."
 	}
-	return fmt.Sprintf("Waiting for approval of Warden grant request %s for %s. The agent continues once it is approved.", w.RequestID, what)
+	return fmt.Sprintf("Waiting for approval of Warden grant request %s for %s. %s", w.RequestID, authWhat(w.Audience, w.For), next)
 }

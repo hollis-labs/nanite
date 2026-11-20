@@ -57,7 +57,7 @@ func (x *execution) startShell(ctx context.Context, raw json.RawMessage) (string
 // subtaskJobKind is the jobs-table kind of a background subtask.
 const subtaskJobKind = "subagent"
 
-func (x *execution) subtask(ctx context.Context, request subagent.Request) (tools.Result, error) {
+func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ tools.Result, retErr error) {
 	if !x.canSpawn() {
 		return tools.Result{}, fmt.Errorf("subtask depth limit reached: only a variant with can_spawn may start subtasks, and only one level down")
 	}
@@ -101,6 +101,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	// The child's ID is chosen before its slot, so a subtask that has to
 	// wait can say so under the ID its start and progress will carry.
 	childID := store.NewID(time.Now().UTC())
+	begun := false
 	var release func()
 	if request.Background {
 		release, err = limit.TryAcquire()
@@ -109,6 +110,26 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 			return events.SubtaskProgress{EventMeta: meta, ID: childID, ParentID: x.info.ID, Variant: variant.Name, Depth: x.depth + 1,
 				StatusLine: "waiting for a subtask slot"}
 		})
+		// A subtask that said it was waiting and then never starts (the wait
+		// was cancelled, the budget ran out, or it failed to start) ends with
+		// one last progress event carrying why, so no waiting state is left
+		// open.
+		defer func() {
+			if begun {
+				return
+			}
+			status := "error"
+			switch {
+			case errors.Is(retErr, errBudgetSpent):
+				status = "refused"
+			case ctx.Err() != nil || errors.Is(retErr, context.Canceled):
+				status = "cancelled"
+			}
+			x.run.emit(context.WithoutCancel(ctx), func(meta events.EventMeta) events.Event {
+				return events.SubtaskProgress{EventMeta: meta, ID: childID, ParentID: x.info.ID, Variant: variant.Name, Depth: x.depth + 1,
+					StatusLine: "did not start (" + status + ")", Status: status}
+			})
+		}()
 		release, err = limit.Acquire(ctx)
 	}
 	if err != nil {
@@ -166,7 +187,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 					defer forget()
 					defer stopWall()
 					report := e.activeEmitter(x.info.ID)
-					result, err := follow(jobCtx, run, sub, e.backgroundProgressEvery, report, report)
+					result, err := follow(jobCtx, run, sub, e.backgroundProgressEvery, report, e.activeForwarder(x.info.ID))
 					status, reason := subtaskStatus(jobCtx, runCtx, result, err)
 					returned := e.closeSubtask(child.ID)
 					bg := context.WithoutCancel(jobCtx)
@@ -216,6 +237,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		return tools.Result{}, err
 	}
 	x.emitSubtaskStarted(ctx, child, request)
+	begun = true
 	result, err := follow(ctx, run, sub, e.progressEvery, x.run.emit, x.run.forward)
 	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)

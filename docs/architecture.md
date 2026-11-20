@@ -370,6 +370,10 @@ short status line. They are rate-limited per subtask, at most one each
 passes, and anything held is sent before the subtask's `SubagentFinished`.
 A foreground subtask that has to wait for a slot first sends one with the
 status line "waiting for a subtask slot", under the ID it then starts with.
+If it never starts, because the wait was cancelled, the turn's budget ran
+out, or it failed to start, a last `SubtaskProgress` closes it with `Status`
+`cancelled`, `refused` or `error` (there is no `SubagentFinished`, since it
+never started).
 They are for the host only: the parent model never sees them. A depth-2
 subtask's `SubagentStarted`, progress and `SubagentFinished` all reach the
 root's run through its lead, each with its parent (the lead) and depth 2. A

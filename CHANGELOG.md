@@ -129,7 +129,9 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   background, and the final status of a background subtask), rate-limited
   per subtask (500ms, 5s for a background subtask) and never shown to the
   model. Steps are the turn's own step count. A foreground subtask waiting
-  for a slot first reports "waiting for a subtask slot". A depth-2 subtask's start,
+  for a slot first reports "waiting for a subtask slot"; one that then never
+  starts gets a last progress event with `Status` `cancelled`, `refused` or
+  `error`. A depth-2 subtask's start,
   progress and finish reach the root's run through its lead. chatrunner
   sends progress as `nanite.subagent` activity with state `progress`.
 - Breaking: `SubagentStarted` and `SubagentFinished` gain `ParentID` and

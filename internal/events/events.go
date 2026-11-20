@@ -137,7 +137,9 @@ type SubtaskProgress struct {
 	StatusLine string
 	// Background marks a background subtask, whose progress lands in
 	// whatever turn its parent conversation is running. Its last progress
-	// event carries Status, how it ended; Status is empty while it runs.
+	// event carries Status, how it ended; Status is empty while it runs. A
+	// foreground subtask that waited for a slot and never started also gets
+	// a last event with Status cancelled, refused or error.
 	Background bool
 	Status     string
 }

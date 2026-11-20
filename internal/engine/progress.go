@@ -242,6 +242,23 @@ func (e *Engine) subtaskLinkOf(child string) *subtaskLink {
 	return &link
 }
 
+// activeForwarder passes events another run already reported, such as a
+// background lead's workers' lifecycle, to conversation's active run, if it
+// has one, without reporting them to the runtime sink again.
+func (e *Engine) activeForwarder(conversation string) progressEmitter {
+	return func(ctx context.Context, event func(events.EventMeta) events.Event) {
+		e.mu.Lock()
+		r := e.active[conversation]
+		e.mu.Unlock()
+		if r == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		r.forward(ctx, event)
+	}
+}
+
 // activeEmitter reports progress on conversation's active run, when it has
 // one: a background subtask's parent turn may long since have ended.
 func (e *Engine) activeEmitter(conversation string) progressEmitter {

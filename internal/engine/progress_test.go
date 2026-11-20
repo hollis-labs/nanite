@@ -783,3 +783,155 @@ func TestSubtaskWaitingForASlotSaysSo(t *testing.T) {
 		}
 	}
 }
+
+// A background lead's workers' lifecycle reaches the parent's running turn,
+// but the runtime sink counts each worker once.
+func TestBackgroundLeadTelemetryCountsOnce(t *testing.T) {
+	p := &routedProvider{
+		root: fake.New(subtaskCall("lead", "bg council", true), toolResponse("hold"), fake.Text("root done")),
+		children: map[string]*fake.Provider{
+			"bg council": fake.New(subtaskCall("worker", "one view", false), returnCall("ok", "council")),
+			"one view":   fake.New(returnCall("ok", "view")),
+		},
+	}
+	e, db, id := setupEngine(t, p, "")
+	lookupTool(t, e)
+	writeVariant(t, e.cfg.Dir, "lead", "---\ncan_spawn: true\n---\nYou lead a council.\n")
+	if err := e.cfg.Tools.SetGroup("host2", tools.Tool{Name: "hold", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(ctx context.Context, _ tools.Call) (tools.Result, error) {
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) && !bgFinished(ctx, e, id) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			return tools.Result{Text: "held"}, nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	count := map[string]map[runtimeevents.EventKind]int{}
+	e.runtime = events.NewRuntime(runtimeevents.SinkFunc(func(_ context.Context, ev runtimeevents.Event) error {
+		var payload struct {
+			ChildID string `json:"child_id"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) != nil || payload.ChildID == "" {
+			return nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if count[payload.ChildID] == nil {
+			count[payload.ChildID] = map[runtimeevents.EventKind]int{}
+		}
+		count[payload.ChildID][ev.Kind]++
+		return nil
+	}), e.cfg.Logger)
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	lead := childOf(t, db, id)
+	worker := childOf(t, db, lead.ID)
+	mu.Lock()
+	defer mu.Unlock()
+	if got := count[worker.ID]; got[runtimeevents.KindAgentSubagentSpawn] != 1 || got[runtimeevents.KindAgentSubagentStop] != 1 {
+		t.Fatalf("worker under a background lead: %v, want one spawn and one stop", got)
+	}
+}
+
+// waitingClosed reads a run's events and reports the subtasks that said they
+// were waiting for a slot and those that later started, finished or got a
+// final status.
+func waitingClosed(run *Run) (waiting, closed map[string]bool) {
+	waiting, closed = map[string]bool{}, map[string]bool{}
+	for ev := range run.Events() {
+		switch x := ev.(type) {
+		case events.SubtaskProgress:
+			if x.StatusLine == "waiting for a subtask slot" {
+				waiting[x.ID] = true
+			}
+			if x.Status != "" {
+				closed[x.ID] = true
+			}
+		case events.SubagentStarted:
+			closed[x.ID] = true
+		case events.SubagentFinished:
+			closed[x.ID] = true
+		}
+	}
+	return waiting, closed
+}
+
+// A subtask cancelled while it waits for a slot ends its waiting state with
+// a final cancelled status.
+func TestWaitingSubtaskCancelledGetsAFinalStatus(t *testing.T) {
+	p := &routedProvider{root: fake.New(fanOut("worker", "queued"), fake.Text("never")), children: map[string]*fake.Provider{"queued": fake.New(returnCall("ok", "q"))}}
+	e, _, id := setupEngine(t, p, "")
+	e.children = subagent.NewLimit(1)
+	hold, err := e.children.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold()
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statuses []string
+	done := make(chan struct{})
+	waiting, closed := map[string]bool{}, map[string]bool{}
+	go func() {
+		defer close(done)
+		for ev := range run.Events() {
+			if x, ok := ev.(events.SubtaskProgress); ok {
+				if x.StatusLine == "waiting for a subtask slot" {
+					waiting[x.ID] = true
+					run.Cancel()
+				}
+				if x.Status != "" {
+					closed[x.ID] = true
+					statuses = append(statuses, x.Status)
+				}
+			}
+		}
+	}()
+	<-done
+	if len(waiting) != 1 || len(closed) != 1 || statuses[0] != "cancelled" {
+		t.Fatalf("waiting %v, closed %v, statuses %v; want one waiting subtask closed as cancelled", waiting, closed, statuses)
+	}
+}
+
+// Subtasks that wait for a slot and then find the turn's budget spent end
+// with a final refused status.
+func TestWaitingSubtaskRefusedGetsAFinalStatus(t *testing.T) {
+	spend := func(r fake.Response, tokens int) fake.Response {
+		r.Events = append([]llmtypes.StreamEvent{{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: tokens}}}, r.Events...)
+		return r
+	}
+	children := map[string]*fake.Provider{}
+	for _, l := range []string{"la", "lb"} {
+		children[l] = fake.New(fanOut("worker", l+"-1", l+"-2"), fake.Text("lead never"))
+		for _, w := range []string{l + "-1", l + "-2"} {
+			children[w] = fake.New(spend(toolResponse("unknown"), 300), spend(toolResponse("unknown"), 300), fake.Text("worker never"))
+		}
+	}
+	p := &routedProvider{root: fake.New(fanOut("lead", "la", "lb"), fake.Text("root never")), children: children}
+	e, _, id := setupEngine(t, p, "")
+	writeVariant(t, e.cfg.Dir, "lead", "---\ncan_spawn: true\n---\nYou lead.\n")
+	e.children, e.leads = subagent.NewLimit(1), subagent.NewLimit(1)
+	e.cfg.TurnTokenBudget = 1000
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, closed := waitingClosed(run)
+	if len(waiting) == 0 {
+		t.Fatal("no subtask waited for a slot")
+	}
+	for child := range waiting {
+		if !closed[child] {
+			t.Fatalf("subtask %s waited for a slot and was never started, finished or given a status (waiting %v, closed %v)", child, waiting, closed)
+		}
+	}
+}

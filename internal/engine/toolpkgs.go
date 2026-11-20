@@ -43,17 +43,6 @@ func (e *Engine) toolPackages() (map[string]authored.ToolPackage, string) {
 	return pkgs, ""
 }
 
-// toolApprovalKey is the agent-wide setting that holds the digest a person
-// approved for a package (conversation "" in the settings table).
-func toolApprovalKey(name string) string { return "toolpkg.approved:" + name }
-
-// toolApproved reports whether a person approved this exact package: the
-// approval is for its digest, so any change to the package asks again.
-func (e *Engine) toolApproved(ctx context.Context, pkg authored.ToolPackage) bool {
-	digest, err := e.cfg.Store.Setting(ctx, "", toolApprovalKey(pkg.Name))
-	return err == nil && digest != "" && digest == pkg.Digest
-}
-
 // recheckTool reads a package again just before it runs and refuses it if
 // it changed since the turn loaded it (and so since the call was approved).
 // A change between this check and the start of the process is still
@@ -138,7 +127,17 @@ func (e *Engine) toolServers(ctx context.Context, authoredCfg agentdir.MCPConfig
 			// approval tool (packageTools).
 			continue
 		}
+		if err := e.recheckTool(ctx, pkg); err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+		check, err := json.Marshal(mcpclient.PackageCheck{Dir: e.profileDir(ctx), Name: pkg.Name, Digest: pkg.Digest, AllowEnv: e.cfg.ToolPackageEnv})
+		if err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
 		env := map[string]string{
+			mcpclient.PackageCheckEnv: string(check),
 			// The digest also restarts the server when the package changes.
 			"NANITE_TOOL_DIGEST": pkg.Digest,
 		}
@@ -197,6 +196,9 @@ func (e *Engine) toolEnv(ctx context.Context, pkg authored.ToolPackage) ([]strin
 	env := processenv.Build(nil)
 	for _, key := range pkg.Env {
 		if value, ok := os.LookupEnv(key); ok {
+			if err := authored.CheckToolEnvValue(key, value, e.cfg.ToolPackageEnv); err != nil {
+				return nil, err
+			}
 			e.cfg.ProviderConfig.Redactor.Add(key, value)
 			env[key] = value
 		}
@@ -255,7 +257,7 @@ func (x *execution) packageTools(ctx context.Context) []tools.Tool {
 					if err := x.engine.recheckTool(ctx, pkg); err != nil {
 						return errorResult(err), nil
 					}
-					if err := x.engine.cfg.Store.SetSetting(ctx, "", toolApprovalKey(pkg.Name), pkg.Digest); err != nil {
+					if err := x.engine.approveTool(ctx, pkg); err != nil {
 						return tools.Result{}, err
 					}
 					return tools.Result{Text: fmt.Sprintf("Approved tool package %s (digest %s). Its tools are offered from the next turn.", pkg.Name, shortDigest(pkg.Digest))}, nil

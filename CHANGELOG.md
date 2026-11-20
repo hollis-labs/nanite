@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Breaking: tool-package approvals no longer use the agent-local database.
+  Existing packages need approval again; old approvals are not migrated.
+  Explicit host `DataDir` uses `DataDir/tool-approvals`; otherwise approvals
+  use the OS user config directory under `nanite/tool-approvals`. Locations
+  resolving inside the agent directory are refused.
+- Tool-package reads are nonblocking, type-checked and byte-bounded. Digest
+  caching tracks file identity and timestamps, and MCP packages are rechecked
+  immediately before each process start, including reconnects. Environment
+  filtering also refuses database URLs, PATs, DSNs and credential-bearing URLs
+  unless explicitly allowed by the host.
+
 ## 0.7.0
 
 Steering, the front desk, Warden auth and the Workbench APIs. Root turns can

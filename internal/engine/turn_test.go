@@ -58,7 +58,7 @@ func setupEngine(t *testing.T, model llmcontracts.Provider, runtime string) (*En
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	e, err := New(Config{Dir: root, GlobalSkillsDir: "-", Provider: model, Store: db, Slots: slots.NewStore(), Tools: &tools.Groups{}, Skills: &skills.Groups{}})
+	e, err := New(Config{Dir: root, ToolApprovalDir: filepath.Join(t.TempDir(), "tool-approvals"), GlobalSkillsDir: "-", Provider: model, Store: db, Slots: slots.NewStore(), Tools: &tools.Groups{}, Skills: &skills.Groups{}})
 	if err != nil {
 		t.Fatal(err)
 	}

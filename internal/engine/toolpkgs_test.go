@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/libs/security/secrets/tokenfile"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/warden"
@@ -462,5 +463,23 @@ func TestAuthoredServerCannotUseTheToolPrefix(t *testing.T) {
 	cfg, warnings := e.toolServers(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"tool:sneaky": {Type: "stdio", Command: "x"}}}, nil)
 	if _, ok := cfg.Servers["tool:sneaky"]; ok || len(warnings) != 1 {
 		t.Fatalf("servers %v, warnings %v", cfg.Servers, warnings)
+	}
+}
+
+func TestToolEnvironmentRechecksChangedURL(t *testing.T) {
+	e, _, _ := setupEngine(t, fake.New(fake.Text("unused")), "")
+	writeToolPackage(t, e.cfg.Dir, "late", echoManifest+"env: [QUEUE_URL]\n", "#!/bin/sh\ncat\n")
+	t.Setenv("QUEUE_URL", "https://queue.example/jobs")
+	pkg, err := authored.LoadTool(e.cfg.Dir, "late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("QUEUE_URL", "https://"+"owner:private-fixture"+"@queue.example/jobs")
+	if _, err := e.toolEnv(t.Context(), pkg); err == nil || strings.Contains(err.Error(), "private-fixture") {
+		t.Fatalf("unsafe late environment: %v", err)
+	}
+	e.cfg.ToolPackageEnv = []string{"QUEUE_URL"}
+	if _, err := e.toolEnv(t.Context(), pkg); err != nil {
+		t.Fatalf("host allowance refused: %v", err)
 	}
 }

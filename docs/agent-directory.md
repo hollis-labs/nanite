@@ -393,7 +393,10 @@ needs:                   # Warden tokens, one variable each
   file's path, mode and content, each symlink's target). Approvals are for
   one digest: any change to any file in the package asks again. Just before
   a package runs, Nanite reads it again and refuses it if the digest
-  changed since the turn loaded it. A change in the moment between that
+  changed since the turn loaded it. MCP packages are checked before each
+  start, including reconnects. A bounded metadata cache avoids rehashing
+  unchanged contents; file reads refuse special files and enforce the byte
+  limit even if a file grows. A change in the moment between that
   check and the process starting is still possible.
 - **`kind: command`** is offered as the tool `tool__<name>`. Each call runs
   the entry from the first workspace root (or the package directory when
@@ -417,7 +420,9 @@ needs:                   # Warden tokens, one variable each
   offered as `tool__<name>__<tool>`; the approval tool is no longer offered.
   The server's read-only hints are not trusted. It also gets
   `NANITE_TOOL_DIGEST`, so an edited package restarts it. An `.mcp.json`
-  server may not use the `tool:` prefix.
+  server may not use the `tool:` prefix. Approvals live outside the agent
+  directory in the host data directory or OS user config directory; see
+  [embedding.md](embedding.md). Old agent-local approvals are ignored.
 - **Environment.** A package gets Nanite's base set (`PATH`, `HOME`, `USER`,
   `LANG`, `TERM`, `TMPDIR`, `SHELL`, `LC_*`), the host variables named in
   `env` that are set, and one variable per `needs` entry holding a fresh
@@ -427,7 +432,10 @@ needs:                   # Warden tokens, one variable each
   `NANITE_*`, and the dynamic loader's variables are reserved. `env` may not
   name a provider key variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
   the like) or a name that looks like a credential (containing `KEY`,
-  `TOKEN`, `SECRET`, `AUTH`, `PASSWORD` or `CREDENTIAL`) unless the host
+  `TOKEN`, `SECRET`, `AUTH`, `PASSWORD` or `CREDENTIAL`, or named
+  `DATABASE_URL`, `PAT`, `DSN`, or ending in `_PAT` or `_DSN`). URL variables
+  (`URL` or names ending in `_URL`) with user information or credential query
+  parameters are also refused. These restrictions apply unless the host
   lists it in `Options.ToolPackageEnv`; ask for a Warden token with `needs`
   instead. A package with `needs` and no Warden identity fails with a clear
   error. Passed-through values and tokens are redacted wherever they

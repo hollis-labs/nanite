@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"sync"
+	"sync/atomic"
 
 	chat "github.com/hollis-labs/libs/agent/chat"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -82,6 +83,9 @@ type run struct {
 	// hostDispatch marks the front desk's own dispatch, which is never
 	// published and does not count as the owner's turn ending.
 	hostDispatch bool
+	// finishing is set once the run has yielded its terminal event: the
+	// owner may already send the next message while it releases.
+	finishing atomic.Bool
 
 	// Translation state, used only by the goroutine reading Events.
 	asked    map[string]bool // call IDs an approval.request was emitted for
@@ -147,7 +151,10 @@ func (x *run) Events() iter.Seq2[chatstream.Event, error] {
 				x.runner.opts.OnSteered(x.turn.ConversationID, s)
 			}
 			for _, out := range x.translate(ev) {
-				terminal = terminal || out.IsTerminal()
+				if out.IsTerminal() {
+					terminal = true
+					x.finishing.Store(true)
+				}
 				if !yield(out, nil) {
 					x.stop()
 					_, _ = x.inner.Wait() // let the turn record its end
@@ -156,6 +163,7 @@ func (x *run) Events() iter.Seq2[chatstream.Event, error] {
 			}
 		}
 		if !terminal {
+			x.finishing.Store(true)
 			// Nanite always ends a run with RunFinished or RunFailed.
 			for _, out := range x.end(chatstream.Event{Verb: chatstream.VerbRunError, Code: CodeTurnFailed, Message: "the turn ended without a result"}) {
 				if !yield(out, nil) {

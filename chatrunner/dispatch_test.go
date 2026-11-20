@@ -443,3 +443,46 @@ func TestNoticeAfterAnIdlePublisherStops(t *testing.T) {
 		time.Sleep(30 * time.Millisecond) // let the publisher go idle and stop
 	}
 }
+
+// The owner may send the next message as soon as a turn's terminal event
+// arrives, while the turn is still releasing the conversation: that message
+// waits for the release instead of failing busy.
+func TestTurnSentAtTheTerminalEventWaitsForTheRelease(t *testing.T) {
+	w := newWired(t, false)
+	x, err := w.runner.Start(t.Context(), chat.Turn{ConversationID: w.conv, Text: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := make(chan error, 1)
+	for ev, err := range x.Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ev.IsTerminal() {
+			continue
+		}
+		go func() {
+			y, err := w.runner.Start(t.Context(), chat.Turn{ConversationID: w.conv, Text: "second"})
+			if err == nil {
+				for range y.Events() {
+				}
+			}
+			next <- err
+		}()
+		// The first turn still holds the conversation here, so the next
+		// one cannot have started; it must not have failed either.
+		select {
+		case err := <-next:
+			t.Fatalf("the next turn did not wait for the release: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	select {
+	case err := <-next:
+		if err != nil {
+			t.Fatalf("the next turn: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the next turn never started")
+	}
+}

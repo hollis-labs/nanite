@@ -445,9 +445,10 @@ func (r *Runner) ownerTurn(naniteID string) bool {
 	return x != nil && !x.hostDispatch
 }
 
-// beginAfterDesk is begin, except that when the front desk's own short
-// dispatch holds the conversation it waits for that to end (up to 10s)
-// instead of failing the owner's turn.
+// beginAfterDesk is begin, except that it waits (up to 10s) instead of
+// failing the owner's turn when the conversation is held by a run the owner
+// is not waiting on: the front desk's own short dispatch, or a run that has
+// already sent its terminal event and is releasing.
 func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(*agent.Conversation, context.Context) (*agent.Run, error)) (*run, error) {
 	for range 2 {
 		x, err := r.begin(ctx, turn, start)
@@ -455,7 +456,7 @@ func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(
 			return x, err
 		}
 		held := r.activeRun(ConversationID(turn.ConversationID))
-		if held == nil || !r.isHostDispatch(held) {
+		if held == nil || (!r.isHostDispatch(held) && !held.finishing.Load()) {
 			return nil, err
 		}
 		select {

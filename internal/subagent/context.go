@@ -11,6 +11,9 @@ import (
 // the call nor its variant says.
 const DefaultLastN = 6
 
+// MaxInclude bounds how many context.include items one subtask may ask for.
+const MaxInclude = 8
+
 // MaxLastN bounds last_n; context.full asks for the whole history instead.
 const MaxLastN = 50
 
@@ -42,6 +45,9 @@ func (r Request) ContextSpec() (ContextSpec, error) {
 	}
 	if spec.LastN != nil && (*spec.LastN < 0 || *spec.LastN > MaxLastN) {
 		return spec, fmt.Errorf("subtask context.last_n must be between 0 and %d; use context.full for the whole history", MaxLastN)
+	}
+	if len(spec.Include) > MaxInclude {
+		return spec, fmt.Errorf("subtask context.include takes at most %d items", MaxInclude)
 	}
 	for _, item := range spec.Include {
 		if _, ok := IncludeKey(item); !ok {

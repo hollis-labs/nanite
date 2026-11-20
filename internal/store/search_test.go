@@ -153,3 +153,32 @@ func TestSearchIndexFollowsRebuildsAndUpdates(t *testing.T) {
 		t.Fatalf("old text of an updated message still matches: %v", seqs(hits))
 	}
 }
+
+func TestSearchJoinChecksConversation(t *testing.T) {
+	// An index row whose rowid points at another conversation's message, as
+	// after a VACUUM renumbered rows, must not surface that message.
+	ctx := context.Background()
+	s, err := Open(ctx, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a := writeConversation(t, s, "alpha text")
+	b := writeConversation(t, s, "bravo text")
+	var rowB int64
+	if err := s.db.Reader().QueryRowContext(ctx, "SELECT rowid FROM messages WHERE conversation_id=?", b).Scan(&rowB); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM messages_fts WHERE rowid=?", rowB); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO messages_fts(rowid, body, conversation_id) VALUES(?, 'orphanword', ?)", rowB, a)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if hits, err := s.SearchMessages(ctx, a, "orphanword", 5); err != nil || len(hits) != 0 {
+		t.Fatalf("search in one conversation returned another's message: %v %v", seqs(hits), err)
+	}
+}

@@ -159,14 +159,15 @@ reuse IDs such as `call_0` in every turn.
 
 `context.include` copies parent state too, each item in its own tagged
 block: `todos` (the checklist), `plan` (the scratchpad entry `plan`),
-`handoff` (the `handoff` slot) and `scratchpad:<key>`. A missing item reads
-`(none)`.
+`handoff` (the `handoff` slot) and `scratchpad:<key>`, at most 8 items. A
+missing item reads `(none)`.
 
 Everything copied is redacted first and only then shortened, so a cut can
 never leave part of a secret the redactor would have caught whole. Each text
 block or tool result is cut to about 2,000 characters, each tool input to
 500, and each include item to 4,000. The whole forked context fits a budget
-of 32,000 characters: include items first, then as many of the newest
+of 32,000 characters. Include items come first and take at most half of it;
+any that do not fit are left out and counted. Then come as many of the newest
 messages as fit, with the number left out stated. `context.full` is bounded
 the same way.
 
@@ -190,8 +191,9 @@ conversation, including the output of tools its own variant denies. Withhold
 
 A pointer to a cached tool result in the copied context belongs to the
 parent's cache. A child's `fetch_tool_result` and `search_tool_result` look
-in its own cache first, then its parent's, then the lead's; never a
-sibling's or another conversation's. The child's own transcript is a normal
+in its own cache first, then its parent's, then the root's (for a depth-2
+child, the lead's and then the root's); never a sibling's or another
+conversation's. The child's own transcript is a normal
 child conversation.
 
 ### Variants

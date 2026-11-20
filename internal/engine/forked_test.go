@@ -12,6 +12,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 // callWithID is a tool call with its own ID and input, so a test's calls do
@@ -174,6 +175,7 @@ func TestBadContextIsRefused(t *testing.T) {
 		"empty key":       {"include": []any{"scratchpad:"}},
 		"too many":        {"last_n": 51},
 		"unknown field":   {"lastn": 3},
+		"many includes":   {"include": []any{"plan", "todos", "handoff", "scratchpad:a", "scratchpad:b", "scratchpad:c", "scratchpad:d", "scratchpad:e", "scratchpad:f"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("NANITE_AUTO_REPAIR", "false")
@@ -478,5 +480,143 @@ func TestSeedMentionsHistoryToolsOnlyWhenOffered(t *testing.T) {
 	}
 	if offered := p.offered("dig", 0); slices.Contains(offered, "parent_history_get") {
 		t.Fatalf("narrow variant offered %v", offered)
+	}
+}
+
+// seedFor runs one root turn that calls subtask with ctx, after prep has set
+// up the parent, and returns the child's first message.
+func seedFor(t *testing.T, ctx map[string]any, prep func(*Engine, *store.Store, string)) string {
+	t.Helper()
+	input := map[string]any{"variant": "worker", "goal": "dig", "return_spec": "x", "context": ctx}
+	p := &routedProvider{root: fake.New(callWithID("subtask", "call-subtask", input), fake.Text("root done")),
+		children: map[string]*fake.Provider{"dig": fake.New(fake.Text("report"))}}
+	e, db, id := setupEngine(t, p, "")
+	prep(e, db, id)
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	return firstChildMessage(t, p, "dig")
+}
+
+func TestManyIncludesStayWithinBudget(t *testing.T) {
+	var items []any
+	for i := range subagent.MaxInclude {
+		items = append(items, fmt.Sprintf("scratchpad:k%d", i))
+	}
+	first := seedFor(t, map[string]any{"last_n": 5, "include": items}, func(_ *Engine, db *store.Store, id string) {
+		for i := range subagent.MaxInclude {
+			if err := db.SetScratch(t.Context(), id, fmt.Sprintf("k%d", i), strings.Repeat("z", 5000)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	if len(first) > seedBudget+2000 {
+		t.Errorf("seed is %d characters with budget %d", len(first), seedBudget)
+	}
+	if !strings.Contains(first, "more include items left out to fit") {
+		t.Errorf("includes past the budget were dropped without saying so")
+	}
+	if !strings.Contains(first, "[#1 user] go") {
+		t.Errorf("includes crowded out the messages:\n%.300s", first)
+	}
+}
+
+func TestHugeNewestMessageIsNotDroppedSilently(t *testing.T) {
+	first := seedFor(t, map[string]any{"last_n": 10}, func(_ *Engine, db *store.Store, id string) {
+		j, err := db.OpenJournal(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = j.Close() }()
+		now := time.Now().UTC()
+		turn := store.Turn{ID: store.NewID(now), UserMessageID: store.NewID(now)}
+		if err := j.StartTurn(turn, now); err != nil {
+			t.Fatal(err)
+		}
+		input := map[string]any{}
+		var uses, results []llmtypes.ContentBlock
+		for i := range 20 {
+			uses = append(uses, llmtypes.ContentBlock{Type: "tool_use", ID: fmt.Sprintf("c%d", i), Name: "bash", Input: &input})
+			results = append(results, llmtypes.ContentBlock{Type: "tool_result", ToolUseID: fmt.Sprintf("c%d", i), Content: strings.Repeat("r", 3000)})
+		}
+		for _, m := range []store.Message{
+			{ID: turn.UserMessageID, Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "run 20 things"}}},
+			{ID: store.NewID(now), Role: "assistant", Blocks: uses},
+			{ID: store.NewID(now), Role: "tool", Blocks: results},
+		} {
+			m.TurnID, m.CreatedAt = turn.ID, now
+			if err := j.AppendMessage(m, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		turn.Status = "completed"
+		if err := j.FinishTurn(turn, now); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// The 60,000-character tool message cannot fit, so it and everything
+	// older are left out, but the child is told, and the newer "go" is kept.
+	if !strings.Contains(first, "[#4 user] go") || !strings.Contains(first, "3 older ones left out to fit") {
+		t.Fatalf("seed:\n%.700s", first)
+	}
+}
+
+// ghKey is a fake key shaped like a GitHub token, built at run time.
+var ghKey = "ghp" + "_0123456789abcdefABCDEF0123456789abcd"
+
+func TestToolBlocksRedactedBeforeCut(t *testing.T) {
+	history := []store.Message{
+		{Seq: 1, Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "tool_use", ID: "a", Name: "bash", Input: &map[string]any{"cmd": strings.Repeat("i", 480) + " " + ghKey}}}},
+		{Seq: 2, Role: "tool", Blocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "a", Content: strings.Repeat("c", 1980) + " " + ghKey}}},
+	}
+	e, _, _ := setupEngine(t, fake.New(), "")
+	out := strings.Join(renderMessages(history, nil, seedBlockChars, e.scrub.Text, true), "")
+	for _, part := range []string{"ghp_0123", "sk-ant-api03"} {
+		if strings.Contains(out, part) {
+			t.Errorf("leaks %q:\n%s", part, out)
+		}
+	}
+}
+
+func TestResultScopeFollowsAncestorsOnly(t *testing.T) {
+	e, db, root := setupEngine(t, fake.New(), "")
+	now := time.Now().UTC()
+	child := func(parent string) store.Conversation {
+		t.Helper()
+		c := store.Conversation{ID: store.NewID(time.Now()), ParentID: parent, Role: "worker", Status: "active", CreatedAt: now, UpdatedAt: now}
+		if err := db.CreateConversation(t.Context(), c); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond) // distinct IDs
+		return c
+	}
+	a, b := child(root), child(root)
+	lead := child(root)
+	grand := child(lead.ID)
+	put := func(scope, body string) string {
+		t.Helper()
+		ptr, err := e.cache.Put(t.Context(), scope, toolresult.Meta{Tool: "bash", CallID: "c"}, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ptr.ID
+	}
+	sibling, rootResult, leadResult := put(a.ID, "sibling A"), put(root, "root output"), put(lead.ID, "lead output")
+	if got := (&execution{engine: e, info: b}).resultScope(t.Context(), sibling); got != b.ID {
+		t.Errorf("a sibling's result resolved to scope %s", got)
+	}
+	if got := (&execution{engine: e, info: b}).resultScope(t.Context(), rootResult); got != root {
+		t.Errorf("a depth-1 child did not reach the root's result: %s", got)
+	}
+	g := &execution{engine: e, info: grand}
+	if got := g.resultScope(t.Context(), leadResult); got != lead.ID {
+		t.Errorf("a depth-2 child did not reach the lead's result: %s", got)
+	}
+	if got := g.resultScope(t.Context(), rootResult); got != root {
+		t.Errorf("a depth-2 child did not reach the root's result: %s", got)
 	}
 }

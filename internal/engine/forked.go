@@ -3,14 +3,12 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 	"unicode"
 
-	"github.com/hollis-labs/libs/agent/core/toolresult"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/slots"
@@ -62,18 +60,27 @@ func (x *execution) childHasHistory(variant subagent.Variant) bool {
 func (x *execution) forkedContext(ctx context.Context, spec subagent.ContextSpec, variant subagent.Variant) (string, error) {
 	scrub := x.engine.scrub.Text
 	history := x.childHasHistory(variant)
+	// Include items take at most half the budget, so messages always have room.
 	var includes []string
+	budget := seedBudget
+	skipped := 0
 	for _, item := range spec.Include {
+		if seedBudget-budget >= seedBudget/2 {
+			skipped++
+			continue
+		}
 		text, err := x.includeItem(ctx, item)
 		if err != nil {
 			return "", err
 		}
 		tag := includeTag(item)
-		includes = append(includes, fmt.Sprintf("<parent_%s>\n%s\n</parent_%s>", tag, cut(scrub(orNone(text)), includeChars, ""), tag))
-	}
-	budget := seedBudget
-	for _, block := range includes {
+		limit := min(includeChars, seedBudget/2-(seedBudget-budget))
+		block := fmt.Sprintf("<parent_%s>\n%s\n</parent_%s>", tag, cut(scrub(orNone(text)), limit, ""), tag)
+		includes = append(includes, block)
 		budget -= len(block)
+	}
+	if skipped > 0 {
+		includes = append(includes, fmt.Sprintf("(%d more include items left out to fit)", skipped))
 	}
 	messages, err := x.parentWindow(ctx, spec, variant)
 	if err != nil {
@@ -93,7 +100,14 @@ func (x *execution) forkedContext(ctx context.Context, spec subagent.ContextSpec
 		for start < len(messages) && messages[start].Role == "tool" {
 			start++
 		}
-		if start < len(messages) {
+		if start == len(messages) {
+			hint := ""
+			if history {
+				hint = " Read them with parent_history_get."
+			}
+			parts = append(parts, fmt.Sprintf("Context from the parent conversation: the last %d messages (#%d to #%d) are too long to copy here.%s",
+				len(messages), messages[0].Seq, messages[len(messages)-1].Seq, hint))
+		} else {
 			what := fmt.Sprintf("the last %d messages", len(messages)-start)
 			if spec.Full && start == 0 {
 				what = "the whole conversation"
@@ -251,11 +265,8 @@ func toolNames(call *store.Message, results store.Message) []string {
 // results; history says whether the reader can fetch a shortened message.
 func renderMessages(messages []store.Message, before *store.Message, limit int, scrub func(string) string, history bool) []string {
 	lines := make([]string, 0, len(messages))
-	for i, m := range messages {
-		previous := before
-		if i > 0 {
-			previous = &messages[i-1]
-		}
+	previous := before
+	for _, m := range messages {
 		hint := ""
 		if history {
 			hint = fmt.Sprintf("parent_history_get from=%d to=%d has it all", m.Seq, m.Seq)
@@ -293,6 +304,7 @@ func renderMessages(messages []store.Message, before *store.Message, limit int, 
 		}
 		b.WriteString("\n")
 		lines = append(lines, b.String())
+		previous = &m
 	}
 	return lines
 }
@@ -403,15 +415,16 @@ func (x *execution) ancestors(ctx context.Context) ([]string, error) {
 }
 
 // resultScope is the scope that holds cached tool result id for this
-// conversation: its own, or for a child the nearest ancestor's, so a child
-// can follow a pointer in the parent context it was given.
+// conversation: its own, or for a child its parent's, then the root's (a
+// depth-2 child: the lead's, then the root's), so a child can follow a
+// pointer in the parent context it was given. Never a sibling's.
 func (x *execution) resultScope(ctx context.Context, id string) string {
 	scopes := []string{x.info.ID}
 	if up, err := x.ancestors(ctx); err == nil {
 		scopes = append(scopes, up...)
 	}
 	for _, scope := range scopes {
-		if _, err := x.engine.cfg.Store.Results().Get(ctx, scope, id); !errors.Is(err, toolresult.ErrNotFound) {
+		if ok, err := x.engine.cfg.Store.Results().Has(ctx, scope, id); ok || err != nil {
 			return scope
 		}
 	}

@@ -103,15 +103,18 @@ type Options struct {
 	// the parent gets a pointer it can read with fetch_tool_result.
 	SubtaskResultCap int
 	// SubtaskLimit is how many subtasks may run at once across the agent,
-	// counting every conversation, background subtasks and a lead's own
-	// children. Zero means 4; at most 8. A subtask over the limit does not
-	// start and the model is told why.
+	// counting every conversation and background subtasks. Leads (can_spawn
+	// variants) and other subtasks each get this many slots, so a lead never
+	// competes with its own children. Zero means 4; at most 8. A foreground
+	// subtask over the limit waits for a slot while its turn lasts; a
+	// background one is refused and the model is told why.
 	SubtaskLimit int
 	// TurnTokenBudget, when positive, caps the tokens one turn may spend,
 	// shared with every foreground subtask it starts at any depth, cached
-	// tokens included. The turn, or a child, that reaches it ends with a
-	// token limit. Background subtasks have only their variant's budget.
-	// Zero is no shared budget.
+	// tokens and (estimated) compaction summaries included. Reaching it stops
+	// running subtasks mid-step and the turn at its next step, with a token
+	// limit. Background subtasks have only their variant's budget; a resumed
+	// turn starts a fresh budget. Zero is no shared budget.
 	TurnTokenBudget int
 }
 

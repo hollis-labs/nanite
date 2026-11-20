@@ -69,12 +69,14 @@ type Config struct {
 	// SubtaskResultCap is the agent's subtask result cap in tokens. Zero uses
 	// subagent.DefaultResultCap; a variant's result_cap overrides it.
 	SubtaskResultCap int
-	// SubtaskLimit is how many subtasks run at once across the agent. Zero is
-	// subagent.DefaultLimit; it is clamped to subagent.MaxLimit.
+	// SubtaskLimit is how many leads, and separately how many other
+	// subtasks, run at once across the agent. Zero is subagent.DefaultLimit;
+	// it is clamped to subagent.MaxLimit.
 	SubtaskLimit int
 	// TurnTokenBudget, when positive, is a token ceiling on one root turn
 	// shared with every foreground subtask it starts, at any depth. Cached
-	// tokens count. A turn or child that reaches it ends with a token limit.
+	// tokens and estimated compaction summaries count. Reaching it stops
+	// running subtasks mid-step and the turn at its next step.
 	TurnTokenBudget int
 }
 
@@ -101,6 +103,9 @@ type Engine struct {
 	runtime      *events.Runtime
 	jobs         *background.Manager
 	children     subagent.Limit
+	// leads limits subtasks that may start their own (a can_spawn variant
+	// at depth 1), apart from children, so a council never starves itself.
+	leads subagent.Limit
 	notices      chan store.Notice
 	mcp          *mcpclient.Client
 	cache        *toolresult.Cache
@@ -143,7 +148,7 @@ func New(cfg Config) (*Engine, error) {
 		// preview would break its JSON.
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
 		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
-		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(cfg.SubtaskLimit),
+		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(cfg.SubtaskLimit), leads: subagent.NewLimit(cfg.SubtaskLimit),
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string)}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	// Expired tool results, cached for an hour or stored subtask results for

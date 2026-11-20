@@ -244,12 +244,51 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		// A ready call stays "cancelled" until it runs, and "panic" while it
 		// runs, so a call that never finishes is not recorded as a success.
 		traced[i].ErrorKind = trace.ErrorCancelled
-		// Read-only tools run side by side, and so does subtask: it is not
-		// read-only (its child may write), but each child runs in its own
-		// conversation, its approvals reach the owner one at a time, and the
-		// agent-wide subtask limit bounds how many run.
+		// Consecutive read-only calls run side by side, and so do subtask
+		// calls: subtask is not read-only (its child may write), but each
+		// child runs in its own conversation, its approvals reach the owner
+		// one at a time, and the agent-wide subtask limits bound how many run.
+		// Every other call runs alone, in model order (runSegments).
 		jobs[i] = tooluse.Job{Ready: true, Concurrent: t.ReadOnly || t.Name == subagent.ToolName}
 	}
+	runSegments(jobs, func(seg []tooluse.Job) { x.batch(ctx, seg, calls, args, results, traced) })
+	for i, job := range jobs {
+		if job.Ready {
+			continue
+		}
+		result := tools.Result{Text: results[i].Content, IsError: true}
+		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
+			return events.ToolCallFinished{EventMeta: meta, CallID: calls[i].ID, Result: result, IsError: true}
+		})
+	}
+	if err := x.message("tool", results); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+// runSegments runs ready jobs in model order: a run of consecutive concurrent
+// jobs runs side by side, and a serial job runs alone, in its place.
+func runSegments(jobs []tooluse.Job, run func([]tooluse.Job)) {
+	for start := 0; start < len(jobs); {
+		if !jobs[start].Ready {
+			start++
+			continue
+		}
+		end := start + 1
+		if jobs[start].Concurrent {
+			for end < len(jobs) && (!jobs[end].Ready || jobs[end].Concurrent) {
+				end++
+			}
+		}
+		seg := make([]tooluse.Job, len(jobs))
+		copy(seg[start:end], jobs[start:end])
+		run(seg)
+		start = end
+	}
+}
+
+func (x *execution) batch(ctx context.Context, jobs []tooluse.Job, calls []llmtypes.ToolUseBlock, args []json.RawMessage, results []llmtypes.ContentBlock, traced []trace.ToolCall) {
 	tooluse.Batch(ctx, jobs, x.definition.Runtime.ToolConcurrency, func(i int, _ bool) {
 		call := calls[i]
 		if ctx.Err() != nil {
@@ -294,19 +333,6 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		})
 		traced[i].ErrorKind = kind
 	}, func(i int) { results[i].Content, traced[i].ErrorKind = "cancelled", trace.ErrorCancelled }, nil)
-	for i, job := range jobs {
-		if job.Ready {
-			continue
-		}
-		result := tools.Result{Text: results[i].Content, IsError: true}
-		x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-			return events.ToolCallFinished{EventMeta: meta, CallID: calls[i].ID, Result: result, IsError: true}
-		})
-	}
-	if err := x.message("tool", results); err != nil {
-		return err
-	}
-	return ctx.Err()
 }
 
 // tracePermission maps a permission decision to the trace vocabulary.

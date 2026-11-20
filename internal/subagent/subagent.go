@@ -3,6 +3,7 @@
 package subagent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -212,8 +213,10 @@ const (
 	MaxLimit     = 8
 )
 
-// Limit bounds how many subtasks run at once across the whole agent: every
-// conversation, background subtasks and a lead's own children included.
+// Limit bounds how many subtasks of one kind run at once across the whole
+// agent: every conversation and background subtasks included. The engine
+// keeps two: one for leads (variants that may start subtasks) and one for
+// every other subtask, so a lead never holds a slot its own children need.
 type Limit chan struct{}
 
 // NewLimit returns a limit of n subtasks at once; n <= 0 is DefaultLimit and
@@ -228,14 +231,32 @@ func NewLimit(n int) Limit {
 	return make(Limit, n)
 }
 
-// Acquire takes a slot or refuses at once. It never waits: a lead holds its
-// own slot while it starts children, so waiting for a slot could deadlock a
-// council of leads.
-func (l Limit) Acquire() (func(), error) {
+// Acquire takes a slot, waiting for one while ctx lasts. Waiting cannot
+// deadlock: a subtask waiting for a slot of its kind holds none, and a lead
+// holds a lead slot only while its workers wait on the other limit.
+func (l Limit) Acquire(ctx context.Context) (func(), error) {
+	select {
+	case l <- struct{}{}:
+		return sync.OnceFunc(func() { <-l }), nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for one of the %d subtask slots: %w", cap(l), context.Cause(ctx))
+	}
+}
+
+// TryAcquire takes a slot or refuses at once, for a background subtask,
+// which must not hold up the turn that starts it.
+func (l Limit) TryAcquire() (func(), error) {
 	select {
 	case l <- struct{}{}:
 		return sync.OnceFunc(func() { <-l }), nil
 	default:
-		return nil, fmt.Errorf("%d subtasks are already running, the most this agent runs at once; this subtask did not start. Wait for one to finish, or start fewer at a time", cap(l))
+		return nil, fmt.Errorf("%s already running, the most this agent runs at once; this background subtask did not start. Wait for one to finish", subtaskCount(cap(l)))
 	}
+}
+
+func subtaskCount(n int) string {
+	if n == 1 {
+		return "1 subtask is"
+	}
+	return fmt.Sprintf("%d subtasks are", n)
 }

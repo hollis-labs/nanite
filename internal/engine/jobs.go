@@ -85,12 +85,31 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		message += "\n\n" + seed
 	}
 	if !request.Background && x.shared.spent() {
-		return tools.Result{}, fmt.Errorf("this turn has spent its shared token budget; the subtask did not start")
+		return tools.Result{}, errBudgetSpent
 	}
 	e := x.engine
-	release, err := e.children.Acquire()
+	// A lead (a can_spawn variant one level down) takes a lead slot, every
+	// other subtask a child slot, so a lead never holds a slot its own
+	// children wait for. A foreground subtask waits for a slot while its
+	// turn lasts; a background one must not hold up the turn, so it is
+	// refused at once.
+	limit := e.children
+	if x.depth == 0 && variant.CanSpawn {
+		limit = e.leads
+	}
+	var release func()
+	if request.Background {
+		release, err = limit.TryAcquire()
+	} else {
+		release, err = limit.Acquire(ctx)
+	}
 	if err != nil {
 		return tools.Result{}, err
+	}
+	if !request.Background && x.shared.spent() {
+		// The budget ran out while this subtask waited for a slot.
+		release()
+		return tools.Result{}, errBudgetSpent
 	}
 	now := time.Now().UTC()
 	// The goal is scrubbed before it is stored or reported anywhere.
@@ -167,8 +186,11 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	defer release()
 	defer e.closeSubtask(child.ID)
 	defer forget()
-	// A foreground child spends from the turn's shared budget.
-	runCtx, stopWall := wallContext(withBudget(ctx, x.shared), variant)
+	// A foreground child spends from the turn's shared budget, and is
+	// stopped mid-step when the budget runs out.
+	budgetCtx, endBudget := x.shared.guard(withBudget(ctx, x.shared))
+	defer endBudget()
+	runCtx, stopWall := wallContext(budgetCtx, variant)
 	defer stopWall()
 	run, err := start(runCtx)
 	if err != nil {
@@ -203,6 +225,9 @@ func wallContext(ctx context.Context, variant subagent.Variant) (context.Context
 // carries the wall-clock budget.
 func subtaskStatus(parent, run context.Context, result events.Result, err error) (subagent.Status, string) {
 	switch {
+	case err != nil && errors.Is(context.Cause(run), errTokenBudget):
+		// The turn's shared budget ran out while this child was running.
+		return subagent.StatusLimit, events.StopTokenBudget
 	case err != nil && parent.Err() == nil && errors.Is(run.Err(), context.DeadlineExceeded):
 		return subagent.StatusLimit, events.StopWallBudget
 	case err != nil && (errors.Is(err, context.Canceled) || parent.Err() != nil):

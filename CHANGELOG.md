@@ -4,22 +4,27 @@
 
 Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
-- Breaking, fan-out: several `subtask` calls in one assistant step now run
-  side by side (bounded by `runtime.tool_concurrency`), with results in call
-  order. `subtask` is concurrency-safe but not read-only, and like read-only
-  tools it now runs before the step's other calls instead of in model order.
-  The over-limit refusal text changed (it names the limit). No option to
-  restore one-at-a-time subtasks. New
-  `agent.Options.SubtaskLimit` (default 4, at most 8) bounds how many run at
-  once across the agent, leads' children included; one over the limit is
-  refused with a clear message, never queued. New
-  `agent.Options.TurnTokenBudget` is a token ceiling a root turn shares with
-  its foreground subtasks at any depth; reaching it ends the turn or child
-  with `limit` (`token_budget`). Background subtasks keep only their
-  variant's budget. Neither setting is in `host.yaml` yet (it needs an
-  `agentdir` key and a libs tag). A cost budget is not enforced: usage
-  carries no price yet.
-
+- Breaking, tool call order: a step's calls now run in model order, and
+  only consecutive calls that may run side by side (read-only tools and
+  `subtask`) run together, bounded by `runtime.tool_concurrency`. Before,
+  every read-only call ran ahead of the step's other calls whatever their
+  order. No option restores the old order.
+- Breaking, fan-out: several consecutive `subtask` calls in one step run side
+  by side, with results in call order. `subtask` is concurrency-safe but not
+  read-only.
+- Breaking, subtask limits: two agent-wide limits of `agent.Options.SubtaskLimit`
+  slots each (default 4, at most 8), one for leads (`can_spawn` variants)
+  and one for every other subtask, replace the single fixed limit of four.
+  A foreground subtask over its limit now waits for a slot while its turn
+  lasts instead of being refused; a background one is still refused at
+  once, and the refusal text names the limit.
+- New `agent.Options.TurnTokenBudget`: a token ceiling a root turn shares
+  with its foreground subtasks at any depth, compaction summaries included
+  (estimated). Reaching it stops every running subtask mid-step with
+  `limit` (`token_budget`) and the root at its next step; no foreground
+  subtask starts on a spent budget. Background subtasks keep only their
+  variant's budget; a resumed turn starts a fresh budget. A cost budget is
+  not enforced: usage carries no price yet.
 - New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
   context?, background?})`. `variant` is required; the model chooses and
   there is no default.

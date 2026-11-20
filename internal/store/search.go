@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -28,6 +30,24 @@ func (s *Store) SearchMessages(ctx context.Context, conversation, query string, 
 		return nil, err
 	}
 	return scanMessages(rows)
+}
+
+// MessageSeqs returns the numbers of a conversation's messages with the given
+// IDs, by ID; an unknown ID is left out.
+func (s *Store) MessageSeqs(ctx context.Context, conversation string, ids ...string) (map[string]int, error) {
+	out := make(map[string]int, len(ids))
+	for _, id := range ids {
+		var seq int
+		err := s.db.Reader().QueryRowContext(ctx, `SELECT seq FROM messages WHERE conversation_id=? AND id=?`, conversation, id).Scan(&seq)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[id] = seq
+	}
+	return out, nil
 }
 
 // MessagesBetween returns a conversation's messages with from <= seq <= to,

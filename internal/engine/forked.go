@@ -88,7 +88,11 @@ func (x *execution) forkedContext(ctx context.Context, spec subagent.ContextSpec
 	}
 	var parts []string
 	if len(messages) > 0 {
-		lines := renderMessages(messages, nil, seedBlockChars, scrub, history)
+		getTool := ""
+		if history {
+			getTool = "parent_history_get"
+		}
+		lines := renderMessages(messages, nil, seedBlockChars, scrub, getTool)
 		kept := len(lines)
 		total := 0
 		for kept > 0 && total+len(lines[kept-1]) <= budget {
@@ -262,14 +266,15 @@ func toolNames(call *store.Message, results store.Message) []string {
 // renderMessages writes each message as one numbered line, scrubbing every
 // block before shortening it to limit characters (tool inputs to a quarter of
 // that). before is the message just before the first, for naming its tool
-// results; history says whether the reader can fetch a shortened message.
-func renderMessages(messages []store.Message, before *store.Message, limit int, scrub func(string) string, history bool) []string {
+// results; getTool names the tool the reader can fetch a shortened message
+// with ("" when it has none).
+func renderMessages(messages []store.Message, before *store.Message, limit int, scrub func(string) string, getTool string) []string {
 	lines := make([]string, 0, len(messages))
 	previous := before
 	for _, m := range messages {
 		hint := ""
-		if history {
-			hint = fmt.Sprintf("parent_history_get from=%d to=%d has it all", m.Seq, m.Seq)
+		if getTool != "" {
+			hint = fmt.Sprintf("%s from=%d to=%d has it all", getTool, m.Seq, m.Seq)
 		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "[#%d %s]", m.Seq, m.Role)
@@ -479,7 +484,7 @@ func (x *execution) parentHistory() selftools.ParentHistory {
 			if len(messages) == 0 {
 				return "No parent messages in that range.", nil
 			}
-			return strings.Join(renderMessages(messages, before, parentHistoryBlockChars, scrub, false), "") + note, nil
+			return strings.Join(renderMessages(messages, before, parentHistoryBlockChars, scrub, ""), "") + note, nil
 		},
 	}
 }

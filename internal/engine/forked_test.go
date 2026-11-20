@@ -574,7 +574,7 @@ func TestToolBlocksRedactedBeforeCut(t *testing.T) {
 		{Seq: 2, Role: "tool", Blocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "a", Content: strings.Repeat("c", 1980) + " " + ghKey}}},
 	}
 	e, _, _ := setupEngine(t, fake.New(), "")
-	out := strings.Join(renderMessages(history, nil, seedBlockChars, e.scrub.Text, true), "")
+	out := strings.Join(renderMessages(history, nil, seedBlockChars, e.scrub.Text, "parent_history_get"), "")
 	for _, part := range []string{"ghp_0123", "sk-ant-api03"} {
 		if strings.Contains(out, part) {
 			t.Errorf("leaks %q:\n%s", part, out)

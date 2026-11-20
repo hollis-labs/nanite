@@ -770,7 +770,11 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		if through == "" {
 			return nil
 		}
-		summary := fmt.Sprintf("[Conversation summary — %d messages compacted]\n\n%s", count, x.engine.scrub.Text(summarizer.summary))
+		header := fmt.Sprintf("[Conversation summary — %d messages compacted]", count)
+		if x.offersHistory() {
+			header += "\n" + x.historyNote(ctx, x.messageIDs[:count])
+		}
+		summary := header + "\n\n" + x.engine.scrub.Text(summarizer.summary)
 		compacted := append([]llmtypes.ChatMessage{{Role: "user", Content: summary}}, summarizer.messages[count:]...)
 		remaining, err := json.Marshal(compacted)
 		if err != nil {

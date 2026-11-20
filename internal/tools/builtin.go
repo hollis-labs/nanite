@@ -23,6 +23,10 @@ const (
 	// BuiltinTools offers the agent's tool packages (tools/<name>/, as
 	// tool__<name> and tool__<name>__<tool>) and tool_validate.
 	BuiltinTools BuiltinGroup = "tools"
+	// BuiltinHistory offers history_search and history_get to root
+	// conversations: their own full transcript, including what compaction
+	// summarized.
+	BuiltinHistory BuiltinGroup = "history"
 )
 
 // ToolPackagePrefix starts the name of every tool a tool package offers.
@@ -36,13 +40,14 @@ var builtinGroups = map[string]BuiltinGroup{
 	"subtask": BuiltinSubtasks, "parent_history_search": BuiltinSubtasks, "parent_history_get": BuiltinSubtasks,
 	"skill_list": BuiltinSkills, "skill_get": BuiltinSkills,
 	"todo_list": BuiltinNotes, "todo_write": BuiltinNotes, "scratchpad_read": BuiltinNotes, "scratchpad_write": BuiltinNotes,
-	"ask_user":      BuiltinQuestions,
-	"tool_validate": BuiltinTools,
+	"ask_user":       BuiltinQuestions,
+	"tool_validate":  BuiltinTools,
+	"history_search": BuiltinHistory, "history_get": BuiltinHistory,
 }
 
 // AllBuiltins lists every built-in group.
 func AllBuiltins() []BuiltinGroup {
-	return []BuiltinGroup{BuiltinFilesRead, BuiltinFilesWrite, BuiltinShell, BuiltinBackground, BuiltinSubtasks, BuiltinSkills, BuiltinNotes, BuiltinQuestions, BuiltinTools}
+	return []BuiltinGroup{BuiltinFilesRead, BuiltinFilesWrite, BuiltinShell, BuiltinBackground, BuiltinSubtasks, BuiltinSkills, BuiltinNotes, BuiltinQuestions, BuiltinTools, BuiltinHistory}
 }
 
 // Builtins is the set of groups an agent is offered. A nil set offers all of

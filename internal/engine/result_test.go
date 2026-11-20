@@ -298,9 +298,98 @@ func TestBackgroundErrorOutputIsJustTheResult(t *testing.T) {
 	}
 	check := execution{engine: e, info: store.Conversation{ID: id}}
 	status, err := check.jobStatus(t.Context(), child.ID)
-	var wrapped struct{ Output string }
-	if err != nil || !status.IsError || json.Unmarshal([]byte(status.Text), &wrapped) != nil || !json.Valid([]byte(wrapped.Output)) {
+	var wrapped struct {
+		Output string
+		Result parentView
+	}
+	if err != nil || !status.IsError || json.Unmarshal([]byte(status.Text), &wrapped) != nil || wrapped.Output != "" || wrapped.Result.Status != "error" {
 		t.Fatalf("background_status %+v, %v", status, err)
+	}
+}
+
+func TestBackgroundStatusEmbedsTheResultAsJSON(t *testing.T) {
+	// About 18KB of short strings: mostly quotes, which an escaped string
+	// would nearly double past the tool result budget.
+	var many []any
+	for range 4500 {
+		many = append(many, "a")
+	}
+	p := &routedProvider{root: fake.New(subtaskCall("worker", "quotes", true), fake.Text("parent finished")),
+		children: map[string]*fake.Provider{"quotes": fake.New(returnCall("ok", many))}}
+	e, db, id := setupEngine(t, p, "")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-e.Notices():
+	case <-time.After(4 * time.Second):
+		t.Fatal("no notice")
+	}
+	child := childOf(t, db, id)
+	check := execution{engine: e, info: store.Conversation{ID: id}}
+	status, err := check.jobStatus(t.Context(), child.ID)
+	var wrapped struct{ Result parentView }
+	if err != nil || status.IsError || len(status.Text) > toolResultBudget || json.Unmarshal([]byte(status.Text), &wrapped) != nil {
+		t.Fatalf("background_status of %d bytes, error %v: %.120q", len(status.Text), err, status.Text)
+	}
+	var got []string
+	if wrapped.Result.Status != "ok" || wrapped.Result.ResultRef != "" || json.Unmarshal(wrapped.Result.Result, &got) != nil || len(got) != 4500 {
+		t.Fatalf("result %+v", wrapped.Result.Status)
+	}
+}
+
+func TestVariantCapAboveTheLimitIsClamped(t *testing.T) {
+	big := strings.Repeat("y", 30<<10)
+	view, _, _, db, id, _ := runSubtask(t, subtaskCall("huge", "dig", false), "dig", fake.New(returnCall("ok", big)), func(e *Engine) {
+		writeVariant(t, e.cfg.Dir, "huge", "---\nresult_cap: 100000\n---\nReturn everything.\n")
+	})
+	raw := lastResultText(t, db, id)
+	if !json.Valid([]byte(raw)) || len(raw) > subtaskEnvelopeLimit || view.ResultRef == "" || string(view.Result) != "null" {
+		t.Fatalf("clamped envelope %d bytes: %+v", len(raw), view.Status)
+	}
+}
+
+func TestOversizedReturnSpecIsRefusedBeforeAnyChild(t *testing.T) {
+	t.Setenv("NANITE_AUTO_REPAIR", "false")
+	spec := map[string]any{"type": "object", "description": strings.Repeat("d", 17<<10)}
+	e, db, id := setupEngine(t, fake.New(subtaskCallSpec("worker", "big spec", spec), fake.Text("parent done")), "")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	results := toolResults(t, db, id)
+	if len(results) != 1 || !results[0].IsError || !strings.Contains(results[0].Content, "limit") {
+		t.Fatalf("results %+v", results)
+	}
+	if conversations, err := db.Conversations(t.Context()); err != nil || len(conversations) != 1 {
+		t.Fatalf("a child was started: %d, %v", len(conversations), err)
+	}
+}
+
+func TestManySmallArtifactsAreCapped(t *testing.T) {
+	// Small enough to fit inline: only the artifact count cap stores them.
+	ret := returnCall("ok", "done")
+	var artifacts []any
+	for i := range 70 {
+		artifacts = append(artifacts, "f"+strings.Repeat("0", 3)+string(rune('a'+i%26)))
+	}
+	ret.Events[0].ToolUse.Input["artifacts"] = artifacts
+	view, _, e, _, id, _ := runSubtask(t, subtaskCall("worker", "many", false), "many", fake.New(ret), nil)
+	if len(view.Artifacts) != maxArtifacts || view.ResultRef == "" || view.Artifacts[maxArtifacts-1] != view.ResultRef {
+		t.Fatalf("%d artifacts shown, ref %q", len(view.Artifacts), view.ResultRef)
+	}
+	text, failed := e.cache.HandleFetch(t.Context(), id, map[string]any{"id": strings.TrimPrefix(view.ResultRef, "tool_result://"), "json_pointer": "/artifacts"}, 0)
+	var stored []string
+	_, body, _ := strings.Cut(text, "\n\n")
+	if failed || json.Unmarshal([]byte(strings.TrimSpace(body)), &stored) != nil || len(stored) != 70 {
+		t.Fatalf("stored artifacts %d from %.160q (failed %v)", len(stored), text, failed)
 	}
 }
 

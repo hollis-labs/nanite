@@ -155,15 +155,17 @@ engine. A child is also always offered `fetch_tool_result` and
 `search_tool_result`, so it can read the pointers its own tools and
 subtasks hand back.
 
-`return_spec` is prose (a JSON string) or a JSON Schema object of at most
-16KB. A malformed schema is refused before any child starts, and so is one
-whose references could recurse without end: a `$ref` must point inside the
-schema (`#` or `#/...`), `$dynamicRef` and `$recursiveRef` are refused, and
-following `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else` and
-`dependentSchemas` must never lead back to the same schema without moving
-into a property or item. (The same check guards every schema Nanite
-validates, including `ask_user` and tool input schemas; the 16KB cap applies
-to schemas the model writes.) With a schema, `result` is
+`return_spec` is prose (a JSON string) or a JSON Schema object. A schema the
+model writes (a `return_spec`, or an `ask_user` question's schema) is held to
+a strict subset, because jsonschema-go can recurse without end on a schema
+that refers back to itself, and that overflows the stack: at most 16KB; no
+`$id`, `$anchor`, `$dynamicAnchor`, `$dynamicRef` or `$recursiveRef`; a
+`$ref` only of the form `#/$defs/<name>` or `#/definitions/<name>`, naming
+a definition that exists; and following `$ref`, `allOf`, `anyOf`, `oneOf`,
+`not`, `if`/`then`/`else`, `dependentSchemas` or `dependencies` must never
+lead back to the same definition without moving into a property or item.
+Anything else is refused before a child starts. Tool input schemas from the
+host and MCP servers are not held to this. With a schema, `result` is
 validated: a result that fails gets one repair (the child sees the
 validation error and calls `return_result` again), and a second failure is
 accepted as `partial` with the reason `return_spec: <error>`.
@@ -196,7 +198,7 @@ under the parent conversation for 30 days: `result` is then `null`,
 `result_ref` is a `tool_result://` pointer the parent reads with
 `fetch_tool_result` (it is also the last artifact), `result_bytes` gives the
 stored size, `result_expires_at` when it goes, and `preview` the start of the
-result.
+result. Expired results are deleted when the agent opens.
 
 ### Forked context
 
@@ -295,8 +297,9 @@ Only a root chat starts background subtasks, and only when it is also offered
 schema. A background subtask runs until it finishes or is cancelled with
 `background_cancel`. Its completion notice and `background_status` report the
 subtask status (`ok`, `partial`, `limit`, `error` or `cancelled`), and the
-notice carries its token usage. Its job output, which `background_status`
-returns, is the same capped result the parent of a foreground subtask gets. If the parent conversation has a turn running
+notice carries its token usage. Its job output is the same capped result
+the parent of a foreground subtask gets; `background_status` embeds it as
+JSON under `result`. If the parent conversation has a turn running
 when the subtask finishes, that turn also gets a `Usage` event with `Subtask`
 set and `Background` true. Background usage is never part of a turn's
 totals: summing a turn's `Usage` events without `Background` gives the turn's

@@ -311,14 +311,23 @@ func (x *execution) cancelJob(ctx context.Context, id string) (string, error) {
 
 func jobJSON(job store.Job, output string) (string, error) {
 	if job.Kind == subtaskJobKind {
-		// A subtask job speaks the subtask vocabulary.
-		raw, err := json.Marshal(struct {
-			ID     string `json:"id"`
-			Kind   string `json:"kind"`
-			Status string `json:"status"`
-			Reason string `json:"reason,omitempty"`
-			Output string `json:"output,omitempty"`
-		}{job.ID, "subtask", subagent.StatusOf(job.Status, job.Reason), job.Reason, output})
+		// A subtask job speaks the subtask vocabulary. Its output is the
+		// result JSON, held under the tool result budget; embedding it as JSON
+		// rather than an escaped string keeps it there.
+		view := struct {
+			ID     string          `json:"id"`
+			Kind   string          `json:"kind"`
+			Status string          `json:"status"`
+			Reason string          `json:"reason,omitempty"`
+			Result json.RawMessage `json:"result,omitempty"`
+			Output string          `json:"output,omitempty"`
+		}{ID: job.ID, Kind: "subtask", Status: subagent.StatusOf(job.Status, job.Reason), Reason: job.Reason}
+		if trimmed := strings.TrimSpace(output); json.Valid([]byte(trimmed)) {
+			view.Result = json.RawMessage(trimmed)
+		} else {
+			view.Output = output
+		}
+		raw, err := json.Marshal(view)
 		return string(raw), err
 	}
 	raw, err := json.Marshal(struct {

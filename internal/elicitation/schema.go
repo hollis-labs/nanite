@@ -11,13 +11,7 @@ import (
 )
 
 // Resolve compiles a local-only JSON schema.
-//
-// A schema whose references would make validation recurse without end is
-// refused (checkRefs): jsonschema-go would overflow the stack on it.
 func Resolve(raw json.RawMessage) (*jsonschema.Resolved, error) {
-	if err := checkRefs(raw); err != nil {
-		return nil, err
-	}
 	var schema jsonschema.Schema
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		return nil, err

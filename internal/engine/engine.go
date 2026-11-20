@@ -123,6 +123,13 @@ func New(cfg Config) (*Engine, error) {
 		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
+	// Expired tool results, cached for an hour or stored subtask results for
+	// 30 days, share one table; clear them once when the agent opens.
+	if removed, err := e.cache.Purge(context.Background()); err != nil {
+		cfg.Logger.Warn("purge expired tool results failed", "error", scrub.Text(err.Error()))
+	} else if removed > 0 {
+		cfg.Logger.Debug("purged expired tool results", "count", removed)
+	}
 	return e, nil
 }
 

@@ -22,11 +22,14 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   `result_expires_at`. `return_result` must be the only call in its step,
   and is now a reserved tool name. A child is always offered
   `fetch_tool_result` and `search_tool_result`.
-- Schemas are refused when their references could recurse without end
-  (`$ref` cycles that never move into a value, `$dynamicRef`,
-  `$recursiveRef`, references outside the schema), which jsonschema-go would
-  otherwise overflow the stack on. This covers `return_spec`, `ask_user` and
-  tool input schemas. Schemas the model writes are capped at 16KB.
+- Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
+  subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
+  `$ref` only to `#/$defs/<name>` or `#/definitions/<name>`, and no
+  reference cycle that never moves into a value, which jsonschema-go would
+  otherwise overflow the stack on. Tool input schemas are unchanged.
+- `background_status` for a subtask embeds its result as JSON under
+  `result`. Expired cached and stored tool results are purged when the
+  agent opens.
 - Variants: built-in `code`, `research`, `worker` and `planner` (read-only,
   and denying `mcp__*` tools, since MCP `readOnlyHint` is not trusted),
   plus authored `variants/<name>.md` in the agent directory, re-read every

@@ -89,10 +89,11 @@ type Options struct {
 	// (ref pnc_...)"); the record with the redacted value and stack is
 	// logged to Logger and handed to this reporter. Nil logs only.
 	PanicReporter PanicReporter
-	// SubtaskResultCap is the size cap, in tokens, on the result a subtask
-	// hands back. Zero means about 6,000. A variant's result_cap overrides
-	// it. A larger result is cached and the parent gets a pointer it can
-	// read with fetch_tool_result.
+	// SubtaskResultCap is the size cap, in tokens, on the whole result a
+	// subtask hands back. Zero means about 6,000. A variant's result_cap
+	// overrides it, and either is clamped to what one tool result shows in
+	// full (about 5,900 tokens). A larger result is stored for 30 days and
+	// the parent gets a pointer it can read with fetch_tool_result.
 	SubtaskResultCap int
 }
 

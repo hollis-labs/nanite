@@ -171,7 +171,7 @@ func compactionExecution(t *testing.T, p *recordingSummaries, cfg func(*Config),
 	return x, r
 }
 
-func drain(r *Run) []events.Event {
+func drainRun(r *Run) []events.Event {
 	close(r.events)
 	var out []events.Event
 	for ev := range r.events {
@@ -191,7 +191,7 @@ func TestCompactionKeepsWholeTurnsWithThePrompt(t *testing.T) {
 	if err := x.compact(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
-	drain(r)
+	drainRun(r)
 	if len(p.prompts) != 1 || p.prompts[0] != "Summarize for the test." {
 		t.Fatalf("summary prompts: %q", p.prompts)
 	}
@@ -212,7 +212,7 @@ func TestCompactionDefaultPrompt(t *testing.T) {
 	if err := x.compact(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
-	drain(r)
+	drainRun(r)
 	if len(p.prompts) != 1 || p.prompts[0] != DefaultCompactionPrompt {
 		t.Fatalf("summary prompts: %q", p.prompts)
 	}
@@ -233,7 +233,7 @@ func TestContextSlotDoesNotStandInForASummary(t *testing.T) {
 	}
 	var started, done *events.Compacted
 	var failed error
-	for _, ev := range drain(r) {
+	for _, ev := range drainRun(r) {
 		switch e := ev.(type) {
 		case events.Compacted:
 			done = &e
@@ -273,7 +273,7 @@ func TestKeepCutSummarizesWhereThePipelineWouldNot(t *testing.T) {
 	if err := x.compact(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
-	drain(r)
+	drainRun(r)
 	if len(p.inputs) != 1 || !strings.Contains(p.inputs[0][0].Content, "first answer") || len(x.messages) != 3 || x.messageIDs[1] != ids[2] {
 		t.Fatalf("summaries=%d kept=%d", len(p.inputs), len(x.messages))
 	}
@@ -311,7 +311,7 @@ func TestLongTurnCompactsInsideItself(t *testing.T) {
 			t.Fatalf("force=%v: %v", force, err)
 		}
 		var failed error
-		for _, ev := range drain(r) {
+		for _, ev := range drainRun(r) {
 			if e, ok := ev.(events.CompactionFailed); ok {
 				failed = e.Err
 			}
@@ -343,7 +343,7 @@ func TestKeepOverTheWindowIsClamped(t *testing.T) {
 	if err := x.compact(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	drain(r)
+	drainRun(r)
 	if len(p.inputs) != 1 || len(x.messages) >= len(msgs) {
 		t.Fatalf("summaries=%d kept=%d", len(p.inputs), len(x.messages))
 	}
@@ -366,7 +366,7 @@ func TestDedupeLeavesTheLiveHistory(t *testing.T) {
 	if err := x.compact(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
-	drain(r)
+	drainRun(r)
 	for i, m := range msgs {
 		if len(m.ContentBlocks) > 0 && m.ContentBlocks[0].Content != before[i] {
 			t.Fatalf("message %d changed: %q", i, m.ContentBlocks[0].Content)
@@ -394,7 +394,7 @@ func TestTwoCompactionsInARowWithKeep(t *testing.T) {
 		t.Fatal(err)
 	}
 	var done int
-	for _, ev := range drain(r) {
+	for _, ev := range drainRun(r) {
 		if _, ok := ev.(events.Compacted); ok {
 			done++
 		}
@@ -414,7 +414,7 @@ func TestKeepRespectsTheConversationSlot(t *testing.T) {
 	x, r := compactionExecution(t, p, func(c *Config) { c.CompactKeepTokens = 100 }, msgs, ids, "")
 	x.assembled.Window.Slot(ctxpkg.SlotConversation).Compactable = false
 	_ = x.compact(t.Context(), true)
-	drain(r)
+	drainRun(r)
 	if len(p.inputs) != 0 {
 		t.Fatalf("summaries=%d", len(p.inputs))
 	}

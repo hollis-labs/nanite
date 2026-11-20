@@ -365,16 +365,15 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		if block, ok := e.turnContext(assembled); ok {
 			message.Blocks = append([]llmtypes.ContentBlock{block}, message.Blocks...)
 		}
-		// In-turn slots now travel in the messages; drop them from the
-		// window's accounting so compaction does not count them twice.
-		for _, name := range slots.Names() {
-			if e.placement(name) == slots.InTurn {
-				if s := assembled.Window.Slot(string(name)); s != nil {
-					assembled.Window.SetContent(string(name), "")
-				}
-			}
-		}
 		err = x.append(message)
+	}
+	// In-turn slots travel in the messages (this turn's or an earlier one);
+	// drop them from the window's accounting so compaction does not count
+	// them twice. This holds for a resumed turn too.
+	for _, name := range slots.Names() {
+		if e.placement(name) == slots.InTurn && assembled.Window.Slot(string(name)) != nil {
+			assembled.Window.SetContent(string(name), "")
+		}
 	}
 	if err == nil {
 		e.mu.Lock()
@@ -717,6 +716,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		return err
 	}
 	recorded = true
+	x.engine.forgetTurnContext(x.info.ID)
 	x.messages = compacted
 	x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
 	after = shrunk

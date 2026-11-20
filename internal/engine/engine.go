@@ -574,3 +574,19 @@ func (e *Engine) turnContext(assembled slots.Assembled) (llmtypes.ContentBlock, 
 	}
 	return llmtypes.ContentBlock{Type: "text", Name: TurnContextBlock, Text: e.scrub.Text(strings.TrimSuffix(b.String(), "\n"))}, true
 }
+
+// forgetTurnContext marks the conversation's in-turn slots as changed, so
+// the next turn sends them again. It is called after a compaction replaced
+// older messages with a summary: an unchanged in-turn slot lived in one of
+// those messages and would otherwise be gone until it changed.
+func (e *Engine) forgetTurnContext(conversation string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	hashes := maps.Clone(e.previous[conversation])
+	for name := range hashes {
+		if e.placement(slots.Name(name)) == slots.InTurn {
+			delete(hashes, name)
+		}
+	}
+	e.previous[conversation] = hashes
+}

@@ -2,11 +2,13 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/provider/failure"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/slots"
 )
@@ -122,5 +124,39 @@ func TestStoredContextIsNotRepeated(t *testing.T) {
 	}
 	if !strings.Contains(contextOf(p.requests[0]), "STORED-ONE") || contextOf(p.requests[1]) != "" || !strings.Contains(contextOf(p.requests[2]), "STORED-TWO") {
 		t.Fatalf("turn contexts: %q / %q / %q", contextOf(p.requests[0]), contextOf(p.requests[1]), contextOf(p.requests[2]))
+	}
+}
+
+func TestStoredContextReturnsAfterCompaction(t *testing.T) {
+	// Turn one answers normally; turn two overflows, compacts, and answers.
+	overflow := fake.Response{Err: &failure.Error{Class: failure.Overflow, Cause: errors.New("typed overflow")}}
+	p := &watchedProvider{Provider: fake.New(fake.Text("one"), overflow, fake.Text("after compaction"), fake.Text("third"))}
+	e, db, id := setupEngine(t, p, "")
+	seedLongHistory(t, db, id)
+	if err := e.cfg.Slots.Put(slots.UserContext, slots.Entry{Owner: "host", Key: "desk", Content: "STORED-DESK"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"first", "second", "third"} {
+		run, err := e.Send(t.Context(), id, Input{Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newest := func(r llmtypes.ChatRequest) llmtypes.ChatMessage { return r.Messages[len(r.Messages)-1] }
+	carries := func(m llmtypes.ChatMessage) bool {
+		return len(m.ContentBlocks) > 0 && m.ContentBlocks[0].Name == TurnContextBlock && strings.Contains(m.ContentBlocks[0].Text, "STORED-DESK")
+	}
+	last := p.requests[len(p.requests)-1]
+	if p.summaries == 0 {
+		t.Fatal("no compaction happened")
+	}
+	if !carries(newest(last)) {
+		t.Fatalf("after compaction the stored context was not sent again: %+v", newest(last).ContentBlocks)
+	}
+	if carries(newest(p.requests[1])) {
+		t.Fatal("unchanged context was repeated before any compaction")
 	}
 }

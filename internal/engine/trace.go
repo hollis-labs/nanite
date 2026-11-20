@@ -19,7 +19,7 @@ import (
 )
 
 // newTraceRecord starts a turn's trace record with what is known up front.
-func newTraceRecord(at time.Time, run string, info store.Conversation, resumed bool) trace.Turn {
+func newTraceRecord(at time.Time, run string, info store.Conversation, resumed bool, link *subtaskLink) trace.Turn {
 	source := trace.SourceUser
 	switch {
 	case resumed:
@@ -27,9 +27,13 @@ func newTraceRecord(at time.Time, run string, info store.Conversation, resumed b
 	case info.ParentID != "":
 		source = trace.SourceSubagent
 	}
-	return trace.Turn{Version: trace.Version, At: at, ConversationID: info.ID, RunID: run, TurnID: run,
+	rec := trace.Turn{Version: trace.Version, At: at, ConversationID: info.ID, RunID: run, TurnID: run,
 		ParentConversationID: info.ParentID, Role: info.Role, Source: source,
-		Slots: []trace.Slot{}, Trimmed: []string{}, ToolsOffered: []string{}, ToolCalls: []trace.ToolCall{}, Compactions: []trace.Compaction{}}
+		Slots: []trace.Slot{}, Trimmed: []string{}, ToolsOffered: []string{}, ToolCalls: []trace.ToolCall{}, Subtasks: []trace.Subtask{}, Compactions: []trace.Compaction{}}
+	if link != nil && info.ParentID != "" {
+		rec.ParentTurnID, rec.ParentCallID, rec.Depth = link.ParentTurnID, link.ParentCallID, link.Depth
+	}
+	return rec
 }
 
 // traceSlots lists the shipped slots in request order, and the entries the
@@ -63,6 +67,12 @@ func (e *Engine) writeTrace(ctx context.Context, rec trace.Turn, x *execution, r
 		slices.Sort(rec.ToolsOffered)
 		rec.ToolCalls = append(rec.ToolCalls, x.toolCalls...)
 		rec.Compactions = append(rec.Compactions, x.passes...)
+		rec.Subtasks = append(rec.Subtasks, x.traceSubtasks()...)
+		// The record's usage is the turn's own requests; its subtasks carry
+		// theirs, so the tree's total is this plus their sum.
+		x.usageMu.Lock()
+		result.Usage = x.ownUsage
+		x.usageMu.Unlock()
 	}
 	// A malformed call (a provider sent no ID or name) is kept, not allowed
 	// to invalidate the whole record.

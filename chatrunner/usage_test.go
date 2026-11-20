@@ -1,6 +1,7 @@
 package chatrunner
 
 import (
+	"encoding/json"
 	"testing"
 
 	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
@@ -41,5 +42,45 @@ func TestUsageDeltasSumToFinal(t *testing.T) {
 	}
 	if !background {
 		t.Fatal("background usage was not forwarded as activity")
+	}
+}
+
+// A running subtask's progress is a nanite.subagent activity with state
+// progress; it never becomes text the model or the transcript sees. Start,
+// progress and done all carry the parent and depth, so a depth-2 subtask can
+// be placed under its lead; a background subtask is marked as one.
+func TestSubtaskActivityCarriesParentAndDepth(t *testing.T) {
+	x := &run{asked: map[string]bool{}}
+	value := func(ev agent.Event) map[string]any {
+		t.Helper()
+		out := x.translate(ev)
+		if len(out) != 1 || out[0].Verb != chatstream.VerbActivity || out[0].Kind != ActivitySubagent {
+			t.Fatalf("%T mapped to %+v", ev, out)
+		}
+		var v map[string]any
+		if err := json.Unmarshal(out[0].Value, &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	start := value(agent.SubagentStarted{ID: "w", ParentID: "lead", Depth: 2, Variant: "worker"})
+	if start["state"] != "start" || start["parent_id"] != "lead" || start["depth"] != float64(2) || start["background"] != nil {
+		t.Fatalf("start %v", start)
+	}
+	progress := value(agent.SubtaskProgress{ID: "w", ParentID: "lead", Depth: 2, Variant: "worker", Step: 2, Tool: "web_fetch", StatusLine: "step 2: calling web_fetch"})
+	if progress["state"] != "progress" || progress["parent_id"] != "lead" || progress["depth"] != float64(2) || progress["step"] != float64(2) ||
+		progress["tool"] != "web_fetch" || progress["status_line"] != "step 2: calling web_fetch" || progress["status"] != nil {
+		t.Fatalf("progress %v", progress)
+	}
+	done := value(agent.SubagentFinished{ID: "w", ParentID: "lead", Depth: 2, Variant: "worker", Status: "ok"})
+	if done["state"] != "done" || done["parent_id"] != "lead" || done["depth"] != float64(2) || done["status"] != "ok" {
+		t.Fatalf("done %v", done)
+	}
+	bg := value(agent.SubtaskProgress{ID: "b", ParentID: "root", Depth: 1, Variant: "worker", Step: 3, StatusLine: "done (ok)", Background: true, Status: "ok"})
+	if bg["background"] != true || bg["status"] != "ok" {
+		t.Fatalf("background progress %v", bg)
+	}
+	if started := value(agent.SubagentStarted{ID: "b", ParentID: "root", Depth: 1, Variant: "worker", Background: true}); started["background"] != true {
+		t.Fatalf("background start %v", started)
 	}
 }

@@ -259,7 +259,9 @@ type SlotsAssembled = github.com/hollis-labs/nanite/internal/events.SlotsAssembl
 type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFinished struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
+  field ParentID string
   field Variant string
+  field Depth int
   field Status string
   field Result github.com/hollis-labs/nanite/internal/events.Result
   field Err error
@@ -267,8 +269,10 @@ type SubagentFinished = github.com/hollis-labs/nanite/internal/events.SubagentFi
 type SubagentStarted = github.com/hollis-labs/nanite/internal/events.SubagentStarted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
+  field ParentID string
   field Variant string
   field Goal string
+  field Depth int
   field Background bool
 type SubtaskOrigin = github.com/hollis-labs/nanite/internal/permission.SubtaskOrigin struct
   field ChildID string
@@ -276,6 +280,17 @@ type SubtaskOrigin = github.com/hollis-labs/nanite/internal/permission.SubtaskOr
   field Goal string
   field Depth int
   field CallID string
+type SubtaskProgress = github.com/hollis-labs/nanite/internal/events.SubtaskProgress struct
+  field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field ID string
+  field ParentID string
+  field Variant string
+  field Depth int
+  field Step int
+  field Tool string
+  field StatusLine string
+  field Background bool
+  field Status string
 type TextDelta = github.com/hollis-labs/nanite/internal/events.TextDelta struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Text string

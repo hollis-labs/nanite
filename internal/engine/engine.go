@@ -98,11 +98,19 @@ type Engine struct {
 	// subtaskCalls maps a child conversation to the root's tool call that
 	// started its subtask chain, so a relayed ask can name it.
 	subtaskCalls map[string]string
-	closed       bool
-	scrub        *redact.Redactor
-	runtime      *events.Runtime
-	jobs         *background.Manager
-	children     subagent.Limit
+	// subtaskLinks maps a running child conversation to the turn that
+	// started it, for the child's trace record.
+	subtaskLinks map[string]subtaskLink
+	// progressEvery is the least time between two progress events for
+	// one subtask.
+	progressEvery time.Duration
+	// backgroundProgressEvery is the same for a background subtask.
+	backgroundProgressEvery time.Duration
+	closed                  bool
+	scrub                   *redact.Redactor
+	runtime                 *events.Runtime
+	jobs                    *background.Manager
+	children                subagent.Limit
 	// leads limits subtasks that may start their own (a can_spawn variant
 	// at depth 1), apart from children, so a council never starves itself.
 	leads   subagent.Limit
@@ -149,7 +157,8 @@ func New(cfg Config) (*Engine, error) {
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
 		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(cfg.SubtaskLimit), leads: subagent.NewLimit(cfg.SubtaskLimit),
-		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string)}
+		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
+		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	// Expired tool results, cached for an hour or stored subtask results for
 	// 30 days, share one table; clear them once when the agent opens.

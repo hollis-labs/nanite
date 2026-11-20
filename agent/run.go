@@ -64,6 +64,10 @@ type SubagentStarted = events.SubagentStarted
 // SubagentFinished reports the result or error of a foreground child.
 type SubagentFinished = events.SubagentFinished
 
+// SubtaskProgress reports a running subtask's step, tool and status line,
+// rate-limited per subtask. It is for the host; the model never sees it.
+type SubtaskProgress = events.SubtaskProgress
+
 // CompactionStarted reports that history compaction is beginning. Exactly one
 // Compacted or CompactionFailed follows it.
 type CompactionStarted = events.CompactionStarted

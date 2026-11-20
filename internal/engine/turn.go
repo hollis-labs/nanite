@@ -60,6 +60,12 @@ type execution struct {
 	// passes for its trace record.
 	toolCalls []trace.ToolCall
 	passes    []trace.Compaction
+	// subtasks lists the subtasks this turn started, for its trace record;
+	// usageMu guards it, since subtasks may run in parallel.
+	subtasks []trace.Subtask
+	// ownUsage is the turn's own model requests, without what subtasks
+	// rolled into result.Usage; it is the trace record's usage.
+	ownUsage events.Usage
 	// compactions counts compaction passes in this turn; stalled is set once
 	// a pass frees too little, so later steps stop retrying it.
 	compactions int
@@ -117,7 +123,7 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	// Every turn writes one trace record, however it ends: it is written here,
 	// after the guard, so a panic anywhere in the turn is recorded as failed
 	// with its ref.
-	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil)}
+	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil, e.subtaskLinkOf(info.ID))}
 	// A panic while preparing the turn fails it with a ref; the host and the
 	// conversation stay usable.
 	err := e.panics.Call("turn", func() (err error) {
@@ -325,6 +331,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if interrupted != nil {
 		record.UserMessageID = interrupted.UserMessageID
 		x.result.Steps = resume.Steps
+		x.run.steps.Store(int64(resume.Steps))
 		if err := journal.ResumeTurn(record, now); err != nil {
 			return events.Result{}, err
 		}
@@ -477,6 +484,7 @@ func (x *execution) generate(ctx context.Context) error {
 	settle := func(ctx context.Context, got step) runloop.Directive {
 		appendStepText(&allText, got.text)
 		x.result.Steps++
+		x.run.steps.Store(int64(x.result.Steps))
 		x.repairArgs(ctx, &got)
 		if len(got.blocks) > 0 {
 			if runErr = x.message("assistant", got.blocks); runErr != nil {
@@ -793,6 +801,10 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			x.result.Usage.OutputTokens += u.OutputTokens
 			x.result.Usage.CacheReadTokens += u.CacheReadTokens
 			x.result.Usage.CacheWriteTokens += u.CacheCreationTokens
+			x.ownUsage.InputTokens += u.InputTokens
+			x.ownUsage.OutputTokens += u.OutputTokens
+			x.ownUsage.CacheReadTokens += u.CacheReadTokens
+			x.ownUsage.CacheWriteTokens += u.CacheCreationTokens
 			x.usageMu.Unlock()
 			x.shared.add(u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens)
 			if u.StopReason != "" {

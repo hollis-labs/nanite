@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hollis-labs/libs/agent/trace"
 	"io"
 	"os"
 	"strings"
@@ -126,15 +127,18 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	}
 	e.mu.Lock()
 	e.subtaskCalls[child.ID] = rootCall
+	e.subtaskLinks[child.ID] = subtaskLink{ParentTurnID: x.run.id, ParentCallID: callIDFrom(ctx), Depth: x.depth + 1}
 	e.mu.Unlock()
-	// Once the child ends, its call mapping and its own grants go too.
+	// Once the child ends, its call mapping, trace link and own grants go too.
 	forget := func() {
 		e.mu.Lock()
 		delete(e.subtaskCalls, child.ID)
+		delete(e.subtaskLinks, child.ID)
 		delete(e.grants, child.ID)
 		e.mu.Unlock()
 	}
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: message}) }
+	sub := followed{ID: child.ID, ParentID: x.info.ID, Variant: variant.Name, Depth: x.depth + 1, Background: request.Background}
 	if request.Background {
 		spec, _ := json.Marshal(struct {
 			ChildID, Variant, Goal string
@@ -154,7 +158,8 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 					defer release()
 					defer forget()
 					defer stopWall()
-					result, err := run.Wait()
+					report := e.activeEmitter(x.info.ID)
+					result, err := follow(jobCtx, run, sub, e.backgroundProgressEvery, report, report)
 					status, reason := subtaskStatus(jobCtx, runCtx, result, err)
 					returned := e.closeSubtask(child.ID)
 					bg := context.WithoutCancel(jobCtx)
@@ -163,6 +168,11 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 					// A person's refusal overrides an ok or partial ending,
 					// whatever the child returned.
 					out.Status, out.Reason = withDenials(out.Status, out.Reason, e.takeDenials(child.ID))
+					// The last progress event says how it ended.
+					report(bg, func(meta events.EventMeta) events.Event {
+						return events.SubtaskProgress{EventMeta: meta, ID: sub.ID, ParentID: sub.ParentID, Variant: sub.Variant, Depth: sub.Depth,
+							Step: result.Steps, StatusLine: "done (" + string(out.Status) + ")", Background: true, Status: string(out.Status)}
+					})
 					outcome, marshalErr := outcomeFor(out, err)
 					if marshalErr != nil {
 						outcome = background.Outcome{Err: marshalErr}
@@ -180,6 +190,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 			return tools.Result{}, err
 		}
 		x.emitSubtaskStarted(ctx, child, request)
+		x.noteSubtask(trace.Subtask{ConversationID: child.ID, ToolCallID: callIDFrom(ctx), Variant: variant.Name, Status: trace.SubtaskRunning, Background: true})
 		text, err := jobJSON(job, "")
 		return tools.Result{Text: text}, err
 	}
@@ -192,12 +203,13 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	defer endBudget()
 	runCtx, stopWall := wallContext(budgetCtx, variant)
 	defer stopWall()
+	started := time.Now()
 	run, err := start(runCtx)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	x.emitSubtaskStarted(ctx, child, request)
-	result, err := run.Wait()
+	result, err := follow(ctx, run, sub, e.progressEvery, x.run.emit, x.run.forward)
 	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)
 	returned := e.closeSubtask(child.ID)
@@ -210,8 +222,10 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	// A person's refusal overrides an ok or partial ending, whatever the
 	// child returned.
 	out.Status, out.Reason = withDenials(out.Status, out.Reason, e.takeDenials(child.ID))
+	x.noteSubtask(trace.Subtask{ConversationID: child.ID, ToolCallID: callIDFrom(ctx), Variant: variant.Name, Status: traceStatus(out.Status),
+		Steps: out.Steps, DurationMS: time.Since(started).Milliseconds(), Usage: traceUsage(result.Usage)})
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Variant: variant.Name, Status: string(out.Status), Result: result, Err: err, Limit: events.LimitReason(result.StopReason)}
+		return events.SubagentFinished{EventMeta: meta, ID: child.ID, ParentID: x.info.ID, Depth: x.depth + 1, Variant: variant.Name, Status: string(out.Status), Result: result, Err: err, Limit: events.LimitReason(result.StopReason)}
 	})
 	raw, err := json.Marshal(out)
 	return tools.Result{Text: string(raw), IsError: out.Status.Failed()}, err
@@ -323,7 +337,7 @@ const subtaskTitlePrefix = "Subtask: "
 func (x *execution) emitSubtaskStarted(ctx context.Context, child store.Conversation, request subagent.Request) {
 	goal := x.engine.scrub.Text(request.Goal)
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.SubagentStarted{EventMeta: meta, ID: child.ID, Variant: child.Role, Goal: goal, Background: request.Background}
+		return events.SubagentStarted{EventMeta: meta, ID: child.ID, ParentID: x.info.ID, Depth: x.depth + 1, Variant: child.Role, Goal: goal, Background: request.Background}
 	})
 }
 

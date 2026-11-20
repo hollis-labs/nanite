@@ -124,6 +124,23 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   activity carries `variant` (and `status` when done) instead of `role`.
 - `context` is recorded and passed to the child; forked context comes in a
   later release.
+- Subtask progress: a running subtask's parent run gets `SubtaskProgress`
+  events (ID, parent ID, depth, variant, step, tool, status line,
+  background, and the final status of a background subtask), rate-limited
+  per subtask (500ms, 5s for a background subtask) and never shown to the
+  model. Steps are the turn's own step count. A depth-2 subtask's start,
+  progress and finish reach the root's run through its lead. chatrunner
+  sends progress as `nanite.subagent` activity with state `progress`.
+- Breaking: `SubagentStarted` and `SubagentFinished` gain `ParentID` and
+  `Depth`, and the `nanite.subagent` activity carries `parent_id` and
+  `depth` in every state (start also `background`).
+- Trace records use libs `agent/trace` v0.2.0: a subtask's record sets
+  `parent_turn_id`, `parent_call_id` and `depth`, and every record lists the
+  subtasks its turn started in `subtasks` (conversation and tool call IDs,
+  variant, status including `running` and `denied`, background, steps,
+  duration, and usage of the subtask's whole tree). Breaking: a record's
+  `usage` is now the turn's own requests only, without its subtasks'; the
+  run's `Result.Usage` and `Usage` events are unchanged.
 - Subtask approvals. A subtask is now evaluated with its root conversation's
   role and conversation (scope), and the PDP request ID is `<child>:<call>`;
   the request context's `subtask_variant` carries the variant for rules that

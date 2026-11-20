@@ -78,6 +78,22 @@ builds it from what the turn already tracks:
 Error text goes through the engine's redactor, and the record never holds
 prompts, completions or tool arguments.
 
+Subtasks are linked in both directions. A child's record has
+`parent_turn_id` (the `turn_id` of the turn that started it),
+`parent_call_id` (that turn's `subtask` call) and `depth` (1 for a root's
+child, 2 under a lead), with `parent_conversation_id`. The record of a turn
+that started subtasks lists them in `subtasks`, in order, each with
+`conversation_id`, `tool_call_id` (the `subtask` call), `variant`,
+`status`, `background`, `steps`, `duration_ms` and `usage`. Status is the
+subtask's result status (`ok`, `partial`, `limit`, `error`, `cancelled`, or
+`denied` when a person refused an approval it relayed), or `running` for a
+background subtask still going when the turn ended; its outcome is in its
+own record, which names the turn. A record's own `usage` is the turn's own
+model requests only, while a subtask entry's `usage` is that subtask's
+whole tree (a lead's covers its council). A tree's total is a record's
+`usage` plus its `subtasks[].usage`. The run's `Result.Usage` and its
+`Usage` events still include foreground subtasks, as before.
+
 Sinks: `Options.TraceFiles` appends to `DataDir/traces/YYYY-MM-DD.jsonl` (the
 CLI turns it on), `Options.TraceSink` receives each record in process, and the
 turn span gets the summary as OpenTelemetry GenAI attributes. The fields for
@@ -345,6 +361,21 @@ set and `Background` true. Background usage is never part of a turn's
 totals: summing a turn's `Usage` events without `Background` gives the turn's
 usage, foreground subtasks included. chatrunner forwards background usage as
 `nanite.subagent` activity with state `usage`, not as a usage delta.
+
+While a subtask runs, its parent's run gets `SubtaskProgress` events: the
+child's ID, its parent's ID and depth, its variant, its step (the turn's own
+step count, whatever the provider reports), the tool it is calling and a
+short status line. They are rate-limited per subtask, at most one each
+500ms; a state that arrives sooner is held and sent when the interval
+passes, and anything held is sent before the subtask's `SubagentFinished`.
+They are for the host only: the parent model never sees them. A depth-2
+subtask's `SubagentStarted`, progress and `SubagentFinished` all reach the
+root's run through its lead, each with its parent (the lead) and depth 2. A
+background subtask's progress goes to the parent conversation's running
+turn, if it has one, and is dropped otherwise. It is marked `Background`,
+sent at most every 5s, and its last progress event carries `Status`, how it
+ended. chatrunner forwards progress as `nanite.subagent` activity with state
+`progress`.
 
 Background Bash uses the same permission check, environment, and denylist as
 foreground Bash. A job can outlive its turn and streams bounded, redacted output

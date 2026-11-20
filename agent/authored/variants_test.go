@@ -62,3 +62,23 @@ func TestLoadVariants(t *testing.T) {
 		t.Fatalf("variants %+v", v)
 	}
 }
+
+// TestLoadVariantsStaysInTheAgentDirectory: a variant symlinked to a file
+// outside the agent directory is an error, not read.
+func TestLoadVariantsStaysInTheAgentDirectory(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "variants"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(target, []byte("Outside body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "variants", "escape.md")); err != nil {
+		t.Fatal(err)
+	}
+	v, err := LoadVariants(dir)
+	if err == nil || !strings.Contains(err.Error(), "variants/escape.md") || len(v) != 0 {
+		t.Fatalf("symlink out of the agent directory: %v %+v", err, v)
+	}
+}

@@ -20,42 +20,45 @@ import (
 // MaxLastN bounds a variant's last_n and a subtask call's context.last_n.
 const MaxLastN = 50
 
-// BuiltinVariants names the variants every agent has. An authored variant
-// cannot take one of these names.
-var BuiltinVariants = []string{"code", "planner", "research", "worker"}
+// BuiltinVariants names the variants every agent has, sorted. An authored
+// variant cannot take one of these names.
+func BuiltinVariants() []string { return []string{"code", "planner", "research", "worker"} }
 
 // Variant is an authored variant, variants/<name>.md: a role prompt (the
 // body), the tools it may use, an optional provider and model, and budgets.
 type Variant struct {
-	Name        string
-	Description string
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 	// Prompt is the body, trimmed: the variant's role prompt.
-	Prompt string
+	Prompt string `json:"prompt"`
 	// ReadOnly offers only read-only tools.
-	ReadOnly bool
+	ReadOnly bool `json:"read_only,omitempty"`
 	// Allow, when set, offers only tools matching one of its patterns; Deny
 	// removes tools matching any. A pattern is a tool name or a path.Match
 	// glob such as "mcp__*".
-	Allow, Deny []string
+	Allow []string `json:"allow,omitempty"`
+	Deny  []string `json:"deny,omitempty"`
 	// Provider and Model select what the subtask runs on, like a use in
 	// providers.yaml. Model alone runs on the provider of the "subtask" use.
-	Provider, Model string
-	Budgets         Budgets
+	Provider string  `json:"provider,omitempty"`
+	Model    string  `json:"model,omitempty"`
+	Budgets  Budgets `json:"budgets"`
 	// LastN is how many parent messages the subtask sees by default (zero is
 	// the engine's default); at most MaxLastN.
-	LastN int
+	LastN int `json:"last_n,omitempty"`
 	// ResultCap is the result size cap in tokens; zero uses the agent's.
-	ResultCap int
+	ResultCap int `json:"result_cap,omitempty"`
 	// CanSpawn lets the variant start subtasks itself, one level deeper.
-	CanSpawn bool
+	CanSpawn bool `json:"can_spawn,omitempty"`
 }
 
 // Budgets bound one subtask. Zero means the agent's own limit applies.
 type Budgets struct {
-	Steps  int
-	Tokens int
-	Wall   time.Duration
-	Cost   float64
+	Steps  int `json:"steps,omitempty"`
+	Tokens int `json:"tokens,omitempty"`
+	// Wall is in nanoseconds in JSON.
+	Wall time.Duration `json:"wall_ns,omitempty"`
+	Cost float64       `json:"cost,omitempty"`
 }
 
 var variantName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
@@ -67,7 +70,7 @@ func CheckVariantName(name string) error {
 	if !variantName.MatchString(name) || name == "chat" {
 		return fmt.Errorf("invalid variant name %q: use lower-case letters, digits and dashes", name)
 	}
-	if slices.Contains(BuiltinVariants, name) {
+	if slices.Contains(BuiltinVariants(), name) {
 		return fmt.Errorf("%q is a built-in variant; choose another name", name)
 	}
 	return nil
@@ -165,12 +168,18 @@ func split(raw []byte) (head []byte, body string, err error) {
 }
 
 // LoadVariants reads the authored variants in dir/variants (*.md; other
-// files are ignored). It returns every variant that loaded and, joined, an
-// error for each file that did not, so a bad file never hides the others.
-// A missing variants directory is no variants.
+// files are ignored) through a root, so a symlink cannot reach outside the
+// agent directory. It returns every variant that loaded and, joined, an
+// error for each file that did not, so a bad file never hides the others. A
+// missing variants directory is no variants.
 func LoadVariants(dir string) (map[string]Variant, error) {
 	out := map[string]Variant{}
-	entries, err := os.ReadDir(filepath.Join(dir, "variants"))
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return out, fmt.Errorf("read variants: %w", err)
+	}
+	defer func() { _ = root.Close() }() // Read-only.
+	entries, err := fs.ReadDir(root.FS(), "variants")
 	if errors.Is(err, fs.ErrNotExist) {
 		return out, nil
 	}
@@ -183,7 +192,7 @@ func LoadVariants(dir string) (map[string]Variant, error) {
 			continue
 		}
 		name := strings.TrimSuffix(entry.Name(), ".md")
-		data, err := os.ReadFile(filepath.Join(dir, "variants", entry.Name())) // #nosec G304 -- An authored file in the agent directory.
+		data, err := root.ReadFile("variants/" + entry.Name())
 		if err == nil {
 			var v Variant
 			if v, err = ParseVariant(name, data); err == nil {

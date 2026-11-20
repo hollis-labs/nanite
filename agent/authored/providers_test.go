@@ -55,8 +55,8 @@ use:
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, headers: {api-key: secret}}\n":       "looks like a credential",
 		"providers:\n  p: {wire: openai-chat, base_url: http://x, extra: 1}\n":                         "field extra not found",
 		"use:\n  chat: {provider: anthropic}\n":                                                        "needs provider and model",
-		"use:\n  review: {provider: anthropic, model: m}\n":                                            "chat, summarizer, subtask or desk",
-		"use:\n  subagent: {provider: anthropic, model: m}\n":                                          "chat, summarizer, subtask or desk",
+		"use:\n  review: {provider: anthropic, model: m}\n":                                            "one of chat, summarizer, subtask, desk",
+		"use:\n  subagent: {provider: anthropic, model: m}\n":                                          "one of chat, summarizer, subtask, desk",
 	} {
 		write(text)
 		if _, err := LoadProviders(dir); err == nil || !strings.Contains(err.Error(), want) {

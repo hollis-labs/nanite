@@ -136,14 +136,14 @@ func TestResultCapBytes(t *testing.T) {
 	if got := ResultCapBytes(Variant{}, 1000, 0); got != 4000 {
 		t.Errorf("agent cap %d", got)
 	}
-	if got := ResultCapBytes(Variant{ResultCap: 50}, 1000, 0); got != 200 {
+	if got := ResultCapBytes(Variant{Variant: authored.Variant{ResultCap: 50}}, 1000, 0); got != 200 {
 		t.Errorf("variant cap %d", got)
 	}
 	if got := ResultCapBytes(Variant{}, 0, 23*1024); got != 23*1024/BytesPerToken*BytesPerToken {
 		t.Errorf("the default is not clamped to the limit: %d", got)
 	}
 	// A setting near the int limit is clamped before it is multiplied.
-	if got := ResultCapBytes(Variant{ResultCap: math.MaxInt}, 0, 23*1024); got <= 0 || got > 23*1024 {
+	if got := ResultCapBytes(Variant{Variant: authored.Variant{ResultCap: math.MaxInt}}, 0, 23*1024); got <= 0 || got > 23*1024 {
 		t.Errorf("a huge cap overflowed: %d", got)
 	}
 }
@@ -157,14 +157,14 @@ func TestCheckLimit(t *testing.T) {
 }
 
 func TestReturnResultAlwaysOfferedToAChild(t *testing.T) {
-	narrow := Variant{Name: "narrow", ReadOnly: true, Allow: []string{"read_file"}, Deny: []string{"return_*"}}
+	narrow := Variant{Variant: authored.Variant{Name: "narrow", ReadOnly: true, Allow: []string{"read_file"}, Deny: []string{"return_*"}}}
 	if !AllowsTool(false, []Variant{narrow}, false, ReturnToolName, false) {
 		t.Error("a variant took return_result away from its child")
 	}
 }
 
 func TestAllowsToolNeedsTheWholeChain(t *testing.T) {
-	lead := Variant{Name: "lead", CanSpawn: true, Deny: []string{"write_file", "subtask"}}
+	lead := Variant{Variant: authored.Variant{Name: "lead", CanSpawn: true, Deny: []string{"write_file", "subtask"}}}
 	code := Builtins()["code"]
 	if AllowsTool(false, []Variant{lead, code}, false, "write_file", false) {
 		t.Error("a child was allowed a tool its lead denies")
@@ -175,7 +175,7 @@ func TestAllowsToolNeedsTheWholeChain(t *testing.T) {
 	if AllowsTool(false, []Variant{lead}, true, "subtask", false) {
 		t.Error("can_spawn overrode the variant's own deny list")
 	}
-	if !AllowsTool(false, []Variant{{Name: "x", CanSpawn: true}}, true, "subtask", false) || AllowsTool(false, []Variant{code}, false, "subtask", false) {
+	if !AllowsTool(false, []Variant{{Variant: authored.Variant{Name: "x", CanSpawn: true}}}, true, "subtask", false) || AllowsTool(false, []Variant{code}, false, "subtask", false) {
 		t.Error("subtask does not follow canSpawn")
 	}
 	if !AllowsTool(true, nil, true, "anything", false) || AllowsTool(false, []Variant{code}, false, "ask_user", true) {
@@ -184,8 +184,8 @@ func TestAllowsToolNeedsTheWholeChain(t *testing.T) {
 }
 
 func TestResultReadersFollowDenyButNotAllow(t *testing.T) {
-	allowOnly := Variant{Name: "narrow", Allow: []string{"read_file"}}
-	denying := Variant{Name: "sealed", Allow: []string{"read_file"}, Deny: []string{"fetch_tool_result", "search_*"}}
+	allowOnly := Variant{Variant: authored.Variant{Name: "narrow", Allow: []string{"read_file"}}}
+	denying := Variant{Variant: authored.Variant{Name: "sealed", Allow: []string{"read_file"}, Deny: []string{"fetch_tool_result", "search_*"}}}
 	for _, tool := range []string{"fetch_tool_result", "search_tool_result"} {
 		if !AllowsTool(false, []Variant{allowOnly}, false, tool, true) {
 			t.Errorf("an allow list that does not name %s removed it", tool)
@@ -202,7 +202,7 @@ func TestResultReadersFollowDenyButNotAllow(t *testing.T) {
 // TestBuiltinNamesMatchAuthored: the names agent/authored refuses for an
 // authored variant are exactly the built-in variants.
 func TestBuiltinNamesMatchAuthored(t *testing.T) {
-	if got, want := Names(Builtins()), slices.Sorted(slices.Values(authored.BuiltinVariants)); !slices.Equal(got, want) {
+	if got, want := Names(Builtins()), slices.Sorted(slices.Values(authored.BuiltinVariants())); !slices.Equal(got, want) {
 		t.Fatalf("built-in variants %v, authored.BuiltinVariants %v", got, want)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/provider"
 	"gopkg.in/yaml.v3"
@@ -29,7 +31,27 @@ const (
 )
 
 // Uses lists every use, in the order the docs give them.
-var Uses = []string{UseChat, UseSummarizer, UseSubtask, UseDesk}
+func Uses() []string { return []string{UseChat, UseSummarizer, UseSubtask, UseDesk} }
+
+// Wires a named provider can speak (ProviderSpec.Wire).
+const (
+	WireAnthropic       = provider.WireAnthropic
+	WireOpenAI          = provider.WireOpenAI
+	WireOpenAIChat      = provider.WireOpenAIChat
+	WireOpenAIResponses = provider.WireOpenAIResponses
+)
+
+// Auth schemes for a named provider (ProviderSpec.Auth): the wire's own
+// (empty), bearer on the Anthropic wire, or none for a local server.
+const (
+	AuthDefault = provider.AuthDefault
+	AuthBearer  = provider.AuthBearer
+	AuthNone    = provider.AuthNone
+)
+
+// BuiltinProviders names the built-in providers, which providers.yaml can
+// select but not redefine.
+func BuiltinProviders() []string { return []string{provider.BuiltinAnthropic, provider.BuiltinOpenAI} }
 
 // Selection names a provider (built in or named) and a model.
 type Selection struct {
@@ -70,10 +92,8 @@ func ParseProviders(data []byte) (Providers, error) {
 		out.Named[name] = spec
 	}
 	for use, sel := range file.Use {
-		switch use {
-		case UseChat, UseSummarizer, UseSubtask, UseDesk:
-		default:
-			return Providers{}, fmt.Errorf("providers.yaml: use %q must be chat, summarizer, subtask or desk", use)
+		if !slices.Contains(Uses(), use) {
+			return Providers{}, fmt.Errorf("providers.yaml: use %q must be one of %s", use, strings.Join(Uses(), ", "))
 		}
 		if sel.Provider == "" || sel.Model == "" {
 			return Providers{}, fmt.Errorf("providers.yaml: use %s needs provider and model", use)

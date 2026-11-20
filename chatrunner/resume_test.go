@@ -2,6 +2,7 @@ package chatrunner_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,10 +23,55 @@ import (
 	"github.com/hollis-labs/nanite/chatrunner"
 )
 
-const resumeFixtureEnv = "NANITE_CHATRUNNER_RESUME_FIXTURE_DIR"
+const (
+	resumeFixtureEnv = "NANITE_CHATRUNNER_RESUME_FIXTURE_DIR"
+	// resumeFixtureDeskEnv makes the fixture plan its message into two
+	// background steps that stall, so they are lost with it.
+	resumeFixtureDeskEnv = "NANITE_CHATRUNNER_RESUME_FIXTURE_DESK"
+)
 
-// resumeScript is the owner's message the killed process was answering.
-const resumeScript = "resumable:recovered"
+// stallingPlan is the fixture's plan: two research steps that stall while the
+// brain hangs and report their results otherwise.
+var stallingPlan = desk.Plan{Confidence: 0.95, Items: []desk.PlanItem{
+	{ID: "a", Kind: desk.KindResearch, Goal: "slow:alpha-result"},
+	{ID: "b", Kind: desk.KindResearch, Goal: "slow:beta-result"},
+}}
+
+// messagePlanner plans every message as stallingPlan and records the messages.
+type messagePlanner struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (p *messagePlanner) Decompose(_ context.Context, req desk.Request) (desk.Plan, error) {
+	p.mu.Lock()
+	p.seen = append(p.seen, req.Message)
+	p.mu.Unlock()
+	plan := stallingPlan
+	plan.Message, plan.Source = req.Message, "model"
+	return plan, nil
+}
+
+func (p *messagePlanner) messages() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.seen)
+}
+
+// withDesk configures a front desk planning with planner, delivering
+// within 200ms.
+func withDesk(planner desk.Decomposer, tweak func(*chatrunner.Options)) func(*chatrunner.Options) {
+	return func(o *chatrunner.Options) {
+		o.Desk = &chatrunner.DeskOptions{Intake: desk.Intake{Mode: desk.IntakeAuto, Planner: planner}, Policy: mergePolicy(200 * time.Millisecond)}
+		if tweak != nil {
+			tweak(o)
+		}
+	}
+}
+
+// resumeScript is the owner's message the killed process was answering. Its
+// list makes the front desk's screen treat it as a task.
+const resumeScript = "resumable:recovered\n" + twoSteps
 
 // newWiredIn is newWiredOpts on a given agent directory, with chat IDs
 // that are the same in every process, so a restarted runner serves the
@@ -92,6 +138,7 @@ func newWiredIn(t *testing.T, dir string, hang bool, tweak func(*chatrunner.Opti
 	if err != nil {
 		t.Fatal(err)
 	}
+	w.att = att.ID
 	stream, err := s.Events(t.Context(), w.conv, att.ID, chat.After(0))
 	if err != nil {
 		t.Fatal(err)
@@ -108,11 +155,18 @@ func TestResumeCrashFixture(t *testing.T) {
 	if dir == "" {
 		t.Skip("started only by the resume tests")
 	}
-	w := newWiredIn(t, dir, true, nil)
+	withSteps := os.Getenv(resumeFixtureDeskEnv) != ""
+	var tweak func(*chatrunner.Options)
+	if withSteps {
+		tweak = withDesk(&messagePlanner{}, nil)
+	}
+	w := newWiredIn(t, dir, true, tweak)
 	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: resumeScript}); err != nil {
 		t.Fatal(err)
 	}
-	for !w.brain.saw(resumeScript) {
+	// The root turn is waiting for the model (a subtask's request may
+	// quote the message too, so look for it as the message answered).
+	for w.brain.answers(resumeScript) == 0 || withSteps && (!w.brain.saw("slow:alpha-result") || !w.brain.saw("slow:beta-result") || savedJobs(t, w) < 2) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "turn-running"), nil, 0600); err != nil { //nolint:gosec // G703: the parent test's temp dir
@@ -121,15 +175,52 @@ func TestResumeCrashFixture(t *testing.T) {
 	<-t.Context().Done() // killed here
 }
 
+// savedJobs counts the jobs the desk's saved state links to its steps.
+func savedJobs(t *testing.T, w *wired) int {
+	states, err := w.runner.Agent().ConversationHostStates(t.Context(), "desk")
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, raw := range states {
+		var saved struct {
+			Plans []struct {
+				Refs []json.RawMessage `json:"refs"`
+			} `json:"plans"`
+		}
+		if json.Unmarshal([]byte(raw), &saved) == nil {
+			for _, p := range saved.Plans {
+				n += len(p.Refs)
+			}
+		}
+	}
+	return n
+}
+
 // crashedDir returns an agent directory whose process was killed while a
 // turn on chat conv_1 waited for the model.
 func crashedDir(t *testing.T) string {
+	t.Helper()
+	return crashed(t, false)
+}
+
+// crashedDeskDir is crashedDir where the killed turn's message was planned
+// into two background steps, lost with the process.
+func crashedDeskDir(t *testing.T) string {
+	t.Helper()
+	return crashed(t, true)
+}
+
+func crashed(t *testing.T, withSteps bool) string {
 	t.Helper()
 	dir := t.TempDir()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestResumeCrashFixture$") // #nosec G204 G702 -- Runs the current test binary with fixed test flags.
 	cmd.Env = append(os.Environ(), resumeFixtureEnv+"="+dir)
+	if withSteps {
+		cmd.Env = append(cmd.Env, resumeFixtureDeskEnv+"=1")
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +265,7 @@ func (b *brain) answers(text string) int {
 		last := ""
 		for _, m := range req.Messages {
 			if m.Role == "user" && !isToolResult(m) {
-				last = messageText(m)
+				last = scriptText(m)
 			}
 		}
 		if last == text {
@@ -188,11 +279,8 @@ func (b *brain) answers(text string) int {
 // stored message, and the front desk does not plan it again.
 func TestRestartResumesTheInterruptedTurn(t *testing.T) {
 	dir := crashedDir(t)
-	planner := &recordingPlanner{}
-	w := newWiredIn(t, dir, false, func(o *chatrunner.Options) {
-		o.ResumeInterrupted = true
-		o.Desk = &chatrunner.DeskOptions{Intake: desk.Intake{Mode: desk.IntakeAuto, Planner: planner}}
-	})
+	planner := &messagePlanner{}
+	w := newWiredIn(t, dir, false, withDesk(planner, func(o *chatrunner.Options) { o.ResumeInterrupted = true }))
 	if got, err := w.runner.InterruptedChats(t.Context()); err != nil || !slices.Equal(got, []string{w.conv}) {
 		t.Fatalf("interrupted chats %v, %v; want [%s]", got, err, w.conv)
 	}
@@ -206,8 +294,13 @@ func TestRestartResumesTheInterruptedTurn(t *testing.T) {
 	if n := w.brain.answers(resumeScript); n != 1 {
 		t.Fatalf("the model answered the stored message %d times", n)
 	}
-	if got := planner.seen(); len(got) != 0 {
-		t.Fatalf("the desk planned the resumed turn: %v", got)
+	// A later message is planned as usual; the resumed one never was.
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: twoSteps}); err != nil {
+		t.Fatal(err)
+	}
+	w.until(t, "the next turn", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	if got := planner.messages(); !slices.Equal(got, []string{twoSteps}) {
+		t.Fatalf("the desk planned %q; want only the later message", got)
 	}
 	if turn, err := w.runner.Interrupted(t.Context(), w.conv); err != nil || turn != nil {
 		t.Fatalf("still interrupted: %+v, %v", turn, err)
@@ -282,5 +375,167 @@ func TestDiscardTheInterruptedTurn(t *testing.T) {
 				t.Fatalf("still interrupted: %+v, %v", turn, err)
 			}
 		})
+	}
+}
+
+// readUntil reads the stream until done reports true, giving each event to
+// see first.
+func (w *wired) readUntil(t *testing.T, what string, see func(chatstream.Event), done func() bool) {
+	t.Helper()
+	w.until(t, what, func(ev chatstream.Event) bool {
+		see(ev)
+		return done()
+	})
+}
+
+// deskBody is a desk notice's body, "" for any other event.
+func deskBody(t *testing.T, ev chatstream.Event) string {
+	if ev.Verb != chatstream.VerbActivity || ev.Kind != chatrunner.ActivityNotice {
+		return ""
+	}
+	v := activityValue(t, ev)
+	if v["kind"] != chatrunner.NoticeKindDesk {
+		return ""
+	}
+	body, _ := v["body"].(string)
+	return body
+}
+
+// The desk's work on a chat waits while its turn is interrupted; the owner
+// is told once, and the work starts when the turn is resumed, discarded,
+// or its hold runs out.
+func TestDeskWorkWaitsForTheInterruptedTurn(t *testing.T) {
+	for _, release := range []string{"resume", "discard", "timeout"} {
+		t.Run(release, func(t *testing.T) {
+			dir := crashedDeskDir(t)
+			planner := &messagePlanner{}
+			w := newWiredIn(t, dir, false, withDesk(planner, func(o *chatrunner.Options) {
+				if release == "timeout" {
+					o.InterruptedHold = 500 * time.Millisecond
+				}
+			}))
+			if _, err := w.runner.RecoverTurns(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			var bodies []string
+			var disposition map[string]any
+			see := func(ev chatstream.Event) {
+				if body := deskBody(t, ev); body != "" {
+					bodies = append(bodies, body)
+				}
+				if ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityInterrupted {
+					if v := activityValue(t, ev); v["disposition"] != nil {
+						disposition = v
+					}
+				}
+			}
+			has := func(text string) bool { return strings.Contains(strings.Join(bodies, "\n"), text) }
+			w.readUntil(t, "the owner told the work waits", see, func() bool { return has("Work is waiting") })
+			if has("alpha-result") || has("beta-result") {
+				t.Fatal("the steps ran while the turn was interrupted")
+			}
+			switch release {
+			case "resume":
+				if err := w.runner.Resume(t.Context(), w.conv); err != nil {
+					t.Fatal(err)
+				}
+			case "discard":
+				if err := w.runner.Discard(t.Context(), w.conv); err != nil {
+					t.Fatal(err)
+				}
+			}
+			w.readUntil(t, "the steps' results", see, func() bool {
+				done := has("alpha-result") && has("beta-result")
+				if release == "timeout" {
+					done = done && disposition != nil
+				}
+				return done
+			})
+			if n := strings.Count(strings.Join(bodies, "\n"), "Work is waiting"); n != 1 {
+				t.Fatalf("the owner was told %d times", n)
+			}
+			if release == "timeout" && (disposition["disposition"] != "discarded" || disposition["reason"] != "timeout") {
+				t.Fatalf("hold ran out with %v", disposition)
+			}
+			if got := planner.messages(); len(got) != 0 {
+				t.Fatalf("the desk planned %q", got)
+			}
+		})
+	}
+}
+
+// Record, an exchange the host answered itself, discards the interrupted
+// turn, says so, and leaves the chat ready for new turns.
+func TestRecordDiscardsTheInterruptedTurn(t *testing.T) {
+	dir := crashedDir(t)
+	w := newWiredIn(t, dir, false, nil)
+	if err := w.runner.Record(t.Context(), chat.Turn{ConversationID: w.conv, Text: "what time is it"}, "noon"); err != nil {
+		t.Fatal(err)
+	}
+	var disposition map[string]any
+	w.until(t, "the discard", func(ev chatstream.Event) bool {
+		if ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityInterrupted {
+			disposition = activityValue(t, ev)
+		}
+		return disposition != nil
+	})
+	if disposition["disposition"] != "discarded" || disposition["reason"] != "new message" {
+		t.Fatalf("record discarded with %v", disposition)
+	}
+	if turn, err := w.runner.Interrupted(t.Context(), w.conv); err != nil || turn != nil {
+		t.Fatalf("still interrupted: %+v, %v", turn, err)
+	}
+}
+
+// A message sent while the resumed turn runs does not disturb it: the
+// resumed turn answers once and the message is handled after it or refused.
+func TestMessageDuringAResume(t *testing.T) {
+	dir := crashedDir(t)
+	w := newWiredIn(t, dir, false, nil)
+	if err := w.runner.Resume(t.Context(), w.conv); err != nil {
+		t.Fatal(err)
+	}
+	_, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hello"})
+	if !w.answered(t, "the resumed turn") {
+		t.Fatal("the resumed turn did not answer the stored message")
+	}
+	if err == nil {
+		w.until(t, "the new turn", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	}
+	if n := w.brain.answers(resumeScript); n != 1 {
+		t.Fatalf("the model answered the stored message %d times", n)
+	}
+}
+
+// Canceling a resumed turn aborts it, and the chat takes new turns.
+func TestCancelAResume(t *testing.T) {
+	dir := crashedDir(t)
+	w := newWiredIn(t, dir, true, nil) // the resumed turn stalls
+	if err := w.runner.Resume(t.Context(), w.conv); err != nil {
+		t.Fatal(err)
+	}
+	var runID string
+	w.until(t, "the resumed run", func(ev chatstream.Event) bool {
+		if ev.Verb == chatstream.VerbRunStart {
+			runID = ev.RunID
+		}
+		return runID != "" && w.brain.answers(resumeScript) == 1
+	})
+	if _, err := w.svc.AcquireLease(t.Context(), w.conv, w.att); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.svc.Cancel(t.Context(), w.conv, runID, w.att); err != nil {
+		t.Fatal(err)
+	}
+	events := w.until(t, "the abort", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	if last := events[len(events)-1]; last.Verb != chatstream.VerbRunAbort {
+		t.Fatalf("the cancelled resume ended %+v", last)
+	}
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	events = w.until(t, "the next turn", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	if last := events[len(events)-1]; last.Verb != chatstream.VerbRunFinish {
+		t.Fatalf("the next turn ended %+v", last)
 	}
 }

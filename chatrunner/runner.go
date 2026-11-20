@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -73,6 +74,11 @@ type Options struct {
 	// process left unfinished. Without it, RecoverTurns offers each one to
 	// the owner (a nanite.interrupted activity) to Resume or Discard.
 	ResumeInterrupted bool
+	// InterruptedHold is how long an interrupted turn waits for the owner
+	// (or RecoverTurns) before the runner discards it (default 15 minutes;
+	// negative waits indefinitely). The front desk's work on that chat
+	// waits meanwhile. The clock survives a restart.
+	InterruptedHold time.Duration
 }
 
 // Runner is a chat.Runner backed by one Nanite agent.
@@ -102,6 +108,15 @@ type Runner struct {
 	noticeCtx  context.Context
 	closed     bool
 	desk       *Desk
+	// recorded is the Nanite conversations whose chat is saved as host
+	// state in this process.
+	recorded map[string]bool
+	// holds is the interrupted turns waiting for the owner, by chat;
+	// resuming is the chats whose turn a Resume has claimed.
+	holds    map[string]*hold
+	resuming map[string]bool
+	// serving is set once the chat Service is known to run.
+	serving bool
 }
 
 var _ chat.Runner = (*Runner)(nil)
@@ -118,7 +133,8 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	if opts.Desk != nil && opts.Observe == nil {
 		return nil, errors.New("chatrunner: Options.Desk needs Options.Observe")
 	}
-	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}, publishers: map[string]*publisher{}}
+	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}, publishers: map[string]*publisher{},
+		recorded: map[string]bool{}, holds: map[string]*hold{}, resuming: map[string]bool{}}
 	if opts.Desk != nil {
 		desk := *opts.Desk
 		if desk.Mode == nil && opts.Agent.Steering != nil {
@@ -159,6 +175,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 			r.desk.logger.Warn("chatrunner: desk recovery", "error", err.Error())
 		}
 	}
+	r.holdInterrupted(ctx)
 	return r, nil
 }
 
@@ -191,6 +208,11 @@ func (r *Runner) Close() error {
 	}
 	r.mu.Lock()
 	r.closed = true
+	for _, h := range r.holds {
+		if h.timer != nil {
+			h.timer.Stop()
+		}
+	}
 	r.mu.Unlock()
 	r.stopNotices()
 	<-r.noticesDone
@@ -227,27 +249,42 @@ func (r *Runner) conversation(ctx context.Context, chatID string) (*agent.Conver
 		return nil, fmt.Errorf("chatrunner: open conversation: %w", err)
 	}
 	r.mu.Lock()
-	_, known := r.chats[id]
+	known := r.recorded[id]
+	r.recorded[id] = true
 	r.chats[id] = chatID
 	r.mu.Unlock()
 	if !known {
+		// Only finding interrupted turns after a restart needs it.
 		if err := c.SetHostState(ctx, chatHostState, chatID); err != nil {
-			return nil, fmt.Errorf("chatrunner: record chat: %w", err)
+			r.logger().Warn("chatrunner: record chat", "conversation", chatID, "error", err.Error())
+			r.mu.Lock()
+			delete(r.recorded, id)
+			r.mu.Unlock()
 		}
 	}
 	return c, nil
 }
 
+func (r *Runner) logger() *slog.Logger {
+	if r.opts.Agent.Logger != nil {
+		return r.opts.Agent.Logger
+	}
+	return slog.Default()
+}
+
 // discardInterrupted abandons a turn the previous process left unfinished,
-// for the owner's new message: the owner has moved on.
-func discardInterrupted(ctx context.Context, c *agent.Conversation) error {
-	if c.Interrupted() == nil {
-		return nil
+// for the owner's new message: the owner has moved on. It returns the
+// discarded turn's ID, "" when there was none.
+func (r *Runner) discardInterrupted(ctx context.Context, chatID string, c *agent.Conversation) (string, error) {
+	turn := c.Interrupted()
+	if turn == nil {
+		return "", nil
 	}
 	if err := c.Discard(ctx); err != nil {
-		return fmt.Errorf("discard interrupted turn: %w", err)
+		return "", fmt.Errorf("discard interrupted turn: %w", err)
 	}
-	return nil
+	r.endHold(chatID)
+	return turn.ID, nil
 }
 
 type turnKey struct{}
@@ -262,6 +299,7 @@ func TurnFromContext(ctx context.Context) (chat.Turn, bool) {
 // a dispatched plan's background subtasks start before the turn, and the
 // chat agent is told about the plan in the turn's context.
 func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
+	r.serve() // the Service calls Start, so it runs
 	in := agent.Input{Text: turn.Text}
 	if r.opts.Situation != nil {
 		sit := r.opts.Situation(turn)
@@ -270,8 +308,13 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	text := contextText(turn.Context)
 	var prelude []chatstream.Event
 	x, err := r.beginAfterDesk(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
-		if err := discardInterrupted(runCtx, c); err != nil {
+		discarded, err := r.discardInterrupted(runCtx, turn.ConversationID, c)
+		if err != nil {
 			return nil, err
+		}
+		if discarded != "" {
+			// Close the owner's offer: their new message replaced it.
+			prelude = append(prelude, discardedActivity(discarded, "new message"))
 		}
 		halted := false
 		if r.desk != nil && r.opts.Agent.Steering != nil {
@@ -332,12 +375,16 @@ func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool
 	if err != nil {
 		return nil, err
 	}
-	if hostDispatch && c.Interrupted() != nil {
-		// The owner decides first whether to resume or discard the turn;
-		// the desk's work waits for that (Resume's run, or Discard, starts
-		// it again), as for any held conversation. Nothing is registered,
-		// so no release wakes the desk into retrying at once.
-		return nil, fmt.Errorf("chatrunner: %w", agent.ErrBusy)
+	if hostDispatch {
+		if held := c.Interrupted(); held != nil {
+			// The owner decides first whether to resume or discard the
+			// turn; the desk's work waits for that (the resumed run's end,
+			// Discard, or the hold running out starts it again), as for any
+			// held conversation. Nothing is registered, so no release wakes
+			// the desk into retrying at once.
+			r.deskWaits(turn.ConversationID, held.ID)
+			return nil, fmt.Errorf("chatrunner: %w", agent.ErrBusy)
+		}
 	}
 	out := &run{runner: r, turn: turn, nanite: c.ID(), pending: map[string]*pending{}, asked: map[string]bool{}, ended: make(chan struct{}), hostDispatch: hostDispatch}
 	if info, err := r.agent.Info(ctx); err == nil {
@@ -433,8 +480,15 @@ func (r *Runner) Record(ctx context.Context, turn chat.Turn, answer string) erro
 	if err != nil {
 		return err
 	}
-	if err := discardInterrupted(ctx, c); err != nil {
+	discarded, err := r.discardInterrupted(ctx, turn.ConversationID, c)
+	if err != nil {
 		return fmt.Errorf("chatrunner: %w", err)
+	}
+	if discarded != "" {
+		r.announce(turn.ConversationID, discardedActivity(discarded, "new message"))
+		if r.desk != nil {
+			go r.desk.idle(turn.ConversationID) //nolint:gosec // G118: the desk's work outlives this call
+		}
 	}
 	return c.Record(ctx, turn.Text, answer)
 }

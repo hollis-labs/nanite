@@ -27,14 +27,18 @@
   tools, and `.mcp.json` servers may not use the `tool:` prefix.
 - chatrunner: interrupted turns can be resumed. A turn the previous process
   left unfinished is no longer discarded when its chat is next used.
-  `Runner.RecoverTurns` resumes each (`Options.ResumeInterrupted`) or offers
-  it to the owner as a `nanite.interrupted` activity (`ActivityInterrupted`);
-  `Runner.Resume` publishes the resumed turn through `Options.Observe` without
-  a new user message, and the front desk does not plan it again;
-  `Runner.Discard` abandons it, as a new owner message or `Record` still
-  does. `Runner.Interrupted` and `Runner.InterruptedChats` report them; the
-  runner records each conversation's chat as host state `chat`. The desk's
-  dispatches on an interrupted chat wait for the owner's decision.
+  **Upgrade: call `Runner.RecoverTurns` once the chat Service starts.** It
+  resumes each turn (`Options.ResumeInterrupted`) or offers it to the owner
+  as a `nanite.interrupted` activity (`ActivityInterrupted`).
+  `Runner.Resume` claims the turn and publishes it through `Options.Observe`
+  without a new user message; the front desk does not plan it again.
+  `Runner.Discard` abandons it, as a new owner message or `Record` does.
+  `Runner.Interrupted` and `Runner.InterruptedChats` report them; the runner
+  records each conversation's chat as host state `chat`. A turn left alone
+  is discarded after `Options.InterruptedHold` (default 15 minutes, negative
+  for never; the start survives a restart). Each discard is announced with
+  `disposition: discarded` and a `reason`. The desk's dispatches on an
+  interrupted chat wait, and the owner is told once.
 - Warden auth. A new agent-directory file, `identity.yaml`, names the
   agent's principal, its Warden URL and parent credential file, and which
   `.mcp.json` HTTP servers get Warden tokens and claimed correlation headers

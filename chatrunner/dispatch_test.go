@@ -26,6 +26,7 @@ type wired struct {
 	brain  *brain
 	svc    *chat.Service
 	conv   string
+	att    string // the controller attachment's ID
 	stream *chat.Stream
 	// hold, when set, is called before each Observe with the chat
 	// conversation it publishes on.

@@ -57,6 +57,18 @@ func messageText(m llmtypes.ChatMessage) string {
 	return text
 }
 
+// scriptText is a user message's text without its turn-context block (a
+// named text block the engine puts in front): what the owner wrote.
+func scriptText(m llmtypes.ChatMessage) string {
+	text := m.Content
+	for _, b := range m.ContentBlocks {
+		if b.Type == "text" && b.Name == "" {
+			text += b.Text
+		}
+	}
+	return text
+}
+
 func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -65,7 +77,7 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 	for _, m := range req.Messages {
 		switch {
 		case m.Role == "user" && !isToolResult(m):
-			script, steps = messageText(m), 0
+			script, steps = scriptText(m), 0
 		case m.Role == "assistant":
 			steps++
 		}

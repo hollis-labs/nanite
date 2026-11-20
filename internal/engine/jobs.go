@@ -65,6 +65,9 @@ func (x *execution) startShell(ctx context.Context, raw json.RawMessage) (string
 const subtaskJobKind = "subagent"
 
 func (x *execution) subtask(ctx context.Context, request subagent.Request) (_ tools.Result, retErr error) {
+	if err := x.engine.checkDaily(); err != nil {
+		return tools.Result{}, err
+	}
 	if !x.canSpawn() {
 		return tools.Result{}, fmt.Errorf("subtask depth limit reached: only a variant with can_spawn may start subtasks, and only one level down")
 	}

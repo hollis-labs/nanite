@@ -282,3 +282,10 @@ type AutoApproved struct {
 	EventMeta
 	Conversation, CallID, Tool, InputSummary string
 }
+
+// BudgetWarning reports the first crossing of 80% of a UTC-day token cap.
+type BudgetWarning struct {
+	EventMeta
+	Day           string
+	Tokens, Limit int64
+}

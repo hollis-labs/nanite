@@ -5,7 +5,7 @@ with `GOWORK=off go install ./cmd/nanite`.
 
 ## Pinned dependencies
 
-Nanite pins `github.com/hollis-labs/libs/agent/agentdir` at `v0.3.0` and a
+Nanite pins `github.com/hollis-labs/libs/agent/agentdir` at `v0.5.0` and a
 Substrate revision whose BOM lists it under `app_libs`. Move both together
 and let the pin check confirm they agree:
 

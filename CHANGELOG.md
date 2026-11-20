@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add a persisted per-agent UTC-day token cap, with one 80% warning per day,
+  through `runtime.daily_token_budget` and `Options.DailyTokenBudget`.
+  Ledger corruption resets with a warning; write failures preserve completed
+  responses and retry persistence with retained in-memory usage.
+- Add `Agent.StopAll(ctx)` and `nanite stop --all` to cancel current work and
+  prevent new turns, subtasks and background jobs until the agent is reopened.
+
 ## 0.10.0
 
 Auto mode for testing and pilots. No breaking changes.

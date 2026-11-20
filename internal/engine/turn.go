@@ -612,6 +612,11 @@ func (x *execution) generate(ctx context.Context) error {
 		callCtx, cancelCall := context.WithCancel(keepalive.WithIdle(spanCtx, x.engine.idleTimeout()))
 		cancel := func() { cancelCall(); endSpan() }
 		x.estimateRequest()
+		if err := x.engine.checkDaily(); err != nil {
+			cancel()
+			runErr = err
+			return attempt{}, runloop.Terminate
+		}
 		stream, err := x.provider.StreamChat(callCtx, req)
 		if err != nil {
 			cancel()
@@ -814,17 +819,23 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	if prompt == "" {
 		prompt = DefaultCompactionPrompt
 	}
+	if err := x.engine.checkDaily(); err != nil {
+		return err
+	}
 	keep := x.keepTokens(window)
 	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(summaryProvider, summaryModel), messages: x.messages, structure: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(summaryModel),
 		prompt: prompt, keepTokens: keep, inputTokens: x.engine.cfg.CompactionInputTokens,
 		// A summary is model spend too. The summarizer's Complete call
 		// reports no usage, so the shared budget is charged an estimate.
-		spend: func(prompt string, span []llmtypes.ChatMessage, summary string) {
-			if x.shared == nil {
-				return
-			}
+		spend: func(prompt string, span []llmtypes.ChatMessage, summary string) error {
 			raw, _ := json.Marshal(span)
-			x.shared.add(est.Estimate(prompt) + est.Estimate(string(raw)) + est.Estimate(summary))
+			tokens := est.Estimate(prompt) + est.Estimate(string(raw)) + est.Estimate(summary)
+			x.shared.add(tokens)
+			if err := x.engine.spendDaily(ctx, x.root.ID, tokens); err != nil {
+				journalErr = true
+				return err
+			}
+			return nil
 		}}
 	// applySummary makes the summarizer's summary durable and replaces the
 	// span it covers with it.
@@ -955,7 +966,7 @@ type capturingSummarizer struct {
 	// called is set once Summarize has run.
 	called bool
 	// spend, when set, is told of each summary call made.
-	spend func(prompt string, span []llmtypes.ChatMessage, summary string)
+	spend func(prompt string, span []llmtypes.ChatMessage, summary string) error
 }
 
 func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span []llmtypes.ChatMessage) (string, error) {
@@ -985,7 +996,9 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 	summary, err := s.Summarizer.Summarize(spanCtx, prompt, input)
 	if s.spend != nil && err == nil {
 		// A failed summary call is not charged: it reports nothing to count.
-		s.spend(prompt, input, summary)
+		if spendErr := s.spend(prompt, input, summary); spendErr != nil {
+			return "", spendErr
+		}
 	}
 	if err == nil && strings.TrimSpace(summary) == "" {
 		// An empty summary would drop the span with nothing in its place.
@@ -1079,6 +1092,9 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			x.ownUsage.CacheWriteTokens += u.CacheCreationTokens
 			x.usageMu.Unlock()
 			x.shared.add(u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens)
+			if err := x.engine.spendDaily(ctx, x.root.ID, u.InputTokens+u.OutputTokens+u.CacheReadTokens+u.CacheCreationTokens); err != nil {
+				return got, err
+			}
 			// What the provider counted for the request just sent: its input,
 			// cached or not. Compaction checks it against the budget too,
 			// since a size estimate can be well off.

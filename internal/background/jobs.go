@@ -245,3 +245,19 @@ func (b *boundedLog) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// StopAll closes admission and cancels jobs as explicit owner cancellations.
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	m.closed = true
+	jobs := make([]activeJob, 0, len(m.active))
+	for id, job := range m.active {
+		m.cancelled[id] = true
+		jobs = append(jobs, job)
+		job.cancel()
+	}
+	m.mu.Unlock()
+	for _, job := range jobs {
+		<-job.done
+	}
+}

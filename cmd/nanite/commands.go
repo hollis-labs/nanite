@@ -109,6 +109,9 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate,
 
 func newRoot(app *module.App, dir string) *cobra.Command {
 	root := cli.Root(app)
+	stopCmd := &cobra.Command{Use: "stop --all", Short: "Cancel all work in the running agent; reopen it to accept work again", Args: cobra.NoArgs}
+	stopCmd.Flags().Bool("all", false, "Stop all turns, subtasks and background jobs")
+	root.AddCommand(stopCmd)
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 	var prompt, output, resume, discard, eventPath string

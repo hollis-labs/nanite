@@ -105,12 +105,20 @@ func (e *Engine) forgetNoticeWork(job string) {
 	e.mu.Unlock()
 }
 
-// noticeWork reports whether a notice turn started job.
-func (e *Engine) noticeWork(job string) bool {
+// noticeWorkIn reports whether a notice turn started any of a subtask's
+// lineage (itself and the subtasks above it): a grandchild's ask under a
+// lead a notice turn started is chained too.
+func (e *Engine) noticeWorkIn(lineage []string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.noticeJobs[job]
+	for _, id := range lineage {
+		if e.noticeJobs[id] {
+			return true
+		}
+	}
+	return false
 }
+
 
 // announce reports a stored notice on its conversation's running turn, if it
 // has one, and to every subscriber, saying which turn (if any) carried it.

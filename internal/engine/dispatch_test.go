@@ -583,3 +583,71 @@ done:
 		t.Fatalf("got %d notices, %d dropped: %+v", len(got), dropped, got)
 	}
 }
+
+// An allow "for the conversation" given on a dispatch's ask covers that start
+// only: the model's own subtask call afterwards is asked again.
+func TestDispatchApprovalDoesNotGrantTheModel(t *testing.T) {
+	children := map[string]*fake.Provider{
+		"find x":  fake.New(returnCall("ok", map[string]any{"answer": "x"})),
+		"model y": fake.New(returnCall("ok", "y")),
+	}
+	root := fake.New(subtaskCall("research", "model y", false), fake.Text("done"))
+	e, _, id := setupEngine(t, &routedProvider{root: root, children: children}, "")
+	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "permissions.yaml"), []byte("permissions:\n  rules:\n    - tool: subtask\n      behavior: ask\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gate := &recordingGate{decide: allowFor(permission.ScopeConversation)}
+	e.cfg.Gate = gate
+	run, err := e.Dispatch(t.Context(), id, []subagent.Request{researchStart("find x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen, _ := dispatchWait(t, run)
+	for _, ev := range seen {
+		if r, ok := ev.(events.PermissionResolved); ok && r.Decision.Scope != permission.ScopeOnce {
+			t.Fatalf("a dispatch approval kept scope %v", r.Decision.Scope)
+		}
+	}
+	run, err = e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if asked := gate.asked(); len(asked) != 2 {
+		t.Fatalf("the model's subtask call ran on the dispatch's approval: %d asks", len(asked))
+	}
+}
+
+// A grandchild's ask under a lead a notice turn started is chained: the lead
+// runs in the background after the notice turn ends, and its worker's ask
+// waits for a turn.
+func TestNoticeWorkChainsTheWholeLineage(t *testing.T) {
+	p := &routedProvider{
+		root: fake.New(subtaskCall("lead", "run a council", true), fake.Text("started")),
+		children: map[string]*fake.Provider{
+			"run a council": fake.New(subtaskCall("worker", "one view", false), fake.Text("council done")),
+			"one view":      fake.New(callAs("deploy", "w-1"), fake.Text("view done")),
+		},
+	}
+	e, _, id := setupEngine(t, p, "")
+	writeVariant(t, e.cfg.Dir, "lead", "---\ncan_spawn: true\n---\nYou lead a council.\n")
+	askedTool(t, e)
+	run, err := e.Send(t.Context(), id, Input{Source: SourceNotice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		n := nextNotice(t, e)
+		if n.Kind == "subtask_ask" {
+			if !n.Chained {
+				t.Fatalf("a grandchild's ask under a notice-started lead was not chained: %+v", n)
+			}
+			return
+		}
+	}
+}

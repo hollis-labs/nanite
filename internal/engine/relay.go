@@ -206,7 +206,7 @@ func (w *rootWaiter) root(ctx context.Context) (*Run, error) {
 			w.notified = true
 			body := fmt.Sprintf("Subtask %s (%s, %q) is waiting for an answer; it will be asked on the next turn.",
 				w.x.info.ID, w.x.origin.Variant, w.x.origin.Goal)
-			w.notice, _ = e.postNotice(context.WithoutCancel(ctx), w.x.root.ID, "subtask_ask", body, e.noticeWork(w.x.info.ID))
+			w.notice, _ = e.postNotice(context.WithoutCancel(ctx), w.x.root.ID, "subtask_ask", body, e.noticeWorkIn(w.x.lineage))
 		}
 		if w.left <= 0 {
 			return nil, errUnanswered

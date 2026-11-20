@@ -27,6 +27,9 @@ type wired struct {
 	svc    *chat.Service
 	conv   string
 	stream *chat.Stream
+	// hold, when set, is called before each Observe with the chat
+	// conversation it publishes on.
+	hold atomic.Pointer[func(string)]
 }
 
 func newWired(t *testing.T, noticeTurns bool) *wired {
@@ -44,6 +47,9 @@ func newWired(t *testing.T, noticeTurns bool) *wired {
 	r, err := chatrunner.Open(t.Context(), chatrunner.Options{
 		Agent: agent.Options{Dir: dir, Provider: w.brain, GlobalSkillsDir: "-", Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks, agent.BuiltinBackground}},
 		Observe: func(ctx context.Context, conversationID string, turn chat.Turn, run chat.Run) error {
+			if hold := w.hold.Load(); hold != nil {
+				(*hold)(conversationID)
+			}
 			return svc.Load().Observe(ctx, conversationID, turn, run)
 		},
 		NoticeTurns: noticeTurns,
@@ -123,6 +129,10 @@ func TestBackgroundDispatchFinishReachesTheWire(t *testing.T) {
 	}
 	started := false
 	seen := w.until(t, "the notice", func(ev chatstream.Event) bool {
+		if ev.Verb == chatstream.VerbRunStart && (ev.Provider != "" || ev.Model != "") {
+			// Only the dispatch run starts here, and it calls no model.
+			t.Fatalf("the dispatch run names provider %q, model %q", ev.Provider, ev.Model)
+		}
 		if ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivitySubagent {
 			v := activityValue(t, ev)
 			started = started || v["state"] == "start" && v["background"] == true
@@ -259,5 +269,161 @@ func TestSubmitRightAfterANoticeIsClean(t *testing.T) {
 			}
 			return ends == want
 		})
+	}
+}
+
+// prime runs one user turn on a chat conversation so the runner knows which
+// Nanite conversation serves it.
+func (w *wired) prime(t *testing.T, conv string, stream *chat.Stream) {
+	t.Helper()
+	if _, err := w.svc.Submit(t.Context(), conv, chat.Turn{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	for {
+		ev, err := stream.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.IsTerminal() {
+			return
+		}
+	}
+}
+
+// A notice caused by work a notice turn started (its background subtask
+// finishing) is announced, never made into another notice turn.
+func TestChainedNoticeStartsNoTurn(t *testing.T) {
+	w := newWired(t, true)
+	w.brain.mu.Lock()
+	w.brain.noticeBackground = "side job"
+	w.brain.mu.Unlock()
+	w.prime(t, w.conv, w.stream)
+	c, err := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(w.conv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PostNotice(t.Context(), "host", "kick off"); err != nil {
+		t.Fatal(err)
+	}
+	// The notice turn starts the background subtask, then ends.
+	w.until(t, "the notice turn's end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	// The subtask's finish is chained: announced in a run with no model step.
+	seen := w.until(t, "the chained notice's run end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	notice, step := false, false
+	for _, ev := range seen {
+		notice = notice || ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityNotice
+		step = step || ev.Verb == chatstream.VerbStepStart
+	}
+	if !notice || step {
+		t.Fatalf("chained notice: announced %v, started a turn %v", notice, step)
+	}
+}
+
+// One conversation's slow Observe does not hold up another's notices.
+func TestNoticesArePublishedPerConversation(t *testing.T) {
+	w := newWired(t, false)
+	other, err := w.svc.EnsureConversation(t.Context(), "desk-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	att, _, err := w.svc.Attach(t.Context(), other.ConversationID, chat.RoleController, chat.StreamCommitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherStream, err := w.svc.Events(t.Context(), other.ConversationID, att.ID, chat.After(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherStream.Close()
+	w.prime(t, w.conv, w.stream)
+	w.prime(t, other.ConversationID, otherStream)
+	release := make(chan struct{})
+	defer close(release)
+	slow := w.conv
+	hold := func(conv string) {
+		if conv == slow {
+			<-release
+		}
+	}
+	w.hold.Store(&hold)
+	a, _ := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(w.conv))
+	b, _ := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(other.ConversationID))
+	if err := a.PostNotice(t.Context(), "host", "for a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PostNotice(t.Context(), "host", "for b"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for {
+		ev, err := otherStream.Next(ctx)
+		if err != nil {
+			t.Fatalf("b's notice was held up by a's: %v", err)
+		}
+		if ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityNotice {
+			return
+		}
+	}
+}
+
+// A notice carried by a turn the runner did not start (the host sent it to
+// the agent directly) is still published on the wire.
+func TestNoticeOnAnotherRunIsPublished(t *testing.T) {
+	w := newWired(t, false)
+	w.prime(t, w.conv, w.stream)
+	c, err := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(w.conv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := c.Send(t.Context(), agent.Input{Text: "long"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PostNotice(t.Context(), "host", "while busy"); err != nil {
+		t.Fatal(err)
+	}
+	carried := false
+	for ev := range run.Events() {
+		if n, ok := ev.(agent.NoticePosted); ok && n.Body == "while busy" {
+			carried = true
+			run.Cancel()
+		}
+	}
+	_, _ = run.Wait()
+	if !carried {
+		t.Fatal("the host's own run did not carry the notice")
+	}
+	seen := w.until(t, "the notice on the wire", func(ev chatstream.Event) bool {
+		return ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityNotice
+	})
+	if v := activityValue(t, seen[len(seen)-1]); v["body"] != "while busy" {
+		t.Fatalf("notice %+v", v)
+	}
+}
+
+// A conversation whose publisher stopped while idle gets a new one: no notice
+// is lost to a publisher that is shutting down.
+func TestNoticeAfterAnIdlePublisherStops(t *testing.T) {
+	t.Cleanup(chatrunner.SetPublisherIdle(10 * time.Millisecond)) // restored after the runner closes
+	w := newWired(t, false)
+	w.prime(t, w.conv, w.stream)
+	c, err := w.runner.Agent().Conversation(t.Context(), chatrunner.ConversationID(w.conv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		if err := c.PostNotice(t.Context(), "host", fmt.Sprintf("n%d", i)); err != nil {
+			t.Fatal(err)
+		}
+		seen := w.until(t, "the notice", func(ev chatstream.Event) bool {
+			return ev.Verb == chatstream.VerbActivity && ev.Kind == chatrunner.ActivityNotice
+		})
+		if v := activityValue(t, seen[len(seen)-1]); v["body"] != fmt.Sprintf("n%d", i) {
+			t.Fatalf("notice %d: %+v", i, v)
+		}
+		time.Sleep(30 * time.Millisecond) // let the publisher go idle and stop
 	}
 }

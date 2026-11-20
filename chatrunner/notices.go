@@ -27,27 +27,36 @@ func (r *Runner) listen(ctx context.Context, notices <-chan agent.NoticePosted) 
 	defer close(r.noticesDone)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	var mu sync.Mutex
 	publishers := map[string]*publisher{}
 	for n := range notices {
 		if r.opts.Observe == nil {
 			continue
 		}
+		mu.Lock()
 		p := publishers[n.ConversationID]
-		if p == nil || p.closed() {
+		if p == nil || !p.push(n) {
+			// None yet, or the last one has just stopped: start another.
 			p = &publisher{wake: make(chan struct{}, 1)}
+			p.push(n)
 			publishers[n.ConversationID] = p
 			wg.Add(1)
-			go func() {
+			go func(key string) {
 				defer wg.Done()
 				p.run(ctx, r)
-			}()
+				mu.Lock()
+				if publishers[key] == p {
+					delete(publishers, key)
+				}
+				mu.Unlock()
+			}(n.ConversationID)
 		}
-		p.push(n)
+		mu.Unlock()
 	}
 }
 
-// publisher publishes one conversation's notices in order. It ends when it
-// has been idle for a while; listen starts a new one when needed.
+// publisher publishes one conversation's notices in order. It stops when it
+// has been idle for publisherIdle; listen starts a new one when needed.
 type publisher struct {
 	mu    sync.Mutex
 	queue []agent.NoticePosted
@@ -55,24 +64,29 @@ type publisher struct {
 	wake  chan struct{}
 }
 
-func (p *publisher) push(n agent.NoticePosted) {
+// publisherIdle is how long a publisher waits for another notice before it
+// stops.
+var publisherIdle = time.Minute
+
+// push queues a notice; false means the publisher has stopped and took
+// nothing.
+func (p *publisher) push(n agent.NoticePosted) bool {
 	p.mu.Lock()
+	if p.done {
+		p.mu.Unlock()
+		return false
+	}
 	p.queue = append(p.queue, n)
 	p.mu.Unlock()
 	select {
 	case p.wake <- struct{}{}:
 	default:
 	}
-}
-
-func (p *publisher) closed() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.done
+	return true
 }
 
 func (p *publisher) run(ctx context.Context, r *Runner) {
-	idle := time.NewTimer(time.Minute)
+	idle := time.NewTimer(publisherIdle)
 	defer idle.Stop()
 	for {
 		p.mu.Lock()
@@ -82,6 +96,9 @@ func (p *publisher) run(ctx context.Context, r *Runner) {
 			case <-p.wake:
 				continue
 			case <-ctx.Done():
+				p.mu.Lock()
+				p.done = true
+				p.mu.Unlock()
 				return
 			case <-idle.C:
 				p.mu.Lock()
@@ -98,15 +115,15 @@ func (p *publisher) run(ctx context.Context, r *Runner) {
 		p.queue = p.queue[1:]
 		p.mu.Unlock()
 		r.publish(ctx, n)
-		idle.Reset(time.Minute)
+		idle.Reset(publisherIdle)
 	}
 }
 
 // publish puts one notice on the wire, unless the runner's own running turn
 // already carried it.
 func (r *Runner) publish(ctx context.Context, n agent.NoticePosted) {
-	if x := r.activeRun(n.ConversationID); x != nil && n.RunID != "" && x.inner != nil && x.inner.ID() == n.RunID {
-		return // translated on that turn
+	if n.RunID != "" && r.activeRunID(n.ConversationID) == n.RunID {
+		return // the runner's own running turn carried it and translates it
 	}
 	chatID := r.chatID(n.ConversationID)
 	if chatID == "" {

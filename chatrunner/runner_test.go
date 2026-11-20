@@ -32,6 +32,9 @@ type brain struct {
 	requests    []llmtypes.ChatRequest
 	overflowed  bool
 	failSummary bool
+	// noticeBackground, when set, is a goal a notice turn starts as a
+	// background subtask.
+	noticeBackground string
 }
 
 func isToolResult(m llmtypes.ChatMessage) bool {
@@ -66,6 +69,12 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 		script, _, _ = strings.Cut(goal, "\n")
 	}
 	switch {
+	case script == agent.NoticeTurnText && b.noticeBackground != "":
+		if steps > 0 {
+			return fake.Text("done")
+		}
+		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-bg", Name: "subtask",
+			Input: map[string]any{"variant": "worker", "goal": b.noticeBackground, "return_spec": "a line", "background": true}}}, {Type: llmtypes.EventDone}}}
 	case strings.HasPrefix(script, "subtask:"):
 		// "subtask:<variant>:<goal>" starts one subtask, then says "done".
 		if steps > 0 {

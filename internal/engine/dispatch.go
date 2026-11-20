@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -214,7 +215,9 @@ func (e *Engine) dispatch(ctx context.Context, r *Run, info store.Conversation, 
 
 // authorizeStart evaluates one dispatched start as a subtask call by the root
 // conversation: the agent's rules and the host's PDP decide, and an ask goes
-// to the gate on the dispatch run, attributed as dispatched. permit is how
+// to the gate on the dispatch run, attributed as dispatched. An approval is
+// always for that start only: a conversation or standing scope is narrowed
+// to once, so it never grants the model's own subtask calls. permit is how
 // the decision is recorded in the trace.
 func (x *execution) authorizeStart(ctx context.Context, call string, start subagent.Request) (permission.PermissionDecision, trace.Permission) {
 	e := x.engine
@@ -250,8 +253,12 @@ func (x *execution) authorizeStart(ctx context.Context, call string, start subag
 				decision = x.decide(ctx, gateReq)
 				release()
 			}
-			if decision.Allow && decision.Scope == permission.ScopeConversation {
-				e.grant(x.info.ID, subagent.ToolName)
+			if decision.Allow && decision.Scope != permission.ScopeOnce {
+				// An approval of a host's dispatch is for that start only:
+				// a standing grant of subtask would also let the model's own
+				// subtask calls run unasked.
+				decision.Scope = permission.ScopeOnce
+				decision.Reason = strings.TrimSpace(decision.Reason + " (a dispatch approval covers this start only)")
 			}
 		}
 	}

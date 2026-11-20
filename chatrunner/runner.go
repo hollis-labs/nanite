@@ -205,7 +205,9 @@ func (r *Runner) begin(ctx context.Context, turn chat.Turn, start func(*agent.Co
 		r.release(out)
 		return nil, fmt.Errorf("chatrunner: %w", err)
 	}
+	r.mu.Lock()
 	out.inner = inner
+	r.mu.Unlock()
 	return out, nil
 }
 
@@ -281,6 +283,17 @@ func (r *Runner) Record(ctx context.Context, turn chat.Turn, answer string) erro
 // Replaced never sends: a Nanite conversation is not replaced behind the
 // Service's back.
 func (r *Runner) Replaced() <-chan string { return r.replaced }
+
+// activeRunID is the Nanite run ID of the runner's running turn on a
+// conversation, or empty.
+func (r *Runner) activeRunID(naniteID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if x := r.active[naniteID]; x != nil && x.inner != nil {
+		return x.inner.ID()
+	}
+	return ""
+}
 
 func (r *Runner) activeRun(naniteID string) *run {
 	r.mu.Lock()

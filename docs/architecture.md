@@ -206,9 +206,10 @@ agent.SourceNotice` and empty text: its user message is always
 `agent.NoticeTurnText` ("A notice arrived."), and the notice reaches the model
 only in the session slot, so the notice text is never sent twice. Its trace
 record has source `reflex`, an automatic activation. A notice caused by work a
-notice turn started (a background subtask or job it began, or an ask one of
-those relayed) is marked `Chained`; a host should not start another notice
-turn for it.
+notice turn started (a background subtask or job it began, or an ask relayed
+from anywhere below one) is marked `Chained`; a host should not start another
+notice turn for it. So a chained ask, relayed while no turn runs, waits for a
+user turn or ends "unanswered" after `SubtaskAskWait`.
 
 ## Host dispatch
 
@@ -217,7 +218,10 @@ A host is not exempt from the agent's gates: Dispatch is refused when the
 agent does not offer `subtask`, and a background start when it does not offer
 `background_status`. Each start is evaluated as a `subtask` call by the
 conversation (the agent's rules and the host PDP): a deny refuses that start,
-and an ask goes to the gate on the dispatch run, attributed as dispatched.
+and an ask goes to the gate on the dispatch run, attributed as dispatched. An
+approval of a dispatch is for that start only: a conversation or standing
+scope is narrowed to once, so it never lets the model's own `subtask` calls
+run unasked.
 Each start has the subtask call's fields, and goes through the same path: the
 variant (required) and its budgets, the subtask slot limits, the agent's
 per-turn token budget, forked context, the result contract, relayed approvals

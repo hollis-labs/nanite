@@ -34,7 +34,8 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
 - Host dispatch: `Conversation.Dispatch` starts subtasks for the host without
   a model call. It keeps the agent's gates: it needs the `subtask` tool (and
   the background tools for a background start), and each start is evaluated
-  as a `subtask` call (a deny refuses it, an ask goes to the gate). It takes
+  as a `subtask` call (a deny refuses it, an ask goes to the gate, and an
+  approval covers that start only, never the model's own calls). It takes
   the same path as a model's `subtask` call (variants,
   budgets, slot limits, the turn budget, forked context, the result contract,
   relayed approvals attributed `dispatched`, progress and trace links). It

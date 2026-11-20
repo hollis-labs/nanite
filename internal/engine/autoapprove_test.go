@@ -200,3 +200,29 @@ func TestAutoApproveHostDispatch(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoModeCannotCallPackageApprovalTool(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		t.Run(fmt.Sprint(auto), func(t *testing.T) {
+			e, _, id := setupEngine(t, fake.New(callWith("tool__fixture", map[string]any{}), fake.Text("done")), "")
+			e.cfg.AutoApprove = auto
+			e.cfg.Gate = permission.AllowGate
+			writeToolPackage(t, e.cfg.Dir, "fixture", "description: Fixture.\nkind: mcp\nentry: run.sh\n", "#!/bin/sh\nexit 0\n")
+			result := toolTurn(t, e, id)
+			files, err := os.ReadDir(e.cfg.ToolApprovalDir)
+			if auto {
+				if !result.IsError || !strings.Contains(result.Content, "tool unavailable") {
+					t.Fatalf("approval tool returned %+v", result)
+				}
+				if err != nil && !os.IsNotExist(err) {
+					t.Fatal(err)
+				}
+				if len(files) != 0 {
+					t.Fatal("auto mode persisted approval")
+				}
+			} else if result.IsError || err != nil || len(files) != 1 {
+				t.Fatalf("normal approval: %+v files=%d err=%v", result, len(files), err)
+			}
+		})
+	}
+}

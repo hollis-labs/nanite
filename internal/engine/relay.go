@@ -63,9 +63,8 @@ func (x *execution) decide(ctx context.Context, req permission.PermissionRequest
 // relayApproval asks the root conversation's gate for a subtask's call. req
 // is the scrubbed request for events; gateReq carries the raw input.
 func (x *execution) relayApproval(ctx context.Context, req, gateReq permission.PermissionRequest) permission.PermissionDecision {
-	if x.engine.cfg.AutoApprove {
-		return x.autoApprove(ctx, req)
-	}
+	// authorize handles auto mode before entering the relay, so this path
+	// always needs a real answer from the root.
 	req.ConversationID, gateReq.ConversationID = x.root.ID, x.root.ID
 	req.ID = x.relayID(req.ID)
 	gateReq.ID = req.ID

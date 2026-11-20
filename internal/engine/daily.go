@@ -115,7 +115,10 @@ func (e *Engine) spendDaily(ctx context.Context, conversation string, tokens int
 		if run != nil {
 			run.emit(ctx, func(meta events.EventMeta) events.Event { warningEvent.EventMeta = meta; return warningEvent })
 		} else {
-			e.runtime.Observe(ctx, conversation, "", warningEvent)
+			_ = e.panics.Call("budget warning sink", func() error {
+				e.runtime.Observe(ctx, conversation, "", warningEvent)
+				return nil
+			})
 		}
 		if notice != nil {
 			e.announce(ctx, *notice, false)

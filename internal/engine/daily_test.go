@@ -10,6 +10,7 @@ import (
 	"time"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
+	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/events"
@@ -239,5 +240,17 @@ func TestSummaryBudgetPersistenceErrorPropagates(t *testing.T) {
 	summary := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(fake.New(fake.Text("summary")), "fixture"), messages: span, messageIDs: []string{"message"}, spend: func(string, []llmtypes.ChatMessage, string) error { return want }}
 	if _, err := summary.Summarize(t.Context(), "summarize", span); !errors.Is(err, want) {
 		t.Fatalf("persistence failure lost: %v", err)
+	}
+}
+
+func TestDailyWarningContainsHelperSinkPanic(t *testing.T) {
+	e, _, _ := setupEngine(t, fake.New(fake.Text("done")), "")
+	e.cfg.DailyTokenBudget = 1
+	e.runtime = events.NewRuntime(runtimeevents.SinkFunc(func(context.Context, runtimeevents.Event) error { panic("fixture sink panic") }), e.cfg.Logger)
+	if text, err := e.Complete(t.Context(), "chat", "", "go", 100); err != nil || text != "done" {
+		t.Fatalf("helper: %q %v", text, err)
+	}
+	if !errors.Is(e.checkDaily(), ErrDailyBudget) {
+		t.Fatal("helper usage not counted")
 	}
 }

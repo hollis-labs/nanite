@@ -534,6 +534,14 @@ type step struct {
 }
 
 func (x *execution) generate(ctx context.Context) error {
+	// Text-only conversations need the same threshold check as tool turns,
+	// before sending their first request. History and in-turn context are
+	// now loaded and the window includes the offered tool schemas.
+	if x.info.ParentID == "" {
+		if err := x.compact(ctx, false); err != nil {
+			return err
+		}
+	}
 	var runErr error
 	var retries int
 	var allText strings.Builder
@@ -775,6 +783,9 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			header += "\n" + x.historyNote(ctx, x.messageIDs[:count])
 		}
 		summary := header + "\n\n" + x.engine.scrub.Text(summarizer.summary)
+		if pinned := x.compactionContext(summarizer.messages[count:]); pinned != "" {
+			summary += "\n\n" + compactionContextLabel + "\n" + pinned
+		}
 		compacted := append([]llmtypes.ChatMessage{{Role: "user", Content: summary}}, summarizer.messages[count:]...)
 		remaining, err := json.Marshal(compacted)
 		if err != nil {

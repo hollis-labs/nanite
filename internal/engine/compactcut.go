@@ -2,12 +2,14 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/slots"
 )
 
 // DefaultCompactionPrompt is the system prompt of the call that writes a
@@ -228,4 +230,32 @@ func requestMessages(msgs []llmtypes.ChatMessage, ids []string) []llmtypes.ChatM
 	}
 	merged.ContentBlocks = append(blocks, merged.ContentBlocks...)
 	return append([]llmtypes.ChatMessage{merged}, msgs[2:]...)
+}
+
+// compactionContextLabel introduces host context carried into a summary, so a
+// later turn's newer context (or a cleared slot) is not read alongside it as
+// current.
+const compactionContextLabel = "[Host context as of this compaction. Context sent in a later message replaces it; if none is sent, it may be out of date.]"
+
+// compactionContext preserves current in-turn slots whose verbatim content
+// would otherwise disappear with the summarized messages. Unchanged slots
+// may have been sent many turns ago; keepCut can also cut inside a long turn.
+// Store them with the summary so recovery sees the same context.
+func (x *execution) compactionContext(kept []llmtypes.ChatMessage) string {
+	var pinned []string
+	for _, block := range x.assembled.Blocks {
+		if x.engine.placement(slots.Name(block.SlotName)) != slots.InTurn || strings.TrimSpace(block.Content) == "" {
+			continue
+		}
+		content := x.engine.scrub.Text(fmt.Sprintf("<%s>\n%s\n</%s>", block.SlotName, block.Content, block.SlotName))
+		present := slices.ContainsFunc(kept, func(m llmtypes.ChatMessage) bool {
+			return strings.Contains(m.Content, content) || slices.ContainsFunc(m.ContentBlocks, func(b llmtypes.ContentBlock) bool {
+				return b.Name == TurnContextBlock && strings.Contains(b.Text, content)
+			})
+		})
+		if !present {
+			pinned = append(pinned, content)
+		}
+	}
+	return strings.Join(pinned, "\n")
 }

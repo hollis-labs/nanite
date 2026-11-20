@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Compaction protects both host context slots and checks the threshold before
+  a root turn’s first model request, including text-only conversations.
+  In-turn host context that would be lost is kept in the summary under a
+  label saying newer context replaces it. With no `CompactAt`, the threshold
+  is the model's context window, so an over-window history now compacts
+  before the first request instead of after the provider refuses it.
+
 - Recovery after compaction: the `history` built-in group
   (`agent.BuiltinHistory`) offers root conversations `history_search` (words,
   `k` up to 20) and `history_get` (up to 20 messages, stopping between messages after 32,000 characters, by

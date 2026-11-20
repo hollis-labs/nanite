@@ -44,14 +44,20 @@ func messagesTokens(msgs []llmtypes.ChatMessage) int {
 	return ctxpkg.DefaultEstimator{}.Estimate(string(raw))
 }
 
-// keepCut picks where the kept part of the conversation starts: the start
-// of a turn such that the turns from it on fit keepTokens, never later than
-// the last turn's start. Everything before it is summarized. It returns 0
-// when there is nothing before the kept part. ids marks stored messages; a
-// message with no id (an earlier summary) never starts a kept turn.
-func keepCut(msgs []llmtypes.ChatMessage, ids []string, keepTokens int) int {
+// keepCut picks where the kept part of the conversation starts; everything
+// before it is summarized. It keeps whole turns while they fit keepTokens,
+// cutting only where the person's message starts a turn, and always the
+// last turn. When the last turn alone does not fit, it cuts inside that turn
+// before a step of the agent's (so never between a tool call and its
+// result), keeping the latest steps that fit and at least the last one;
+// the turn's own message is then in the summary. structure is the history
+// as stored, which says where turns and steps start; msgs is the same
+// history after compaction stages (sizes); ids marks stored messages, and
+// a message with no id (an earlier summary) never starts the kept part. It
+// returns 0 when there is nothing to summarize.
+func keepCut(structure, msgs []llmtypes.ChatMessage, ids []string, keepTokens int) int {
 	var starts []int
-	for i, m := range msgs {
+	for i, m := range structure {
 		if i < len(ids) && ids[i] != "" && ownerMessage(m) {
 			starts = append(starts, i)
 		}
@@ -59,8 +65,26 @@ func keepCut(msgs []llmtypes.ChatMessage, ids []string, keepTokens int) int {
 	if len(starts) == 0 {
 		return 0
 	}
-	// The last turn is always kept; earlier ones while they fit.
-	cut := starts[len(starts)-1]
+	last := starts[len(starts)-1]
+	if messagesTokens(msgs[last:]) > keepTokens {
+		// The current turn alone is over the budget: cut inside it.
+		cut := 0
+		for j := len(structure) - 1; j > last; j-- {
+			if structure[j].Role != "assistant" || ids[j] == "" {
+				continue
+			}
+			if cut != 0 && messagesTokens(msgs[j:]) > keepTokens {
+				break
+			}
+			cut = j
+		}
+		if cut != 0 {
+			return cut
+		}
+		return last
+	}
+	// The last turn is kept; earlier ones while they fit.
+	cut := last
 	for k := len(starts) - 2; k >= 0; k-- {
 		if messagesTokens(msgs[starts[k]:]) > keepTokens {
 			break
@@ -125,16 +149,14 @@ func clip(s string, n int) string {
 	return s[:n] + " [...]"
 }
 
-// summaryInput is what a summary call is sent for span: the messages as
-// they are while they fit inputTokens, else a clipped transcript.
+// summaryInput is what a summary call is sent for span: one message with a
+// plain transcript, bounded by inputTokens, so the request never ends with
+// the agent's message (which a provider may take as a reply to continue).
 func summaryInput(span []llmtypes.ChatMessage, inputTokens int) []llmtypes.ChatMessage {
 	if inputTokens <= 0 {
 		inputTokens = DefaultCompactionInputTokens
 	}
-	if messagesTokens(span) <= inputTokens {
-		return span
-	}
-	return []llmtypes.ChatMessage{{Role: "user", Content: transcript(span, inputTokens*4)}}
+	return []llmtypes.ChatMessage{{Role: "user", Content: "Summarize this part of the conversation:\n\n" + transcript(span, inputTokens*4)}}
 }
 
 // requestTokens is the estimated size of a request with conversation
@@ -167,4 +189,43 @@ func cloneMessages(msgs []llmtypes.ChatMessage) []llmtypes.ChatMessage {
 		out[i].ContentBlocks = slices.Clone(out[i].ContentBlocks)
 	}
 	return out
+}
+
+// keepTokens is the compaction keep budget for this window: the configured
+// one, at most half the window's budget, so a pass can always free room.
+func (x *execution) keepTokens(window *ctxpkg.ContextWindow) int {
+	keep := x.engine.cfg.CompactKeepTokens
+	if keep <= 0 || window == nil {
+		return keep
+	}
+	if limit := window.TotalBudget / 2; keep > limit {
+		if !x.warnedKeep {
+			x.warnedKeep = true
+			x.engine.cfg.Logger.Warn("nanite: CompactKeepTokens is over half the compaction budget; keeping half instead",
+				"conversation", x.info.ID, "keep", keep, "budget", window.TotalBudget)
+		}
+		keep = max(limit, 1)
+	}
+	return keep
+}
+
+// requestMessages is the history as a request sends it: a leading summary
+// (a message with no id) is merged into the person's message after it, so
+// the request never has two user messages in a row.
+func requestMessages(msgs []llmtypes.ChatMessage, ids []string) []llmtypes.ChatMessage {
+	if len(msgs) < 2 || len(ids) < 1 || ids[0] != "" || msgs[0].Role != "user" || msgs[1].Role != "user" {
+		return msgs
+	}
+	merged := msgs[1]
+	var blocks []llmtypes.ContentBlock
+	if msgs[0].Content != "" {
+		blocks = append(blocks, llmtypes.ContentBlock{Type: "text", Text: msgs[0].Content})
+	}
+	blocks = append(blocks, msgs[0].ContentBlocks...)
+	if merged.Content != "" {
+		blocks = append(blocks, llmtypes.ContentBlock{Type: "text", Text: merged.Content})
+		merged.Content = ""
+	}
+	merged.ContentBlocks = append(blocks, merged.ContentBlocks...)
+	return append([]llmtypes.ChatMessage{merged}, msgs[2:]...)
 }

@@ -39,7 +39,7 @@ modules asked for (`agent.ErrandSource("late-answer")` is
 `-`, starting with a letter or digit). It carries its own text, and is not
 the person speaking: it is not classified, fires no reflexes, does not reach
 the front desk, does not replace the person's interrupted turn (it is refused
-until they resume or discard it) and does not reset the notice-turn count.
+until they resume or discard it, with `agent.ErrBusy` so the host can retry) and does not reset the notice-turn count.
 Its trace record has source `host`, and its `situation` the exact source, with
 or without steering. chatrunner maps a chat turn's meta: a non-empty
 `"errand"` is `ErrandSource` of it, else `"auto"` set to `true` or a

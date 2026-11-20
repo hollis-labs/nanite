@@ -308,6 +308,18 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	}
 	in := agent.Input{Text: turn.Text, Source: source}
 	person := source == ""
+	if !person {
+		// Only the owner's new message replaces their interrupted turn. A
+		// host turn is refused (busy, so the host can retry it) until they
+		// resume or discard it.
+		c, err := r.conversation(ctx, turn.ConversationID)
+		if err != nil {
+			return nil, err
+		}
+		if held := c.Interrupted(); held != nil {
+			return nil, fmt.Errorf("chatrunner: %w: the owner's interrupted turn %s waits for them to resume or discard it", agent.ErrBusy, held.ID)
+		}
+	}
 	if r.opts.Situation != nil {
 		sit := r.opts.Situation(turn)
 		in.Situation = &sit
@@ -316,8 +328,6 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	var prelude []chatstream.Event
 	x, err := r.beginAfterDesk(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
 		if person {
-			// Only the owner's new message replaces their interrupted turn;
-			// a host's turn waits for them to resume or discard it.
 			discarded, err := r.discardInterrupted(runCtx, turn.ConversationID, c)
 			if err != nil {
 				return nil, err

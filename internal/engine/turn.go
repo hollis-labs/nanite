@@ -669,9 +669,6 @@ func (x *execution) generate(ctx context.Context) error {
 			x.result.StopReason = llmtypes.StopReasonEndTurn
 			return runloop.Finish
 		}
-		if x.result.StopReason == llmtypes.StopReasonMaxTokens {
-			return runloop.Finish
-		}
 		if x.result.Steps >= x.definition.Runtime.MaxSteps {
 			x.result.StopReason = events.StopMaxSteps
 			return runloop.Finish

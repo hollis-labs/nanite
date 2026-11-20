@@ -304,3 +304,26 @@ func TestResumeAtStepLimitDoesNotRunMoreTools(t *testing.T) {
 		})
 	}
 }
+
+// A step that calls a tool and stops at max_tokens still continues: the model
+// sees the tool's result and answers, instead of the turn ending empty.
+func TestToolCallAtLengthStopContinues(t *testing.T) {
+	cut := fake.Response{Events: []llmtypes.StreamEvent{
+		{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-1", Name: "unknown"}},
+		{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: llmtypes.StopReasonMaxTokens}},
+		{Type: llmtypes.EventDone},
+	}}
+	p := &watchedProvider{Provider: fake.New(cut, fake.Text("after tool"))}
+	e, _, id := setupEngine(t, p, "")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != "after tool" || len(p.requests) != 2 {
+		t.Fatalf("result %+v requests=%d, want the turn to continue after the tool", result, len(p.requests))
+	}
+}

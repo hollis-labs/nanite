@@ -23,6 +23,9 @@ func (p *limitProvider) StreamChat(ctx context.Context, req llmtypes.ChatRequest
 func TestEmbeddingRuntimeLimits(t *testing.T) {
 	for _, invalid := range []agent.Options{{MaxSteps: -1}, {MaxOutputTokens: -1}} {
 		invalid.Dir = t.TempDir()
+		writeAgent(t, invalid.Dir)
+		invalid.GlobalSkillsDir = "-"
+		invalid.Provider = fake.New()
 		if a, err := agent.Open(t.Context(), invalid); err == nil {
 			a.Close()
 			t.Fatal("negative limit accepted")

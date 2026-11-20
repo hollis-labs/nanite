@@ -67,6 +67,12 @@ about either setting.
 - `inventory` varies `SubtaskResultCap`. At 1,500 tokens the list is over the cap: the parent
   receives a pointer and has to fetch the stored result.
 
+**Stub tools:** a scenario's `Stubs` are host tools offered in every arm (group `eval-stubs`), so a
+case can exercise an agent that depends on host or MCP tools without calling them. Each stub has a
+name, description, input schema and canned results, returned in order, one a call, the last
+repeating; a tool not marked read-only asks for approval, which the harness grants and counts.
+`Result.StubCalls` counts each stub's calls, subtasks' included. The checked-in scenarios use none.
+
 ## Metrics
 
 All of these come from the task turn's trace records (libs `agent/trace` v0.2.0), except approvals

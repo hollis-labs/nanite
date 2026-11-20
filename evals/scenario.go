@@ -91,6 +91,8 @@ type Scenario struct {
 	// Requires names variants a subtask arm must run: a subtask run that
 	// does not is invalid, not a success.
 	Requires []string
+	// Stubs are host tools offered in every arm, with canned results.
+	Stubs []Stub
 	// Arms are run after DefaultArms.
 	Arms []Arm
 	// Grade checks the final answer and the workspace the run left behind. It

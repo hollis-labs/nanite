@@ -47,7 +47,7 @@ func sseToolStream(parts int, gap, silence time.Duration) http.HandlerFunc {
 
 func readAll(t *testing.T, c *Client, idle time.Duration) (tool *llmtypes.ToolUseBlock, keepalives int, err error) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(keepalive.WithIdle(context.Background(), idle))
 	defer cancel()
 	ch, err := c.StreamChat(ctx, llmtypes.ChatRequest{Model: "claude-sonnet-4-5-20250514",
 		Messages: []llmtypes.ChatMessage{{Role: "user", Content: "write"}},
@@ -87,12 +87,12 @@ func TestLongToolInputIsNotAStall(t *testing.T) {
 	old := keepalive.SetEvery(20 * time.Millisecond)
 	t.Cleanup(func() { keepalive.SetEvery(old) })
 
-	c := newStreamingTestClient(t, sseToolStream(12, 25*time.Millisecond, 0))
-	tool, keepalives, err := readAll(t, c, 120*time.Millisecond)
+	c := newStreamingTestClient(t, sseToolStream(24, 25*time.Millisecond, 0))
+	tool, keepalives, err := readAll(t, c, 300*time.Millisecond)
 	if err != nil {
 		t.Fatalf("a busy stream stalled: %v", err)
 	}
-	if tool == nil || tool.Input["text"] != strings.Repeat("ab", 12) {
+	if tool == nil || tool.Input["text"] != strings.Repeat("ab", 24) {
 		t.Fatalf("tool input = %+v", tool)
 	}
 	if keepalives == 0 {
@@ -105,9 +105,23 @@ func TestSilentStreamStillStalls(t *testing.T) {
 	old := keepalive.SetEvery(20 * time.Millisecond)
 	t.Cleanup(func() { keepalive.SetEvery(old) })
 
-	c := newStreamingTestClient(t, sseToolStream(0, 0, 400*time.Millisecond))
-	_, _, err := readAll(t, c, 120*time.Millisecond)
+	c := newStreamingTestClient(t, sseToolStream(0, 0, 900*time.Millisecond))
+	_, _, err := readAll(t, c, 300*time.Millisecond)
 	if !errors.Is(err, turn.ErrTurnStalled) {
 		t.Fatalf("a silent stream did not stall: %v", err)
+	}
+}
+
+// With only the default 5 second interval, a short idle timeout would fire
+// before the first keepalive. The interval follows the reader's idle timeout
+// (a third of it) when that is shorter.
+func TestShortIdleTimeoutStillGetsKeepalives(t *testing.T) {
+	c := newStreamingTestClient(t, sseToolStream(24, 25*time.Millisecond, 0))
+	tool, keepalives, err := readAll(t, c, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("a busy stream stalled under a short idle timeout: %v", err)
+	}
+	if tool == nil || keepalives == 0 {
+		t.Fatalf("tool = %+v, keepalives = %d", tool, keepalives)
 	}
 }

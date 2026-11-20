@@ -152,7 +152,7 @@ func (c *Client) runStream(ctx context.Context, stream *ssestream.Stream[sdk.Mes
 	var currentTool *toolUseAcc
 	var currentThinking *thinkingAcc
 
-	busy := keepalive.Start()
+	busy := keepalive.Start(ctx)
 	emit := func(event llmtypes.StreamEvent) bool {
 		select {
 		case ch <- event:

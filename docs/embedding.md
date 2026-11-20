@@ -164,8 +164,9 @@ A turn fails as stalled when its model stream sends nothing for
 of what a model writes is not passed on as it arrives: a tool call's input
 is kept until the block ends, and so is thinking. While such frames keep
 arriving, each provider stream sends a `keepalive` event at most every 5
-seconds, so a model writing a long tool input (a whole document, say) is not
-mistaken for a stall. A keepalive carries nothing and never reaches the
+seconds, or every third of the idle timeout when that is shorter (never more
+often than every 100ms), so a model writing a long tool input (a whole
+document, say) is not mistaken for a stall. A keepalive carries nothing and never reaches the
 reply, the transcript or the events. A stream that receives no frames at all
 still stalls. There is no `host.yaml` key for the idle timeout yet; it needs
 a field in libs `agent/agentdir`.

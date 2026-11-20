@@ -75,7 +75,7 @@ func (c *Client) streamResponse(ctx context.Context, req llmtypes.ChatRequest) (
 		defer close(out)
 		defer failure.RecoverStream(ctx, c.panics, "openai responses stream", out)
 		defer func() { _ = stream.Close() }()
-		busy := keepalive.Start()
+		busy := keepalive.Start(ctx)
 		emit := func(event llmtypes.StreamEvent) bool {
 			select {
 			case <-ctx.Done():

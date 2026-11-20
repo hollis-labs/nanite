@@ -55,7 +55,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 			toolOrder    []int64
 		)
 
-		busy := keepalive.Start()
+		busy := keepalive.Start(ctx)
 		emit := func(ev llmtypes.StreamEvent) bool {
 			select {
 			case <-ctx.Done():

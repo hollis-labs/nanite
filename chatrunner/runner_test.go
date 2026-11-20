@@ -35,6 +35,10 @@ type brain struct {
 	// noticeBackground, when set, is a goal a notice turn starts as a
 	// background subtask.
 	noticeBackground string
+	// plan is what the front desk's planner prompt gets back.
+	plan string
+	// planned records the planner requests.
+	planned []llmtypes.ChatRequest
 }
 
 func isToolResult(m llmtypes.ChatMessage) bool {
@@ -114,9 +118,13 @@ func (b *brain) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-cha
 	return fake.New(b.respond(req)).StreamChat(ctx, req)
 }
 
-func (b *brain) Complete(context.Context, llmtypes.ChatRequest) (string, error) {
+func (b *brain) Complete(_ context.Context, req llmtypes.ChatRequest) (string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if strings.Contains(req.SystemPrompt, "You are the front desk") {
+		b.planned = append(b.planned, req)
+		return b.plan, nil
+	}
 	if b.failSummary {
 		return "", errors.New("summary unavailable")
 	}

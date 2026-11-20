@@ -229,8 +229,11 @@ plans needs the `subtasks` and `background` builtin groups.
 
 - *Intake.* Before each user turn, `DeskOptions.Intake` screens the message
   and, when it is worth it, plans it (`desk.Model` over a small model, or
-  the rules). Planning is bounded by `IntakeTimeout` (15s) and never blocks
-  the message. A trivial plan changes nothing. In `suggest` mode the turn
+  the rules). `PlanWithModel` plans with the agent's own provider, the
+  `desk` use in `providers.yaml` (falling back to chat), with
+  `PlannerInstructions` added to its prompt; `agent.Agent.Complete` is the
+  one-request call behind it. Planning is bounded by `IntakeTimeout` (15s)
+  and never blocks the message. A trivial plan changes nothing. In `suggest` mode the turn
   opens with a `nanite.desk.plan` activity (id, disposition, topic, card,
   plan) and the chat agent is told a plan was suggested; the host calls
   `r.Desk().AcceptPlan(ctx, chatID, id, edited)` or `DeclinePlan`, and

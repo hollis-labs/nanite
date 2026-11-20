@@ -24,7 +24,7 @@ type Definition struct {
 	Rules    []byte
 	// Providers are the named providers from providers.yaml.
 	Providers map[string]provider.Spec
-	// Use selects a provider and model per use (chat, summarizer, subtask)
+	// Use selects a provider and model per use (chat, summarizer, subtask, desk)
 	// from providers.yaml. A use not listed falls back to chat; chat not
 	// listed uses host.yaml's runtime.provider and runtime.model.
 	Use map[string]Selection
@@ -35,6 +35,8 @@ const (
 	UseChat       = "chat"
 	UseSummarizer = "summarizer"
 	UseSubtask    = "subtask"
+	// UseDesk is the front desk's planner (chatrunner DeskOptions.PlanWithModel).
+	UseDesk = "desk"
 )
 
 // Selection names a provider (built in or named) and a model.
@@ -81,9 +83,9 @@ func loadProviders(dir string) (map[string]provider.Spec, map[string]Selection, 
 	}
 	for use, sel := range file.Use {
 		switch use {
-		case UseChat, UseSummarizer, UseSubtask:
+		case UseChat, UseSummarizer, UseSubtask, UseDesk:
 		default:
-			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer or subtask", use)
+			return nil, nil, fmt.Errorf("providers.yaml: use %q must be chat, summarizer, subtask or desk", use)
 		}
 		// A name not defined here may be one the host supplies; the engine
 		// reports a name nobody defines when the use is resolved.

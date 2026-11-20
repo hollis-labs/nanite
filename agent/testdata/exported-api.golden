@@ -1,5 +1,6 @@
 type Agent struct
   (*Agent) Close() error
+  (*Agent) Complete(ctx context.Context, use string, system string, prompt string, maxTokens int) (string, error)
   (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
   (*Agent) Conversations(ctx context.Context) ([]ConversationInfo, error)
   (*Agent) Info(ctx context.Context) (Info, error)
@@ -396,3 +397,4 @@ type Usage = github.com/hollis-labs/nanite/internal/events.Usage struct
   field CacheWriteTokens int
   field Subtask string
   field Background bool
+const UseDesk untyped string

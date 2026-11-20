@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- providers.yaml: a `desk` use for the front desk's planner, falling back
+  to chat. `agent.Agent.Complete` makes one model request for a use
+  outside any conversation, and chatrunner `DeskOptions.PlanWithModel`
+  plans with it. A desk job's result whose lookup fails is read up to three
+  times before its item is failed.
+
 - chatrunner: the front desk (`Options.Desk`, libs `agent/desk`). Intake
   plans each user message (off, shadow, suggest or auto); suggested plans
   open the turn as a `nanite.desk.plan` activity and run on

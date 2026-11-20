@@ -206,6 +206,17 @@ a, err := agent.Open(ctx, agent.Options{
 | `BuiltinTools` | the agent's tool packages (`tool__<name>`, `tool__<name>__<tool>`) and `tool_validate`; see "Tool packages" in [agent-directory.md](agent-directory.md) |
 | `BuiltinHistory` | `history_search` and `history_get`, offered to root conversations only: search the conversation's own full transcript, including messages compaction summarized, and read messages by number, up to 20 (and 32,000 characters) at a time. The compaction summary names them, with the compacted message range, when they are offered. |
 
+Tool-package approvals are host state outside the agent directory. An explicit
+`Options.DataDir` stores them in `<DataDir>/tool-approvals/`; otherwise they
+use `os.UserConfigDir()/nanite/tool-approvals/`. The resolved path, including
+symlinks, must be outside the resolved agent directory. Approvals are keyed
+by that agent directory, package name, and digest, with private directory
+and file permissions (0700 and 0600). Old approvals in the agent-local
+database are ignored; approve those packages again. This separates approvals
+from agent-authored files, but does not isolate arbitrary code running as
+the same OS user. Such code can access the host's files; use OS isolation
+when that boundary is needed.
+
 Leaving `Builtins` nil gives the default for the agent's kind, as above.
 
 A host can read a root conversation's own transcript itself with

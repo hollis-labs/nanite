@@ -45,7 +45,9 @@ var (
 type Options struct {
 	// Dir is the required authored agent directory.
 	Dir string
-	// DataDir defaults to .nanite inside Dir.
+	// DataDir defaults to .nanite inside Dir. When explicitly set, tool-package
+	// approvals use DataDir/tool-approvals, which must resolve outside Dir.
+	// Without an explicit DataDir, approvals use the OS user config directory.
 	DataDir string
 	// WorkDir is the agent's working directory, an existing absolute
 	// directory: relative paths in the file tools resolve there first, then
@@ -58,8 +60,9 @@ type Options struct {
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
 	// ToolPackageEnv names credential-like host variables (provider key
-	// variables, or names containing KEY, TOKEN, SECRET, AUTH, PASSWORD or
-	// CREDENTIAL) that tool packages may pass through with env. Without it a
+	// variables, PATs, DSNs, credential URLs, or names containing KEY, TOKEN,
+	// SECRET, AUTH, PASSWORD or CREDENTIAL) that tool packages may pass through
+	// with env. Without it a
 	// package that lists one does not load; it should ask for a Warden token
 	// with needs instead.
 	ToolPackageEnv []string
@@ -288,6 +291,13 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load agent: %w", err)
 	}
+	approvalDir := ""
+	if opts.DataDir != "" {
+		approvalDir, err = filepath.Abs(filepath.Join(opts.DataDir, "tool-approvals"))
+		if err != nil {
+			return nil, err
+		}
+	}
 	rt, err := runtimeSettings(opts, def.Profile.Runtime)
 	if err != nil {
 		return nil, err
@@ -371,7 +381,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		providers[spec.Name] = spec
 	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,

@@ -114,6 +114,7 @@ func TestBadStubsAreRefused(t *testing.T) {
 		"JSON Schema object ":      {{Name: "b", Schema: json.RawMessage(`[1]`), Results: ok}},
 		"reserved":                 {{Name: "read_file", Results: ok}},
 		"reserved ":                {{Name: "mcp__fs__read", Results: ok}},
+		"empty when":               {{Name: "a", Results: []StubResult{{When: map[string]any{}, Text: "x"}}}},
 	} {
 		s := stubScenario(t)
 		s.Stubs = stubs
@@ -134,5 +135,9 @@ func TestMatches(t *testing.T) {
 		if got := matches(w, in); got != want {
 			t.Errorf("%s: %v", when, got)
 		}
+	}
+	// A When written in Go (an int) matches the decoded input (a float64).
+	if !matches(map[string]any{"n": 2}, in) {
+		t.Error("an int in When did not match the decoded number")
 	}
 }

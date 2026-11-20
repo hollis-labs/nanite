@@ -67,6 +67,8 @@ func checkStubs(stubs []Stub) error {
 			return fmt.Errorf("evals: stub name %q: use 1-64 letters, digits, _ or -", s.Name)
 		case len(s.Results) == 0:
 			return fmt.Errorf("evals: stub %q has no results", s.Name)
+		case slices.ContainsFunc(s.Results, func(r StubResult) bool { return r.When != nil && len(r.When) == 0 }):
+			return fmt.Errorf("evals: stub %q: an empty when matches every call; leave it out", s.Name)
 		}
 	}
 	var g tools.Groups

@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+## 0.7.0
+
+Steering, the front desk, Warden auth and the Workbench APIs. Root turns can
+be steered (libs `agent/steer`: owner-set modes, work slots, reflexes and
+classifier suggestions), including host turns (auto, errand) and event and
+focus reflexes. chatrunner gains the front desk (libs `agent/desk`), which
+survives a restart, and resumes interrupted turns. Agents authenticate with
+short-lived Warden tokens (`identity.yaml`, `auth: warden`), and a missing
+grant waits in the chat and continues on approval. Agents can write their own
+tools (`tools/<name>/`). New public packages `agent/authored` (the rules for
+an agent directory's Nanite files) and `agent/providers` (provider
+constructors); evals run concurrently and can stub tools. A model writing a
+long tool input is no longer taken for a stalled stream.
+
+Breaking (no aliases or compatibility layer):
+
+- chatrunner: a turn the previous process left unfinished is no longer
+  discarded when its chat is next used. **Call `Runner.RecoverTurns` once
+  the chat Service starts**, or such turns wait (and are discarded after
+  `Options.InterruptedHold`, default 15 minutes).
+- evals: `Run` never changes the process's working directory; each run
+  works in its copy through `agent.Options.WorkDir`, and `Config.Dir` is the
+  base directory for the copies. A request that does not fit beside other
+  runs' reservations waits instead of being refused.
+- Agent directories: variants, `providers.yaml`, `identity.yaml` and tool
+  packages are read through an `os.Root`, so a symlink that leaves the agent
+  directory (a `variants/` linked to a shared folder, say) is an error.
+- Tool names: `tool__*` and `tool_validate` are reserved for tool packages,
+  and `.mcp.json` servers may not use the `tool:` prefix.
+- `Input.Source`: besides person and notice, only `agent.SourceAuto` and
+  `agent.ErrandSource(module)` (`errand:<module>`) are accepted; chatrunner
+  refuses a turn with bad `errand` or `auto` meta.
+- Events: `Steered` gains `Event` (set for event reflexes such as
+  `nanite.compacted`).
+- Background jobs: a job `Close` cancels has the reason `shutdown`, and one
+  the next start finds still running has `process exit`, instead of a
+  plain cancellation or failure.
+- `providers.NewNamed` refuses `auth: warden` without `Options.Warden`.
+- Store: migration 8 (`conversation_settings`) runs on open.
+- Dependencies: libs `agent/steer` v0.1.0 and `agent/desk` v0.1.0, through
+  the Substrate BOM (768e5f7), which also moves libs `harness/core` forward.
+
+- Steering host turns and event and focus reflexes (parity gaps 6 and 7).
+  `agent.SourceAuto` and `agent.ErrandSource(module)` (module: 1–64 of
+  `[A-Za-z0-9._-]`, starting with a letter or digit; text required) are
+  steered like notice turns: the mode and work slots, no classifier and no
+  reflexes. chatrunner maps chat turn meta to them (a non-empty `errand`,
+  else a true or non-empty `auto`); such turns skip front-desk intake, do not
+  discard the owner's interrupted turn (they are refused until it is resumed
+  or discarded) and do not reset the notice-turn count. Traces record source
+  `host` and the exact source in `situation.source`, with or without
+  steering. `Conversation.SteerEvent(ctx, topic)` and `SteerFocus(ctx,
+  view)` run the event and focus reflexes active in the mode in force and
+  return `agent.HostFired{Fired, Actions}`, keeping cooldowns; they are host
+  API only (no model tool), for root conversations, and return
+  `ErrNoSteering` without steering. chatrunner adds `Runner.SteerEvent` and
+  `Runner.SteerFocus`. After a successful root compaction Nanite posts
+  `nanite.compacted` (`agent.TopicCompacted`); what fires is emitted as
+  `Steered{Event: "nanite.compacted"}` to `OnSteered`. Event reminders wait
+  for the next person's message (at most 10, in memory).
 - A model writing a long tool input is no longer taken for a stalled stream.
   The Anthropic and OpenAI streams keep a tool call's input (and thinking)
   until the block ends; while those frames arrive they now send a

@@ -31,6 +31,14 @@ func TestResolveLimitedRefusesWhatCouldRecurse(t *testing.T) {
 		"forbidden in items":   `{"type":"array","items":{"$anchor":"x"}}`,
 		"forbidden nested def": `{"allOf":[{"$defs":{"q":{"$id":"x"}}}]}`,
 		"oversized":            `{"description":"` + strings.Repeat("x", MaxSchemaBytes) + `"}`,
+		// jsonschema-go reads keywords ignoring case, the last duplicate winning.
+		"upper ref":           `{"allOf":[{"$REF":"#"}]}`,
+		"upper allOf cycle":   `{"$ref":"#/$defs/a","$defs":{"a":{"ALLOF":[{"$ref":"#/$defs/a"}]}}}`,
+		"mixed ref":           `{"$Ref":"#"}`,
+		"upper not":           `{"$defs":{"a":{"NOT":{"$ref":"#/$defs/a"}}},"$ref":"#/$defs/a"}`,
+		"duplicate allOf":     `{"allOf":[],"AllOf":[{"$ref":"#"}]}`,
+		"upper id with cycle": `{"$defs":{"a":{"$ID":"https://example.com/a","$defs":{"b":{"allOf":[{"$ref":"#/$defs/b"}]}},"$ref":"#/$defs/b"}},"$ref":"#/$defs/a"}`,
+		"upper defs key":      `{"$DEFS":{"a":{"allOf":[{"$ref":"#/$defs/a"}]}},"$ref":"#/$defs/a"}`,
 	} {
 		if _, err := ResolveLimited(json.RawMessage(schema)); err == nil {
 			t.Errorf("%s: accepted %s", name, schema)
@@ -55,6 +63,7 @@ func TestResolveLimitedAllowsRecursionThroughValues(t *testing.T) {
 		"chained defs":   `{"$defs":{"a":{"$ref":"#/$defs/b"},"b":{"type":"string"}},"$ref":"#/$defs/a"}`,
 		"definitions":    `{"definitions":{"s":{"type":"string"}},"items":{"$ref":"#/definitions/s"}}`,
 		"default object": `{"type":"object","default":{"$ref":"#"},"enum":[{"$id":"x"}]}`,
+		"names any case": `{"properties":{"Type":{"type":"string"},"ALLOF":{"type":"string"}},"$defs":{"Ref":{"type":"string"}},"items":{"$ref":"#/$defs/Ref"}}`,
 	} {
 		if _, err := ResolveLimited(json.RawMessage(schema)); err != nil {
 			t.Errorf("%s: %v", name, err)

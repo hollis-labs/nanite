@@ -151,9 +151,10 @@ the only call in its step: any other call in that step, including a second
 `return_result`, is answered "ignored" and does not run. The tool is offered
 to every child whatever its variant allows, never to a root chat, and it is
 not put to the permission check, since it only hands the result to the
-engine. A child is also always offered `fetch_tool_result` and
-`search_tool_result`, so it can read the pointers its own tools and
-subtasks hand back.
+engine. A child is also offered `fetch_tool_result` and
+`search_tool_result` even when its variant's allow list does not name them,
+so it can read the pointers its own tools and subtasks hand back; a
+variant's explicit deny still removes them.
 
 `return_spec` is prose (a JSON string) or a JSON Schema object. A schema the
 model writes (a `return_spec`, or an `ask_user` question's schema) is held to
@@ -164,8 +165,10 @@ that refers back to itself, and that overflows the stack: at most 16KB; no
 a definition that exists; and following `$ref`, `allOf`, `anyOf`, `oneOf`,
 `not`, `if`/`then`/`else`, `dependentSchemas` or `dependencies` must never
 lead back to the same definition without moving into a property or item.
-Anything else is refused before a child starts. Tool input schemas from the
-host and MCP servers are not held to this. With a schema, `result` is
+Keywords must be spelled exactly (jsonschema-go reads them ignoring case),
+and the check runs on the library's own reading of the schema. Anything else
+is refused before a child starts. Tool input schemas from the host and MCP
+servers are not held to this. With a schema, `result` is
 validated: a result that fails gets one repair (the child sees the
 validation error and calls `return_result` again), and a second failure is
 accepted as `partial` with the reason `return_spec: <error>`.

@@ -163,3 +163,19 @@ func TestAllowsToolNeedsTheWholeChain(t *testing.T) {
 		t.Error("root or ask_user handling changed")
 	}
 }
+
+func TestResultReadersFollowDenyButNotAllow(t *testing.T) {
+	allowOnly := Variant{Name: "narrow", Allow: []string{"read_file"}}
+	denying := Variant{Name: "sealed", Allow: []string{"read_file"}, Deny: []string{"fetch_tool_result", "search_*"}}
+	for _, tool := range []string{"fetch_tool_result", "search_tool_result"} {
+		if !AllowsTool(false, []Variant{allowOnly}, false, tool, true) {
+			t.Errorf("an allow list that does not name %s removed it", tool)
+		}
+		if AllowsTool(false, []Variant{denying}, false, tool, true) {
+			t.Errorf("an explicit deny did not remove %s", tool)
+		}
+		if AllowsTool(false, []Variant{denying, allowOnly}, false, tool, true) {
+			t.Errorf("a lead's deny did not remove %s from its child", tool)
+		}
+	}
+}

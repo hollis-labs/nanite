@@ -125,10 +125,19 @@ func AllowsTool(root bool, chain []Variant, canSpawn bool, name string, readOnly
 		return false
 	}
 	switch name {
-	case ReturnToolName, "fetch_tool_result", "search_tool_result":
-		// Every child must be able to end its subtask, and to read the
-		// pointers its own tools and subtasks hand back, whatever its
-		// variant narrows. None of these acts outside the conversation.
+	case ReturnToolName:
+		// Every child must be able to end its subtask, whatever its variant
+		// narrows.
+		return true
+	case "fetch_tool_result", "search_tool_result":
+		// A child reads the pointers its tools and subtasks hand back, so an
+		// allow list need not name these; an explicit deny still removes
+		// them.
+		for _, v := range chain {
+			if matchAny(v.Deny, name) {
+				return false
+			}
+		}
 		return true
 	}
 	for _, v := range chain {

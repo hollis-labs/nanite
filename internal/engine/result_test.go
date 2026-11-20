@@ -3,12 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/libs/agent/core/toolresult"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/tools"
@@ -408,5 +410,29 @@ func TestVariantResultCapOverridesTheAgent(t *testing.T) {
 	})
 	if view.ResultRef == "" || string(view.Result) != "null" {
 		t.Fatalf("a variant cap under the default was not applied: %+v", view)
+	}
+}
+
+func TestOpeningPurgesExpiredResults(t *testing.T) {
+	e, db, id := setupEngine(t, fake.New(), "")
+	past := time.Now().Add(-time.Hour)
+	for _, entry := range []toolresult.Entry{
+		{ID: "gone", Scope: id, Tool: "subtask", CreatedAt: past.Add(-time.Hour), ExpiresAt: past, Body: "old", BodyStored: true, ByteSize: 3},
+		{ID: "kept", Scope: id, Tool: "subtask", CreatedAt: past, ExpiresAt: time.Now().Add(time.Hour), Body: "new", BodyStored: true, ByteSize: 3},
+	} {
+		if err := db.Results().Put(t.Context(), entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	again, err := New(e.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(again.Close)
+	if _, err := db.Results().Get(t.Context(), id, "gone"); !errors.Is(err, toolresult.ErrNotFound) {
+		t.Fatalf("an expired result survived opening: %v", err)
+	}
+	if _, err := db.Results().Get(t.Context(), id, "kept"); err != nil {
+		t.Fatalf("a live result was purged: %v", err)
 	}
 }

@@ -20,11 +20,13 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   at most 50 artifacts. A larger return is scrubbed and stored for 30 days,
   and the parent gets a `result_ref` pointer for `fetch_tool_result` with
   `result_expires_at`. `return_result` must be the only call in its step,
-  and is now a reserved tool name. A child is always offered
-  `fetch_tool_result` and `search_tool_result`.
+  and is now a reserved tool name. A child gets `fetch_tool_result` and
+  `search_tool_result` even when its variant's allow list leaves them out;
+  an explicit deny removes them.
 - Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
   subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
-  `$ref` only to `#/$defs/<name>` or `#/definitions/<name>`, and no
+  keywords spelled exactly, `$ref` only to `#/$defs/<name>` or
+  `#/definitions/<name>`, and no
   reference cycle that never moves into a value, which jsonschema-go would
   otherwise overflow the stack on. Tool input schemas are unchanged.
 - `background_status` for a subtask embeds its result as JSON under

@@ -33,10 +33,92 @@ func ResolveLimited(raw json.RawMessage) (*jsonschema.Resolved, error) {
 	if len(raw) > MaxSchemaBytes {
 		return nil, fmt.Errorf("schema is %d bytes; the limit is %d", len(raw), MaxSchemaBytes)
 	}
-	if err := checkStrict(raw); err != nil {
+	// jsonschema-go reads keywords case-insensitively (encoding/json into its
+	// struct, the last of duplicate keys winning), so check exact spellings
+	// first and then the library's own reading of the schema.
+	if err := checkSpelling(raw); err != nil {
+		return nil, err
+	}
+	canonical, err := canonicalize(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkStrict(canonical); err != nil {
 		return nil, err
 	}
 	return Resolve(raw)
+}
+
+// canonicalize is the schema as jsonschema-go reads it, written back with
+// its canonical keyword spellings.
+func canonicalize(raw json.RawMessage) (json.RawMessage, error) {
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	return json.Marshal(&schema)
+}
+
+// keywords are the JSON Schema keywords jsonschema-go reads, in their only
+// accepted spelling.
+var keywords = []string{
+	"$schema", "$id", "$ref", "$comment", "$defs", "definitions", "$anchor", "$dynamicAnchor", "$dynamicRef", "$recursiveRef", "$recursiveAnchor", "$vocabulary",
+	"type", "enum", "const", "multipleOf", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+	"minLength", "maxLength", "pattern", "prefixItems", "items", "additionalItems", "minItems", "maxItems", "uniqueItems",
+	"contains", "minContains", "maxContains", "unevaluatedItems", "minProperties", "maxProperties", "required",
+	"dependentRequired", "dependencies", "properties", "patternProperties", "additionalProperties", "propertyNames",
+	"unevaluatedProperties", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "dependentSchemas",
+	"contentEncoding", "contentMediaType", "contentSchema", "format", "title", "description", "default",
+	"deprecated", "readOnly", "writeOnly", "examples",
+}
+
+// nameMaps are keywords whose object values are keyed by names (property
+// or definition names), not keywords.
+var nameMaps = []string{"properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies", "dependentRequired"}
+
+// checkSpelling refuses, at every level, a key that matches a keyword
+// ignoring case but is not spelled exactly like it. Names under properties,
+// $defs and the like are names, not keywords, and may be spelled freely;
+// their values are still checked.
+func checkSpelling(raw json.RawMessage) error {
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return err
+	}
+	return spelling(doc, false)
+}
+
+func spelling(value any, names bool) error {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if !names {
+				for _, keyword := range keywords {
+					if key != keyword && strings.EqualFold(key, keyword) {
+						return fmt.Errorf("schema key %q must be spelled %q", key, keyword)
+					}
+				}
+			}
+			isNameMap := false
+			if !names {
+				for _, k := range nameMaps {
+					if strings.EqualFold(key, k) {
+						isNameMap = true
+					}
+				}
+			}
+			if err := spelling(child, isNameMap); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if err := spelling(child, false); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Keywords whose values are schemas that apply to the same value (in place)

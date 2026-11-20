@@ -2,6 +2,7 @@ package recover
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -27,11 +28,14 @@ func (v Validator) Validate(input map[string]any) error {
 	if input == nil {
 		input = map[string]any{}
 	}
-	return v.schema.Validate(input)
+	return elicitation.Validate(v.schema, input)
 }
 
-// Classify identifies invalid arguments to a valid schema.
-func (v Validator) Classify(err error) bool { return v.schema != nil && err != nil }
+// Classify identifies invalid arguments to a valid schema. Input refused for
+// nesting too deeply is not repairable: it is never sent back to a model.
+func (v Validator) Classify(err error) bool {
+	return v.schema != nil && err != nil && !errors.Is(err, elicitation.ErrValueTooDeep)
+}
 
 type outcome struct {
 	RepairedArgs    map[string]any `json:"repaired_args"`

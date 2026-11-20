@@ -39,8 +39,12 @@ func TestResolveRefusesSchemasThatReferBackInPlace(t *testing.T) {
 		"upper-case $ID":               `{"properties":{"x":{"$ID":"http://example.com/a","allOf":[{"$ref":"#"}]}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Resolve(json.RawMessage(schema)); !errors.Is(err, ErrCyclicSchema) {
-				t.Fatalf("Resolve(%s) = %v, want ErrCyclicSchema", schema, err)
+			_, err := Resolve(json.RawMessage(schema))
+			if !errors.Is(err, ErrUnsafeSchema) {
+				t.Fatalf("Resolve(%s) = %v, want ErrUnsafeSchema", schema, err)
+			}
+			if !strings.Contains(err.Error(), "refers back to itself") {
+				t.Fatalf("Resolve(%s) = %v, want a cycle", schema, err)
 			}
 		})
 	}
@@ -82,30 +86,70 @@ func TestResolveKeepsSchemasThatTerminate(t *testing.T) {
 
 // The check reads reference targets the library keeps unexported. If an
 // upgrade changes that layout, this fails rather than the check quietly
-// over-refusing every schema with a $ref.
+// refusing every schema with a $ref.
 func TestResolvedLayout(t *testing.T) {
-	var schema jsonschema.Schema
-	if err := json.Unmarshal([]byte(`{"$defs":{"s":{"type":"string"}},"properties":{"x":{"$ref":"#/$defs/s"}}}`), &schema); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := schema.Resolve(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	targets, err := resolvedTargets(resolved)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref := schema.Properties["x"]
-	got := targets[reflect.ValueOf(ref).Pointer()].targets
-	if len(got) != 1 || got[0] != reflect.ValueOf(schema.Defs["s"]).Pointer() {
-		t.Fatalf("targets of x = %v", got)
+	for name, tc := range map[string]struct {
+		schema string
+		from   func(*jsonschema.Schema) *jsonschema.Schema
+		to     func(*jsonschema.Schema) *jsonschema.Schema
+		anchor string
+	}{
+		"$ref": {`{"$defs":{"s":{"type":"string"}},"properties":{"x":{"$ref":"#/$defs/s"}}}`,
+			func(r *jsonschema.Schema) *jsonschema.Schema { return r.Properties["x"] },
+			func(r *jsonschema.Schema) *jsonschema.Schema { return r.Defs["s"] }, ""},
+		// A $dynamicRef to a plain anchor resolves lexically, like $ref.
+		"lexical $dynamicRef": {`{"$defs":{"s":{"$anchor":"a","type":"string"}},"properties":{"x":{"$dynamicRef":"#a"}}}`,
+			func(r *jsonschema.Schema) *jsonschema.Schema { return r.Properties["x"] },
+			func(r *jsonschema.Schema) *jsonschema.Schema { return r.Defs["s"] }, ""},
+		// To a dynamic anchor it resolves at validation time, by anchor name.
+		"dynamic $dynamicRef": {`{"$dynamicAnchor":"n","properties":{"x":{"$dynamicRef":"#n"}}}`,
+			func(r *jsonschema.Schema) *jsonschema.Schema { return r.Properties["x"] },
+			nil, "n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var schema jsonschema.Schema
+			if err := json.Unmarshal([]byte(tc.schema), &schema); err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := schema.Resolve(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			order, _ := index(&schema)
+			nodes := map[uintptr]*jsonschema.Schema{}
+			for _, s := range order {
+				nodes[reflect.ValueOf(s).Pointer()] = s
+			}
+			targets, err := resolvedTargets(resolved, nodes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := targets[tc.from(&schema)]
+			if got.dynamicAnchor != tc.anchor {
+				t.Fatalf("dynamic anchor %q, want %q", got.dynamicAnchor, tc.anchor)
+			}
+			if tc.to == nil {
+				if len(got.targets) != 0 {
+					t.Fatalf("lexical targets %v for a dynamic reference", got.targets)
+				}
+				return
+			}
+			if len(got.targets) != 1 || got.targets[0] != tc.to(&schema) {
+				t.Fatalf("targets %v", got.targets)
+			}
+		})
 	}
 }
 
-func TestCycleErrorNamesThePath(t *testing.T) {
+func TestErrorsNameJSONPaths(t *testing.T) {
 	_, err := Resolve(json.RawMessage(`{"$defs":{"a":{"allOf":[{"$ref":"#/$defs/a"}]}}}`))
-	if err == nil || !errors.Is(err, ErrCyclicSchema) || !strings.Contains(err.Error(), "#/$defs/a") {
+	if err == nil || !errors.Is(err, ErrUnsafeSchema) || !strings.Contains(err.Error(), "#/$defs/a") {
+		t.Fatalf("err = %v", err)
+	}
+	// draft-07 dependencies and items are split into Go-only fields; the path
+	// still uses the JSON keyword.
+	_, err = Resolve(json.RawMessage(`{"$schema":"http://json-schema.org/draft-07/schema#","items":{"dependencies":{"x":{"$ref":"#/items"}}}}`))
+	if err == nil || !strings.Contains(err.Error(), "#/items/dependencies/x") || strings.Contains(err.Error(), "DependencySchemas") {
 		t.Fatalf("err = %v", err)
 	}
 }

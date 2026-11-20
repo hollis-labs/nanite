@@ -13,6 +13,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
 	"github.com/hollis-labs/nanite/internal/background"
+	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
@@ -132,7 +133,7 @@ func validateResult(schema *jsonschema.Resolved, raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return fmt.Errorf("result is not valid JSON: %w", err)
 	}
-	return schema.Validate(value)
+	return elicitation.Validate(schema, value)
 }
 
 // subtaskCost is a subtask's spend. TokensIn counts every input token,

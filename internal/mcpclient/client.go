@@ -262,10 +262,11 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 	if err != nil || len(schema) == 0 || schema[0] != '{' {
 		return tools.Tool{}, fmt.Errorf("invalid input schema for %q", spec.Name)
 	}
-	// Validating a call against a schema that refers back to itself in place
-	// would overflow the stack and end the process, so such a tool is left
-	// out. Other schema problems still surface on the call, as before.
-	if _, err := elicitation.Resolve(schema); errors.Is(err, elicitation.ErrCyclicSchema) {
+	// Validating a call against an unsafe schema (one that refers back to
+	// itself in place, is too large, or makes validation do too much work)
+	// could end the process, so such a tool is left out. Other schema
+	// problems still surface on the call, as before.
+	if _, err := elicitation.Resolve(schema); errors.Is(err, elicitation.ErrUnsafeSchema) {
 		return tools.Tool{}, fmt.Errorf("tool %q left out: %w", spec.Name, err)
 	}
 	readonly := spec.Annotations != nil && spec.Annotations.ReadOnlyHint

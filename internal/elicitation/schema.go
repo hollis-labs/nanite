@@ -10,22 +10,31 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-// Resolve compiles a local-only JSON schema. A schema that refers back to
-// itself in place is refused with ErrCyclicSchema: validating against it
-// would recurse until the stack overflows and the process dies.
+// Resolve compiles a local-only JSON schema. It refuses, with
+// ErrUnsafeSchema, a schema validation could not finish on (see
+// checkResolved), one over MaxToolSchemaBytes, and one whose JSON nests more
+// than MaxSchemaNesting levels. Results are cached by content.
 func Resolve(raw json.RawMessage) (*jsonschema.Resolved, error) {
-	var schema jsonschema.Schema
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		return nil, err
+	if len(raw) > MaxToolSchemaBytes {
+		return nil, fmt.Errorf("%w: %d bytes; the limit is %d", ErrUnsafeSchema, len(raw), MaxToolSchemaBytes)
 	}
-	resolved, err := schema.Resolve(nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkCycles(resolved); err != nil {
-		return nil, err
-	}
-	return resolved, nil
+	return cachedResolve(raw, func() (*jsonschema.Resolved, error) {
+		if n := jsonNesting(raw); n > MaxSchemaNesting {
+			return nil, fmt.Errorf("%w: it nests %d levels; the limit is %d", ErrUnsafeSchema, n, MaxSchemaNesting)
+		}
+		var schema jsonschema.Schema
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			return nil, err
+		}
+		resolved, err := schema.Resolve(nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkResolved(resolved); err != nil {
+			return nil, err
+		}
+		return resolved, nil
+	})
 }
 
 // ValidateResponse adapts legacy string/boolean question validation to JSON
@@ -46,5 +55,5 @@ func ValidateResponse(schema *jsonschema.Resolved, value json.RawMessage) error 
 	if s, ok := answer.(string); ok && strings.TrimSpace(s) == "" && schema.Schema().Type == "string" {
 		return fmt.Errorf("string answer requires non-empty content")
 	}
-	return schema.Validate(answer)
+	return Validate(schema, answer)
 }

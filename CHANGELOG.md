@@ -59,18 +59,24 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   and is now a reserved tool name. A child gets `fetch_tool_result` and
   `search_tool_result` even when its variant's allow list leaves them out;
   an explicit deny removes them.
-- Every JSON Schema Nanite resolves (tool input schemas from hosts and MCP
-  servers included) is refused when its in-place keywords (`$ref`,
-  `$dynamicRef`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`,
-  `dependentSchemas`, draft-07 schema `dependencies`) refer back to
-  themselves. Validating against such a schema recursed until the stack
-  overflowed, which ended the whole process. The check follows
-  jsonschema-go's own reference resolution (`$id` bases, `$anchor`,
-  percent- and pointer-decoding, keyword case). An MCP tool with such a
-  schema is now left out of the catalog with a warning naming the server
-  and tool; the server's other tools stay. A host tool keeps its catalog
-  entry and every call fails with `invalid tool schema`. Recursion through
-  `properties`, `items` and the like is unaffected.
+- Schema and value limits, so no schema or value from a host, an MCP server
+  or the model can crash, hang or exhaust the process. jsonschema-go
+  validates by plain recursion and explores every alternative; a stack
+  overflow there is a fatal error no recover catches. Every schema Nanite
+  resolves (tool input schemas included) is refused (`ErrUnsafeSchema`) when:
+  its in-place keywords (`$ref`, `$dynamicRef`, `allOf`, `anyOf`, `oneOf`,
+  `not`, `if`/`then`/`else`, `dependentSchemas`, draft-07 schema
+  `dependencies`) refer back to themselves; more than 32 of them apply to one
+  value in a row; more than 1,000 such runs start at one schema; it is over
+  256KB (a schema the model writes keeps its 16KB); or its JSON nests more
+  than 256 levels. The check follows jsonschema-go's own resolution of every
+  reference. Every value (tool input, `return_result`, `ask_user` answers)
+  nesting more than 64 levels is refused before validation and is not sent
+  to argument repair, and validation error text is cut to 4KB. An MCP tool
+  with an unsafe schema is left out of the catalog with a warning naming the
+  server and tool; the server's other tools stay. A host tool keeps its entry
+  and each call fails with `invalid tool schema`. Resolved schemas are
+  cached by content, so a tool's schema is resolved once.
 - Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
   subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
   keywords spelled exactly, `$ref` only to `#/$defs/<name>` or

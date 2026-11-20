@@ -27,9 +27,9 @@ const MaxSchemaBytes = 16 << 10
 //     properties, items and the like is fine: each step is into a smaller
 //     value.
 //
-// Tool input schemas from hosts and MCP servers go through Resolve, which
-// refuses only in-place cycles (checkCycles), so every acyclic shape they use
-// still works.
+// Tool input schemas from hosts and MCP servers go through Resolve alone,
+// which holds every schema to the limits in guard.go (no in-place cycle,
+// bounded in-place chains and paths, size and nesting) without this subset.
 func ResolveLimited(raw json.RawMessage) (*jsonschema.Resolved, error) {
 	if len(raw) > MaxSchemaBytes {
 		return nil, fmt.Errorf("schema is %d bytes; the limit is %d", len(raw), MaxSchemaBytes)

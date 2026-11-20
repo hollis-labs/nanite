@@ -15,3 +15,19 @@ func TestCyclicToolSchemaFailsTheCallNotTheProcess(t *testing.T) {
 		t.Fatalf("Validate = %v", err)
 	}
 }
+
+// Tool input nested past the limit is refused before validation recurses on it.
+func TestDeepToolInputIsRefused(t *testing.T) {
+	v := NewValidator(json.RawMessage(`{"type":"object","properties":{"x":{"$ref":"#/$defs/a"}},"$defs":{"a":{"type":"array","items":{"$ref":"#/$defs/a"}}}}`))
+	var deep any = []any{}
+	for range 5000 {
+		deep = []any{deep}
+	}
+	err := v.Validate(map[string]any{"x": deep})
+	if err == nil || !strings.Contains(err.Error(), "nests too deeply") {
+		t.Fatalf("Validate = %v", err)
+	}
+	if v.Classify(err) {
+		t.Fatal("deep input must not go to argument repair")
+	}
+}

@@ -168,11 +168,23 @@ lead back to the same definition without moving into a property or item.
 Keywords must be spelled exactly (jsonschema-go reads them ignoring case),
 and the check runs on the library's own reading of the schema. Anything else
 is refused before a child starts. Tool input schemas from the host and MCP
-servers are not held to this subset, but every schema Nanite resolves is
-refused when those in-place keywords form a cycle, using jsonschema-go's own
-resolution of each `$ref` (so `$id`, `$anchor` and encoded pointers resolve
-exactly as validation would). An MCP tool with such a schema is left out of
-the catalog with a warning naming the server and tool; a host tool keeps its
+servers are not held to this subset. Every schema Nanite resolves, from any
+source, is held to limits that keep validation finite (jsonschema-go
+validates by plain recursion and explores every alternative; a stack
+overflow there ends the process): no cycle among the in-place keywords
+above, at most 32 of them in a row on one value, at most 1,000 such runs from
+one schema, at most 256KB (16KB for a schema the model writes), and JSON
+nesting of at most 256 levels. The check follows jsonschema-go's own
+resolution of each `$ref` and `$dynamicRef` (so `$id`, `$anchor` and encoded
+pointers resolve exactly as validation would; a `$dynamicRef` resolved at
+validation time is taken to reach every matching `$dynamicAnchor`). A value
+(tool input, a returned result, an answer) nesting more than 64 levels is
+refused before validation, and validation error text is cut to 4KB. The check
+errs on the side of refusing: it also refuses a cycle in `$defs` nothing
+uses, a cycle through draft-07 keywords that sit beside a `$ref` (which
+draft-07 ignores), and one through `dependencies` in a 2020-12 schema (which
+2020-12 ignores). An MCP tool with an unsafe schema is left out of the
+catalog with a warning naming the server and tool; a host tool keeps its
 entry and each call fails with `invalid tool schema`. With a schema, `result` is
 validated: a result that fails gets one repair (the child sees the
 validation error and calls `return_result` again), and a second failure is

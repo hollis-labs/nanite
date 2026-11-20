@@ -207,6 +207,7 @@ func Run(ctx context.Context, cfg Config, scenarios []Scenario) (Report, error) 
 			switch {
 			case errs[i] != nil && failed < 0:
 				failed = i
+				stopAll()
 			case failed >= 0 && ctx.Err() == nil && (errs[i] != nil || !results[i].Success):
 				// Cancelled because another run failed.
 				errs[i] = nil

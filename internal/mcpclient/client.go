@@ -452,7 +452,40 @@ func (c *Client) expand(ctx context.Context, key, value string) (string, error) 
 	return value, nil
 }
 
+// PackageCheckEnv carries a host-created startup check, removed before exec.
+const PackageCheckEnv = "NANITE_TOOL_CHECK"
+
+// PackageCheck is the exact tool package approved for a stdio registration.
+type PackageCheck struct {
+	Dir, Name, Digest string
+	AllowEnv          []string
+}
+
 func commandEnv(cfg mcp.ServerConfig) ([]string, error) {
+	if raw, ok := cfg.Env[PackageCheckEnv]; ok {
+		var check PackageCheck
+		if err := json.Unmarshal([]byte(raw), &check); err != nil {
+			return nil, fmt.Errorf("invalid tool package startup check")
+		}
+		pkg, err := authored.LoadTool(check.Dir, check.Name, check.AllowEnv...)
+		if err != nil {
+			return nil, fmt.Errorf("tool package no longer loads: %w", err)
+		}
+		entry, err := filepath.Abs(filepath.Join(check.Dir, filepath.FromSlash(pkg.Dir()), filepath.FromSlash(pkg.Entry)))
+		if err != nil {
+			return nil, err
+		}
+		if pkg.Kind != authored.ToolMCP || pkg.Digest != check.Digest || cfg.Command != entry {
+			return nil, fmt.Errorf("tool package %s changed before MCP startup; approve it again", check.Name)
+		}
+		for _, key := range pkg.Env {
+			if err := authored.CheckToolEnvValue(key, cfg.Env[key], check.AllowEnv); err != nil {
+				return nil, err
+			}
+		}
+		cfg.Env = maps.Clone(cfg.Env)
+		delete(cfg.Env, PackageCheckEnv)
+	}
 	if !strings.ContainsRune(cfg.Command, '/') && cfg.Env["PATH"] == "" {
 		return nil, fmt.Errorf("MCP stdio command requires PATH")
 	}

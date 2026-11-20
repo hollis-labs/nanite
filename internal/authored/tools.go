@@ -2,13 +2,12 @@ package authored
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"regexp"
@@ -287,7 +286,7 @@ var credentialWords = []string{"KEY", "TOKEN", "SECRET", "AUTH", "PASSWORD", "CR
 
 // CheckToolEnv reports why a package may not pass the host variable name
 // through: a provider key variable Nanite reads, or a name that looks like a
-// credential (it contains KEY, TOKEN, SECRET, AUTH, PASSWORD or CREDENTIAL),
+// credential (including database URLs, PATs, DSNs and password names),
 // unless allow lists it. A package gets credentials as Warden tokens through
 // needs instead.
 func CheckToolEnv(name string, allow []string) error {
@@ -297,9 +296,37 @@ func CheckToolEnv(name string, allow []string) error {
 	if slices.Contains(providerKeyEnv, name) {
 		return fmt.Errorf("%s holds a provider key Nanite uses; a package cannot read it", name)
 	}
+	if name == "DATABASE_URL" || name == "PAT" || name == "DSN" || strings.HasSuffix(name, "_PAT") || strings.HasSuffix(name, "_DSN") {
+		return fmt.Errorf("%s looks like a credential; ask for a Warden token with needs, or have the host allow it", name)
+	}
 	for _, word := range credentialWords {
 		if strings.Contains(name, word) {
 			return fmt.Errorf("%s looks like a credential; ask for a Warden token with needs, or have the host allow it", name)
+		}
+	}
+	return nil
+}
+
+// CheckToolEnvValue also refuses credentials embedded in a URL variable.
+// Callers must validate the exact value they will pass, since the host
+// environment can change after a manifest was parsed.
+func CheckToolEnvValue(name, value string, allow []string) error {
+	if err := CheckToolEnv(name, allow); err != nil {
+		return err
+	}
+	if slices.Contains(allow, name) || name != "URL" && !strings.HasSuffix(name, "_URL") {
+		return nil
+	}
+	endpoint, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("%s is not a valid URL", name)
+	}
+	if endpoint.User != nil {
+		return fmt.Errorf("%s contains URL credentials; have the host allow it explicitly", name)
+	}
+	for key := range endpoint.Query() {
+		if CheckToolEnv(strings.ToUpper(key), nil) != nil {
+			return fmt.Errorf("%s contains URL credentials; have the host allow it explicitly", name)
 		}
 	}
 	return nil
@@ -368,13 +395,20 @@ func loadTool(root *os.Root, name string, allowEnv []string) (ToolPackage, error
 	if info.Size() > 1<<20 {
 		return ToolPackage{}, fmt.Errorf("tool.yaml is larger than 1 MiB")
 	}
-	data, err := root.ReadFile(dir + "/tool.yaml")
+	data, err := readPackageFile(root, dir+"/tool.yaml", info, 1<<20)
 	if err != nil {
 		return ToolPackage{}, err
 	}
 	pkg, err := ParseTool(name, data, allowEnv...)
 	if err != nil {
 		return ToolPackage{}, err
+	}
+	for _, name := range pkg.Env {
+		if value, ok := os.LookupEnv(name); ok {
+			if err := CheckToolEnvValue(name, value, allowEnv); err != nil {
+				return ToolPackage{}, err
+			}
+		}
 	}
 	entry, err := root.Lstat(dir + "/" + pkg.Entry)
 	if err != nil {
@@ -394,56 +428,15 @@ func loadTool(root *os.Root, name string, allowEnv []string) (ToolPackage, error
 	if pkg.Digest, err = packageDigest(root, dir); err != nil {
 		return ToolPackage{}, err
 	}
+	current, err := root.Lstat(dir + "/tool.yaml")
+	if err != nil || versionOf(current) != versionOf(info) {
+		return ToolPackage{}, fmt.Errorf("tool.yaml changed while loading the package")
+	}
 	return pkg, nil
 }
 
 // MaxToolPackageBytes bounds the files hashed for a package's digest.
 const MaxToolPackageBytes = 64 << 20
-
-// packageDigest hashes every entry under dir in path order: a regular file's
-// path and content, a symlink's path and target (not followed), and a
-// directory's path.
-func packageDigest(root *os.Root, dir string) (string, error) {
-	h := sha256.New()
-	total := int64(0)
-	err := fs.WalkDir(root.FS(), dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(p, dir), "/")
-		switch {
-		case d.IsDir():
-			_, _ = fmt.Fprintf(h, "dir\x00%s\x00", rel)
-		case d.Type()&fs.ModeSymlink != 0:
-			target, err := root.Readlink(p)
-			if err != nil {
-				return err
-			}
-			_, _ = fmt.Fprintf(h, "link\x00%s\x00%s\x00", rel, target)
-		case d.Type().IsRegular():
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			if total += info.Size(); total > MaxToolPackageBytes {
-				return fmt.Errorf("the package is larger than %d MiB", MaxToolPackageBytes>>20)
-			}
-			data, err := root.ReadFile(p)
-			if err != nil {
-				return err
-			}
-			_, _ = fmt.Fprintf(h, "file\x00%s\x00%d\x00%o\x00", rel, len(data), info.Mode().Perm())
-			_, _ = h.Write(data)
-		default:
-			return fmt.Errorf("%s is not a regular file, directory or symlink", rel)
-		}
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("digest: %w", err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
 
 // ToolNames returns the package names in sorted order.
 func ToolNames(pkgs map[string]ToolPackage) []string {

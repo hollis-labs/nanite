@@ -51,6 +51,8 @@ type Config struct {
 	// ToolPackageEnv names credential-like host variables tool packages may
 	// pass through (authored.CheckToolEnv).
 	ToolPackageEnv []string
+	// ToolApprovalDir is host-owned storage outside Dir; empty uses user config.
+	ToolApprovalDir string
 	// Builtins limits which of Nanite's own tool groups are offered. Nil offers all.
 	Builtins       tools.Builtins
 	Provider       llmcontracts.Provider

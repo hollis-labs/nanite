@@ -58,7 +58,7 @@ tools:
 budgets:
   steps: 20              # model steps; never more than host.yaml allows
   wall: 10m              # stop after ten minutes
-last_n: 4                # parent messages copied into the child (0-50)
+last_n: 4                # parent messages copied into the child: 1-50; 0 or unset means 6
 # result_cap: 3000       # tokens; a larger result is stored and returned as a pointer
 # can_spawn: true        # let this variant start subtasks one level down (not with read_only)
 ---

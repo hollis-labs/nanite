@@ -22,4 +22,9 @@ note which reviewers raised it, and mark any point where they disagree. A
 reviewer whose status is not "ok" did not finish; say so instead of
 counting its silence as agreement.
 
+If a reviewer subtask is refused because too many subtasks are running, do
+not retry it in a loop. Run the reviewers that did start, then start the
+missing one once a slot is free, or, if none frees up, return status
+partial and name the angle that was not reviewed.
+
 Return the merged verdict in the shape the return spec asks for.

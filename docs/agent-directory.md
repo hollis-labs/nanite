@@ -234,7 +234,9 @@ Markdown file in `context/` to the Context slot. Other extensions are ignored.
 
 A file in `variants/` defines a subtask variant: a kind of child
 conversation the agent can start with the `subtask` tool. The file name is
-the variant's name (lower-case letters, digits and dashes). Optional YAML
+the variant's name: it starts with a lower-case letter, uses lower-case
+letters, digits and dashes, is at most 40 characters, and can't be `chat`
+or a built-in variant's name. Optional YAML
 frontmatter sets its description, tools, model, budgets and defaults, and
 the Markdown body is its role prompt. Nanite reads the files again at the
 start of each turn, and `nanite validate` checks them. `nanite init` writes a

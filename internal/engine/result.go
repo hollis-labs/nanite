@@ -81,7 +81,7 @@ func (x *execution) returnResult(ctx context.Context, in subagent.Return) (tools
 	case subagent.StatusDenied:
 		// Only the engine reports denied, when a person refused an approval
 		// the subtask asked for; a child cannot claim it.
-		return tools.Result{}, fmt.Errorf("status denied is set by the engine when a person refuses an approval, not by return_result; use ok, partial or error and say what was refused in reason")
+		return tools.Result{}, fmt.Errorf("status denied is set by the engine when a person refuses an approval, not by return_result; use ok, partial or error and say what was refused in notes")
 	default:
 		return tools.Result{}, fmt.Errorf("status must be ok, partial or error")
 	}

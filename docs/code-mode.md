@@ -49,10 +49,18 @@ optional model and its budgets. Four are built in:
 
 | Variant | Use it for | Tools |
 |---|---|---|
-| `code` | Tool work: run commands, edit files, report the outcome. | Everything the agent has. |
-| `research` | Broad reading and searching; returns findings with their sources. | Everything the agent has. |
-| `worker` | General work on a focused goal. | Everything the agent has. |
-| `planner` | Gathering context and returning a plan. | Read-only tools only, and no MCP tools. |
+| `code` | Tool work: run commands, edit files, report the outcome. | The child set (below). |
+| `research` | Broad reading and searching; returns findings with their sources. | The child set. |
+| `worker` | General work on a focused goal. | The child set. |
+| `planner` | Gathering context and returning a plan. | The read-only tools of the child set, and no MCP tools. |
+
+The child set is everything the agent has except `ask_user` (a child can't
+ask the person directly), and except `subtask` unless the variant is a lead.
+Every child also gets `return_result`, which nothing removes;
+`fetch_tool_result` and `search_tool_result`, which an allow list need not
+name but an explicit deny removes; and the parent history tools
+`parent_history_search` and `parent_history_get`. A variant's allow and deny
+lists narrow the rest, the history tools included.
 
 Each built-in prompt states the same contract: return only what the return
 spec asks for, never paste raw tool output, return `partial` or `error` with
@@ -64,8 +72,9 @@ step touches and the questions it could not settle.
 ### Writing your own
 
 An agent adds variants as `variants/<name>.md` in its directory. Nanite reads
-them again at the start of every turn. The name is lower-case letters, digits
-and dashes, and can't reuse a built-in name. The YAML frontmatter is optional
+them again at the start of every turn. The name starts with a lower-case
+letter, uses lower-case letters, digits and dashes, and is at most 40
+characters. It can't reuse a built-in name or `chat`. The YAML frontmatter is optional
 and the Markdown body is the role prompt. `nanite init` writes a commented
 example, `variants/reviewer.md`:
 
@@ -95,7 +104,7 @@ for mistakes ...
 | `budgets.tokens` | Most tokens the child may use: input, output and cached. |
 | `budgets.wall` | A time limit such as `10m`. It also stops a step in progress. |
 | `budgets.cost` | Accepted and checked, but not yet enforced. |
-| `last_n` | How many parent messages the child sees by default, 0 to 50. |
+| `last_n` | How many parent messages the child sees by default: 1 to 50; 0 or unset means 6. To start a child with no messages, pass `context.last_n: 0` on the call. |
 | `result_cap` | The result size cap in tokens (see [What comes back](#what-comes-back)). |
 | `can_spawn` | Lets this variant start subtasks one level down (see [Leads](#leads-one-more-level)). |
 
@@ -144,25 +153,30 @@ it; a result that fails gets one chance to repair, then is accepted as
 `partial`.
 
 The parent receives JSON with `status`, `result`, `artifacts`, `notes`,
-`reason`, `cost`, `child_id`, `variant` and `steps`. The status tells the
-parent how far to trust the result:
+`reason`, `cost`, `child_id`, `variant` and `steps`, plus the overflow fields
+below when the result was stored. The status tells the parent how far to
+trust the result:
 
 | Status | Meaning |
 |---|---|
 | `ok` | The goal is met. |
 | `partial` | Only part of it is. Also given when the child stopped without calling `return_result` (reason `no_return_result`); the result is then the end of its last output. |
-| `limit` | The child stopped at a budget: `max_steps`, `token_budget` or `wall_time`. |
+| `limit` | The child stopped at a limit. The reason is one of `max_steps`, `token_budget`, `wall_time`, `max_tokens` (the model's output limit) or `model_context_window_exceeded`. |
 | `error` | The child failed or reported that the goal can't be done. |
 | `cancelled` | The run was cancelled. |
-| `denied` | A person refused an approval the child asked for. Only the engine sets this; a child can't claim it. |
+| `denied` | A person refused an approval the child asked for, and the child then ended `ok` or `partial`. Only the engine sets this; a child can't claim it. |
 
 Anything other than `ok` is incomplete work, and `reason` says why.
 
 The whole result is capped: the variant's `result_cap`, else the host's
-`agent.Options.SubtaskResultCap`, else about 6,000 tokens. The cap can't
-exceed what one tool result shows in full, about 5,900 tokens. A larger
-return is stored, scrubbed of secrets, for 30 days. The parent then gets a
-preview and a `tool_result://` pointer it reads with `fetch_tool_result`.
+`agent.Options.SubtaskResultCap`, else the default. Every cap is clamped to
+what one tool result shows in full, about 5,900 tokens, so the effective
+default is about 5,900 tokens and a larger setting has no further effect.
+A return that doesn't fit is stored, scrubbed of secrets, for 30 days. The
+parent then gets `result: null` and the overflow fields: `result_ref`, a
+`tool_result://` pointer it reads with `fetch_tool_result` (also appended to
+`artifacts`); `result_bytes`, the stored size; `result_expires_at`; and
+`preview`, the start of the result.
 
 ## Approvals
 
@@ -179,16 +193,21 @@ ask is open at a time per root conversation, so prompts never overlap.
 
 Grants flow down only. A grant in the root covers its subtasks. A grant given
 on a subtask's ask covers that subtask and its own subtasks, never the root
-or a sibling. How far an allow can reach depends on the host:
+or a sibling, and lasts only while that subtask runs. How far an allow can
+reach depends on the host:
 
 - chatrunner's chat cards for a subtask's ask take a once answer only;
 - the REPL's "always" covers that subtask and its own subtasks.
 
-A refusal reaches the child as a tool result. If a person refused, the
-subtask's status becomes `denied`. A background subtask that asks between
-turns posts a notice to the root and is asked on the root's next turn. If no
-root turn comes to ask it on within `agent.Options.SubtaskAskWait` (30
-minutes by default), the ask ends denied with reason `unanswered`.
+A refusal reaches the child as a tool result with the gate's reason. When a
+person refused, and the child then ends `ok` or `partial`, its status becomes
+`denied`; a `limit`, `error` or `cancelled` ending stays as it is. A refusal
+that no person gave, such as a default gate, an expiry or a policy, is not
+`denied`. A background subtask that asks between turns posts a notice to the
+root and is asked on the root's next turn. If no root turn comes to ask it on
+within `agent.Options.SubtaskAskWait` (30 minutes by default), the ask is
+refused with reason `unanswered`; that is not a person's refusal, so it never
+makes the subtask `denied`.
 
 ## Leads: one more level
 
@@ -220,7 +239,10 @@ angle in its goal: correctness, safety, and clarity. ...
 ```
 
 A lead's token budget includes the children it has finished, and its time
-limit bounds them too.
+limit bounds them too. The lead and its three reviewers take 4 subtask
+slots, the whole default limit, so a council can't run alongside other
+subtasks unless the host raises `agent.Options.SubtaskLimit`. The council
+prompt says what to do when a reviewer is refused over the limit.
 
 ## Several subtasks at once
 
@@ -228,12 +250,24 @@ limit bounds them too.
 > fan-out as B5 specifies it. Until B5 lands, several `subtask` calls in one
 > step run one after another.
 
-Several `subtask` calls in one step run at the same time, up to the agent's
-limit: 4 by default, configurable up to 8 in `host.yaml`. A lead's council
-counts against the same limit. The parent gets the results in call order,
-each capped as above. The root turn's token and cost ceiling covers all its
-children; a child that would exceed it ends with `limit`. Cancelling the
-parent turn cancels its foreground subtasks.
+Several `subtask` calls in one step run side by side, bounded by the host's
+`runtime.tool_concurrency` (default 4). They run before the step's other
+calls, and the results come back in call order, each capped as above.
+
+At most `agent.Options.SubtaskLimit` subtasks (default 4, at most 8) run at
+once across the whole agent: every conversation, background subtasks and a
+lead's own children count against it. A subtask over the limit is refused,
+not queued: the model is told how many are running and to wait or start
+fewer.
+
+`agent.Options.TurnTokenBudget` is opt-in. When a host sets it, one root turn
+shares that token ceiling with every foreground subtask it starts, at any
+depth; background subtasks draw only on their variant's own budget. A turn or
+child that reaches it ends with `limit` (`token_budget`), and no new
+foreground subtask starts once the budget is spent. A cost (USD) budget is
+not enforced.
+
+Cancelling the parent turn cancels every foreground subtask it started.
 
 ## Background subtasks
 
@@ -247,7 +281,9 @@ notice, not counted into whichever turn happens to be running.
 
 - `budgets.cost` is accepted but not enforced, because usage doesn't carry
   a price yet.
-- The agent-wide result cap can't be set in `host.yaml` yet; a host sets it
-  with `agent.Options.SubtaskResultCap`.
+- The agent-wide result cap, the subtask limit and the turn token budget
+  can't be set in `host.yaml` yet; a host sets them with
+  `agent.Options.SubtaskResultCap`, `agent.Options.SubtaskLimit` and
+  `agent.Options.TurnTokenBudget`.
 - A child can't yet search the parent's tool catalog for tools it wasn't
   given (CM-4), and there is no long-lived companion subtask (CM-7).

@@ -38,8 +38,9 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   `nanite validate`, not clamped. The effective default result cap is about
   5,900 tokens (6,000 clamped to what one tool result shows in full).
 - Code Mode guidance: the base prompt gains a short section on when to
-  delegate with `subtask`, how to choose a variant, and how to read its
-  status (only `ok` is finished work). The built-in variant prompts state their contract more fully:
+  delegate with `subtask`, how to choose a variant, that a subtask sees only
+  what it is passed and cannot ask the person, and how to read its status
+  (only `ok` is finished work). The built-in variant prompts state their contract more fully:
   `code` names the files it changed and what it checked, `research` gives a
   source for each finding, `planner` names what each step touches.
 - `nanite init` writes a commented example variant, `variants/reviewer.md`.

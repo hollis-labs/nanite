@@ -243,7 +243,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	} else {
 		model, sel, err = e.provider(def, use)
 		if variant.Model != "" {
-			// The subagent provider must serve this model.
+			// The subtask use's provider must serve this model.
 			sel.Model = variant.Model
 		}
 	}

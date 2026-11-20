@@ -140,10 +140,63 @@ A conversation delegates with the `subtask` tool:
 model must name a variant; there is no default. The child is a separate
 conversation that starts from the variant's role prompt and one message
 holding the goal, the inputs, the return spec and its forked context (below).
-The parent gets back a
-result with a status (`ok`, `partial`, `limit`, `error` or `cancelled`), the
-child's final text, its steps and its token usage, which also rolls into the
-parent turn's usage.
+The child's token usage also rolls into the parent turn's usage.
+
+### The result contract
+
+A child ends its subtask by calling `return_result({status, result,
+artifacts[], notes})`, with status `ok`, `partial` or `error`. Only what it
+passes there reaches the parent; the turn ends after that step. It must be
+the only call in its step: any other call in that step, including a second
+`return_result`, is answered "ignored" and does not run. The tool is offered
+to every child whatever its variant allows, never to a root chat, and it is
+not put to the permission check, since it only hands the result to the
+engine. A child is also always offered `fetch_tool_result` and
+`search_tool_result`, so it can read the pointers its own tools and
+subtasks hand back.
+
+`return_spec` is prose (a JSON string) or a JSON Schema object of at most
+16KB. A malformed schema is refused before any child starts, and so is one
+whose references could recurse without end: a `$ref` must point inside the
+schema (`#` or `#/...`), `$dynamicRef` and `$recursiveRef` are refused, and
+following `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else` and
+`dependentSchemas` must never lead back to the same schema without moving
+into a property or item. (The same check guards every schema Nanite
+validates, including `ask_user` and tool input schemas; the 16KB cap applies
+to schemas the model writes.) With a schema, `result` is
+validated: a result that fails gets one repair (the child sees the
+validation error and calls `return_result` again), and a second failure is
+accepted as `partial` with the reason `return_spec: <error>`.
+
+The parent receives:
+
+```json
+{"status": "ok", "result": {}, "artifacts": [], "notes": "",
+ "reason": "", "cost": {"tokens_in": 0, "tokens_out": 0},
+ "child_id": "", "variant": "", "steps": 0}
+```
+
+`status` is `ok`, `partial`, `limit`, `error` or `cancelled`, and anything
+other than `ok` is an error result the model must read. A run that stops at a
+budget, fails or is cancelled keeps that status even if the child had
+returned. `cost.tokens_in` counts every input token, cached or not; `usd`
+appears once usage carries a price. A child that ends without calling
+`return_result` gives `partial`, reason `no_return_result`, with the last
+2KB of its output as `result`, never its transcript.
+
+The whole result the parent receives is held to a cap, for every status: the
+variant's `result_cap` in tokens, else the agent's
+(`agent.Options.SubtaskResultCap`), else about 6,000 tokens, counted as 4
+bytes a token of JSON. The cap is clamped to what one tool result shows in
+full (23KB, about 5,900 tokens), so a larger setting has no further effect.
+At most 50 artifacts of 512 bytes each are shown, and `notes` is cut to an
+eighth of the cap. When the return does not fit, or anything was cut, the
+whole return (`result`, `artifacts`, `notes`, scrubbed of secrets) is stored
+under the parent conversation for 30 days: `result` is then `null`,
+`result_ref` is a `tool_result://` pointer the parent reads with
+`fetch_tool_result` (it is also the last artifact), `result_bytes` gives the
+stored size, `result_expires_at` when it goes, and `preview` the start of the
+result.
 
 ### Forked context
 
@@ -242,7 +295,8 @@ Only a root chat starts background subtasks, and only when it is also offered
 schema. A background subtask runs until it finishes or is cancelled with
 `background_cancel`. Its completion notice and `background_status` report the
 subtask status (`ok`, `partial`, `limit`, `error` or `cancelled`), and the
-notice carries its token usage. If the parent conversation has a turn running
+notice carries its token usage. Its job output, which `background_status`
+returns, is the same capped result the parent of a foreground subtask gets. If the parent conversation has a turn running
 when the subtask finishes, that turn also gets a `Usage` event with `Subtask`
 set and `Background` true. Background usage is never part of a turn's
 totals: summing a turn's `Usage` events without `Background` gives the turn's

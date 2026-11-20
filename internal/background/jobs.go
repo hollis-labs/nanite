@@ -31,6 +31,9 @@ type Outcome struct {
 	// Summary, when set, is what the completion notice says in place of the
 	// job's status.
 	Summary string
+	// Structured marks Output as the whole answer, such as a subtask's
+	// result JSON: Err sets the job's status but is not appended to it.
+	Structured bool
 }
 type Task struct {
 	PID  int
@@ -139,7 +142,7 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 		job.Reason = got.Reason
 	}
 	output := got.Output
-	if got.Err != nil {
+	if got.Err != nil && !got.Structured {
 		output += "\n" + got.Err.Error() + "\n"
 	}
 	_, writeErr := io.WriteString(logWriter, output)

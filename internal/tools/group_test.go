@@ -52,3 +52,14 @@ func TestGroupReplacementIsAtomicAndSnapshotsOwnSchemas(t *testing.T) {
 		t.Fatalf("after replace/remove: %+v", got)
 	}
 }
+
+func TestSubtaskToolNamesAreReserved(t *testing.T) {
+	var g Groups
+	for _, name := range []string{"subtask", "return_result"} {
+		err := g.SetGroup("host", Tool{Name: name, InputSchema: json.RawMessage(`{"type":"object"}`),
+			Handler: func(context.Context, Call) (Result, error) { return Result{}, nil }})
+		if err == nil {
+			t.Errorf("a host tool took the reserved name %q", name)
+		}
+	}
+}

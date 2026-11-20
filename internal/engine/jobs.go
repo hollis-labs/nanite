@@ -22,6 +22,9 @@ import (
 
 func (x *execution) jobTools() []tools.Tool {
 	handlers := selftools.JobTools{Status: x.jobStatus, Cancel: x.cancelJob}
+	if x.depth > 0 {
+		handlers.Return = x.returnResult
+	}
 	if x.canSpawn() {
 		handlers.Subtask, handlers.Variants = x.subtask, x.variants
 		// Only a root chat runs background subtasks, and only where it can poll them.
@@ -53,25 +56,15 @@ func (x *execution) startShell(ctx context.Context, raw json.RawMessage) (string
 // subtaskJobKind is the jobs-table kind of a background subtask.
 const subtaskJobKind = "subagent"
 
-// subtaskResult is what the parent model receives from a foreground subtask.
-type subtaskResult struct {
-	Status  subagent.Status `json:"status"`
-	Result  string          `json:"result"`
-	Reason  string          `json:"reason,omitempty"`
-	ChildID string          `json:"child_id"`
-	Variant string          `json:"variant"`
-	Steps   int             `json:"steps"`
-	Usage   struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
-}
-
 func (x *execution) subtask(ctx context.Context, request subagent.Request) (tools.Result, error) {
 	if !x.canSpawn() {
 		return tools.Result{}, fmt.Errorf("subtask depth limit reached: only a variant with can_spawn may start subtasks, and only one level down")
 	}
 	if err := request.Validate(x.variants); err != nil {
+		return tools.Result{}, err
+	}
+	schema, err := request.Schema()
+	if err != nil {
 		return tools.Result{}, err
 	}
 	if request.Background && x.depth > 0 {
@@ -102,6 +95,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		release()
 		return tools.Result{}, err
 	}
+	e.openSubtask(child.ID, schema)
 	start := func(runCtx context.Context) (*Run, error) { return e.Send(runCtx, child.ID, Input{Text: message}) }
 	if request.Background {
 		spec, _ := json.Marshal(struct {
@@ -121,25 +115,23 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 					defer stopWall()
 					result, err := run.Wait()
 					status, reason := subtaskStatus(jobCtx, runCtx, result, err)
-					e.reportUsage(context.WithoutCancel(jobCtx), x.info.ID, child.ID, result.Usage)
-					outcome := background.Outcome{Output: result.Text,
-						Summary: fmt.Sprintf("subtask %s (%s) ended %s%s; usage %d input, %d output, %d cache-read, %d cache-write tokens.",
-							child.ID, variant.Name, status, parenthesize(reason), result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CacheReadTokens, result.Usage.CacheWriteTokens)}
-					switch status {
-					case subagent.StatusLimit:
-						outcome.Limit = reason
-					case subagent.StatusPartial:
-						outcome.Reason = reason
-					case subagent.StatusError, subagent.StatusCancelled:
-						outcome.Err = err
-					case subagent.StatusOK:
+					returned := e.closeSubtask(child.ID)
+					bg := context.WithoutCancel(jobCtx)
+					e.reportUsage(bg, x.info.ID, child.ID, result.Usage)
+					out := e.composeSubtaskResult(bg, x.info.ID, child.ID, variant, result, status, reason, returned)
+					outcome, marshalErr := outcomeFor(out, err)
+					if marshalErr != nil {
+						outcome = background.Outcome{Err: marshalErr}
 					}
+					outcome.Summary = fmt.Sprintf("subtask %s (%s) ended %s%s; usage %d input, %d output, %d cache-read, %d cache-write tokens.",
+						child.ID, variant.Name, out.Status, parenthesize(out.Reason), result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CacheReadTokens, result.Usage.CacheWriteTokens)
 					return outcome
 				}}, nil
 			})
 		if err != nil {
 			// The release is idempotent if the job already joined the child.
 			release()
+			e.closeSubtask(child.ID)
 			return tools.Result{}, err
 		}
 		x.emitSubtaskStarted(ctx, child, request)
@@ -147,6 +139,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		return tools.Result{Text: text}, err
 	}
 	defer release()
+	defer e.closeSubtask(child.ID)
 	runCtx, stopWall := wallContext(ctx, variant)
 	defer stopWall()
 	run, err := start(runCtx)
@@ -157,13 +150,12 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	result, err := run.Wait()
 	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)
+	out := e.composeSubtaskResult(ctx, x.info.ID, child.ID, variant, result, status, reason, e.closeSubtask(child.ID))
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Variant: variant.Name, Status: string(status), Result: result, Err: err, Limit: events.LimitReason(result.StopReason)}
+		return events.SubagentFinished{EventMeta: meta, ID: child.ID, Variant: variant.Name, Status: string(out.Status), Result: result, Err: err, Limit: events.LimitReason(result.StopReason)}
 	})
-	out := subtaskResult{Status: status, Result: result.Text, Reason: reason, ChildID: child.ID, Variant: variant.Name, Steps: result.Steps}
-	out.Usage.InputTokens, out.Usage.OutputTokens = result.Usage.InputTokens, result.Usage.OutputTokens
 	raw, err := json.Marshal(out)
-	return tools.Result{Text: string(raw), IsError: status.Failed()}, err
+	return tools.Result{Text: string(raw), IsError: out.Status.Failed()}, err
 }
 
 // wallContext bounds a child by its variant's wall-clock budget, so the
@@ -285,12 +277,16 @@ func (x *execution) jobOutput(job store.Job) (string, error) {
 			return "", err
 		}
 		defer func() { _ = file.Close() }() // Read-only status log.
-		const tailSize = 8 << 10
+		tailSize := int64(8 << 10)
 		stat, err := file.Stat()
 		if err != nil {
 			return "", err
 		}
-		if _, err := file.Seek(max(0, stat.Size()-tailSize), io.SeekStart); err != nil {
+		if job.Kind == subtaskJobKind {
+			// A subtask's output is its result JSON, already held under the
+			// tool result budget; read it from the start.
+			tailSize = subtaskEnvelopeLimit
+		} else if _, err := file.Seek(max(0, stat.Size()-tailSize), io.SeekStart); err != nil {
 			return "", err
 		}
 		data, err := io.ReadAll(io.LimitReader(file, tailSize))

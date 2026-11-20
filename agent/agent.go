@@ -89,6 +89,11 @@ type Options struct {
 	// (ref pnc_...)"); the record with the redacted value and stack is
 	// logged to Logger and handed to this reporter. Nil logs only.
 	PanicReporter PanicReporter
+	// SubtaskResultCap is the size cap, in tokens, on the result a subtask
+	// hands back. Zero means about 6,000. A variant's result_cap overrides
+	// it. A larger result is cached and the parent gets a pointer it can
+	// read with fetch_tool_result.
+	SubtaskResultCap int
 }
 
 // TraceRecord is one turn's trace record. Its schema is documented in
@@ -144,6 +149,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("nanite: agent directory required")
+	}
+	if opts.SubtaskResultCap < 0 {
+		return nil, fmt.Errorf("nanite: SubtaskResultCap must not be negative")
 	}
 	def, err := agentdir.Load(opts.Dir)
 	if err != nil {
@@ -213,7 +221,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: opts.SubtaskResultCap,
 	})
 	if err != nil {
 		_ = db.Close()

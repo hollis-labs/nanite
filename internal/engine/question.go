@@ -31,7 +31,7 @@ func (r *Run) ask(ctx context.Context, prompt string, schema, displaySchema json
 		schema = json.RawMessage(`{"type":"string"}`)
 		displaySchema = schema
 	}
-	resolved, err := elicitation.Resolve(schema)
+	resolved, err := elicitation.ResolveLimited(schema)
 	if err != nil {
 		return nil, fmt.Errorf("question schema: %w", err)
 	}

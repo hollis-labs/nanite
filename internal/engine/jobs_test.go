@@ -116,6 +116,14 @@ func subtaskCall(variant, goal string, background bool) fake.Response {
 	return spawn
 }
 
+// returnCall is a child's return_result call.
+func returnCall(status string, result any) fake.Response {
+	call := toolResponse("return_result")
+	call.Events[0].ToolUse.ID = "ret-1"
+	call.Events[0].ToolUse.Input = map[string]any{"status": status, "result": result}
+	return call
+}
+
 func TestChildRolesAndPermissionBoundary(t *testing.T) {
 	for _, role := range []string{"worker", "planner"} {
 		t.Run(role, func(t *testing.T) {
@@ -239,7 +247,9 @@ func TestBackgroundChildFinishesAndPostsResult(t *testing.T) {
 		t.Fatalf("job %+v, %v", job, err)
 	}
 	data, err := os.ReadFile(job.OutputPath)
-	if err != nil || string(data) != "child output" || p.requests.Load() != 1 {
+	var out struct{ Status, Result, Reason string }
+	// Ending without return_result is partial, with the child's last output.
+	if err != nil || json.Unmarshal(data, &out) != nil || out.Status != "partial" || out.Result != "child output" || out.Reason != "no_return_result" || p.requests.Load() != 1 {
 		t.Fatalf("output %q, requests=%d, %v", data, p.requests.Load(), err)
 	}
 }

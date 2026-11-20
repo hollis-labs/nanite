@@ -63,6 +63,9 @@ type Config struct {
 	// PanicReporter also receives each contained panic. The engine always
 	// logs one; this adds the host's own record.
 	PanicReporter panics.Reporter
+	// SubtaskResultCap is the agent's subtask result cap in tokens. Zero uses
+	// subagent.DefaultResultCap; a variant's result_cap overrides it.
+	SubtaskResultCap int
 }
 
 type Engine struct {
@@ -79,6 +82,12 @@ type Engine struct {
 	notices  chan store.Notice
 	mcp      *mcpclient.Client
 	cache    *toolresult.Cache
+	// subtaskResults stores over-cap subtask results in the same table as
+	// cache, for subtaskResultTTL rather than an hour (result.go).
+	subtaskResults *toolresult.Cache
+	// subtasks holds each running subtask's result contract, by child
+	// conversation id (result.go). Guarded by mu.
+	subtasks map[string]*subtaskState
 	// panics contains panics at every boundary where Nanite runs code it
 	// does not own (host tools, slot sources, gates, provider streams) and
 	// in every goroutine it starts. It is per engine: a library never sets
@@ -107,7 +116,11 @@ func New(cfg Config) (*Engine, error) {
 	}
 	guard := newGuard(cfg.Logger, scrub, cfg.PanicReporter)
 	cfg.ProviderConfig.Panics = guard
-	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget}), active: make(map[string]*Run),
+	e := &Engine{cfg: cfg, scrub: scrub, panics: guard, runtime: events.NewRuntime(cfg.Events, cfg.Logger), notices: make(chan store.Notice, 64), mcp: mcpclient.New(cfg.Dir, cfg.ProviderConfig.Secrets, cfg.ProviderConfig.Redactor, cfg.Logger), cache: toolresult.New(cfg.Store.Results(), toolresult.Config{DefaultBudget: toolResultBudget,
+		// A subtask result is already held under the budget (result.go); a
+		// preview would break its JSON.
+		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
+		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit()}
 	e.jobs = background.New(cfg.Store, scrub, e.publishNotice, cfg.Logger, guard)
 	return e, nil

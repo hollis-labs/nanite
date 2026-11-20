@@ -39,7 +39,8 @@ type Variant struct {
 	// LastN is how many parent messages the child sees by default; zero
 	// means DefaultLastN.
 	LastN int
-	// ResultCap is the result size cap in tokens (applied in B3).
+	// ResultCap is the result size cap in tokens; zero uses the agent's cap
+	// or DefaultResultCap.
 	ResultCap int
 	// CanSpawn lets this variant run subtask itself, one level deeper.
 	CanSpawn bool
@@ -74,7 +75,7 @@ func matchAny(patterns []string, name string) bool {
 	})
 }
 
-const contract = " Return only what the return spec asks for; do not paste raw tool output. Your final message is your result."
+const contract = " Return only what the return spec asks for; do not paste raw tool output. End by calling return_result: it is the only thing your parent receives."
 
 // Builtins are the variants every agent has.
 func Builtins() map[string]Variant {

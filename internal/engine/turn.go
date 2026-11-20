@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
@@ -73,6 +74,9 @@ type execution struct {
 	deadline time.Time
 	// usageMu guards result.Usage, which subtask handlers add child usage to.
 	usageMu sync.Mutex
+	// returned is set once this child has called return_result; the turn
+	// ends after that step.
+	returned atomic.Bool
 }
 
 // canSpawn reports whether this conversation may run subtask: a root chat
@@ -460,6 +464,11 @@ func (x *execution) generate(ctx context.Context) error {
 		}
 		if runErr = x.callTools(ctx, got.calls); runErr != nil {
 			return runloop.Terminate
+		}
+		if x.returned.Load() {
+			// return_result ends a subtask: the parent has what it needs.
+			x.result.StopReason = llmtypes.StopReasonEndTurn
+			return runloop.Finish
 		}
 		if x.result.Steps >= x.definition.Runtime.MaxSteps {
 			x.result.StopReason = events.StopMaxSteps

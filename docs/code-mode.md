@@ -42,6 +42,13 @@ subtask({goal, return_spec, variant, inputs?, context?, background?})
 The tool is in the `subtasks` built-in group. A host that leaves that group
 out gives its agent no `subtask` tool.
 
+A `return_spec` schema the model writes is held to a strict subset: at most
+16KB, local `#/$defs/<name>` references only, and no reference cycles.
+Validating any schema, from the model, the host or an MCP server, is bounded
+in work and time, and a schema that could never validate safely is refused.
+[architecture.md](architecture.md#the-result-contract) has the exact
+limits.
+
 ## Variants
 
 A variant is a kind of subtask: a role prompt, the tools it may use, an
@@ -243,7 +250,8 @@ A lead's token budget includes the children it has finished, and its time
 limit bounds them too. The lead takes a slot from the leads' pool and its
 three reviewers take three of the other pool's slots, so a lead never
 competes with its own children. The council prompt starts all three
-reviewers in one step, so they run side by side.
+reviewers in one step. They run side by side when `tool_concurrency` is at
+least 3 and three worker slots are free; otherwise some wait.
 
 ## Several subtasks at once
 
@@ -254,10 +262,12 @@ in its place. So a write made before a `subtask` call finishes before the
 subtask starts. Results come back in call order, each capped as above.
 
 Subtasks share two agent-wide pools of slots, across every conversation: one
-for leads (`can_spawn` variants) and one for every other subtask. Each pool
-has `subtask_limit` slots: `agent.Options.SubtaskLimit`, else
-`runtime.subtask_limit` in `host.yaml`, else 4. The most is 8, and a larger
-`host.yaml` value is refused when the agent opens and by `nanite validate`.
+for leads (`can_spawn` variants started by the root conversation) and one for
+every other subtask, including a `can_spawn` variant started at depth 2. Each
+pool has `subtask_limit` slots: `agent.Options.SubtaskLimit`, else
+`runtime.subtask_limit` in `host.yaml`, else 4. The most is 8: a larger
+`agent.Options` or `host.yaml` value is refused when the agent opens, and a
+larger `host.yaml` value by `nanite validate` too.
 A foreground subtask over its limit waits for a slot while its turn lasts;
 cancelling the turn ends the wait. A background subtask over its limit is
 refused at once, since it must not hold up the turn that starts it.
@@ -277,6 +287,27 @@ For each of these settings, a non-zero `agent.Options` value wins, then
 `host.yaml`, then the default.
 
 Cancelling the parent turn cancels every foreground subtask it started.
+
+## Watching subtasks
+
+While a subtask runs, the host sees `SubtaskProgress` events on the parent's
+run; the model never does. Each carries the subtask's ID, its `ParentID` and
+`Depth`, its variant, step, the tool it is calling and a short status line,
+and `Background` for a background subtask. A depth-2 subtask's events reach
+the root's run through its lead. chatrunner forwards them as
+`nanite.subagent` activity with state `progress`.
+
+A foreground subtask waiting for a slot first reports the status line
+"waiting for a subtask slot". If it never starts, because the wait was
+cancelled, the turn's budget ran out or it failed to start, a last progress
+event closes it with status `cancelled`, `refused` or `error`. A background
+subtask's progress is sent at most every 5 seconds, and only while its
+parent conversation has a turn running.
+
+Each turn's trace record links the tree: a child's record has
+`parent_turn_id`, and the parent's lists its subtasks in `subtasks[]`. A
+record's `usage` is the turn's own, so a tree's total is its `usage` plus its
+`subtasks[].usage`. See [architecture.md](architecture.md#turn-trace).
 
 ## Background subtasks
 

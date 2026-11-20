@@ -162,8 +162,6 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
 - `SubagentStarted` replaces `Role` with `Variant`, `Goal` and `Background`;
   `SubagentFinished` gains `Variant` and `Status`. The `nanite.subagent`
   activity carries `variant` (and `status` when done) instead of `role`.
-- `context` is recorded and passed to the child; forked context comes in a
-  later release.
 - Subtask progress: a running subtask's parent run gets `SubtaskProgress`
   events (ID, parent ID, depth, variant, step, tool, status line,
   background, and the final status of a background subtask), rate-limited

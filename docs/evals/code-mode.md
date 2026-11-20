@@ -67,7 +67,7 @@ go run ./cmd/nanite-eval -live -max-usd 10 -turn-tokens 150000 -out docs/evals/l
 From `offline.md`:
 - With the subtask tool, the parent's context is 44–62% of the direct run's for the three
   single-subtask scenarios. The parent no longer carries the search results and file contents.
-- The tree's total tokens are higher, 161–186% of the direct run's. A subtask starts with its own
+- The tree's total tokens are higher, 162–188% of the direct run's. A subtask starts with its own
   system prompt and part of the parent's history, and the parent then reads the subtask's result.
 - The council run costs about seven times the direct review, and its parent context is slightly
   larger. That is expected: it buys three independent reviews, not a smaller parent.

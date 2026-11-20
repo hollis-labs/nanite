@@ -122,6 +122,11 @@ type Options struct {
 	// runtime.turn_token_budget, else no shared budget": an embedder cannot
 	// turn off a host.yaml budget through Options, only set its own.
 	TurnTokenBudget int
+	// SlotPlacement moves the slots it names between the system prefix and
+	// the turn (see SlotInSystem and SlotInTurn). By default only
+	// user_context is placed in the turn. Universal, System and Agent always
+	// stay in the system prefix.
+	SlotPlacement map[SlotName]SlotPlacement
 	// CompactAt, when positive, is the request size in tokens at which the
 	// conversation is compacted. The size counts everything a request
 	// carries: system blocks, tool schemas and conversation. The provider's
@@ -286,7 +291,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
 		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, CompactAt: opts.CompactAt,
-		SlotBudgets: maps.Clone(opts.SlotBudgets),
+		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {
 		_ = db.Close()

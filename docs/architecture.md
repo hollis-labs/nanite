@@ -33,6 +33,27 @@ package work in an ordinary Go process.
 4. The engine records the terminal status and closes the run event stream.
    The caller reads the final response and error with `Run.Wait`.
 
+## Where slots go in a request
+
+Slots are the logical layer: what the engine, the agent directory and the
+host write. Placement compiles them into the request, in one of two places:
+
+- **System prefix.** These slots go in the system blocks, which every
+  request shares and the provider caches. A change here invalidates the
+  cache for everything after it, the conversation included, so it holds
+  content that rarely changes. Universal, System and Agent are always here.
+- **Turn.** These slots go in one text block, named `nanite.turn_context`,
+  in front of the user's message that starts the turn, and are stored with
+  that message. The system blocks and the earlier messages stay
+  byte-identical, so the cache holds when only the per-turn context
+  changes. Each message keeps the context it was written in, as a person
+  would remember it.
+
+By default only `user_context` (the per-turn context a host passes, such
+as chatrunner's turn context) goes in the turn. `agent.Options.SlotPlacement`
+moves other slots. Reports and the trace still list each slot under its own
+name.
+
 ## The base prompt
 
 The Universal slot comes first in every request and holds the engine's base

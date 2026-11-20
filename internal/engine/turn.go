@@ -359,6 +359,12 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		}
 		message := store.Message{ID: record.UserMessageID, TurnID: r.id, Role: "user", CreatedAt: now,
 			Blocks: []llmtypes.ContentBlock{{Type: "text", Text: e.scrub.Text(input.Text)}}}
+		// Slots placed in the turn go in front of what was said, stored with
+		// it: the conversation then remembers the context each message came
+		// with, and the system blocks stay the same.
+		if block, ok := e.turnContext(assembled); ok {
+			message.Blocks = append([]llmtypes.ContentBlock{block}, message.Blocks...)
+		}
 		err = x.append(message)
 	}
 	if err == nil {
@@ -451,6 +457,9 @@ func (x *execution) generate(ctx context.Context) error {
 	var allText strings.Builder
 	blocks := make([]llmtypes.SlotBlock, 0, len(x.assembled.Blocks))
 	for _, b := range x.assembled.Blocks {
+		if x.engine.placement(slots.Name(b.SlotName)) == slots.InTurn {
+			continue // sent with the turn's user message instead
+		}
 		blocks = append(blocks, llmtypes.SlotBlock{Name: b.SlotName, Content: b.Content, Changed: b.Changed, CacheKey: b.CacheKey})
 	}
 	request := func(ctx context.Context) (attempt, runloop.Directive) {

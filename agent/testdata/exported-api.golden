@@ -112,6 +112,7 @@ type Options struct
   field SubtaskResultCap int
   field SubtaskLimit int
   field TurnTokenBudget int
+  field SlotPlacement map[SlotName]SlotPlacement
   field CompactAt int
   field SlotBudgets map[SlotName]int
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
@@ -213,11 +214,14 @@ type SlotEntry = github.com/hollis-labs/nanite/internal/slots.Entry struct
   field Priority int
   field Labels map[string]string
 const SlotHandoff github.com/hollis-labs/nanite/internal/slots.Name
+const SlotInSystem github.com/hollis-labs/nanite/internal/slots.Placement
+const SlotInTurn github.com/hollis-labs/nanite/internal/slots.Placement
 const SlotMemory github.com/hollis-labs/nanite/internal/slots.Name
 const SlotMode github.com/hollis-labs/nanite/internal/slots.Name
 type SlotName = github.com/hollis-labs/nanite/internal/slots.Name string
 func SlotNames() []SlotName
 const SlotPermissions github.com/hollis-labs/nanite/internal/slots.Name
+type SlotPlacement = github.com/hollis-labs/nanite/internal/slots.Placement uint8
 type SlotPlan = github.com/hollis-labs/nanite/internal/slots.Plan struct
   field Decisions map[github.com/hollis-labs/nanite/internal/slots.Name][]github.com/hollis-labs/nanite/internal/slots.Decision
 const SlotPointer github.com/hollis-labs/nanite/internal/slots.Disposition
@@ -360,6 +364,7 @@ type TraceRecord = github.com/hollis-labs/libs/agent/trace.Turn struct
   (TraceRecord) Attributes() []github.com/hollis-labs/libs/agent/trace.Attribute
   (TraceRecord) MarshalJSON() ([]byte, error)
   (TraceRecord) Validate() error
+const TurnContextBlock untyped string
 type Usage = github.com/hollis-labs/nanite/internal/events.Usage struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field InputTokens int

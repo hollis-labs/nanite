@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"github.com/hollis-labs/nanite/internal/engine"
 	"regexp"
 
 	"github.com/hollis-labs/nanite/internal/slots"
@@ -96,6 +97,27 @@ const (
 	// skips an entry that does not fit.
 	SlotTrim = slots.Trim
 )
+
+// SlotPlacement says where a slot's content goes in a request.
+type SlotPlacement = slots.Placement
+
+const (
+	// SlotInSystem puts a slot in the system blocks, the cached prefix every
+	// request shares. A change there invalidates the cache for everything
+	// after it, so it suits content that rarely changes.
+	SlotInSystem = slots.InSystem
+	// SlotInTurn puts a slot's content in front of the user's message that
+	// starts the turn, stored with that message in a text block named
+	// TurnContextBlock. The system blocks and earlier messages stay
+	// byte-identical, so the cache holds. user_context is placed here by
+	// default.
+	SlotInTurn = slots.InTurn
+)
+
+// TurnContextBlock is the Name of the text block, at the front of a user
+// message, that carries the slots placed in the turn. A host showing
+// history can leave it out.
+const TurnContextBlock = engine.TurnContextBlock
 
 // Slots manages host contributions to the next turn's context.
 type Slots struct{ store *slots.Store }

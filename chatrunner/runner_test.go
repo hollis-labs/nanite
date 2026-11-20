@@ -106,6 +106,13 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 		variant, goal, _ := strings.Cut(strings.TrimPrefix(script, "subtask:"), ":")
 		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "call-sub", Name: "subtask",
 			Input: map[string]any{"variant": variant, "goal": goal, "return_spec": "a line"}}}, {Type: llmtypes.EventDone}}}
+	case strings.HasPrefix(script, "resumable:"):
+		// "resumable:<text>" stalls while hang is set (so the process can be
+		// killed mid-turn), else answers <text>.
+		if b.hang {
+			return fake.Response{Stall: true, Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "working"}}}
+		}
+		return fake.Text(strings.TrimPrefix(script, "resumable:"))
 	case script == "long":
 		return fake.Response{Stall: true, Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "working"}}}
 	case script == "overflow" && !b.overflowed:

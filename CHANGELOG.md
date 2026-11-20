@@ -25,6 +25,16 @@
   `ParseTool`, `LoadTools`, `LoadTool`, `CheckToolName` and
   `CheckToolEnv`. `tool__*` names and `tool_validate` are reserved for host
   tools, and `.mcp.json` servers may not use the `tool:` prefix.
+- chatrunner: interrupted turns can be resumed. A turn the previous process
+  left unfinished is no longer discarded when its chat is next used.
+  `Runner.RecoverTurns` resumes each (`Options.ResumeInterrupted`) or offers
+  it to the owner as a `nanite.interrupted` activity (`ActivityInterrupted`);
+  `Runner.Resume` publishes the resumed turn through `Options.Observe` without
+  a new user message, and the front desk does not plan it again;
+  `Runner.Discard` abandons it, as a new owner message or `Record` still
+  does. `Runner.Interrupted` and `Runner.InterruptedChats` report them; the
+  runner records each conversation's chat as host state `chat`. The desk's
+  dispatches on an interrupted chat wait for the owner's decision.
 - Warden auth. A new agent-directory file, `identity.yaml`, names the
   agent's principal, its Warden URL and parent credential file, and which
   `.mcp.json` HTTP servers get Warden tokens and claimed correlation headers

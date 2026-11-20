@@ -338,11 +338,31 @@ plans needs the `subtasks` and `background` builtin groups.
 
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
-`runner_ref` on the chat conversation record. A turn the previous process
-left unfinished is discarded when the conversation is next used: the chat
-Service has already ended that run on the stream, so there is no stream to
-resume it on. The owner sends the message again; front-desk work is not lost
-(see *Restarts* above).
+`runner_ref` on the chat conversation record. The runner records which chat
+each Nanite conversation serves (host state `chat`), so a restarted runner can
+find its interrupted turns.
+
+**Interrupted turns.** A turn the previous process left unfinished (it was
+killed mid-turn) is kept until the owner decides:
+
+- `Runner.RecoverTurns(ctx)` handles all of them. Call it once the chat
+  Service the runner serves is running; `Open` cannot, because the Service is
+  built on the runner and resuming publishes through `Options.Observe`. With
+  `Options.ResumeInterrupted` it resumes each. Otherwise it offers each to
+  the owner as a `nanite.interrupted` activity (`turn`, and `actions`:
+  `resume`, `discard`) on a run of its own.
+- `Runner.Resume(ctx, chatID)` continues the turn from its stored message as a
+  new run published through `Options.Observe`, with no new user message (the
+  owner's message is already in the chat). The front desk does not plan it
+  again.
+- `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
+  `Record`, also discards it: the owner has moved on.
+- `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report
+  them.
+
+While a turn is interrupted, the front desk's dispatches on that chat wait,
+as for any held conversation; they start when the resumed turn ends or the
+turn is discarded. A notice turn on that chat only announces its notice.
 
 **The turn's context.** `Turn.Context` goes into one slot entry
 (`SlotUserContext` unless `Options.ContextSlot` names another) for that turn

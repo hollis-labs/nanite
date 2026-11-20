@@ -19,7 +19,7 @@ import (
 )
 
 // seen is what the server saw on the last request.
-type seen struct{ path, auth, apiKey, team string }
+type seen struct{ path, auth, apiKey, team, profile string }
 
 // server answers as an OpenAI-compatible chat server, or as the Anthropic
 // Messages API under /v1/messages, and records the last request.
@@ -29,7 +29,7 @@ func server(t *testing.T) (*httptest.Server, func() seen) {
 	var last seen
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		last = seen{r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"), r.Header.Get("X-Team")}
+		last = seen{r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"), r.Header.Get("X-Team"), r.Header.Get("X-Profile")}
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/messages") {
@@ -155,7 +155,7 @@ func TestPerRequestGatewayHeadersDoNotLeak(t *testing.T) {
 			for _, value := range []string{"alpha", "beta", ""} {
 				ctx := t.Context()
 				if value != "" {
-					ctx = station.WithHeaders(ctx, map[string]string{"X-Team": value})
+					ctx = station.WithHeaders(ctx, map[string]string{"X-Team": value, "X-Profile": value})
 				}
 				req := request
 				req.MaxTokens = 16
@@ -165,12 +165,8 @@ func TestPerRequestGatewayHeadersDoNotLeak(t *testing.T) {
 				if _, err := p.Complete(ctx, req); err != nil {
 					t.Fatal(err)
 				}
-				want := value
-				if want == "" {
-					want = "default"
-				}
-				if got := last().team; got != want {
-					t.Fatalf("team=%q want %q", got, want)
+				if got := last(); got.team != "default" || got.profile != value {
+					t.Fatalf("team=%q profile=%q; want default, %q", got.team, got.profile, value)
 				}
 			}
 		})

@@ -31,6 +31,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcpclient"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider"
+	"github.com/hollis-labs/nanite/internal/provider/station"
 	"github.com/hollis-labs/nanite/internal/skills"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -462,15 +463,6 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 			return nil, fmt.Errorf("an errand turn needs text")
 		}
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed {
-		return nil, fmt.Errorf("nanite: agent is closed")
-	}
-	if e.active[id] != nil {
-		return nil, ErrBusy
-	}
-
 	info, err := e.cfg.Store.Conversation(ctx, id)
 	if err != nil {
 		return nil, err
@@ -487,10 +479,31 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	}
 	if interrupted != nil {
 		input.AgentDir, input.Headers = interrupted.AgentDir, interrupted.Headers
+		// Persisted empty selections mean the Open profile and no turn headers,
+		// even when the caller tries to resume from another profile's context.
+		ctx = context.WithValue(ctx, profileKey{}, (*turnProfile)(nil))
+		ctx = station.WithHeaders(ctx, nil)
 	}
 	ctx, err = e.prepareProfile(ctx, &input)
 	if err != nil {
 		return nil, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, fmt.Errorf("nanite: agent is closed")
+	}
+	if e.active[id] != nil {
+		return nil, ErrBusy
+	}
+	// Validation performs filesystem I/O without the engine lock. Confirm
+	// that nobody resolved or replaced the interrupted turn in the meantime.
+	current, err := e.cfg.Store.Interrupted(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if (current == nil) != (interrupted == nil) || current != nil && current.ID != interrupted.ID {
+		return nil, fmt.Errorf("conversation's interrupted turn changed while validating its profile")
 	}
 	runID := store.NewID(time.Now())
 	if interrupted != nil {

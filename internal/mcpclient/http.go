@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"time"
@@ -34,7 +35,7 @@ const (
 )
 
 func (c *Client) httpClient(headers map[string]string, timeoutSeconds int) *http.Client {
-	t := headerTransport{headers: headers}
+	t := headerTransport{headers: headers, logger: c.logger}
 	if server, ok := headers[authMarker]; ok && c.auth != nil {
 		t.headers = maps.Clone(headers)
 		delete(t.headers, authMarker)
@@ -50,17 +51,21 @@ func (c *Client) httpClient(headers map[string]string, timeoutSeconds int) *http
 
 type headerTransport struct {
 	headers     map[string]string
+	logger      *slog.Logger
 	bearer      *warden.Bearer
 	principal   string
 	correlation bool
 }
 
 func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
-	for k, v := range t.headers {
-		req.Header.Set(k, v)
+	ctx := req.Context()
+	if req.Method != http.MethodPost {
+		// Connection streams, reconnect GETs and DELETE must never inherit a
+		// turn's metadata, even if the SDK retained the dialing call's context.
+		ctx = station.WithHeaders(ctx, nil)
 	}
-	for k, v := range station.Headers(req.Context()) {
+	req = req.Clone(ctx)
+	for k, v := range station.ConfiguredHeaders(req.Context(), t.headers, t.logger) {
 		req.Header.Set(k, v)
 	}
 	if t.correlation {

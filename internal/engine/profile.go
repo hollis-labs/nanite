@@ -53,12 +53,16 @@ func (e *Engine) steeringConfig(ctx context.Context) *Steering {
 // prepareProfile completes all fallible profile validation before a run is
 // registered. Descendants keep the parent's snapshot, even after a switch.
 func (e *Engine) prepareProfile(ctx context.Context, in *Input) (context.Context, error) {
-	headers, err := station.CopyHeaders(in.Headers)
+	source := in.Headers
+	if source == nil {
+		source = station.Headers(ctx)
+	}
+	headers, err := station.CopyHeaders(source)
 	if err != nil {
 		return ctx, err
 	}
-	if in.Headers == nil {
-		headers = maps.Clone(station.Headers(ctx))
+	if err := e.validateHeaderValues(headers); err != nil {
+		return ctx, err
 	}
 	in.Headers = headers
 	ctx = station.WithHeaders(ctx, headers)
@@ -91,6 +95,18 @@ func (e *Engine) prepareProfile(ctx context.Context, in *Input) (context.Context
 		return ctx, errors.New("nanite: Input.Steer was prepared for another profile")
 	}
 	return context.WithValue(ctx, profileKey{}, p), nil
+}
+
+// validateHeaderValues refuses sensitive values without storing a modified
+// correlation ID. Recheck immediately before journaling, after lazy provider
+// and tool setup may have registered additional secrets with the redactor.
+func (e *Engine) validateHeaderValues(headers map[string]string) error {
+	for name, value := range headers {
+		if e.scrub.Text(value) != value {
+			return fmt.Errorf("turn header %q contains redacted data", name)
+		}
+	}
+	return nil
 }
 
 type profileFile struct {
@@ -170,9 +186,10 @@ func (e *Engine) loadProfile(dir string) (*turnProfile, error) {
 		return nil, err
 	}
 	e.profileMu.Lock()
-	defer e.profileMu.Unlock()
-	if p := e.profiles[dir]; p != nil && p.digest == digest {
-		return p, nil
+	cached := e.profiles[dir]
+	e.profileMu.Unlock()
+	if cached != nil && cached.digest == digest {
+		return cached, nil
 	}
 	// agentdir.Load requires host.yaml. Validate the captured files against a
 	// stand-in host, then retain only the authored fields allowed in a profile.
@@ -205,6 +222,11 @@ func (e *Engine) loadProfile(dir string) (*turnProfile, error) {
 	if err != nil {
 		return nil, err
 	}
+	for name, pkg := range packages {
+		if len(pkg.Env) != 0 || len(pkg.Needs) != 0 {
+			return nil, fmt.Errorf("tool package %q: turn profiles cannot request environment passthrough or Warden tokens", name)
+		}
+	}
 	cfg, err := e.profileSteering(files["steering.json"].data)
 	if err != nil {
 		return nil, fmt.Errorf("steering.json: %w", err)
@@ -233,6 +255,11 @@ func (e *Engine) loadProfile(dir string) (*turnProfile, error) {
 		def.Context = append(def.Context, definition.Context{Name: c.Name, Text: c.Body})
 	}
 	p := &turnProfile{owner: e, dir: dir, digest: digest, definition: def, variants: variants, packages: packages, steering: cfg}
+	e.profileMu.Lock()
+	defer e.profileMu.Unlock()
+	if cached := e.profiles[dir]; cached != nil && cached.digest == digest {
+		return cached, nil
+	}
 	if len(e.profiles) >= 32 {
 		clear(e.profiles)
 	}

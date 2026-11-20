@@ -25,6 +25,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/processenv"
+	"github.com/hollis-labs/nanite/internal/provider/station"
 	"github.com/hollis-labs/nanite/internal/tools"
 	"github.com/hollis-labs/nanite/internal/warden"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -240,6 +241,9 @@ func (l *Lease) cachedList(ctx context.Context, reg *registration) ([]*sdk.Tool,
 }
 
 func (l *Lease) list(ctx context.Context, reg *registration) ([]*sdk.Tool, error) {
+	if err := l.client.warm(ctx, reg); err != nil {
+		return nil, err
+	}
 	page, err := l.client.pool.ListTools(reg.transportContext(ctx), reg.key)
 	if err != nil {
 		return nil, err
@@ -301,6 +305,9 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 				return tools.Result{}, err
 			}
 			defer release()
+			if err := l.client.warm(ctx, reg); err != nil {
+				return tools.Result{}, err
+			}
 			result, _, err := l.client.pool.CallTool(reg.transportContext(ctx), reg.key, spec.Name, args, mcp.WithCallRetry(mcp.RetryIfUnsent))
 			if err != nil {
 				if isUnknownTool(err) {
@@ -450,4 +457,19 @@ func commandEnv(cfg mcp.ServerConfig) ([]string, error) {
 		return nil, fmt.Errorf("MCP stdio command requires PATH")
 	}
 	return processenv.List(cfg.Env), nil
+}
+
+// warm establishes a lazy connection without retaining the turn's headers
+// in the SDK connection context. Actual list/call requests use their own
+// context. The HTTP transport also excludes metadata from GET and DELETE
+// if the pool reconnects inside a later call.
+func (c *Client) warm(ctx context.Context, reg *registration) error {
+	conn, err := c.pool.Get(reg.key)
+	if err != nil {
+		return err
+	}
+	if conn.SDKSession() != nil {
+		return nil
+	}
+	return conn.Ping(reg.transportContext(station.WithHeaders(ctx, nil)))
 }

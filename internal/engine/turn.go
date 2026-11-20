@@ -395,6 +395,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		// The trace shows the tool schemas' share of the request.
 		tr.rec.Slots = append(tr.rec.Slots, trace.Slot{Name: "tool_schemas", Tokens: x.schemaTokens})
 	}
+	if err := e.validateHeaderValues(input.Headers); err != nil {
+		return events.Result{}, err
+	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)
 	if err != nil {
 		return events.Result{}, err

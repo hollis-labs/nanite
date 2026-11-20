@@ -15,7 +15,10 @@
   skills, variants, tool packages and `steering.json` without rewriting the
   Open directory. Background descendants retain their starting snapshot.
 - `Input.Headers` supplies non-credential MCP HTTP and model gateway headers
-  for one turn and its descendants. Reserved transport/auth headers are refused.
+  for one turn and its descendants. Host-configured values win. Header names
+  that suggest credentials and reserved transport names are refused, as are
+  redacted values; limits are 16 headers and 256 printable ASCII bytes per value.
+  MCP connection streams and close requests never carry turn headers.
 - Turn profiles and headers survive interrupted-turn recovery. chatrunner's
   `TurnProfile` hook selects them; `Agent.TurnContext` shares the validated
   snapshot with planning and host dispatch. See [turn profiles](docs/turn-profiles.md).

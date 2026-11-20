@@ -50,7 +50,7 @@ func (c *Client) requestOptions(ctx context.Context) []option.RequestOption {
 		return nil
 	}
 	var opts []option.RequestOption
-	for name, value := range station.Headers(ctx) {
+	for name, value := range station.ConfiguredHeaders(ctx, gw.Headers, nil) {
 		opts = append(opts, option.WithHeader(name, value))
 	}
 	if id, ok := station.SessionID(ctx); ok {

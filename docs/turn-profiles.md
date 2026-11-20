@@ -32,7 +32,11 @@ variants, including variants used for children it starts after the switch.
 Keep profile directories at their stable paths while work uses them: executable
 tool packages still run from those paths and are rechecked before execution.
 Package approval remains keyed by package name and digest; the same named,
-identical package in two profile directories shares its approval.
+identical package in two profile directories shares its approval. Per-turn tool
+packages cannot request environment passthrough (`env`) or Warden tokens
+(`needs`); validation refuses either. Skill bodies come from the validated
+snapshot. Skill directory paths still point to the stable profile directory,
+so auxiliary files referenced by a skill must remain immutable there.
 
 ## Steering
 
@@ -66,18 +70,24 @@ message, and may be consumed only once.
 
 ## Headers and recovery
 
-Headers are copied before the run begins and apply to MCP HTTP/SSE requests
+Headers are copied before the run begins and apply to MCP HTTP/SSE calls
 and the built-in model gateway adapters, including descendants. They do not
-modify shared clients. No fixed profile header name is introduced: the example
+modify shared clients. Connection streams and close requests (GET/DELETE)
+never receive turn headers. No fixed profile header name is introduced: the example
 uses an application-owned name, which applications should coordinate with
 receiving services. Custom provider implementations receive the request context
 but do not automatically gain an HTTP transport implementation.
 
 Authorization, cookies, host, content/connection framing, proxy/forwarding
 headers, and headers owned by the Warden, MCP or model adapters are refused.
-Use this API only for non-secret correlation metadata: header values are
-persisted with the turn. Existing authenticated transport settings retain
-control of credentials and identity.
+Names containing auth, token, key, secret, cookie, session, password or credential
+(case-insensitive) are also refused. There may be at most 16 headers, each
+value at most 256 bytes of printable ASCII. Values that the redactor would
+change are refused before the turn is stored; errors name only the header.
+Use this API only for non-secret correlation metadata: accepted header values
+are persisted with the turn. Host-configured headers always win over a turn
+header with the same name, with one warning per shadowed name per scope.
+Existing authenticated transport settings retain control of credentials and identity.
 
 The transcript and its SQLite projection store the absolute `AgentDir` and
 headers when the turn starts. Recovery loads that directory, even if the host
@@ -85,6 +95,8 @@ now selects a different profile. A missing or invalid directory fails recovery
 explicitly; it never falls back to the Open directory. Keep profile versions
 immutable if exact content must survive a process restart: recovery reloads
 the stored path, rather than persisting executable files or parsed callbacks.
+A persisted empty directory or absent headers explicitly restores the Open
+profile or no headers; recovery never inherits the caller’s profile context.
 A new turn uses the selection supplied by the host.
 
 ## chatrunner and planning

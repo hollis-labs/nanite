@@ -12,6 +12,23 @@
   it (the engine's variant embeds `authored.Variant`), so there is one set of
   rules. Both loaders read through an `os.Root`, so a symlink cannot reach
   outside the agent directory.
+- chatrunner front desk survives a restart. Each chat's plans, step
+  states, job links, suggested plans and delivery queue are saved as the
+  conversation's host state on every change, and the ledger the desk made
+  agent-wide. `Open` restores them and runs the new `Desk.Recover`. A job
+  that finished meanwhile is applied, a job a restart stopped is started
+  again (it counts toward the three attempts), and held deliveries go out
+  once. `Close` saves before it stops the agent.
+- `agent.Conversation.HostState` / `SetHostState`, `agent.Agent.HostState` /
+  `SetHostState` and `ConversationHostStates`: host values that outlive a
+  restart and that the model never sees (stored with the conversation
+  settings, under a `host.` key prefix; no migration).
+- A background job `Close` cancels now has the reason `shutdown`, and a job
+  the next start finds still running (status `lost`) has `process exit`
+  (`agent.JobReasonShutdown`, `agent.JobReasonProcessExit`), so a host can
+  tell a restart from a cancellation or a failure.
+- Fix: a turn sent the moment the previous turn's terminal event arrives
+  waits for that turn to release the conversation instead of failing busy.
 - Steering (libs `agent/steer`), off unless `agent.Options.Steering` is set.
   A root turn gets the conversation's mode (a preset: instructions and output
   style in the `mode` slot), the work slots in front with their instructions

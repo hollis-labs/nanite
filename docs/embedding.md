@@ -264,9 +264,10 @@ plans needs the `subtasks` and `background` builtin groups.
   that come due while a turn runs start when it ends; a step that fails to
   start three times is marked failed and the owner is told. Desk notices are
   handled per conversation, so a slow `Delegate` holds up only its own chat.
-- *Ledger.* Every plan is a topic in `r.Desk().Ledger()` (pass your own in
-  `DeskOptions.Ledger` to persist it): its work, results and the questions
-  waiting on the owner.
+- *Ledger.* Every plan is a topic in `r.Desk().Ledger()`: its work, results
+  and the questions waiting on the owner. The desk saves the ledger it made
+  and restores it on `Open`. A ledger you pass in `DeskOptions.Ledger` is
+  yours to save and restore (it marshals to JSON); the desk only uses it.
 - *Delivery.* With a desk, a notice no running turn carried does not go to
   the wire as it arrives. Each one (a desk job's result, a relayed ask,
   a host notice, a shell job) is an item for the chat's delivery editor,
@@ -278,11 +279,28 @@ plans needs the `subtasks` and `background` builtin groups.
   items and questions until it ends. `Held` counts what waits and `Flush`
   sends it now. A desk job's result always goes through the editor, even
   when a running turn announced that the job ended.
+- *Restarts.* The desk saves each chat's state as the conversation's host
+  state (`agent.Conversation.SetHostState`, key `desk`) whenever it changes:
+  its plans and how far each step got, the jobs running them, suggested
+  plans not yet answered, and the delivery editor's queue. `Open` restores
+  it before notices flow and then runs `r.Desk().Recover`. That looks up
+  each job a step was waiting on. A job that finished meanwhile has its
+  result applied, as its notice would have. A job Nanite stopping ended
+  (`Close`, or a process exit: the job's reason is
+  `agent.JobReasonShutdown` or `agent.JobReasonProcessExit`) is started
+  again, counting as one of the step's three attempts. Then ready steps
+  start and what the editor holds goes out when due. A job's finish is
+  applied once, whether its notice or `Recover` sees it first, and an item
+  the editor already released is not sent again. `Close` saves everything
+  before it stops the agent. The owner's typing state is not saved.
 
 **Conversations.** Each chat conversation is one Nanite conversation, created
 on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
 `runner_ref` on the chat conversation record. A turn the previous process
-left unfinished is discarded when the conversation is next used.
+left unfinished is discarded when the conversation is next used: the chat
+Service has already ended that run on the stream, so there is no stream to
+resume it on. The owner sends the message again; front-desk work is not lost
+(see *Restarts* above).
 
 **The turn's context.** `Turn.Context` goes into one slot entry
 (`SlotUserContext` unless `Options.ContextSlot` names another) for that turn

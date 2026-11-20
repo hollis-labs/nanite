@@ -79,7 +79,7 @@ func TestRecoverMarksVerifiedProcessJobLost(t *testing.T) {
 		t.Fatal("verified group was left running")
 	}
 	got, err := db.Job(t.Context(), id, "shell", job.ID)
-	if err != nil || got.Status != "lost" {
+	if err != nil || got.Status != "lost" || got.Reason != store.JobReasonProcessExit {
 		t.Fatalf("job %+v, %v", got, err)
 	}
 	notices, err := db.PendingNotices(t.Context(), id)

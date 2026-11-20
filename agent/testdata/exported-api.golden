@@ -2,11 +2,14 @@ type Agent struct
   (*Agent) Close() error
   (*Agent) Complete(ctx context.Context, use string, system string, prompt string, maxTokens int) (string, error)
   (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
+  (*Agent) ConversationHostStates(ctx context.Context, key string) (map[string]string, error)
   (*Agent) Conversations(ctx context.Context) ([]ConversationInfo, error)
+  (*Agent) HostState(ctx context.Context, key string) (string, error)
   (*Agent) Info(ctx context.Context) (Info, error)
   (*Agent) Latest(ctx context.Context) (*Conversation, error)
   (*Agent) NewConversation(ctx context.Context, options ...ConversationOption) (*Conversation, error)
   (*Agent) RebuildIndex(ctx context.Context) error
+  (*Agent) SetHostState(ctx context.Context, key string, value string) error
   (*Agent) Skills() *SkillSet
   (*Agent) SlotBudget(name SlotName) int
   (*Agent) Slots() *Slots
@@ -40,6 +43,7 @@ type Conversation struct
   (*Conversation) Discard(ctx context.Context) error
   (*Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error)
   (*Conversation) History(ctx context.Context) ([]Message, error)
+  (*Conversation) HostState(ctx context.Context, key string) (string, error)
   (*Conversation) ID() string
   (*Conversation) Interrupted() *InterruptedTurn
   (*Conversation) Job(ctx context.Context, id string) (string, error)
@@ -48,6 +52,7 @@ type Conversation struct
   (*Conversation) Record(ctx context.Context, userText string, answer string) error
   (*Conversation) Resume(ctx context.Context) (*Run, error)
   (*Conversation) Send(ctx context.Context, in Input) (*Run, error)
+  (*Conversation) SetHostState(ctx context.Context, key string, value string) error
   (*Conversation) SetMode(ctx context.Context, name string) error
   (*Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error)
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
@@ -101,6 +106,8 @@ type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
 type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
   field ID string
   field UserMessageID string
+const JobReasonProcessExit untyped string
+const JobReasonShutdown untyped string
 type Message = github.com/hollis-labs/nanite/internal/store.Message struct
   field ID string
   field TurnID string

@@ -134,6 +134,11 @@ func (m *Manager) finish(ctx context.Context, job store.Job, task Task, file *os
 	job.ExitCode = got.ExitCode
 	if errors.Is(got.Err, context.Canceled) || ctx.Err() != nil {
 		job.Status = "cancelled"
+		m.mu.Lock()
+		if m.closed {
+			job.Reason = store.JobReasonShutdown
+		}
+		m.mu.Unlock()
 	} else if got.Err != nil || (got.ExitCode != nil && *got.ExitCode != 0) {
 		job.Status = "failed"
 	} else if got.Limit != "" {

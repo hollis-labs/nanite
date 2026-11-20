@@ -74,3 +74,37 @@ func TestPanickingJobStartIsAnError(t *testing.T) {
 		t.Fatalf("start error %v", err)
 	}
 }
+
+// A job Close stops is cancelled with the shutdown reason, so whoever
+// started it can tell a restart from a cancellation it asked for.
+func TestCloseMarksJobsStoppedByShutdown(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), ".nanite"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Now().UTC()
+	conversation := store.Conversation{ID: store.NewID(now), Role: "chat", Status: "active", CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateConversation(t.Context(), conversation); err != nil {
+		t.Fatal(err)
+	}
+	scrub, err := redact.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(db, scrub, func(store.Job, store.Notice) {}, slog.New(slog.DiscardHandler), panics.New(panics.Config{Redact: scrub.Text}))
+	started := make(chan struct{})
+	job, err := m.Start(t.Context(), store.Job{ID: store.NewID(now), ConversationID: conversation.ID, Kind: "subagent", Spec: "{}"},
+		func(ctx context.Context, _ io.Writer) (Task, error) {
+			return Task{Wait: func() Outcome { close(started); <-ctx.Done(); return Outcome{Err: ctx.Err()} }}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	m.Close()
+	got, err := db.Job(t.Context(), conversation.ID, "subagent", job.ID)
+	if err != nil || got.Status != "cancelled" || got.Reason != store.JobReasonShutdown {
+		t.Fatalf("job %+v, %v", got, err)
+	}
+}

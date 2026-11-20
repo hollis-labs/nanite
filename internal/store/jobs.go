@@ -23,6 +23,14 @@ type Job struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// Reasons a job ended because its process stopped rather than because of
+// what it did: the agent closed while it ran, or the process exited and the
+// next start found it still marked running.
+const (
+	JobReasonShutdown    = "shutdown"
+	JobReasonProcessExit = "process exit"
+)
+
 func (s *Store) JobDir() string { return filepath.Join(filepath.Dir(s.transcripts), "jobs") }
 
 func (s *Store) StartJob(ctx context.Context, job Job) error {

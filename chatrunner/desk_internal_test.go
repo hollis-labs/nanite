@@ -20,9 +20,19 @@ func TestJobForMatchesOnlyAJobFinish(t *testing.T) {
 		{agent.NoticePosted{Kind: subtaskJobKind, Body: "subtask 01JOBX (research) ended ok"}, false},
 		{agent.NoticePosted{Kind: "shell", Body: "shell job 01JOB succeeded."}, false},
 	} {
-		got, job := d.jobFor(tc.n)
+		got, job, _ := d.jobFor(tc.n)
 		if (got != nil) != tc.want || (tc.want && job != "01JOB") {
 			t.Errorf("%s %q: got %v %q", tc.n.Kind, tc.n.Body, got != nil, job)
 		}
+	}
+}
+
+// A notice for a job whose finish was applied already is recognized, so it
+// is dropped rather than delivered as a plain notice.
+func TestJobForKnowsRetiredJobs(t *testing.T) {
+	d := &Desk{jobs: map[string]*planRun{}, retired: map[string]bool{"01JOB": true}}
+	run, job, retired := d.jobFor(agent.NoticePosted{Kind: subtaskJobKind, Body: "subagent job 01JOB was interrupted by a process exit"})
+	if run != nil || job != "01JOB" || !retired {
+		t.Fatalf("got %v %q %v", run != nil, job, retired)
 	}
 }

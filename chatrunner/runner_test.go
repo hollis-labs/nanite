@@ -39,6 +39,8 @@ type brain struct {
 	plan string
 	// planned records the planner requests.
 	planned []llmtypes.ChatRequest
+	// hang makes a "slow:" subtask stall until it is cancelled.
+	hang bool
 }
 
 func isToolResult(m llmtypes.ChatMessage) bool {
@@ -86,6 +88,16 @@ func (b *brain) respond(req llmtypes.ChatRequest) fake.Response {
 		}
 		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "ret-1", Name: "return_result",
 			Input: map[string]any{"status": "ok", "result": strings.TrimPrefix(script, "report:")}}}, {Type: llmtypes.EventDone}}}
+	case strings.HasPrefix(script, "slow:"):
+		// "slow:<text>" stalls while hang is set, else reports <text>.
+		if b.hang {
+			return fake.Response{Stall: true, Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "working"}}}
+		}
+		if steps > 0 {
+			return fake.Text("done")
+		}
+		return fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "ret-1", Name: "return_result",
+			Input: map[string]any{"status": "ok", "result": strings.TrimPrefix(script, "slow:")}}}, {Type: llmtypes.EventDone}}}
 	case strings.HasPrefix(script, "subtask:"):
 		// "subtask:<variant>:<goal>" starts one subtask, then says "done".
 		if steps > 0 {

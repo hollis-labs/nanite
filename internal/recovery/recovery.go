@@ -36,7 +36,7 @@ func Recover(ctx context.Context, db *store.Store) error {
 		if err := shell.TerminateRecordedGroup(ctx, job.PID, job.ProcessIdentity); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return fmt.Errorf("terminate job %s: %w", job.ID, err)
 		}
-		job.Status = "lost"
+		job.Status, job.Reason = "lost", store.JobReasonProcessExit
 		notice := store.Notice{ID: store.NewID(time.Now()), ConversationID: job.ConversationID, Kind: job.Kind,
 			Body: fmt.Sprintf("%s job %s was interrupted by a process exit", job.Kind, job.ID)}
 		if err := db.CompleteJob(ctx, job, notice); err != nil {

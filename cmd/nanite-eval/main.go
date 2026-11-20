@@ -32,8 +32,8 @@ import (
 
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/agent/providers"
 	"github.com/hollis-labs/nanite/evals"
-	"github.com/hollis-labs/nanite/internal/provider"
 )
 
 // maxCap is the most a single live run may be allowed to spend, and
@@ -123,7 +123,7 @@ func run(ctx context.Context, args []string, w, status io.Writer) error {
 		cfg.MaxUSD, cfg.Model = *maxUSD, *model
 		gw := agent.Gateway{BaseURL: os.Getenv("NANITE_GATEWAY_URL"), KeyRef: os.Getenv("NANITE_GATEWAY_KEY_REF"), Auth: os.Getenv("NANITE_GATEWAY_AUTH")}
 		cfg.Gateway = gw
-		p, err := provider.New(provider.Config{Provider: *providerName, Gateway: provider.Gateway{BaseURL: gw.BaseURL, KeyRef: gw.KeyRef, Auth: gw.Auth}})
+		p, err := providers.New(providers.Config{Name: *providerName, KeyRef: gw.KeyRef, BaseURL: gw.BaseURL, Auth: gw.Auth})
 		if err != nil {
 			return err
 		}

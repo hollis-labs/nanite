@@ -81,6 +81,30 @@ Tools offered: ask_user, fetch_tool_result, find_files, list_dir, read_file, scr
 The workspace context is clear.
 ```
 
+## Building a provider yourself
+
+`agent.Open` builds the providers that `host.yaml` and `providers.yaml`
+select, so most hosts never build one. A host that wants a provider outside
+an agent (a live eval, a workbench, a one-off request), or wants to choose it
+explicitly through `agent.Options.Provider`, uses
+`github.com/hollis-labs/nanite/agent/providers`:
+
+```go
+p, err := providers.New(providers.Config{
+    Name:   providers.OpenAI,                  // or providers.Anthropic
+    KeyRef: "keychain://nanite/provider/openai", // optional; a reference, never the key
+})
+// A named provider, as providers.yaml defines one:
+q, err := providers.NewNamed(spec, providers.Options{})
+```
+
+A built-in provider looks for its key at `KeyRef`, then at
+`keychain://nanite/provider/<name>`, then, only with
+`NANITE_PROVIDER_KEY_ENV=1`, in `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+`BaseURL`, `Headers` and `Auth` route it through a gateway, as
+`agent.Gateway` does. Keys are resolved on each request and redacted; a key
+that cannot be resolved fails the request, not `New`.
+
 ## Steering
 
 `Options.Steering` turns on modes, work slots, reflexes and a classifier for

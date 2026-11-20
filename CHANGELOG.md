@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- New public package `agent/providers`: `New(Config)` builds a built-in
+  provider (anthropic, openai) from its name, a key reference and an
+  optional gateway; `NewNamed(spec, Options)` builds a named provider as
+  providers.yaml defines one. `nanite-eval` and the embed-host example use
+  it instead of internal packages.
 - `agent.Options.WorkDir`: the working directory the file tools resolve
   relative paths against first and bash runs in (an existing absolute
   directory; empty is the process's working directory at `Open`). MCP stdio

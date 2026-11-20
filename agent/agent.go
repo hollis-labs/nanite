@@ -421,8 +421,11 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	a.control, err = control.Start(data, a.StopAll)
 	if err != nil {
-		_ = a.Close()
-		return nil, fmt.Errorf("start agent control: %w", err)
+		logger := opts.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("agent CLI control unavailable; embedding StopAll remains available", "error", err)
 	}
 	return a, nil
 }

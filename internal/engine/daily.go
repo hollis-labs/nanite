@@ -27,7 +27,6 @@ type dailyState struct {
 type dailyBudget struct {
 	mu    sync.Mutex
 	state dailyState
-	fault error
 	now   func() time.Time
 }
 
@@ -38,12 +37,14 @@ func (e *Engine) loadDaily() error {
 		return err
 	}
 	if raw != "" {
-		if err := json.Unmarshal([]byte(raw), &e.daily.state); err != nil {
-			return fmt.Errorf("daily budget state: %w", err)
+		var state dailyState
+		err := json.Unmarshal([]byte(raw), &state)
+		_, dayErr := time.Parse("2006-01-02", state.Day)
+		if err != nil || dayErr != nil || state.Tokens < 0 {
+			e.cfg.Logger.Warn("invalid daily budget state; starting an empty ledger")
+			state = dailyState{Day: e.daily.now().UTC().Format("2006-01-02")}
 		}
-		if _, err := time.Parse("2006-01-02", e.daily.state.Day); err != nil || e.daily.state.Tokens < 0 {
-			return errors.New("invalid daily budget state")
-		}
+		e.daily.state = state
 	}
 	return nil
 }
@@ -53,9 +54,6 @@ func (e *Engine) loadDaily() error {
 func (e *Engine) checkDaily() error {
 	e.daily.mu.Lock()
 	defer e.daily.mu.Unlock()
-	if e.daily.fault != nil {
-		return e.daily.fault
-	}
 	if e.cfg.DailyTokenBudget > 0 && e.daily.state.Day == e.daily.now().UTC().Format("2006-01-02") && e.daily.state.Tokens >= int64(e.cfg.DailyTokenBudget) {
 		return fmt.Errorf("%w: %d/%d tokens on %s UTC", ErrDailyBudget, e.daily.state.Tokens, e.cfg.DailyTokenBudget, e.daily.state.Day)
 	}
@@ -68,23 +66,21 @@ func (e *Engine) spendDaily(ctx context.Context, conversation string, tokens int
 		return nil
 	}
 	e.daily.mu.Lock()
-	if e.daily.fault != nil {
-		err := e.daily.fault
-		e.daily.mu.Unlock()
-		return err
-	}
 	day := e.daily.now().UTC().Format("2006-01-02")
 	state := e.daily.state
 	if state.Day != day {
 		state = dailyState{Day: day}
 	}
 	if int64(tokens) > math.MaxInt64-state.Tokens {
-		e.daily.fault = errors.New("daily token count overflow")
-		err := e.daily.fault
-		e.daily.mu.Unlock()
-		return err
+		state.Tokens = math.MaxInt64
+	} else {
+		state.Tokens += int64(tokens)
 	}
-	state.Tokens += int64(tokens)
+	if e.cfg.DailyTokenBudget == 0 {
+		e.daily.state = state
+		e.daily.mu.Unlock()
+		return nil
+	}
 	warning := e.cfg.DailyTokenBudget > 0 && !state.Warned && state.Tokens >= int64(e.cfg.DailyTokenBudget)-int64(e.cfg.DailyTokenBudget)/5
 	state.Warned = state.Warned || warning
 	var notice *store.Notice
@@ -97,14 +93,15 @@ func (e *Engine) spendDaily(ctx context.Context, conversation string, tokens int
 		err = e.cfg.Store.SaveBudget(context.WithoutCancel(ctx), dailyBudgetKey, string(raw), notice)
 	}
 	if err != nil {
-		e.daily.fault = fmt.Errorf("persist daily budget: %w", err)
-		err = e.daily.fault
-	} else {
-		e.daily.state = state
+		// Retain usage in memory and retry persistence on the next spend.
+		// Leave the warning pending until its notice is durably committed.
+		state.Warned = e.daily.state.Day == day && e.daily.state.Warned
 	}
+	e.daily.state = state
 	e.daily.mu.Unlock()
 	if err != nil {
-		return err
+		e.cfg.Logger.Warn("persist daily budget; retaining in-memory usage", "error", err)
+		return nil
 	}
 	if warning {
 		e.cfg.Logger.Warn(body)

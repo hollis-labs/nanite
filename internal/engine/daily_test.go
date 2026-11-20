@@ -2,10 +2,13 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,7 +220,7 @@ func TestDailyBudgetStopsNextModelStep(t *testing.T) {
 	}
 }
 
-func TestDailyBudgetRejectsDispatchAndMalformedState(t *testing.T) {
+func TestDailyBudgetRejectsDispatch(t *testing.T) {
 	e, _, id := setupEngine(t, fake.New(), "")
 	e.cfg.DailyTokenBudget = 100
 	if err := e.spendDaily(t.Context(), id, 100); err != nil {
@@ -225,12 +228,6 @@ func TestDailyBudgetRejectsDispatchAndMalformedState(t *testing.T) {
 	}
 	if _, err := e.Dispatch(t.Context(), id, []subagent.Request{{Goal: "child", Variant: "worker", ReturnSpec: json.RawMessage(`"a note"`)}}); !errors.Is(err, ErrDailyBudget) {
 		t.Fatalf("dispatch cap: %v", err)
-	}
-	if err := e.cfg.Store.SetSetting(t.Context(), "", dailyBudgetKey, `{"day":"bad","tokens":1}`); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.loadDaily(); err == nil {
-		t.Fatal("malformed state accepted")
 	}
 }
 
@@ -252,5 +249,166 @@ func TestDailyWarningContainsHelperSinkPanic(t *testing.T) {
 	}
 	if !errors.Is(e.checkDaily(), ErrDailyBudget) {
 		t.Fatal("helper usage not counted")
+	}
+}
+
+func TestDailyBudgetRecoversMalformedState(t *testing.T) {
+	for _, cap := range []int{0, 100} {
+		for _, raw := range []string{`{`, `{"day":"bad","tokens":1}`, `{"day":"2026-01-01","tokens":-1}`} {
+			t.Run(fmt.Sprintf("%d/%s", cap, raw), func(t *testing.T) {
+				e, db, _ := setupEngine(t, fake.New(), "")
+				e.cfg.DailyTokenBudget = cap
+				if err := db.SetSetting(t.Context(), "", dailyBudgetKey, raw); err != nil {
+					t.Fatal(err)
+				}
+				reopened, err := New(e.cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer reopened.Close()
+				if reopened.daily.state.Tokens != 0 || reopened.daily.state.Day != time.Now().UTC().Format("2006-01-02") {
+					t.Fatalf("recovered %+v", reopened.daily.state)
+				}
+				if err := reopened.checkDaily(); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+// Reject only ledger writes: transcript and turn persistence must still work.
+func failDailyWrites(t *testing.T, e *Engine) func() {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(e.cfg.Dir, ".nanite", "nanite.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER fail_budget BEFORE INSERT ON conversation_settings WHEN NEW.key = 'daily_token_budget' BEGIN SELECT RAISE(FAIL, 'fixture budget failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if _, err := db.ExecContext(t.Context(), "DROP TRIGGER fail_budget"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDailyBudgetWriteFailurePreservesAnswersAndRetries(t *testing.T) {
+	for _, cap := range []int{0, 10000} {
+		t.Run(fmt.Sprint(cap), func(t *testing.T) {
+			response := fake.Text("turn answer")
+			response.Events = append([]llmtypes.StreamEvent{{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{InputTokens: 80}}}, response.Events...)
+			e, db, id := setupEngine(t, fake.New(response, fake.Text("helper answer")), "")
+			e.cfg.DailyTokenBudget = cap
+			recoverWrites := failDailyWrites(t, e)
+			run, err := e.Send(t.Context(), id, Input{Text: "go"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result, err := run.Wait(); err != nil || result.Text != "turn answer" {
+				t.Fatalf("turn answer: %+v %v", result, err)
+			}
+			if text, err := e.Complete(t.Context(), "chat", "", "go", 100); err != nil || text != "helper answer" {
+				t.Fatalf("helper answer: %q %v", text, err)
+			}
+			before := e.daily.state.Tokens
+			if before <= 80 {
+				t.Fatalf("lost in-memory usage: %d", before)
+			}
+			if err := e.checkDaily(); err != nil {
+				t.Fatalf("latched failure: %v", err)
+			}
+			recoverWrites()
+			if err := e.spendDaily(t.Context(), id, 1); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := db.Setting(t.Context(), "", dailyBudgetKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cap == 0 {
+				if raw != "" {
+					t.Fatalf("disabled ledger persisted: %s", raw)
+				}
+				return
+			}
+			var state dailyState
+			if err := json.Unmarshal([]byte(raw), &state); err != nil {
+				t.Fatal(err)
+			}
+			if state.Tokens != before+1 {
+				t.Fatalf("retry lost usage: %+v, previous %d", state, before)
+			}
+		})
+	}
+}
+
+func TestDailyBudgetFailedWriteEnforcesCapAndRetriesNotice(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(), "")
+	e.cfg.DailyTokenBudget = 100
+	notices := e.SubscribeNotices(t.Context())
+	recoverWrites := failDailyWrites(t, e)
+	if err := e.spendDaily(t.Context(), id, 100); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(e.checkDaily(), ErrDailyBudget) {
+		t.Fatal("in-memory cap lost")
+	}
+	if e.daily.state.Warned {
+		t.Fatal("failed notice marked durable")
+	}
+	recoverWrites()
+	if err := e.spendDaily(t.Context(), id, 1); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-notices:
+		if n.Kind != "budget" {
+			t.Fatalf("notice %+v", n)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing retried notice")
+	}
+	if err := e.spendDaily(t.Context(), id, 1); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-notices:
+		t.Fatalf("duplicate %+v", n)
+	default:
+	}
+}
+
+func TestDailyBudgetChargesCompaction(t *testing.T) {
+	e, db, id := setupEngine(t, overflowThen(fake.Text("after compaction")), "")
+	e.cfg.DailyTokenBudget = 100000
+	seedLongHistory(t, db, id)
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(compactionEvents(t, run), "; "); got != "started; done shrank=true" {
+		t.Fatal(got)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	// Streaming responses report no usage; only the summary can charge this ledger.
+	if e.daily.state.Tokens <= 0 {
+		t.Fatal("compaction was not charged")
+	}
+	raw, err := db.Setting(t.Context(), "", dailyBudgetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state dailyState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Tokens != e.daily.state.Tokens {
+		t.Fatalf("summary usage not persisted: %+v", state)
 	}
 }

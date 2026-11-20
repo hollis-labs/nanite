@@ -58,3 +58,17 @@ func TestLocalControlStopsOpenAgent(t *testing.T) {
 		t.Fatal("endpoint survived Close")
 	}
 }
+
+func TestOpenWithoutControlTempDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeAgent(t, dir)
+	t.Setenv("TMPDIR", filepath.Join(dir, "missing"))
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: fake.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.StopAll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}

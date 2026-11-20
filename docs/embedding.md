@@ -622,7 +622,7 @@ and accepting Warden tokens on Nanite's own endpoints.
 `Options.DailyTokenBudget` sets an agent-wide token cap for each UTC day. A
 positive option overrides `host.yaml`'s `runtime.daily_token_budget`; zero uses
 the file, and an unset file value disables the cap. Negative values are refused.
-The count survives close/reopen in the agent state database and includes input,
+With a cap enabled, the count survives close/reopen in the agent state database and includes input,
 output and cached tokens across conversations, foreground and background
 subtasks, without counting child roll-ups twice. Helper completions and
 compaction summaries use estimated tokens because their provider interface does
@@ -634,6 +634,11 @@ flight may report usage beyond it; it is not a gateway billing ceiling. Missing
 provider usage cannot be counted. At 80%, one `BudgetWarning` is emitted per
 UTC day, with a warning log and runtime event; conversation work also posts a
 `budget` notice to the root conversation. The warning marker is persisted.
+Invalid ledger data logs a warning and starts an empty ledger for today. A
+ledger write failure keeps the count in memory and preserves the model response;
+the next usage report retries persistence, including any pending threshold
+notice. Usage since the last successful write can be lost on restart. With no
+cap, ledger writes are skipped.
 
 `a.StopAll(ctx)` cancels running turns, their subtasks and background jobs, and
 waits for cleanup. It latches admission off: later work returns `ErrStopped`;
@@ -645,4 +650,6 @@ A private local Unix socket exposes the same operation to `nanite stop --all
 --dir <agent-directory>`. It contacts the existing process, including an embedded
 agent, without opening its database or acquiring its agent lock. With a custom
 `Options.DataDir`, use the embedding API. The socket endpoint is removed on
-Close; no network listener is opened.
+Close; no network listener is opened. If the local socket cannot start (for
+example, the temporary directory is unavailable), Open logs a warning and
+continues without CLI control; the embedding `StopAll` API remains available.

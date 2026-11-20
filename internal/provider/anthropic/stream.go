@@ -33,6 +33,9 @@ import (
 // breaker state as the request flows through; this method just opens the
 // stream and translates events.
 func (c *Client) StreamChat(ctx context.Context, in llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
+	if err := c.validateCacheTTLs(in); err != nil {
+		return nil, err
+	}
 	api, err := c.client(ctx)
 	if err != nil {
 		return nil, err

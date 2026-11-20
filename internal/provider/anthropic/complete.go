@@ -16,6 +16,9 @@ import (
 // A response with no text, or only whitespace, returns an error wrapping
 // failure.ErrEmptyResponse rather than an empty string.
 func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string, error) {
+	if err := c.validateCacheTTLs(in); err != nil {
+		return "", err
+	}
 	api, err := c.client(ctx)
 	if err != nil {
 		return "", err

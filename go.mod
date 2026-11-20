@@ -4,16 +4,17 @@ go 1.26.11
 
 require (
 	github.com/google/go-cmp v0.7.0
-	github.com/hollis-labs/libs/agent/agentdir v0.3.0
+	github.com/hollis-labs/libs/agent/agentdir v0.4.0
 	github.com/hollis-labs/libs/agent/chat v0.1.0
 	github.com/hollis-labs/libs/agent/steer v0.1.0
 	github.com/hollis-labs/libs/agent/trace v0.2.0
 	github.com/hollis-labs/libs/security/policy v0.1.0
 	github.com/hollis-labs/libs/ui/ui-go v0.4.0
-	github.com/hollis-labs/substrate v0.1.1-0.20261120171505-0d8ca5dd433a
+	github.com/hollis-labs/substrate v0.1.1-0.20261120212928-3b89e9c9ff54
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
+	golang.org/x/net v0.62.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -36,7 +37,6 @@ require (
 	go.opentelemetry.io/otel/sdk/log v0.21.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.45.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261005182115-fad411399dd8 // indirect
 	google.golang.org/grpc v1.84.0 // indirect
@@ -46,7 +46,7 @@ require (
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
-	github.com/hollis-labs/libs/llm/core v0.4.0
+	github.com/hollis-labs/libs/llm/core v0.5.0
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/oklog/ulid/v2 v2.1.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect

@@ -24,6 +24,12 @@ func (x *execution) sizeWindow() {
 	if at := x.engine.cfg.CompactAt; at > 0 && x.info.ParentID == "" {
 		window.TotalBudget = at
 	}
+	// The Context slot's blocks are already in the request, so clearing it
+	// in the window would free nothing real; the compaction pipeline must
+	// not count on it.
+	if s := window.Slot(ctxpkg.SlotContext); s != nil {
+		s.Compactable = false
+	}
 	if len(x.specs) == 0 {
 		return
 	}

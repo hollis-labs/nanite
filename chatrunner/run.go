@@ -459,10 +459,11 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			"why": e.Why, "fired": e.Fired, "halted": e.Halted, "suggestions": suggestions})}
 
 	case agent.CompactionStarted:
-		return []chatstream.Event{activity(ActivityCompact, map[string]any{"state": "start", "before": e.Before})}
+		return []chatstream.Event{activity(ActivityCompact, map[string]any{"state": "start", "before": e.Before, "request_before": e.RequestBefore})}
 
 	case agent.Compacted:
-		return []chatstream.Event{activity(ActivityCompact, map[string]any{"state": "done", "before": e.Before, "after": e.After})}
+		return []chatstream.Event{activity(ActivityCompact, map[string]any{"state": "done", "before": e.Before, "after": e.After,
+			"request_before": e.RequestBefore, "request_after": e.RequestAfter})}
 
 	case agent.CompactionFailed:
 		v := map[string]any{"state": "failed"}

@@ -171,6 +171,18 @@ type Options struct {
 	// reported input for the last request is checked against it too. Zero
 	// uses 80% of host.yaml's runtime.context_window (200,000 when unset).
 	CompactAt int
+	// CompactKeepTokens, when positive, is about how much of the end of the
+	// conversation compaction keeps whole, in estimated tokens: the recent
+	// turns that fit, cut only where the person's message starts a turn,
+	// and always the last turn. Zero keeps the last four messages.
+	CompactKeepTokens int
+	// CompactionPrompt replaces the system prompt of the call that writes a
+	// compaction summary (DefaultCompactionPrompt when empty).
+	CompactionPrompt string
+	// CompactionInputTokens bounds what one summary call is sent, in
+	// estimated tokens. A longer span is sent as a transcript with long
+	// blocks clipped and its start left out. Zero means 100,000.
+	CompactionInputTokens int
 	// SlotBudgets overrides the token budget of the slots it names (sizes
 	// are estimated at about 4 bytes a token). Budgets must be positive, and
 	// the Universal slot cannot be named: its budget is set by the base
@@ -240,6 +252,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
+	}
+	if opts.CompactKeepTokens < 0 || opts.CompactionInputTokens < 0 {
+		return nil, fmt.Errorf("nanite: CompactKeepTokens and CompactionInputTokens must not be negative")
 	}
 	for name, size := range opts.SlotBudgets {
 		switch {
@@ -354,7 +369,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: opts.IdleTimeout, CompactAt: opts.CompactAt, Steering: opts.Steering,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: opts.IdleTimeout, CompactAt: opts.CompactAt, CompactKeepTokens: opts.CompactKeepTokens, CompactionPrompt: opts.CompactionPrompt, CompactionInputTokens: opts.CompactionInputTokens, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {
@@ -508,3 +523,7 @@ func IsAuthWaiting(err error) (AuthWaiting, bool) {
 // be saved, or Warden refused it. Whoever enrolled the agent places a new
 // credential and removes the <credential_file>.inflight marker.
 var ErrReenroll = warden.ErrReenroll
+
+// DefaultCompactionPrompt is the system prompt of the call that writes a
+// compaction summary when Options.CompactionPrompt is empty.
+const DefaultCompactionPrompt = engine.DefaultCompactionPrompt

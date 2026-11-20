@@ -44,12 +44,15 @@ type Compacted = github.com/hollis-labs/nanite/internal/events.Compacted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int
   field After int
+  field RequestBefore int
+  field RequestAfter int
 type CompactionFailed = github.com/hollis-labs/nanite/internal/events.CompactionFailed struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Err error
 type CompactionStarted = github.com/hollis-labs/nanite/internal/events.CompactionStarted struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Before int
+  field RequestBefore int
 type Conversation struct
   (*Conversation) AcceptSuggestion(ctx context.Context, suggestion SteerVerdict, view string) error
   (*Conversation) Discard(ctx context.Context) error
@@ -78,6 +81,7 @@ type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversatio
   field CreatedAt time.Time
   field UpdatedAt time.Time
 type ConversationOption func(*ConversationInfo)
+const DefaultCompactionPrompt untyped string
 var DenyGate github.com/hollis-labs/nanite/internal/permission.Gate
 type DispatchStart struct
   field Goal string
@@ -178,6 +182,9 @@ type Options struct
   field OnAuthGranted func(AuthWaiting)
   field SlotPlacement map[SlotName]SlotPlacement
   field CompactAt int
+  field CompactKeepTokens int
+  field CompactionPrompt string
+  field CompactionInputTokens int
   field SlotBudgets map[SlotName]int
 type PanicRecord = github.com/hollis-labs/libs/core/panics.Record struct
   field Ref string

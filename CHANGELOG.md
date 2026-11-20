@@ -13,7 +13,6 @@
   once, sharing the dollar cap; results keep scenario and arm order. A
   request that does not fit beside others' reservations now waits for them
   instead of being refused; a failed run cancels the runs in flight.
-  once, sharing the dollar cap; results keep scenario and arm order.
 - New public package `agent/authored`: the rules for the Nanite files in an
   agent directory, for editors and CI. `ParseVariant`, `LoadVariants`,
   `CheckVariantName`, `BuiltinVariants()`, `Variant` (JSON-tagged) and

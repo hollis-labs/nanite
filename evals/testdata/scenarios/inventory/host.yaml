@@ -1,0 +1,6 @@
+kind: embedded
+lifetime: application
+application_id: eval-inventory
+runtime:
+  provider: anthropic
+  max_steps: 30

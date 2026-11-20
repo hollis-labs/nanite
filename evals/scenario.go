@@ -1,12 +1,16 @@
-// Package evals runs Code Mode evaluation scenarios: each task is run once with
-// direct tool use and once with the subtask tool, and the turn's trace records
-// give the metrics compared.
+// Package evals runs Code Mode evaluation scenarios: each task is run in
+// several arms (direct tool use, the subtask tool, and subtask settings such
+// as last_n and the result cap), and the turns' trace records give the
+// metrics compared.
 //
-// A scenario is an agent directory with a fixture workspace (testdata/scenarios),
-// a task prompt, a grader that checks the answer and the workspace, and a script
-// for the offline run. The offline run uses a scripted provider and runs in CI;
-// the live run uses the configured provider and runs only on request (see
-// cmd/nanite-eval).
+// A scenario is an agent directory with a fixture workspace (an fs.FS), an
+// optional prelude of earlier messages, a task prompt, a grader that checks
+// the answer and the workspace, and a script for the offline run. The offline
+// run uses a scripted model and runs in CI; the live run uses the configured
+// provider and runs only on request (see cmd/nanite-eval).
+//
+// The package is experimental: its API may change while the N6-10 evals work
+// builds on it.
 package evals
 
 import (
@@ -14,16 +18,20 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/hollis-labs/nanite/agent"
 )
 
 //go:embed testdata/scenarios
 var fixtures embed.FS
 
-// Mode is how a scenario is run.
+// Mode is whether an arm offers the subtask tool.
 type Mode string
 
 const (
@@ -34,45 +42,90 @@ const (
 	Subtask Mode = "subtask"
 )
 
-// Modes are the modes every scenario is compared in, in report order.
+// Modes are the modes, in report order.
 var Modes = []Mode{Direct, Subtask}
+
+// Arm is one way of running a scenario.
+type Arm struct {
+	// Name labels the arm in reports, such as "subtask last_n=1".
+	Name string
+	Mode Mode
+	// LastN and ResultCap record the setting the arm varies, for the report;
+	// zero is the default.
+	LastN, ResultCap int
+	// Prepare edits the run's copy of the agent directory before the agent
+	// opens, for example to change a variant's last_n.
+	Prepare func(dir string) error
+	// Options adjusts the agent's options, for example SubtaskResultCap.
+	Options func(*agent.Options)
+}
+
+// DefaultArms are the arms every scenario runs: direct, and subtask with the
+// default settings.
+func DefaultArms() []Arm {
+	return []Arm{{Name: string(Direct), Mode: Direct}, {Name: string(Subtask), Mode: Subtask}}
+}
 
 // Scenario is one task the evals run.
 type Scenario struct {
-	// Name is the fixture directory under testdata/scenarios.
+	// Name identifies the scenario.
 	Name string
+	// Files holds the agent directory and workspace, and task.md (and
+	// prelude.txt, one earlier message a line, when there is one).
+	Files fs.FS
 	// Writes says whether the task changes workspace files; the agent is then
 	// offered the write tools and asks for approval to use them.
 	Writes bool
+	// Requires names variants a subtask arm must run: a subtask run that
+	// does not is invalid, not a success.
+	Requires []string
+	// Arms are run after DefaultArms.
+	Arms []Arm
 	// Grade checks the final answer and the workspace the run left behind. It
 	// returns whether the task succeeded and, when not, why.
 	Grade func(answer, workspace string) (bool, string)
-	// Script is the offline run's scripted model, for one mode.
-	Script func(Mode) Script
+	// Script is the offline run's scripted model, for one arm.
+	Script func(Arm) Script
 }
+
+// AllArms are DefaultArms followed by the scenario's own arms.
+func (s Scenario) AllArms() []Arm { return append(DefaultArms(), s.Arms...) }
 
 // Task is the scenario's prompt, from task.md.
 func (s Scenario) Task() (string, error) {
-	data, err := fixtures.ReadFile(path.Join("testdata/scenarios", s.Name, "task.md"))
+	data, err := fs.ReadFile(s.Files, "task.md")
 	return strings.TrimSpace(string(data)), err
+}
+
+// Prelude are the messages sent before the task, from prelude.txt.
+func (s Scenario) Prelude() []string {
+	data, err := fs.ReadFile(s.Files, "prelude.txt")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // install copies the scenario's agent directory and workspace into dir.
 func (s Scenario) install(dir string) error {
-	root := path.Join("testdata/scenarios", s.Name)
-	return fs.WalkDir(fixtures, root, func(name string, d fs.DirEntry, err error) error {
+	return fs.WalkDir(s.Files, ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(name, root), "/")
-		if rel == "task.md" {
+		if name == "task.md" || name == "prelude.txt" {
 			return nil
 		}
-		target := filepath.Join(dir, filepath.FromSlash(rel))
+		target := filepath.Join(dir, filepath.FromSlash(name))
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}
-		data, err := fixtures.ReadFile(name)
+		data, err := fs.ReadFile(s.Files, name)
 		if err != nil {
 			return err
 		}
@@ -80,18 +133,26 @@ func (s Scenario) install(dir string) error {
 	})
 }
 
-// fixture reads one fixture file of a scenario.
-func fixture(scenario, name string) string {
-	data, err := fixtures.ReadFile(path.Join("testdata/scenarios", scenario, name))
+// read reads one file of a scenario.
+func (s Scenario) read(name string) string {
+	data, err := fs.ReadFile(s.Files, name)
 	if err != nil {
-		panic(fmt.Sprintf("evals: fixture %s/%s: %v", scenario, name, err))
+		panic(fmt.Sprintf("evals: %s/%s: %v", s.Name, name, err))
 	}
 	return string(data)
 }
 
+func files(name string) fs.FS {
+	sub, err := fs.Sub(fixtures, "testdata/scenarios/"+name)
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}
+
 // Scenarios are the checked-in scenarios, in report order.
 func Scenarios() []Scenario {
-	return []Scenario{codeSearch(), research(), chore(), council()}
+	return []Scenario{codeSearch(), research(), chore(), council(), history(), inventory()}
 }
 
 // Find returns the named scenarios, or all of them for no names.
@@ -111,32 +172,54 @@ func Find(names ...string) ([]Scenario, error) {
 	return out, nil
 }
 
-// mentions checks that answer contains every phrase, ignoring case, and names
-// the first missing one.
-func mentions(answer string, phrases ...string) (bool, string) {
-	lower := strings.ToLower(answer)
+// word matches phrase in text as whole words, ignoring case.
+func word(text, phrase string) bool {
+	return regexp.MustCompile(`(?i)(^|[^\w])` + regexp.QuoteMeta(phrase) + `($|[^\w])`).MatchString(text)
+}
+
+// mentions checks that answer names every phrase as whole words and none of
+// the decoys, and says which one failed.
+func mentions(answer string, phrases []string, decoys ...string) (bool, string) {
 	for _, p := range phrases {
-		if !strings.Contains(lower, strings.ToLower(p)) {
+		if !word(answer, p) {
 			return false, fmt.Sprintf("answer does not mention %q", p)
 		}
 	}
+	for _, d := range decoys {
+		if word(answer, d) {
+			return false, fmt.Sprintf("answer names the decoy %q", d)
+		}
+	}
 	return true, ""
+}
+
+var dates = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+
+// says checks that answer states the number n, as a digit or a word, outside
+// any date.
+func says(answer string, n int, name string) (bool, string) {
+	text := dates.ReplaceAllString(answer, " ")
+	if word(text, strconv.Itoa(n)) || (name != "" && word(text, name)) {
+		return true, ""
+	}
+	return false, fmt.Sprintf("answer does not state %d", n)
 }
 
 func codeSearch() Scenario {
 	const goal = "Find every function in src/ that reads the APP_MODE environment variable, and the mode values the code compares it against."
 	answer := "loadMode in src/config.go and startServer in src/server.go read APP_MODE. The code compares it against dev, prod and test."
 	return Scenario{
-		Name: "code-search",
+		Name:  "code-search",
+		Files: files("code-search"),
 		Grade: func(a, _ string) (bool, string) {
-			return mentions(a, "config.go", "loadMode", "server.go", "startServer", "dev", "prod", "test")
+			return mentions(a, []string{"config.go", "loadMode", "server.go", "startServer", "dev", "prod", "test"}, "describeMode", "legacyModes")
 		},
-		Script: func(m Mode) Script {
+		Script: func(arm Arm) Script {
 			work := []Step{
 				Calls(Call("search_files", "pattern", "APP_MODE", "path", "src")),
-				Calls(Call("read_file", "path", "src/config.go"), Call("read_file", "path", "src/server.go")),
+				Calls(Call("read_file", "path", "src/config.go"), Call("read_file", "path", "src/server.go"), Call("read_file", "path", "src/docs.go")),
 			}
-			if m == Direct {
+			if arm.Mode == Direct {
 				return Script{Root: append(work, Say(answer))}
 			}
 			return Script{
@@ -152,18 +235,20 @@ func codeSearch() Scenario {
 
 func research() Scenario {
 	const goal = "From the files in corpus/, find the current default retention period for ledger exports, who decided it and when, and the file that says so."
-	answer := "The current default retention period is 30 days. The Data Council decided it on 2026-03-04 (corpus/policy-2026.md), replacing the 90-day rule of 2024."
+	answer := "The current default retention period is 30 days. The Data Council decided it on 2026-03-04 (corpus/policy-2026.md)."
 	return Scenario{
-		Name: "research",
+		Name:  "research",
+		Files: files("research"),
 		Grade: func(a, _ string) (bool, string) {
-			return mentions(a, "30 days", "Data Council", "2026-03-04", "policy-2026.md")
+			// The superseded policy's decider is the decoy.
+			return mentions(a, []string{"30 days", "Data Council", "2026-03-04", "policy-2026.md"}, "Finance Operations")
 		},
-		Script: func(m Mode) Script {
+		Script: func(arm Arm) Script {
 			work := []Step{
 				Calls(Call("search_files", "pattern", "retention period", "path", "corpus")),
 				Calls(Call("read_file", "path", "corpus/policy-2024.md"), Call("read_file", "path", "corpus/policy-2026.md")),
 			}
-			if m == Direct {
+			if arm.Mode == Direct {
 				return Script{Root: append(work, Say(answer))}
 			}
 			return Script{
@@ -183,44 +268,41 @@ const reviewedLine = "Reviewed: 2026-11-20"
 
 func chore() Scenario {
 	const goal = "Append the line \"Reviewed: 2026-11-20\" at the end of every Markdown file in notes/, keeping the rest of each file, and report how many files changed."
-	answer := "I added \"Reviewed: 2026-11-20\" to all 6 files in notes/."
-	return Scenario{
-		Name:   "chore",
-		Writes: true,
-		Grade: func(a, ws string) (bool, string) {
-			for _, n := range choreNotes {
-				name := filepath.Join(ws, "notes", n+".md")
-				data, err := os.ReadFile(name) //nolint:gosec // a file of the run's own copy of the workspace
-				if err != nil {
-					return false, err.Error()
-				}
-				want := strings.TrimRight(fixture("chore", "notes/"+n+".md"), "\n") + "\n" + reviewedLine
-				if strings.TrimRight(string(data), "\n") != want {
-					return false, fmt.Sprintf("notes/%s.md does not end with the reviewed line, or other text changed", n)
-				}
+	answer := "I added the reviewed line to all 6 files in notes/."
+	s := Scenario{Name: "chore", Files: files("chore"), Writes: true}
+	s.Grade = func(a, ws string) (bool, string) {
+		for _, n := range choreNotes {
+			data, err := os.ReadFile(filepath.Join(ws, "notes", n+".md")) //nolint:gosec // a file of the run's own copy of the workspace
+			if err != nil {
+				return false, err.Error()
 			}
-			return mentions(a, "6")
-		},
-		Script: func(m Mode) Script {
-			var reads, writes []ToolUse
-			for _, n := range choreNotes {
-				p := "notes/" + n + ".md"
-				reads = append(reads, Call("read_file", "path", p))
-				writes = append(writes, Call("write_file", "path", p, "content", strings.TrimRight(fixture("chore", p), "\n")+"\n"+reviewedLine+"\n"))
+			want := strings.TrimRight(s.read("notes/"+n+".md"), "\n") + "\n" + reviewedLine
+			if strings.TrimRight(string(data), "\n") != want {
+				return false, fmt.Sprintf("notes/%s.md does not end with the reviewed line, or other text changed", n)
 			}
-			work := []Step{Calls(Call("list_dir", "path", "notes")), Calls(reads...), Calls(writes...)}
-			if m == Direct {
-				return Script{Root: append(work, Say(answer))}
-			}
-			return Script{
-				Root: []Step{
-					Calls(Call("subtask", "goal", goal, "variant", "worker", "return_spec", "The number of files changed.")),
-					Say(answer),
-				},
-				Children: map[string][]Step{goal: append(work, Return("ok", "Changed 6 files."))},
-			}
-		},
+		}
+		return says(a, 6, "six")
 	}
+	s.Script = func(arm Arm) Script {
+		var reads, writes []ToolUse
+		for _, n := range choreNotes {
+			p := "notes/" + n + ".md"
+			reads = append(reads, Call("read_file", "path", p))
+			writes = append(writes, Call("write_file", "path", p, "content", strings.TrimRight(s.read(p), "\n")+"\n"+reviewedLine+"\n"))
+		}
+		work := []Step{Calls(Call("list_dir", "path", "notes")), Calls(reads...), Calls(writes...)}
+		if arm.Mode == Direct {
+			return Script{Root: append(work, Say(answer))}
+		}
+		return Script{
+			Root: []Step{
+				Calls(Call("subtask", "goal", goal, "variant", "worker", "return_spec", "The number of files changed.")),
+				Say(answer),
+			},
+			Children: map[string][]Step{goal: append(work, Return("ok", "Changed 6 files."))},
+		}
+	}
+	return s
 }
 
 func council() Scenario {
@@ -228,18 +310,24 @@ func council() Scenario {
 	angles := []string{"correctness", "safety", "clarity"}
 	answer := "Two bugs in src/payment.go. Line 17: the loop condition i <= len(items) is an off-by-one that reads past the end; use i < len(items). Line 25: Refund returns a negative amount unchecked; refuse or clamp negative amounts."
 	return Scenario{
-		Name: "council",
+		Name:     "council",
+		Files:    files("council"),
+		Requires: []string{"council"},
 		Grade: func(a, _ string) (bool, string) {
-			if ok, why := mentions(a, "17", "negative"); !ok {
+			if ok, why := mentions(a, []string{"17", "25"}); !ok {
 				return ok, why
 			}
-			if !strings.Contains(a, "off-by-one") && !strings.Contains(a, "< len(items)") {
+			lower := strings.ToLower(a)
+			if !strings.Contains(lower, "negative") {
+				return false, "answer does not name the negative refund"
+			}
+			if !strings.Contains(lower, "off-by-one") && !strings.Contains(lower, "off by one") && !strings.Contains(a, "< len(items)") {
 				return false, "answer does not name the off-by-one loop"
 			}
 			return true, ""
 		},
-		Script: func(m Mode) Script {
-			if m == Direct {
+		Script: func(arm Arm) Script {
+			if arm.Mode == Direct {
 				return Script{Root: []Step{Calls(Call("read_file", "path", "src/payment.go")), Say(answer)}}
 			}
 			children := map[string][]Step{}
@@ -265,4 +353,115 @@ func council() Scenario {
 			}
 		},
 	}
+}
+
+// history needs facts from early in the conversation: a subtask sees the
+// last last_n messages, so the arms vary the scribe variant's last_n.
+func history() Scenario {
+	const goal = "Write notes/release.md with exactly three lines: the codename, the ship date and the owner of the release discussed earlier in this conversation."
+	release := "Codename: Juniper\nShip date: 2026-12-05\nOwner: Dana Reyes\n"
+	answer := "I wrote notes/release.md: codename Juniper, ship date 2026-12-05, owner Dana Reyes."
+	s := Scenario{Name: "history", Files: files("history"), Writes: true, Requires: []string{"scribe"}}
+	for _, n := range []int{1, 20} {
+		s.Arms = append(s.Arms, Arm{Name: fmt.Sprintf("subtask last_n=%d", n), Mode: Subtask, LastN: n, Prepare: setLastN("variants/scribe.md", n)})
+	}
+	s.Grade = func(a, ws string) (bool, string) {
+		data, err := os.ReadFile(filepath.Join(ws, "notes", "release.md")) //nolint:gosec // a file of the run's own copy of the workspace
+		if err != nil {
+			return false, "notes/release.md was not written"
+		}
+		if ok, why := mentions(string(data), []string{"Juniper", "2026-12-05", "Dana Reyes"}, "Cedar"); !ok {
+			return false, "notes/release.md: " + why
+		}
+		return mentions(a, []string{"Juniper"}, "Cedar")
+	}
+	s.Script = func(arm Arm) Script {
+		var root []Step
+		for range s.Prelude() {
+			root = append(root, Say("Noted."))
+		}
+		write := Calls(Call("write_file", "path", "notes/release.md", "content", release))
+		if arm.Mode == Direct {
+			return Script{Root: append(root, write, Say(answer))}
+		}
+		return Script{
+			Root: append(root,
+				Calls(Call("subtask", "goal", goal, "variant", "scribe", "return_spec", "What was written.")),
+				Say(answer)),
+			Children: map[string][]Step{goal: {
+				Calls(Call("parent_history_search", "query", "codename ship date owner correction")),
+				write,
+				Return("ok", strings.TrimSpace(release)),
+			}},
+		}
+	}
+	return s
+}
+
+// setLastN rewrites a variant's last_n.
+func setLastN(variant string, n int) func(string) error {
+	return func(dir string) error {
+		p := filepath.Join(dir, filepath.FromSlash(variant))
+		data, err := os.ReadFile(p) //nolint:gosec // a file of the run's own copy of the agent directory
+		if err != nil {
+			return err
+		}
+		out := regexp.MustCompile(`(?m)^last_n: \d+$`).ReplaceAllString(string(data), "last_n: "+strconv.Itoa(n))
+		return os.WriteFile(p, []byte(out), 0o600) //nolint:gosec // the run's own copy of the agent directory
+	}
+}
+
+var todoLine = regexp.MustCompile(`// TODO\((\w+)\): (.*)`)
+
+// inventory returns a list longer than a small result cap: the arms vary
+// SubtaskResultCap, and over the cap the parent has to fetch the stored
+// result.
+func inventory() Scenario {
+	const goal = "List every TODO comment in src/ as file:line: owner: text, one per line."
+	s := Scenario{Name: "inventory", Files: files("inventory"), Requires: []string{"research"}}
+	s.Arms = []Arm{{Name: "subtask result_cap=1500", Mode: Subtask, ResultCap: 1500,
+		Options: func(o *agent.Options) { o.SubtaskResultCap = 1500 }}}
+	// The list and the counts, from the fixture.
+	var list []string
+	counts := map[string]int{}
+	names, _ := fs.Glob(s.Files, "src/*.go")
+	sort.Strings(names)
+	for _, name := range names {
+		for i, line := range strings.Split(s.read(name), "\n") {
+			if m := todoLine.FindStringSubmatch(line); m != nil {
+				list = append(list, fmt.Sprintf("%s:%d: %s: %s", name, i+1, m[1], m[2]))
+				counts[m[1]]++
+			}
+		}
+	}
+	top := ""
+	for o, n := range counts {
+		if top == "" || n > counts[top] || (n == counts[top] && o < top) {
+			top = o
+		}
+	}
+	total := len(list)
+	answer := fmt.Sprintf("There are %d TODO comments in src/. %s has the most, with %d.", total, top, counts[top])
+	s.Grade = func(a, _ string) (bool, string) {
+		if ok, why := says(a, total, ""); !ok {
+			return ok, why
+		}
+		return mentions(a, []string{top})
+	}
+	s.Script = func(arm Arm) Script {
+		search := Calls(Call("search_files", "pattern", `TODO\(`, "path", "src"))
+		if arm.Mode == Direct {
+			return Script{Root: []Step{search, Say(answer)}}
+		}
+		return Script{
+			Root: []Step{
+				Calls(Call("subtask", "goal", goal, "variant", "research", "return_spec", "Every TODO as file:line: owner: text, one per line.")),
+				// Over the cap the result is stored and the parent reads it.
+				FetchIfStored(Say(answer)),
+				Say(answer),
+			},
+			Children: map[string][]Step{goal: {search, Return("ok", strings.Join(list, "\n"))}},
+		}
+	}
+	return s
 }

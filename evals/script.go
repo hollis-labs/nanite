@@ -13,6 +13,9 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
+// ScriptedModel is the model name an offline run reports.
+const ScriptedModel = "scripted"
+
 // Script is the offline run's model: the steps of the root conversation, and
 // of each subtask conversation, keyed by the subtask's goal.
 type Script struct {
@@ -20,10 +23,12 @@ type Script struct {
 	Children map[string][]Step
 }
 
-// Step is one model response: tool calls, or a final text.
+// Step is one model response: tool calls, or a final text. A step made with
+// FetchIfStored decides from the request.
 type Step struct {
-	calls []ToolUse
-	text  string
+	calls  []ToolUse
+	text   string
+	decide func(llmtypes.ChatRequest) Step
 }
 
 // ToolUse is one scripted tool call.
@@ -43,6 +48,23 @@ func Return(status, result string) Step {
 	return Calls(Call("return_result", "status", status, "result", result))
 }
 
+var storedRef = regexp.MustCompile(`tool_result://([0-9A-Za-z]+)`)
+
+// FetchIfStored reads the last tool result's stored body with
+// fetch_tool_result when the result was too big to show in full (it carries
+// a tool_result:// pointer); otherwise it is the step given.
+func FetchIfStored(otherwise Step) Step {
+	return Step{decide: func(req llmtypes.ChatRequest) Step {
+		last := req.Messages[len(req.Messages)-1]
+		for _, b := range last.ContentBlocks {
+			if m := storedRef.FindStringSubmatch(b.Content); b.Type == "tool_result" && m != nil {
+				return Calls(Call("fetch_tool_result", "id", m[1]))
+			}
+		}
+		return otherwise
+	}}
+}
+
 // Call builds a tool call from name and key, value pairs.
 func Call(name string, kv ...any) ToolUse {
 	in := map[string]any{}
@@ -58,10 +80,10 @@ func Call(name string, kv ...any) ToolUse {
 // own steps whatever order they run in.
 //
 // Its usage is an estimate from the request's size (about four characters a
-// token), so the offline run compares how much context each mode sends.
+// token), so the offline run checks the harness end to end; it is not
+// evidence about any model.
 type scripted struct {
 	script Script
-	model  string
 	// dirs are the run's directory: it is counted as one word, so the
 	// estimate does not depend on where the run is.
 	dirs []string
@@ -71,7 +93,7 @@ type scripted struct {
 
 var _ llmcontracts.Provider = (*scripted)(nil)
 
-func newScripted(s Script) *scripted { return &scripted{script: s, model: "scripted"} }
+func newScripted(s Script) *scripted { return &scripted{script: s} }
 
 func (p *scripted) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {
 	if err := ctx.Err(); err != nil {
@@ -95,6 +117,9 @@ func (p *scripted) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-
 		return nil, fmt.Errorf("%s", msg)
 	}
 	step := steps[n]
+	if step.decide != nil {
+		step = step.decide(req)
+	}
 	var events []llmtypes.StreamEvent
 	out := 0
 	if step.text != "" {
@@ -102,11 +127,10 @@ func (p *scripted) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-
 		out += len(step.text)
 	}
 	for i, c := range step.calls {
-		in := c.Input
-		raw, _ := json.Marshal(in)
+		raw, _ := json.Marshal(c.Input)
 		out += len(raw) + len(c.Name)
 		events = append(events, llmtypes.StreamEvent{Type: llmtypes.EventToolUse,
-			ToolUse: &llmtypes.ToolUseBlock{ID: fmt.Sprintf("s%d_%d", n, i), Name: c.Name, Input: in}})
+			ToolUse: &llmtypes.ToolUseBlock{ID: fmt.Sprintf("s%d_%d", n, i), Name: c.Name, Input: c.Input}})
 	}
 	stop := llmtypes.StopReasonEndTurn
 	if len(step.calls) > 0 {
@@ -123,7 +147,9 @@ func (p *scripted) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-
 	return ch, nil
 }
 
-func (p *scripted) Complete(ctx context.Context, req llmtypes.ChatRequest) (string, error) {
+// Complete serves the engine's non-streaming requests (compaction summaries
+// and argument repair); none of the scripts trigger them.
+func (p *scripted) Complete(context.Context, llmtypes.ChatRequest) (string, error) {
 	return "", fmt.Errorf("scripted model: Complete is not scripted")
 }
 
@@ -165,8 +191,7 @@ func goalOf(msgs []llmtypes.ChatMessage) string {
 
 // requestTokens estimates a request's input tokens from its size. The run's
 // directory, the platform, IDs and numbers (times, dates) are counted as one
-// fixed-size word,
-// so the estimate is the same on every run.
+// fixed-size word, so the estimate is the same on every run and machine.
 func requestTokens(req llmtypes.ChatRequest, dirs []string) int {
 	var b strings.Builder
 	b.WriteString(req.SystemPrompt)

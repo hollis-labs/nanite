@@ -326,6 +326,5 @@ notice, not counted into whichever turn happens to be running.
 
 ## Measuring it
 
-The Code Mode evals compare direct tool use with `subtask` on four tasks:
-parent context, total tokens, cost, wall time and approvals, read from the
-trace records. See [evals/code-mode.md](evals/code-mode.md).
+The Code Mode evals compare direct tool use with `subtask`, and settings such
+as `last_n` and the result cap, on six tasks, from the trace records. See [evals/code-mode.md](evals/code-mode.md).

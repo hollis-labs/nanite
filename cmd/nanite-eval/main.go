@@ -1,12 +1,15 @@
-// Command nanite-eval runs the Code Mode eval scenarios: each task once with
-// direct tool use and once with the subtask tool, compared from the turns'
-// trace records.
+// Command nanite-eval runs the Code Mode eval scenarios: each task in several
+// arms (direct tool use, the subtask tool, and subtask settings), compared from
+// the turns' trace records.
 //
 // Without -live it runs offline against each scenario's scripted model, the
-// same run CI makes. With -live it calls the configured provider and spends
-// money: each run is capped by -turn-tokens and the whole run by -max-usd,
-// priced with -price-in, -price-out and the cache prices (conservative by
-// default, so the cap stops early rather than late).
+// same run CI makes: a harness check, not evidence. With -live it calls the
+// configured provider and spends money. A live run needs a dollar cap
+// (-max-usd, at most 50), a per-run token cap (-turn-tokens) and positive
+// prices; every model request reserves its most expensive outcome against the
+// cap before it is sent. It prints the provider, model and prices before it
+// starts, and writes what ran and the spend so far even when it is
+// interrupted or fails.
 //
 // The live run reads its provider key as nanite does: from NANITE_GATEWAY_URL
 // and NANITE_GATEWAY_KEY_REF for a gateway, else the keychain entry
@@ -16,9 +19,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,24 +35,28 @@ import (
 	"github.com/hollis-labs/nanite/internal/provider"
 )
 
+// maxCap is the most a single live run may be allowed to spend.
+const maxCap = 50.0
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
+	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "nanite-eval:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, w io.Writer) error {
+func run(ctx context.Context, args []string, w, status io.Writer) error {
 	fs := flag.NewFlagSet("nanite-eval", flag.ContinueOnError)
 	live := fs.Bool("live", false, "call the configured provider (spends money); without it the run is offline and scripted")
-	providerName := fs.String("provider", "anthropic", "provider for -live")
+	providerName := fs.String("provider", "anthropic", "provider for -live: anthropic or openai")
+	model := fs.String("model", "claude-sonnet-5-5", "model for -live, written into every run's host.yaml (parent and subtasks)")
 	only := fs.String("scenario", "", "comma-separated scenarios to run (default all)")
-	mode := fs.String("mode", "", "run only this mode: direct or subtask (default both)")
+	mode := fs.String("mode", "", "run only the arms of this mode: direct or subtask (default all)")
 	out := fs.String("out", "", "write results.md and results.json into this directory instead of printing the table")
-	maxUSD := fs.Float64("max-usd", 10, "stop the whole run once the estimated spend reaches this many dollars (0: no cap)")
-	turnTokens := fs.Int("turn-tokens", 150000, "token cap for one run, its subtasks included (0: no cap)")
+	maxUSD := fs.Float64("max-usd", 10, "live: stop the whole run before its estimated spend passes this many dollars (0 < cap <= 50)")
+	turnTokens := fs.Int("turn-tokens", 150000, "live: token cap for one run's task turn, its subtasks included (> 0)")
 	price := evals.ConservativePrice
 	fs.Float64Var(&price.Input, "price-in", price.Input, "dollars per million input tokens")
 	fs.Float64Var(&price.Output, "price-out", price.Output, "dollars per million output tokens")
@@ -64,43 +73,88 @@ func run(ctx context.Context, args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	modes := evals.Modes
+	cfg := evals.Config{TurnTokens: *turnTokens, Price: price}
 	if *mode != "" {
 		m := evals.Mode(*mode)
 		if m != evals.Direct && m != evals.Subtask {
 			return fmt.Errorf("unknown mode %q", *mode)
 		}
-		modes = []evals.Mode{m}
+		cfg.Modes = []evals.Mode{m}
 	}
-	cfg := evals.Config{TurnTokens: *turnTokens, Price: price}
 	if *live {
-		cfg.MaxUSD = *maxUSD
+		if err := checkLive(*providerName, *model, *maxUSD, *turnTokens, price); err != nil {
+			return err
+		}
+		cfg.MaxUSD, cfg.Model = *maxUSD, *model
 		gw := agent.Gateway{BaseURL: os.Getenv("NANITE_GATEWAY_URL"), KeyRef: os.Getenv("NANITE_GATEWAY_KEY_REF"), Auth: os.Getenv("NANITE_GATEWAY_AUTH")}
 		cfg.Gateway = gw
-		model, err := provider.New(provider.Config{Provider: *providerName, Gateway: provider.Gateway{BaseURL: gw.BaseURL, KeyRef: gw.KeyRef, Auth: gw.Auth}})
+		p, err := provider.New(provider.Config{Provider: *providerName, Gateway: provider.Gateway{BaseURL: gw.BaseURL, KeyRef: gw.KeyRef, Auth: gw.Auth}})
 		if err != nil {
 			return err
 		}
-		cfg.Provider = func(evals.Scenario, evals.Mode) (llmcontracts.Provider, error) { return model, nil }
+		cfg.Provider = func(evals.Scenario, evals.Arm) (llmcontracts.Provider, error) { return p, nil }
+		if status != nil {
+			fmt.Fprintf(status, "nanite-eval: live run: provider %s, model %s; price per million tokens $%g in, $%g out, $%g cache read, $%g cache write; cap $%.2f total, %d tokens a run\n",
+				*providerName, *model, price.Input, price.Output, price.CacheRead, price.CacheWrite, *maxUSD, *turnTokens)
+		}
 	}
-	results, err := evals.Run(ctx, cfg, scenarios, modes)
+	rep, runErr := evals.Run(ctx, cfg, scenarios)
+	// Whatever ran is written, with the spend, even when the run stopped
+	// early.
+	if err := write(rep, *out, w); err != nil {
+		return errors.Join(runErr, err)
+	}
+	if status != nil && *live {
+		fmt.Fprintf(status, "nanite-eval: estimated spend $%.4f\n", rep.SpentUSD)
+	}
+	return runErr
+}
+
+// checkLive refuses a live run without bounds, or with a model that does not
+// belong to the provider.
+func checkLive(providerName, model string, maxUSD float64, turnTokens int, p evals.Price) error {
+	if math.IsNaN(maxUSD) || math.IsInf(maxUSD, 0) || maxUSD <= 0 || maxUSD > maxCap {
+		return fmt.Errorf("-max-usd must be more than 0 and at most %g for a live run", maxCap)
+	}
+	if turnTokens <= 0 {
+		return errors.New("-turn-tokens must be more than 0 for a live run")
+	}
+	for name, v := range map[string]float64{"-price-in": p.Input, "-price-out": p.Output, "-price-cache-read": p.CacheRead, "-price-cache-write": p.CacheWrite} {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+			return fmt.Errorf("%s must be more than 0 for a live run", name)
+		}
+	}
+	claude := strings.HasPrefix(model, "claude-")
+	switch providerName {
+	case "anthropic":
+		if !claude {
+			return fmt.Errorf("model %q is not an Anthropic model", model)
+		}
+	case "openai":
+		if claude {
+			return fmt.Errorf("model %q is not an OpenAI model", model)
+		}
+	default:
+		return fmt.Errorf("unknown provider %q", providerName)
+	}
+	return nil
+}
+
+func write(rep evals.Report, out string, w io.Writer) error {
+	md := evals.Markdown(rep, true)
+	if out == "" {
+		_, err := io.WriteString(w, md)
+		return err
+	}
+	js, err := evals.JSON(rep, true)
 	if err != nil {
 		return err
 	}
-	md := evals.Markdown(results, true)
-	if *out == "" {
-		_, err = io.WriteString(w, md)
+	if err := os.MkdirAll(out, 0o750); err != nil {
 		return err
 	}
-	js, err := evals.JSON(results, true)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(out, "results.md"), []byte(md), 0o644); err != nil { //nolint:gosec // results are meant to be shared
 		return err
 	}
-	if err := os.MkdirAll(*out, 0o750); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(*out, "results.md"), []byte(md), 0o644); err != nil { //nolint:gosec // results are meant to be shared
-		return err
-	}
-	return os.WriteFile(filepath.Join(*out, "results.json"), js, 0o644) //nolint:gosec // results are meant to be shared
+	return os.WriteFile(filepath.Join(out, "results.json"), js, 0o644) //nolint:gosec // results are meant to be shared
 }

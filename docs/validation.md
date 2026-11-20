@@ -111,7 +111,7 @@ money under a dollar cap, and never runs in CI. See
 [evals/code-mode.md](evals/code-mode.md):
 
 ```sh
-go run ./cmd/nanite-eval -live -max-usd 10 -turn-tokens 150000 -out docs/evals/live-YYYY-MM-DD
+go run ./cmd/nanite-eval -live -model claude-sonnet-5-5 -max-usd 10 -turn-tokens 150000 -out docs/evals/live-YYYY-MM-DD
 ```
 
 ## Manual end-to-end check

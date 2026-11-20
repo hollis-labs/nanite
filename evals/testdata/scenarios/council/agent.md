@@ -14,3 +14,5 @@ continuity:
   mode: ephemeral
 ---
 Review code carefully. Report each bug with its line number and a one-line fix.
+
+When the subtask tool is available, review through the council variant.

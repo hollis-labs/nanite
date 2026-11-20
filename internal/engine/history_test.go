@@ -173,6 +173,34 @@ func TestHistorySnippetsAreRedacted(t *testing.T) {
 	}
 }
 
+// A query word inside a secret in a long message: redaction removes the
+// match, and the snippet must not fall back to the window's edge, which could
+// hold half of another token that redaction no longer recognises.
+func TestHistorySnippetNeverShowsACutToken(t *testing.T) {
+	p := &watchedProvider{Provider: fake.New()}
+	e, db, id := setupEngine(t, p, "")
+	gh := "ghp_" + "Zq9Xw8Vu7Ts6Rq5Po4Nm3Lk2Jh1Gf0EdCbA9z8y"
+	msg := strings.Repeat("b ", 500) + "xxxxxx " + gh + strings.Repeat(" ", 2000-len(gh)-7+20) + testKey + strings.Repeat("a", 6000)
+	appendParent(t, db, id, msg)
+	hits, err := e.SearchHistory(t.Context(), id, "api03", 5)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("hits: %+v, %v", hits, err)
+	}
+	if s := hits[0].Snippet; strings.Contains(s, gh[len(gh)-12:]) || strings.Contains(s, testKey[:20]) || s != redactedMatch {
+		t.Fatalf("snippet = %q", s)
+	}
+	// Window edges inside a token are moved to whitespace.
+	shifted := strings.Repeat("c ", 600) + gh + strings.Repeat(" w", 1990) + " heron " + strings.Repeat("d ", 3000)
+	appendParent(t, db, id, shifted)
+	hits, err = e.SearchHistory(t.Context(), id, "heron", 5)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("hits: %+v, %v", hits, err)
+	}
+	if s := hits[0].Snippet; strings.Contains(s, gh[len(gh)-12:]) || !strings.Contains(s, "[heron]") {
+		t.Fatalf("snippet = %q", s)
+	}
+}
+
 func TestHistoryLimits(t *testing.T) {
 	p := &watchedProvider{Provider: fake.New()}
 	e, db, id := setupEngine(t, p, "")

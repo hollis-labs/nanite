@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/hollis-labs/nanite/internal/selftools"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -71,9 +72,11 @@ func (e *Engine) SearchHistory(ctx context.Context, conversation, query string, 
 
 // windowedSnippet is snippet over a redacted window of raw text around the
 // first match, so a long message is not redacted whole. The window is
-// snippetWindow characters on each side, far wider than the snippet, so a
-// secret the window cuts never reaches the snippet; a short message is
-// redacted whole.
+// snippetWindow characters on each side, far wider than the snippet, and its
+// edges are moved inward to whitespace so it never starts or ends inside a
+// token: a secret cut in half might no longer be recognised by redaction. If
+// the match is gone after redaction (it was inside a secret), no text from the
+// window is shown; a short message is redacted whole.
 func windowedSnippet(raw string, words []string, scrub func(string) string) string {
 	runes := []rune(raw)
 	if len(runes) <= 4*snippetWindow {
@@ -81,8 +84,36 @@ func windowedSnippet(raw string, words []string, scrub func(string) string) stri
 	}
 	at := firstMatch(runes, words)
 	from, to := max(0, at-snippetWindow), min(len(runes), at+snippetWindow)
-	text := snippet(scrub(string(runes[from:to])), words)
-	return text
+	if from > 0 {
+		for from < at && !unicode.IsSpace(runes[from-1]) {
+			from++
+		}
+	}
+	if to < len(runes) {
+		for to > at && !unicode.IsSpace(runes[to]) {
+			to--
+		}
+	}
+	window := scrub(string(runes[from:to]))
+	if !containsAny(window, words) {
+		return redactedMatch
+	}
+	return snippet(window, words)
+}
+
+// redactedMatch is the snippet of a hit whose matching words were inside
+// redacted text.
+const redactedMatch = "(the match is inside redacted text)"
+
+// containsAny reports whether text contains any of words, ignoring case.
+func containsAny(text string, words []string) bool {
+	lower := strings.ToLower(text)
+	for _, w := range words {
+		if w != "" && strings.Contains(lower, strings.ToLower(w)) {
+			return true
+		}
+	}
+	return false
 }
 
 // firstMatch is the rune index of the first case-insensitive match of any of

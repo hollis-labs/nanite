@@ -285,8 +285,23 @@ func TestBackgroundRelayWaitsForTheRootsNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := childOf(t, db, id)
-	// Give the child time to relay into the gap between the root's turns.
-	time.Sleep(50 * time.Millisecond)
+	// The child's ask finds no root turn running and posts the "is waiting"
+	// notice. Wait for that notice before starting the next turn: a fixed sleep
+	// here let the second turn start first under load, and the ask then went
+	// straight to that turn with no notice (correctly), failing the test.
+	var waiting, ended string
+	for waiting == "" {
+		select {
+		case n := <-e.Notices():
+			if n.Kind == "subtask_ask" {
+				waiting = n.Body
+			} else {
+				t.Fatalf("notice before the ask waited: %s %q", n.Kind, n.Body)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the child's ask never waited for the root's next turn")
+		}
+	}
 	run, err = e.Send(t.Context(), id, Input{Text: "again"})
 	if err != nil {
 		t.Fatal(err)
@@ -294,16 +309,13 @@ func TestBackgroundRelayWaitsForTheRootsNextTurn(t *testing.T) {
 	if _, err := run.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	var waiting, ended string
 	for ended == "" {
 		select {
 		case n := <-e.Notices():
-			if n.Kind == "subtask_ask" {
-				waiting = n.Body
-			} else {
+			if n.Kind != "subtask_ask" {
 				ended = n.Body
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(10 * time.Second):
 			t.Fatal("no completion notice")
 		}
 	}

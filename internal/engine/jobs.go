@@ -188,7 +188,7 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	defer forget()
 	// A foreground child spends from the turn's shared budget, and is
 	// stopped mid-step when the budget runs out.
-	budgetCtx, endBudget := x.shared.guard(withBudget(ctx, x.shared))
+	budgetCtx, endBudget := x.shared.guard(withBudget(ctx, x.shared), func() bool { return e.hasReturned(child.ID) })
 	defer endBudget()
 	runCtx, stopWall := wallContext(budgetCtx, variant)
 	defer stopWall()
@@ -200,7 +200,13 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	result, err := run.Wait()
 	status, reason := subtaskStatus(ctx, runCtx, result, err)
 	x.rollUp(ctx, child.ID, result.Usage)
-	out := e.composeSubtaskResult(ctx, x.info.ID, child.ID, variant, result, status, reason, e.closeSubtask(child.ID))
+	returned := e.closeSubtask(child.ID)
+	if returned != nil && ctx.Err() == nil && errors.Is(context.Cause(runCtx), errTokenBudget) {
+		// The child had already handed back its result when the budget ran
+		// out; the result stands.
+		status, reason = subagent.StatusOK, ""
+	}
+	out := e.composeSubtaskResult(ctx, x.info.ID, child.ID, variant, result, status, reason, returned)
 	// A person's refusal overrides an ok or partial ending, whatever the
 	// child returned.
 	out.Status, out.Reason = withDenials(out.Status, out.Reason, e.takeDenials(child.ID))

@@ -55,6 +55,9 @@ runtime:
   max_steps: 50
   context_window: 200000
   tool_concurrency: 4
+  subtask_limit: 4
+  turn_token_budget: 200000
+  subtask_result_cap: 6000
   env:
     PROJECT_MODE: development
 permissions:
@@ -65,7 +68,13 @@ permissions:
 `model`, Nanite uses `NANITE_DEFAULT_MODEL` or `claude-sonnet-5-5`. Set an
 appropriate model explicitly when selecting OpenAI. Numeric limits accept
 nonnegative values. Zero selects the engine or adapter default. The engine
-defaults to 50 model steps and four concurrent tool calls. `env` supplies
+defaults to 50 model steps and four concurrent tool calls. `subtask_limit`
+is how many subtasks run at once, separately for leads and other subtasks
+(default 4, at most 8; a higher value is refused when the agent opens).
+`turn_token_budget` is a token ceiling a turn shares with its subtasks (zero
+is unlimited). `subtask_result_cap` caps a subtask's result in tokens (zero
+means about 5,900, the most one tool result shows in full). An embedding
+host's non-zero `agent.Options` value wins over these. `env` supplies
 literal values to both foreground and background Bash. Use shell variable
 names and keep credentials out of this file.
 

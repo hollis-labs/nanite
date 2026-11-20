@@ -192,10 +192,11 @@ const DefaultResultCap = 6000
 // BytesPerToken converts a token cap to bytes of result JSON.
 const BytesPerToken = 4
 
-// ResultCapBytes is the configured cap on a child's whole result, in bytes:
+// ResultCapBytes is the configured cap on a child's whole result, in bytes,
+// never more than maxBytes (when positive):
 // the variant's result_cap, else the agent's, else DefaultResultCap. The
 // engine clamps it to what one tool result can carry.
-func ResultCapBytes(variant Variant, agent int) int {
+func ResultCapBytes(variant Variant, agent, maxBytes int) int {
 	tokens := DefaultResultCap
 	switch {
 	case variant.ResultCap > 0:
@@ -203,7 +204,20 @@ func ResultCapBytes(variant Variant, agent int) int {
 	case agent > 0:
 		tokens = agent
 	}
+	// Clamp in tokens first, so a huge setting cannot overflow the product.
+	if maxBytes > 0 {
+		tokens = min(tokens, maxBytes/BytesPerToken)
+	}
 	return tokens * BytesPerToken
+}
+
+// CheckLimit refuses a subtask limit the agent cannot run; zero is the
+// default.
+func CheckLimit(n int) error {
+	if n < 0 || n > MaxLimit {
+		return fmt.Errorf("subtask_limit %d is out of range: it must be between 0 (the default, %d) and %d", n, DefaultLimit, MaxLimit)
+	}
+	return nil
 }
 
 // DefaultLimit is how many subtasks may run at once on one agent when the

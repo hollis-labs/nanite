@@ -105,10 +105,10 @@ type Engine struct {
 	children     subagent.Limit
 	// leads limits subtasks that may start their own (a can_spawn variant
 	// at depth 1), apart from children, so a council never starves itself.
-	leads subagent.Limit
-	notices      chan store.Notice
-	mcp          *mcpclient.Client
-	cache        *toolresult.Cache
+	leads   subagent.Limit
+	notices chan store.Notice
+	mcp     *mcpclient.Client
+	cache   *toolresult.Cache
 	// subtaskResults stores over-cap subtask results in the same table as
 	// cache, for subtaskResultTTL rather than an hour (result.go).
 	subtaskResults *toolresult.Cache

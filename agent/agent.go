@@ -97,7 +97,8 @@ type Options struct {
 	// logged to Logger and handed to this reporter. Nil logs only.
 	PanicReporter PanicReporter
 	// SubtaskResultCap is the size cap, in tokens, on the whole result a
-	// subtask hands back. Zero means about 6,000. A variant's result_cap
+	// subtask hands back. Zero means host.yaml's runtime.subtask_result_cap,
+	// else the effective default of about 5,900. A variant's result_cap
 	// overrides it, and either is clamped to what one tool result shows in
 	// full (about 5,900 tokens). A larger result is stored for 30 days and
 	// the parent gets a pointer it can read with fetch_tool_result.
@@ -105,7 +106,8 @@ type Options struct {
 	// SubtaskLimit is how many subtasks may run at once across the agent,
 	// counting every conversation and background subtasks. Leads (can_spawn
 	// variants) and other subtasks each get this many slots, so a lead never
-	// competes with its own children. Zero means 4; at most 8. A foreground
+	// competes with its own children. Zero means host.yaml's
+	// runtime.subtask_limit, else 4; at most 8. A foreground
 	// subtask over the limit waits for a slot while its turn lasts; a
 	// background one is refused and the model is told why.
 	SubtaskLimit int
@@ -114,7 +116,8 @@ type Options struct {
 	// tokens and (estimated) compaction summaries included. Reaching it stops
 	// running subtasks mid-step and the turn at its next step, with a token
 	// limit. Background subtasks have only their variant's budget; a resumed
-	// turn starts a fresh budget. Zero is no shared budget.
+	// turn starts a fresh budget. Zero means host.yaml's
+	// runtime.turn_token_budget, else no shared budget.
 	TurnTokenBudget int
 }
 
@@ -185,6 +188,10 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load agent: %w", err)
 	}
+	subtasks, err := subtaskSettings(opts, def.Profile.Runtime)
+	if err != nil {
+		return nil, fmt.Errorf("load agent: %w", err)
+	}
 	data := opts.DataDir
 	if data == "" {
 		data = filepath.Join(def.Directory, ".nanite")
@@ -249,7 +256,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: opts.SubtaskResultCap, SubtaskLimit: opts.SubtaskLimit, TurnTokenBudget: opts.TurnTokenBudget,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget,
 	})
 	if err != nil {
 		_ = db.Close()
@@ -295,4 +302,28 @@ func (a *Agent) Notices() <-chan Notice { return a.engine.Notices() }
 // RebuildIndex reconstructs the SQLite conversation projection from transcripts.
 func (a *Agent) RebuildIndex(ctx context.Context) error {
 	return a.engine.Maintain(ctx, a.store.RebuildIndex)
+}
+
+// subtaskConfig is the agent's subtask settings after precedence.
+type subtaskConfig struct{ limit, turnBudget, resultCap int }
+
+// subtaskSettings resolves the subtask settings: a non-zero Option wins, then
+// host.yaml's runtime value, then the engine's default (zero). host.yaml is
+// read when the agent opens. A host.yaml subtask_limit above the most the
+// agent runs at once is refused, not clamped.
+func subtaskSettings(opts Options, runtime agentdir.Runtime) (subtaskConfig, error) {
+	if err := subagent.CheckLimit(runtime.SubtaskLimit); err != nil {
+		return subtaskConfig{}, fmt.Errorf("host.yaml runtime: %w", err)
+	}
+	pick := func(option, file int) int {
+		if option != 0 {
+			return option
+		}
+		return file
+	}
+	return subtaskConfig{
+		limit:      pick(opts.SubtaskLimit, runtime.SubtaskLimit),
+		turnBudget: pick(opts.TurnTokenBudget, runtime.TurnTokenBudget),
+		resultCap:  pick(opts.SubtaskResultCap, runtime.SubtaskResultCap),
+	}, nil
 }

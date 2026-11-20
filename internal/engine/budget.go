@@ -26,7 +26,14 @@ type turnBudget struct {
 
 	mu      sync.Mutex
 	next    int
-	running map[int]context.CancelCauseFunc
+	running map[int]guarded
+}
+
+// guarded is one running subtask: how to stop it, and whether it has
+// already handed back its result (then it is left to finish).
+type guarded struct {
+	cancel   context.CancelCauseFunc
+	returned func() bool
 }
 
 type turnBudgetKey struct{}
@@ -43,7 +50,7 @@ func sharedBudget(ctx context.Context, depth, limit int) *turnBudget {
 	if limit <= 0 {
 		return nil
 	}
-	return &turnBudget{limit: int64(limit), running: map[int]context.CancelCauseFunc{}}
+	return &turnBudget{limit: int64(limit), running: map[int]guarded{}}
 }
 
 // withBudget hands b to a subtask started with the returned context; a nil b
@@ -63,9 +70,16 @@ func (b *turnBudget) add(tokens int) {
 		return
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, cancel := range b.running {
-		cancel(errTokenBudget)
+	running := make([]guarded, 0, len(b.running))
+	for _, g := range b.running {
+		running = append(running, g)
+	}
+	b.mu.Unlock()
+	for _, g := range running {
+		// A subtask that already returned its result keeps it.
+		if g.returned == nil || !g.returned() {
+			g.cancel(errTokenBudget)
+		}
 	}
 }
 
@@ -75,9 +89,10 @@ func (b *turnBudget) spent() bool {
 }
 
 // guard returns a context for a subtask's run that is cancelled with
-// errTokenBudget when the budget runs out, and a func to call when the
+// errTokenBudget when the budget runs out (unless returned reports that the
+// subtask already handed back its result), and a func to call when the
 // subtask ends.
-func (b *turnBudget) guard(ctx context.Context) (context.Context, func()) {
+func (b *turnBudget) guard(ctx context.Context, returned func() bool) (context.Context, func()) {
 	if b == nil {
 		return ctx, func() {}
 	}
@@ -85,7 +100,7 @@ func (b *turnBudget) guard(ctx context.Context) (context.Context, func()) {
 	b.mu.Lock()
 	id := b.next
 	b.next++
-	b.running[id] = cancel
+	b.running[id] = guarded{cancel: cancel, returned: returned}
 	b.mu.Unlock()
 	if b.spent() {
 		cancel(errTokenBudget)

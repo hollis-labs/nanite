@@ -703,7 +703,8 @@ func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span
 	spanCtx, endSpan := events.ModelSpan(ctx, s.model)
 	defer endSpan()
 	summary, err := s.Summarizer.Summarize(spanCtx, prompt, span[:end])
-	if s.spend != nil {
+	if s.spend != nil && err == nil {
+		// A failed summary call is not charged: it reports nothing to count.
 		s.spend(prompt, span[:end], summary)
 	}
 	if err == nil && strings.TrimSpace(summary) == "" {

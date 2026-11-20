@@ -20,11 +20,23 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   once, and the refusal text names the limit.
 - New `agent.Options.TurnTokenBudget`: a token ceiling a root turn shares
   with its foreground subtasks at any depth, compaction summaries included
-  (estimated). Reaching it stops every running subtask mid-step with
+  (estimated; a failed summary call is not charged). Reaching it stops
+  every running subtask mid-step with
   `limit` (`token_budget`) and the root at its next step; no foreground
-  subtask starts on a spent budget. Background subtasks keep only their
+  subtask starts on a spent budget; a subtask that has already returned its
+  result keeps it. Background subtasks keep only their
   variant's budget; a resumed turn starts a fresh budget. A cost budget is
   not enforced: usage carries no price yet.
+- Dependencies: libs `agent/agentdir` v0.2.0 and `agent/trace` v0.2.0
+  (the trace record gains `ParentTurnID`, `ParentCallID`, `Depth` and
+  `Subtasks`, visible through `agent.TraceRecord`), with Substrate repinned
+  to the BOM that lists both.
+- `host.yaml` gains `runtime.subtask_limit`, `runtime.turn_token_budget`
+  and `runtime.subtask_result_cap` (libs `agent/agentdir` v0.2.0), read when
+  the agent opens. A non-zero `agent.Options` value wins, then `host.yaml`,
+  then the default. A `subtask_limit` above 8 is refused at open and by
+  `nanite validate`, not clamped. The effective default result cap is about
+  5,900 tokens (6,000 clamped to what one tool result shows in full).
 - New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
   context?, background?})`. `variant` is required; the model chooses and
   there is no default.
@@ -39,7 +51,8 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   never calls `return_result` gives `partial` (`no_return_result`) with the
   last 2KB of its output. The whole result is capped for every status
   (variant `result_cap`, else the new `agent.Options.SubtaskResultCap`, else
-  about 6,000 tokens, clamped to the 23KB a tool result shows in full), with
+  6,000 tokens, clamped to the 23KB a tool result shows in full, so about
+  5,900 in effect), with
   at most 50 artifacts. A larger return is scrubbed and stored for 30 days,
   and the parent gets a `result_ref` pointer for `fetch_tool_result` with
   `result_expires_at`. `return_result` must be the only call in its step,

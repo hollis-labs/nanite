@@ -191,9 +191,11 @@ appears once usage carries a price. A child that ends without calling
 
 The whole result the parent receives is held to a cap, for every status: the
 variant's `result_cap` in tokens, else the agent's
-(`agent.Options.SubtaskResultCap`), else about 6,000 tokens, counted as 4
-bytes a token of JSON. The cap is clamped to what one tool result shows in
-full (23KB, about 5,900 tokens), so a larger setting has no further effect.
+(`agent.Options.SubtaskResultCap`, else `runtime.subtask_result_cap` in
+`host.yaml`), else 6,000 tokens, counted as 4 bytes a token of JSON. The cap
+is clamped, in tokens, to what one tool result shows in full (23KB, about
+5,900 tokens), so the effective default is about 5,900 tokens and a larger
+setting has no further effect.
 At most 50 artifacts of 512 bytes each are shown, and `notes` is cut to an
 eighth of the cap. When the return does not fit, or anything was cut, the
 whole return (`result`, `artifacts`, `notes`, scrubbed of secrets) is stored
@@ -302,7 +304,9 @@ not marked read-only: its child may write, but each child runs in its own
 conversation and its approvals reach the owner one at a time.
 
 Subtasks share two agent-wide limits, each `Options.SubtaskLimit` slots
-(default 4, at most 8), across every conversation: one for leads (a
+(else `runtime.subtask_limit` in `host.yaml`; default 4, at most 8, and a
+`host.yaml` value above 8 is refused when the agent opens), across every
+conversation: one for leads (a
 `can_spawn` variant started at depth 1) and one for every other subtask. A
 lead's children therefore never compete with the lead for a slot, and a
 council of leads cannot starve itself. A foreground subtask over its limit
@@ -311,13 +315,15 @@ Waiting cannot deadlock: a subtask waiting for a slot holds none of its own
 kind. A background subtask must not hold up the turn that starts it, so over
 the limit it is refused at once.
 
-`Options.TurnTokenBudget`, when set, is a token ceiling one root turn shares
+`Options.TurnTokenBudget` (else `runtime.turn_token_budget` in `host.yaml`),
+when set, is a token ceiling one root turn shares
 with every foreground subtask it starts, at any depth. Each turn adds its
 own model usage (cached tokens included) as it arrives, so a child's tokens
 count once; compaction summaries are charged too, as an estimate, since the
-summary call reports no usage. When the total reaches the budget, every
-subtask still running is stopped at once, mid-step, and ends `limit` with
-reason `token_budget`; the root stops at its next step boundary. A
+summary call reports no usage (a failed summary call is not charged). When
+the total reaches the budget, every subtask still running is stopped at
+once, mid-step, and ends `limit` with reason `token_budget`, except one that
+has already handed back its result, which keeps it; the root stops at its next step boundary. A
 foreground subtask does not start on a spent budget, including one that was
 waiting for a slot. Background subtasks outlive the turn and draw only on
 their variant's own budget. A resumed turn starts a fresh budget. A cost

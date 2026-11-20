@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"math"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -126,14 +127,29 @@ func TestRequestValidateAndMessage(t *testing.T) {
 }
 
 func TestResultCapBytes(t *testing.T) {
-	if got := ResultCapBytes(Variant{}, 0); got != DefaultResultCap*BytesPerToken {
+	if got := ResultCapBytes(Variant{}, 0, 0); got != DefaultResultCap*BytesPerToken {
 		t.Errorf("default %d", got)
 	}
-	if got := ResultCapBytes(Variant{}, 1000); got != 4000 {
+	if got := ResultCapBytes(Variant{}, 1000, 0); got != 4000 {
 		t.Errorf("agent cap %d", got)
 	}
-	if got := ResultCapBytes(Variant{ResultCap: 50}, 1000); got != 200 {
+	if got := ResultCapBytes(Variant{ResultCap: 50}, 1000, 0); got != 200 {
 		t.Errorf("variant cap %d", got)
+	}
+	if got := ResultCapBytes(Variant{}, 0, 23*1024); got != 23*1024/BytesPerToken*BytesPerToken {
+		t.Errorf("the default is not clamped to the limit: %d", got)
+	}
+	// A setting near the int limit is clamped before it is multiplied.
+	if got := ResultCapBytes(Variant{ResultCap: math.MaxInt}, 0, 23*1024); got <= 0 || got > 23*1024 {
+		t.Errorf("a huge cap overflowed: %d", got)
+	}
+}
+
+func TestCheckLimit(t *testing.T) {
+	for n, ok := range map[int]bool{0: true, 1: true, 8: true, 9: false, -1: false} {
+		if err := CheckLimit(n); (err == nil) != ok {
+			t.Errorf("CheckLimit(%d) = %v", n, err)
+		}
 	}
 }
 

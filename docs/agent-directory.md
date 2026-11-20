@@ -374,44 +374,70 @@ needs:                   # Warden tokens, one variable each
   dashes, starting with a letter, at most 40 characters. `name`, if set,
   must match it. `description` and `kind` are required.
 - `entry` is a clean relative path inside the package, and must be a regular
-  executable file: not a symlink, not a directory.
+  executable file: not a symlink, not a directory, and with no other hard
+  links.
+- **The package's digest.** Nanite hashes the whole package directory (each
+  file's path, mode and content, each symlink's target). Approvals are for
+  one digest: any change to any file in the package asks again. Just before
+  a package runs, Nanite reads it again and refuses it if the digest
+  changed since the turn loaded it. A change in the moment between that
+  check and the process starting is still possible.
 - **`kind: command`** is offered as the tool `tool__<name>`. Each call runs
   the entry from the first workspace root (or the package directory when
   there is none), with the call's JSON arguments on standard input. It must
   write a JSON result on standard output and exit 0. A non-zero exit, a
   result that is not JSON, more than 64 KiB of output or a call past
   `timeout` is an error result (with up to 8 KiB of standard error). The
-  process runs in its own process group, which is ended with it.
+  process runs in its own process group, which is ended with it. Nothing
+  runs and no token is minted (or grant requested) until the call is
+  approved.
 - **`background: true`** runs each call as a background job instead: the
   call returns the job (`background_status` and `background_cancel` work on
   it), and its finish posts a notice. At most 4 background tool jobs run at
   once across the agent; a call over the limit is refused. A job is stored
   as a shell job whose spec names the tool.
-- **`kind: mcp`** runs the entry as a stdio MCP server, like an `.mcp.json`
-  registration named `tool:<name>`. Its tools are offered as
-  `tool__<name>__<tool>`. The server's read-only hints are not trusted. An
-  `.mcp.json` server may not use the `tool:` prefix.
+- **`kind: mcp`** runs the entry as a stdio MCP server, but only once a
+  person has approved that exact package (by digest). Until then the
+  package is offered as one tool, `tool__<name>`: calling it asks, with the
+  package's details. Once approved (the approval is kept across restarts),
+  the server starts at the next turn, with its tokens, and its tools are
+  offered as `tool__<name>__<tool>`; the approval tool is no longer offered.
+  The server's read-only hints are not trusted. It also gets
+  `NANITE_TOOL_DIGEST`, so an edited package restarts it. An `.mcp.json`
+  server may not use the `tool:` prefix.
 - **Environment.** A package gets Nanite's base set (`PATH`, `HOME`, `USER`,
   `LANG`, `TERM`, `TMPDIR`, `SHELL`, `LC_*`), the host variables named in
   `env` that are set, and one variable per `needs` entry holding a fresh
   Warden token for that audience and scope set (see "Identity and Warden
-  auth"). It never gets the parent credential or any other host variable.
-  Variable names are upper-case; the base set, `NANITE_*`, and the dynamic
-  loader's variables are reserved. A package with `needs` and no Warden
-  identity fails with a clear error. Passed-through values and tokens are
-  redacted wherever they appear. An MCP package's environment is fixed when
-  its server starts: when a token is renewed, the server restarts with the
-  new one at the next turn.
+  auth"). It never gets the parent credential through its environment, or
+  any other host variable. Variable names are upper-case; the base set,
+  `NANITE_*`, and the dynamic loader's variables are reserved. `env` may not
+  name a provider key variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
+  the like) or a name that looks like a credential (containing `KEY`,
+  `TOKEN`, `SECRET`, `AUTH`, `PASSWORD` or `CREDENTIAL`) unless the host
+  lists it in `Options.ToolPackageEnv`; ask for a Warden token with `needs`
+  instead. A package with `needs` and no Warden identity fails with a clear
+  error. Passed-through values and tokens are redacted wherever they
+  appear. An MCP package's environment is fixed when its server starts:
+  when a token is renewed, the server restarts with the new one at the next
+  turn.
+- **Not a sandbox.** A package runs as the same OS user as the agent, so it
+  can read any file that user can, including the Warden parent credential
+  file. Approving a package is trusting that code; isolation (a separate
+  user, a container) is a later item.
 - **Permissions.** Package tools are the agent's own code, so policy never
   treats them as read-only: in the `default` and `accept-edits` modes each
-  call asks first. Allow one in `permissions.yaml` (for example
-  `tool: tool__queue-peek`) once you trust it.
+  call asks first, and the prompt names the package, its digest, the entry,
+  and the names (never the values) of the host variables and Warden tokens
+  it gets. A conversation-scope approval is for the package's digest, so a
+  rewritten package asks again. Allow one in `permissions.yaml` (for
+  example `tool: tool__queue-peek`) once you trust it.
 - **Offered with** the `tools` built-in group (`agent.BuiltinTools`), which
   also holds `tool_validate`. An embedded agent gets it only when the host
   names it.
 
 `agent/authored` exports the same checks: `ParseTool(name, content)`,
-`LoadTools(dir)` and `CheckToolName`. A package that does not load is left
+`LoadTools(dir)`, `LoadTool(dir, name)`, `CheckToolName` and `CheckToolEnv`. A package that does not load is left
 out of the turn with a warning.
 
 ## Generated state

@@ -2,6 +2,8 @@ package authored
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +14,10 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/elicitation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,6 +71,10 @@ type ToolPackage struct {
 	Env []string `json:"env,omitempty"`
 	// Needs are Warden tokens minted for the tool, each in its own variable.
 	Needs []ToolNeed `json:"needs,omitempty"`
+	// Digest is the SHA-256 of the whole package directory (every file's
+	// path and content, and every symlink's target), set by LoadTools. An
+	// approval is for one digest: any change to the package asks again.
+	Digest string `json:"digest,omitempty"`
 }
 
 // ToolNeed asks for a short-lived Warden token for one audience and scope
@@ -118,8 +126,10 @@ type toolFile struct {
 }
 
 // ParseTool parses and validates tools/<name>/tool.yaml. It checks the
-// manifest only; LoadTools also checks the entry file.
-func ParseTool(name string, data []byte) (ToolPackage, error) {
+// manifest only; LoadTools also checks the entry file. allowEnv names
+// credential-like host variables the host lets packages pass through (see
+// CheckToolEnv).
+func ParseTool(name string, data []byte, allowEnv ...string) (ToolPackage, error) {
 	if err := CheckToolName(name); err != nil {
 		return ToolPackage{}, err
 	}
@@ -185,6 +195,9 @@ func ParseTool(name string, data []byte) (ToolPackage, error) {
 	seen := map[string]string{}
 	for _, name := range file.Env {
 		if err := checkEnvName(name); err != nil {
+			return ToolPackage{}, fmt.Errorf("env: %w", err)
+		}
+		if err := CheckToolEnv(name, allowEnv); err != nil {
 			return ToolPackage{}, fmt.Errorf("env: %w", err)
 		}
 		if seen[name] != "" {
@@ -257,14 +270,46 @@ func toolSchema(schema map[string]any) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("input_schema: %w", err)
 	}
+	// The same check an MCP tool's schema gets: a schema Nanite could not
+	// safely validate calls against is refused.
+	if _, err := elicitation.Resolve(raw); err != nil {
+		return nil, fmt.Errorf("input_schema: %w", err)
+	}
 	return raw, nil
+}
+
+// providerKeyEnv are the variables Nanite itself reads provider keys from.
+var providerKeyEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "OPENAI_ORG_ID", "OPENAI_PROJECT_ID", "OPENAI_CUSTOM_HEADERS"}
+
+// credentialWords mark a variable name as a likely credential, the same
+// words that mark a provider header as one.
+var credentialWords = []string{"KEY", "TOKEN", "SECRET", "AUTH", "PASSWORD", "CREDENTIAL"}
+
+// CheckToolEnv reports why a package may not pass the host variable name
+// through: a provider key variable Nanite reads, or a name that looks like a
+// credential (it contains KEY, TOKEN, SECRET, AUTH, PASSWORD or CREDENTIAL),
+// unless allow lists it. A package gets credentials as Warden tokens through
+// needs instead.
+func CheckToolEnv(name string, allow []string) error {
+	if slices.Contains(allow, name) {
+		return nil
+	}
+	if slices.Contains(providerKeyEnv, name) {
+		return fmt.Errorf("%s holds a provider key Nanite uses; a package cannot read it", name)
+	}
+	for _, word := range credentialWords {
+		if strings.Contains(name, word) {
+			return fmt.Errorf("%s looks like a credential; ask for a Warden token with needs, or have the host allow it", name)
+		}
+	}
+	return nil
 }
 
 // LoadTools reads the tool packages in dir/tools: each subdirectory with a
 // tool.yaml. It returns every package that loaded and, joined, an error for
 // each that did not. A missing tools directory is no packages. The entry
 // must be a regular executable file inside the package.
-func LoadTools(dir string) (map[string]ToolPackage, error) {
+func LoadTools(dir string, allowEnv ...string) (map[string]ToolPackage, error) {
 	out := map[string]ToolPackage{}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -284,7 +329,7 @@ func LoadTools(dir string) (map[string]ToolPackage, error) {
 			continue
 		}
 		name := entry.Name()
-		pkg, err := loadTool(root, name)
+		pkg, err := loadTool(root, name, allowEnv)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("tools/%s: %w", name, err))
 			continue
@@ -294,7 +339,24 @@ func LoadTools(dir string) (map[string]ToolPackage, error) {
 	return out, errors.Join(errs...)
 }
 
-func loadTool(root *os.Root, name string) (ToolPackage, error) {
+// LoadTool reads one tool package, dir/tools/<name>, as LoadTools does.
+func LoadTool(dir, name string, allowEnv ...string) (ToolPackage, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return ToolPackage{}, fmt.Errorf("read tools: %w", err)
+	}
+	defer func() { _ = root.Close() }() // Read-only.
+	info, err := root.Lstat("tools/" + name)
+	if err != nil {
+		return ToolPackage{}, err
+	}
+	if !info.IsDir() {
+		return ToolPackage{}, fmt.Errorf("tools/%s is not a directory", name)
+	}
+	return loadTool(root, name, allowEnv)
+}
+
+func loadTool(root *os.Root, name string, allowEnv []string) (ToolPackage, error) {
 	dir := "tools/" + name
 	info, err := root.Lstat(dir + "/tool.yaml")
 	if err != nil {
@@ -310,7 +372,7 @@ func loadTool(root *os.Root, name string) (ToolPackage, error) {
 	if err != nil {
 		return ToolPackage{}, err
 	}
-	pkg, err := ParseTool(name, data)
+	pkg, err := ParseTool(name, data, allowEnv...)
 	if err != nil {
 		return ToolPackage{}, err
 	}
@@ -324,7 +386,63 @@ func loadTool(root *os.Root, name string) (ToolPackage, error) {
 	if entry.Mode().Perm()&0o100 == 0 {
 		return ToolPackage{}, fmt.Errorf("entry %s is not executable (chmod +x)", pkg.Entry)
 	}
+	if st, ok := entry.Sys().(*syscall.Stat_t); ok && uint64(st.Nlink) > 1 { //nolint:unconvert // Nlink's width differs by platform.
+		// A hard link could change the entry from outside the package
+		// without changing anything Nanite reads under tools/.
+		return ToolPackage{}, fmt.Errorf("entry %s has other hard links; copy it into the package instead", pkg.Entry)
+	}
+	if pkg.Digest, err = packageDigest(root, dir); err != nil {
+		return ToolPackage{}, err
+	}
 	return pkg, nil
+}
+
+// MaxToolPackageBytes bounds the files hashed for a package's digest.
+const MaxToolPackageBytes = 64 << 20
+
+// packageDigest hashes every entry under dir in path order: a regular file's
+// path and content, a symlink's path and target (not followed), and a
+// directory's path.
+func packageDigest(root *os.Root, dir string) (string, error) {
+	h := sha256.New()
+	total := int64(0)
+	err := fs.WalkDir(root.FS(), dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, dir), "/")
+		switch {
+		case d.IsDir():
+			_, _ = fmt.Fprintf(h, "dir\x00%s\x00", rel)
+		case d.Type()&fs.ModeSymlink != 0:
+			target, err := root.Readlink(p)
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(h, "link\x00%s\x00%s\x00", rel, target)
+		case d.Type().IsRegular():
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if total += info.Size(); total > MaxToolPackageBytes {
+				return fmt.Errorf("the package is larger than %d MiB", MaxToolPackageBytes>>20)
+			}
+			data, err := root.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(h, "file\x00%s\x00%d\x00%o\x00", rel, len(data), info.Mode().Perm())
+			_, _ = h.Write(data)
+		default:
+			return fmt.Errorf("%s is not a regular file, directory or symlink", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("digest: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // ToolNames returns the package names in sorted order.

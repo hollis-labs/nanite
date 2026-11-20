@@ -36,15 +36,88 @@ func (e *Engine) toolPackages() (map[string]authored.ToolPackage, string) {
 	if !e.cfg.Builtins.Has(tools.BuiltinTools) {
 		return nil, ""
 	}
-	pkgs, err := authored.LoadTools(e.cfg.Dir)
+	pkgs, err := authored.LoadTools(e.cfg.Dir, e.cfg.ToolPackageEnv...)
 	if err != nil {
 		return pkgs, "Some tool packages did not load: " + err.Error()
 	}
 	return pkgs, ""
 }
 
-// toolServers adds each mcp-kind tool package to the authored MCP servers
-// as a stdio server named "tool:<package>". Its environment is the base set,
+// toolApprovalKey is the agent-wide setting that holds the digest a person
+// approved for a package (conversation "" in the settings table).
+func toolApprovalKey(name string) string { return "toolpkg.approved:" + name }
+
+// toolApproved reports whether a person approved this exact package: the
+// approval is for its digest, so any change to the package asks again.
+func (e *Engine) toolApproved(ctx context.Context, pkg authored.ToolPackage) bool {
+	digest, err := e.cfg.Store.Setting(ctx, "", toolApprovalKey(pkg.Name))
+	return err == nil && digest != "" && digest == pkg.Digest
+}
+
+// recheckTool reads a package again just before it runs and refuses it if
+// it changed since the turn loaded it (and so since the call was approved).
+// A change between this check and the start of the process is still
+// possible; the agent's own files are not a security boundary against the
+// agent, which runs as the same OS user.
+func (e *Engine) recheckTool(pkg authored.ToolPackage) error {
+	now, err := authored.LoadTool(e.cfg.Dir, pkg.Name, e.cfg.ToolPackageEnv...)
+	if err != nil {
+		return fmt.Errorf("tool package %s no longer loads: %w", pkg.Name, err)
+	}
+	if now.Digest != pkg.Digest {
+		return fmt.Errorf("tool package %s changed after it was approved; call it again", pkg.Name)
+	}
+	return nil
+}
+
+// toolNote describes a package for the person approving a call: what runs,
+// as whom, and the names (never values) of what it is given.
+func toolNote(pkg authored.ToolPackage) string {
+	parts := []string{fmt.Sprintf("tool package %s", pkg.Name)}
+	if pkg.Version != "" {
+		parts[0] += " " + pkg.Version
+	}
+	parts[0] += fmt.Sprintf(" (%s, digest %s) runs %s as the agent's OS user", pkg.Kind, shortDigest(pkg.Digest), pkg.Dir()+"/"+pkg.Entry)
+	if len(pkg.Env) > 0 {
+		parts = append(parts, "host variables: "+strings.Join(pkg.Env, ", "))
+	}
+	for _, need := range pkg.Needs {
+		need := need
+		scopes := ""
+		if len(need.Scopes) > 0 {
+			scopes = " [" + strings.Join(need.Scopes, " ") + "]"
+		}
+		parts = append(parts, fmt.Sprintf("Warden token for %s%s in %s", need.Audience, scopes, need.Env))
+	}
+	if pkg.Network {
+		parts = append(parts, "uses the network")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// errorResult reports err to the model as a failed tool call.
+func errorResult(err error) tools.Result { return tools.Result{Text: err.Error(), IsError: true} }
+
+func shortDigest(d string) string {
+	if len(d) > 12 {
+		return d[:12]
+	}
+	return d
+}
+
+// packageOf names the package a package tool belongs to: tool__<name> or
+// tool__<name>__<tool>.
+func packageOf(tool string) (string, bool) {
+	rest, ok := strings.CutPrefix(tool, tools.ToolPackagePrefix)
+	if !ok {
+		return "", false
+	}
+	name, _, _ := strings.Cut(rest, "__")
+	return name, true
+}
+
+// toolServers adds each approved mcp-kind tool package to the authored MCP
+// servers as a stdio server named "tool:<package>". Its environment is the base set,
 // the host variables the package lists, and the Warden tokens it needs,
 // minted now: a token renewed later changes the server's configuration, so
 // the server restarts with the new token at the next turn.
@@ -59,10 +132,16 @@ func (e *Engine) toolServers(ctx context.Context, authoredCfg agentdir.MCPConfig
 	}
 	for _, name := range authored.ToolNames(pkgs) {
 		pkg := pkgs[name]
-		if pkg.Kind != authored.ToolMCP {
+		if pkg.Kind != authored.ToolMCP || !e.toolApproved(ctx, pkg) {
+			// An MCP package starts (and gets its tokens) only once a person
+			// approved this exact package; until then it is offered as its
+			// approval tool (packageTools).
 			continue
 		}
-		env := map[string]string{}
+		env := map[string]string{
+			// The digest also restarts the server when the package changes.
+			"NANITE_TOOL_DIGEST": pkg.Digest,
+		}
 		for _, key := range pkg.Env {
 			if _, ok := os.LookupEnv(key); ok {
 				// Expanded (and redacted) by the MCP client.
@@ -139,27 +218,73 @@ func (e *Engine) toolDir(pkg authored.ToolPackage) string {
 	return filepath.Dir(e.toolEntry(pkg))
 }
 
-// packageTools offers each command-kind package as tool__<package>.
-func (x *execution) packageTools() []tools.Tool {
+// packageTools offers each command-kind package as tool__<package>, and
+// each mcp-kind package not yet approved as its approval tool,
+// tool__<package>: calling it asks the person, and once approved the server
+// starts and its tools are offered from the next turn. It records what the
+// approval prompt shows for every package tool.
+func (x *execution) packageTools(ctx context.Context) []tools.Tool {
 	var out []tools.Tool
+	x.pkgNotes = map[string]string{}
 	for _, name := range authored.ToolNames(x.toolPkgs) {
 		pkg := x.toolPkgs[name]
-		if pkg.Kind != authored.ToolCommand {
-			continue
+		x.pkgNotes[name] = toolNote(pkg)
+		switch {
+		case pkg.Kind == authored.ToolCommand:
+			out = append(out, tools.Tool{Name: tools.ToolPackagePrefix + name, Description: toolDescription(pkg), InputSchema: pkg.InputSchema,
+				// The agent's own code: never read-only to policy, so the
+				// default permission mode asks before each call.
+				Destructive: true,
+				Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
+					// Runs only after the call was approved: nothing from the
+					// package runs and no token is minted before.
+					if err := x.engine.recheckTool(pkg); err != nil {
+						return errorResult(err), nil
+					}
+					if pkg.Background {
+						return x.startToolJob(ctx, pkg, call.Input)
+					}
+					return x.runTool(ctx, pkg, call.Input)
+				},
+			})
+		case !x.engine.toolApproved(ctx, pkg):
+			out = append(out, tools.Tool{Name: tools.ToolPackagePrefix + name, InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
+				Description: "Ask to start tool package " + name + ", an MCP server: " + pkg.Description + " Once approved, its tools are offered from the next turn.",
+				Destructive: true,
+				Handler: func(ctx context.Context, _ tools.Call) (tools.Result, error) {
+					if err := x.engine.recheckTool(pkg); err != nil {
+						return errorResult(err), nil
+					}
+					if err := x.engine.cfg.Store.SetSetting(ctx, "", toolApprovalKey(pkg.Name), pkg.Digest); err != nil {
+						return tools.Result{}, err
+					}
+					return tools.Result{Text: fmt.Sprintf("Approved tool package %s (digest %s). Its tools are offered from the next turn.", pkg.Name, shortDigest(pkg.Digest))}, nil
+				},
+			})
 		}
-		out = append(out, tools.Tool{Name: tools.ToolPackagePrefix + name, Description: toolDescription(pkg), InputSchema: pkg.InputSchema,
-			// The agent's own code: never read-only to policy, so the default
-			// permission mode asks before each call.
-			Destructive: true,
-			Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
-				if pkg.Background {
-					return x.startToolJob(ctx, pkg, call.Input)
-				}
-				return x.runTool(ctx, pkg, call.Input)
-			},
-		})
 	}
 	return out
+}
+
+// grantKey is the key a conversation-scope approval is kept under. For a
+// package tool it includes the package's digest, so a rewritten package
+// asks again.
+func (x *execution) grantKey(tool string) string {
+	if name, ok := packageOf(tool); ok {
+		if pkg, ok := x.toolPkgs[name]; ok {
+			return tool + "@" + pkg.Digest
+		}
+	}
+	return tool
+}
+
+// approvalNote is what the person approving a package tool is shown about
+// the package, "" for any other tool.
+func (x *execution) approvalNote(tool string) string {
+	if name, ok := packageOf(tool); ok {
+		return x.pkgNotes[name]
+	}
+	return ""
 }
 
 func toolDescription(pkg authored.ToolPackage) string {
@@ -183,7 +308,7 @@ func (x *execution) runTool(ctx context.Context, pkg authored.ToolPackage, input
 	if err != nil {
 		return tools.Result{Text: e.scrub.Text(fmt.Sprintf("tool package %s: %v", pkg.Name, err)), IsError: true}, nil
 	}
-	result, err := shell.RunExec(ctx, shell.Exec{Path: e.toolEntry(pkg), Dir: e.toolDir(pkg), Env: env, Stdin: input, Timeout: pkg.Timeout})
+	result, err := shell.RunExec(ctx, shell.Exec{Name: "tool package " + pkg.Name, Path: e.toolEntry(pkg), Dir: e.toolDir(pkg), Env: env, Stdin: input, Timeout: pkg.Timeout})
 	stderr := strings.TrimSpace(result.Stderr)
 	fail := func(format string, args ...any) (tools.Result, error) {
 		text := fmt.Sprintf(format, args...)
@@ -245,7 +370,7 @@ func (x *execution) startToolJob(ctx context.Context, pkg authored.ToolPackage, 
 		// What this job causes must not start another notice turn.
 		e.markNoticeWork(jobID)
 	}
-	command := shell.Exec{Path: e.toolEntry(pkg), Dir: e.toolDir(pkg), Env: env, Stdin: input, Timeout: pkg.Timeout}
+	command := shell.Exec{Name: "tool package " + pkg.Name, Path: e.toolEntry(pkg), Dir: e.toolDir(pkg), Env: env, Stdin: input, Timeout: pkg.Timeout}
 	job, err := e.jobs.Start(ctx, store.Job{ID: jobID, ConversationID: x.info.ID, Kind: toolJobKind, Spec: e.scrub.Text(string(spec))},
 		func(runCtx context.Context, output io.Writer) (background.Task, error) {
 			process, err := shell.StartExecStreaming(runCtx, command, output)
@@ -287,7 +412,7 @@ func (x *execution) toolValidate() tools.Tool {
 			if err := json.Unmarshal(call.Input, &in); err != nil {
 				return tools.Result{}, err
 			}
-			pkgs, err := authored.LoadTools(x.engine.cfg.Dir)
+			pkgs, err := authored.LoadTools(x.engine.cfg.Dir, x.engine.cfg.ToolPackageEnv...)
 			var lines []string
 			for _, name := range authored.ToolNames(pkgs) {
 				if in.Name == "" || in.Name == name {

@@ -118,9 +118,25 @@ func CheckToolName(name string) error { return authored.CheckToolName(name) }
 
 // ParseTool parses and validates the content of tools/<name>/tool.yaml. It
 // checks the manifest only; LoadTools also checks the entry file.
-func ParseTool(name string, data []byte) (ToolPackage, error) { return authored.ParseTool(name, data) }
+// allowEnv names credential-like host variables the host lets packages pass
+// through (see CheckToolEnv).
+func ParseTool(name string, data []byte, allowEnv ...string) (ToolPackage, error) {
+	return authored.ParseTool(name, data, allowEnv...)
+}
 
 // LoadTools reads the tool packages in dir/tools. It returns every package
 // that loaded and, joined, an error for each that did not. A missing tools
 // directory is no packages.
-func LoadTools(dir string) (map[string]ToolPackage, error) { return authored.LoadTools(dir) }
+func LoadTools(dir string, allowEnv ...string) (map[string]ToolPackage, error) {
+	return authored.LoadTools(dir, allowEnv...)
+}
+
+// LoadTool reads one tool package, dir/tools/<name>, as LoadTools does.
+func LoadTool(dir, name string, allowEnv ...string) (ToolPackage, error) {
+	return authored.LoadTool(dir, name, allowEnv...)
+}
+
+// CheckToolEnv reports why a package may not pass the host variable name
+// through: a provider key variable Nanite reads, or a name that looks like a
+// credential, unless allow lists it.
+func CheckToolEnv(name string, allow []string) error { return authored.CheckToolEnv(name, allow) }

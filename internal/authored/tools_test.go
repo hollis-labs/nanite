@@ -60,6 +60,9 @@ func TestParseToolRejects(t *testing.T) {
 		{"need env clash", "a", base + "env: [T]\nneeds:\n  - audience: x\n    env: T\n", "already used"},
 		{"need reserved env", "a", base + "needs:\n  - audience: x\n    env: NANITE_TOKEN\n", "reserved"},
 		{"two documents", "a", base + "---\n" + base, "one document"},
+		{"provider key env", "a", base + "env: [ANTHROPIC_API_KEY]\n", "provider key Nanite uses"},
+		{"credential env", "a", base + "env: [GITHUB_TOKEN]\n", "looks like a credential"},
+		{"unsafe schema", "a", base + "input_schema:\n  properties:\n    enum:\n      $ref: '#/properties/enum'\n", "unsafe schema"},
 		{"empty", "a", "", "empty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,5 +109,54 @@ func TestLoadToolsChecksTheEntry(t *testing.T) {
 	}
 	if pkgs, err := LoadTools(t.TempDir()); err != nil || len(pkgs) != 0 {
 		t.Fatalf("no tools directory: %v, %v", pkgs, err)
+	}
+}
+
+func TestCredentialEnvNeedsTheHostsAllowance(t *testing.T) {
+	manifest := []byte("description: d\nkind: command\nentry: run.sh\nenv: [GITHUB_TOKEN]\n")
+	if _, err := ParseTool("a", manifest); err == nil {
+		t.Fatal("a credential-like variable was accepted without an allowance")
+	}
+	if pkg, err := ParseTool("a", manifest, "GITHUB_TOKEN"); err != nil || pkg.Env[0] != "GITHUB_TOKEN" {
+		t.Fatalf("allowed: %+v, %v", pkg, err)
+	}
+	// A token Nanite mints may have any variable name.
+	if _, err := ParseTool("a", []byte("description: d\nkind: command\nentry: run.sh\nneeds:\n  - audience: x\n    env: X_TOKEN\n")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPackageDigestAndHardLinks(t *testing.T) {
+	dir := t.TempDir()
+	pkgDir := filepath.Join(dir, "tools", "p")
+	if err := os.MkdirAll(pkgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "tool.yaml"), []byte("description: d\nkind: mcp\nentry: run.sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(pkgDir, "run.sh")
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"), 0o700); err != nil { //nolint:gosec // G306: the entry must be executable
+		t.Fatal(err)
+	}
+	first, err := LoadTool(dir, "p")
+	if err != nil || len(first.Digest) != 64 {
+		t.Fatalf("%+v, %v", first, err)
+	}
+	if again, _ := LoadTool(dir, "p"); again.Digest != first.Digest {
+		t.Fatal("the digest is not stable")
+	}
+	// Any file in the package changes it, not only the entry.
+	if err := os.WriteFile(filepath.Join(pkgDir, "lib.py"), []byte("x = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, _ := LoadTool(dir, "p"); changed.Digest == first.Digest {
+		t.Fatal("a new file did not change the digest")
+	}
+	if err := os.Link(entry, filepath.Join(dir, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadTool(dir, "p"); err == nil || !strings.Contains(err.Error(), "other hard links") {
+		t.Fatalf("a hard-linked entry loaded: %v", err)
 	}
 }

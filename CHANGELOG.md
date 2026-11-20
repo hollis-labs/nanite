@@ -9,15 +9,22 @@
   most 10m), a 64 KiB output cap and its own process group; `background:
   true` runs it as a background job whose finish posts a notice, at most 4
   at once. `kind: mcp` runs the entry as a stdio MCP server whose tools are
-  `tool__<name>__<tool>`. A package gets only the base environment, the host
-  variables it lists in `env`, and a fresh Warden token for each `needs`
-  entry. Package tools are never read-only to policy, so the default mode
-  asks before each call. Packages are read every turn; `tool_validate` and
-  `nanite validate` check them. New built-in group `tools`
-  (`agent.BuiltinTools`); `agent/authored` adds `ToolPackage`, `ParseTool`,
-  `LoadTools` and `CheckToolName`. `tool__*` names and `tool_validate` are
-  reserved for host tools, and `.mcp.json` servers may not use the `tool:`
-  prefix.
+  `tool__<name>__<tool>`, but only after a person approves that exact
+  package through its approval tool `tool__<name>`. Approvals and
+  conversation grants are keyed by the package's digest (the whole
+  directory), so any change asks again; a package is re-checked just before
+  it runs. Nothing runs and no Warden token is minted or requested before
+  approval. A package gets only the base environment, the host variables it
+  lists in `env` (credential-like names need `Options.ToolPackageEnv`), and
+  a fresh Warden token for each `needs` entry. Package tools are never
+  read-only to policy, and the approval prompt names the package, its
+  digest and what it is given. An entry with other hard links is refused.
+  Packages are read every turn; `tool_validate` and `nanite validate` check
+  them. New built-in group `tools` (`agent.BuiltinTools`) and
+  `Options.ToolPackageEnv`; `agent/authored` adds `ToolPackage`,
+  `ParseTool`, `LoadTools`, `LoadTool`, `CheckToolName` and
+  `CheckToolEnv`. `tool__*` names and `tool_validate` are reserved for host
+  tools, and `.mcp.json` servers may not use the `tool:` prefix.
 - Warden auth. A new agent-directory file, `identity.yaml`, names the
   agent's principal, its Warden URL and parent credential file, and which
   `.mcp.json` HTTP servers get Warden tokens and claimed correlation headers

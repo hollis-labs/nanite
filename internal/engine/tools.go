@@ -39,7 +39,7 @@ func (x *execution) prepareTools(host, mcp []tools.Tool, skillCatalog skills.Cat
 	catalog = append(catalog, selftools.Skills(skillCatalog)...)
 	catalog = append(catalog, mcp...)
 	catalog = append(catalog, x.jobTools()...)
-	catalog = append(catalog, x.packageTools()...)
+	catalog = append(catalog, x.packageTools(context.Background())...)
 	catalog = append(catalog, x.toolValidate())
 	if x.info.ParentID != "" {
 		// Only a subtask child can read its parent's history.
@@ -123,10 +123,13 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 		// A conversation-scope allow covers the conversation it was given on
 		// and the subtasks under it: a root's grant reaches its children, a
 		// subtask's never reaches its parent or siblings.
-		if x.granted(t.Name) {
+		if x.granted(x.grantKey(t.Name)) {
 			decision = permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation, Reason: "conversation approval"}
 		} else {
 			req.Reason = x.engine.scrub.Text(effect.Reason)
+			if note := x.approvalNote(t.Name); note != "" {
+				req.Reason = note + ". " + req.Reason
+			}
 			gateReq := req
 			gateReq.Input = raw
 			if x.origin != nil {
@@ -147,7 +150,7 @@ func (x *execution) authorize(ctx context.Context, t tools.Tool, call llmtypes.T
 				}
 			}
 			if decision.Allow && decision.Scope == permission.ScopeConversation {
-				x.engine.grant(x.info.ID, t.Name)
+				x.engine.grant(x.info.ID, x.grantKey(t.Name))
 			}
 		}
 	}

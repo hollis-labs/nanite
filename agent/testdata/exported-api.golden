@@ -139,6 +139,7 @@ type Options struct
   field DataDir string
   field WorkDir string
   field GlobalSkillsDir string
+  field ToolPackageEnv []string
   field Provider github.com/hollis-labs/libs/llm/core/llmcontracts.Provider
   field Gateway Gateway
   field Providers []ProviderSpec

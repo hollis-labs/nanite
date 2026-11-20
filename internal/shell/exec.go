@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -12,6 +13,8 @@ import (
 // Exec runs one executable directly (no shell), with input on standard
 // input. Env is the whole environment: nothing else is inherited.
 type Exec struct {
+	// Name is what errors call the run, such as "tool package queue-peek".
+	Name    string
 	Path    string
 	Dir     string
 	Env     []string
@@ -40,9 +43,7 @@ func RunExec(ctx context.Context, e Exec) (ExecResult, error) {
 		limit = maxOutput
 	}
 	stdout, stderr := &limitedBuffer{limit: limit}, &limitedBuffer{limit: maxStderr}
-	process, err := startProcess(ctx, e.Timeout, e.Dir, e.Env, bytes.NewReader(e.Stdin), stdout, stderr, func(runCtx context.Context) *exec.Cmd {
-		return exec.CommandContext(runCtx, e.Path) // #nosec G204 -- an authored tool package's entry, run after policy checks.
-	})
+	process, err := startExec(ctx, e, stdout, stderr)
 	if err != nil {
 		return ExecResult{}, err
 	}
@@ -55,9 +56,22 @@ func RunExec(ctx context.Context, e Exec) (ExecResult, error) {
 // StartExecStreaming starts e with its standard output and error both
 // written to w, for a background job. The caller must Wait exactly once.
 func StartExecStreaming(ctx context.Context, e Exec, w io.Writer) (*Process, error) {
-	return startProcess(ctx, e.Timeout, e.Dir, e.Env, bytes.NewReader(e.Stdin), w, w, func(runCtx context.Context) *exec.Cmd {
+	return startExec(ctx, e, w, w)
+}
+
+func startExec(ctx context.Context, e Exec, stdout, stderr io.Writer) (*Process, error) {
+	label := e.Name
+	if label == "" {
+		label = e.Path
+	}
+	process, err := startProcess(ctx, e.Timeout, e.Dir, e.Env, bytes.NewReader(e.Stdin), stdout, stderr, func(runCtx context.Context) *exec.Cmd {
 		return exec.CommandContext(runCtx, e.Path) // #nosec G204 -- an authored tool package's entry, run after policy checks.
 	})
+	if err != nil {
+		return nil, fmt.Errorf("start %s: %w", label, err)
+	}
+	process.label = label
+	return process, nil
 }
 
 type limitedBuffer struct {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -312,28 +313,146 @@ func TestToolPackageMCPServerHelper(t *testing.T) {
 	os.Exit(0)
 }
 
-// An mcp-kind package runs as a stdio MCP server; its tools are offered as
-// tool__<package>__<tool>, and its read-only hint is not trusted.
-func TestMCPToolPackage(t *testing.T) {
-	p := &watchedProvider{Provider: fake.New(callWith("tool__fixture__ping", map[string]any{}), fake.Text("done"))}
+// countingWarden is a fake Warden that mints one token and counts every
+// request it gets (mints and grant requests alike).
+func countingWarden(t *testing.T) (url string, requests func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	n := 0
+	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+		_ = r.ParseForm()
+		next := "parent-fixture-next"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "pkg-" + "fixture", "expires_in": 900, "refresh" + "_token": next})
+	}))
+	t.Cleanup(ws.Close)
+	return ws.URL, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return n
+	}
+}
+
+// An mcp-kind package does nothing until a person approves that exact
+// package: no process, no token, no grant request. Until then it is offered
+// as its approval tool; once approved, the server starts from the next turn
+// and its tools are offered as tool__<package>__<tool>, with its read-only
+// hint not trusted. A changed package needs approval again.
+func TestMCPToolPackageStartsOnlyOnceApproved(t *testing.T) {
+	p := &watchedProvider{Provider: fake.New(
+		callWith("tool__fixture", map[string]any{}), fake.Text("refused"),
+		callWith("tool__fixture", map[string]any{}), fake.Text("approved"),
+		callWith("tool__fixture__ping", map[string]any{}), fake.Text("pinged"),
+		fake.Text("after the change"),
+	)}
 	e, _, id := setupEngine(t, p, "")
+	url, wardenRequests := countingWarden(t)
+	attachWarden(t, e, url)
+	marker := filepath.Join(t.TempDir(), "started")
 	t.Setenv("TOOLPKG_MCP_SERVE", "1")
-	writeToolPackage(t, e.cfg.Dir, "fixture", "description: A fixture server.\nkind: mcp\nentry: run.sh\nenv: [TOOLPKG_MCP_SERVE]\n",
-		fmt.Sprintf("#!/bin/sh\nexec %q -test.run='^TestToolPackageMCPServerHelper$' -test.v=false\n", os.Args[0]))
-	var asked []string
+	t.Setenv("TOOLPKG_MARKER", marker)
+	script := fmt.Sprintf("#!/bin/sh\ntouch \"$TOOLPKG_MARKER\"\nexec %q -test.run='^TestToolPackageMCPServerHelper$' -test.v=false\n", os.Args[0])
+	writeToolPackage(t, e.cfg.Dir, "fixture", "description: A fixture server.\nkind: mcp\nentry: run.sh\nenv: [TOOLPKG_MCP_SERVE, TOOLPKG_MARKER]\nneeds:\n  - audience: fixture\n    env: FIXTURE_TOKEN\n", script)
+	allow := false
+	var asked []permission.PermissionRequest
 	e.cfg.Gate = gateFunc(func(_ context.Context, r permission.PermissionRequest) (permission.PermissionDecision, error) {
-		asked = append(asked, r.Tool)
-		return permission.PermissionDecision{Allow: true}, nil
+		asked = append(asked, r)
+		return permission.PermissionDecision{Allow: allow}, nil
 	})
+	started := func() bool {
+		_, err := os.Stat(marker)
+		return err == nil
+	}
+
+	// Refused: nothing ran, nothing was minted or requested.
 	result := toolTurn(t, e, id)
-	if result.IsError || !strings.Contains(result.Content, "pong from the package") {
-		t.Fatalf("result %+v", result)
+	if !result.IsError || started() || wardenRequests() != 0 {
+		t.Fatalf("before approval: result %+v, started %v, warden requests %d", result, started(), wardenRequests())
 	}
-	if !slices.Contains(offered(p.requests[0]), "tool__fixture__ping") {
-		t.Fatalf("offered %v", offered(p.requests[0]))
+	if got := offered(p.requests[0]); !slices.Contains(got, "tool__fixture") || slices.Contains(got, "tool__fixture__ping") {
+		t.Fatalf("offered before approval: %v", got)
 	}
-	if !slices.Equal(asked, []string{"tool__fixture__ping"}) {
-		t.Fatalf("a package's read-only hint was trusted: asked %v", asked)
+	note := asked[0].Reason
+	for _, want := range []string{"tool package fixture", "digest ", "as the agent's OS user", "host variables: TOOLPKG_MCP_SERVE, TOOLPKG_MARKER", "Warden token for fixture in FIXTURE_TOKEN"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("the approval prompt lacks %q: %s", want, note)
+		}
+	}
+
+	// Approved: recorded, still nothing started this turn.
+	allow = true
+	if approved := toolTurn(t, e, id); approved.IsError || !strings.Contains(approved.Content, "offered from the next turn") || started() || wardenRequests() != 0 {
+		t.Fatalf("approval: result %+v, started %v, warden requests %d", approved, started(), wardenRequests())
+	}
+
+	// The next turn starts the server with its token and offers its tools.
+	asked = nil
+	result = toolTurn(t, e, id)
+	if result.IsError || !strings.Contains(result.Content, "pong from the package") || !started() || wardenRequests() != 1 {
+		t.Fatalf("after approval: result %+v, started %v, warden requests %d", result, started(), wardenRequests())
+	}
+	if got := offered(p.requests[4]); slices.Contains(got, "tool__fixture") || !slices.Contains(got, "tool__fixture__ping") {
+		t.Fatalf("offered after approval: %v", got)
+	}
+	if len(asked) != 1 || asked[0].Tool != "tool__fixture__ping" {
+		t.Fatalf("a package's read-only hint was trusted: asked %+v", asked)
+	}
+
+	// A changed package is a different package: approval again.
+	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "tools", "fixture", "notes.txt"), []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.Send(t.Context(), id, Input{Text: "again"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := offered(p.requests[len(p.requests)-1]); !slices.Contains(got, "tool__fixture") || slices.Contains(got, "tool__fixture__ping") {
+		t.Fatalf("offered after a change: %v", got)
+	}
+}
+
+// A refused command call runs nothing and mints nothing; a conversation
+// approval does not carry over to a rewritten package.
+func TestCommandToolPackageMintsOnlyAfterApproval(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(
+		callWith("tool__peek", map[string]any{}), fake.Text("refused"),
+		callWith("tool__peek", map[string]any{}), fake.Text("allowed"),
+		callWith("tool__peek", map[string]any{}), fake.Text("granted"),
+		callWith("tool__peek", map[string]any{}), fake.Text("changed"),
+	), "")
+	url, wardenRequests := countingWarden(t)
+	attachWarden(t, e, url)
+	writeToolPackage(t, e.cfg.Dir, "peek", "description: Peek.\nkind: command\nentry: run.sh\nneeds:\n  - audience: queue\n    env: QUEUE_TOKEN\n", "#!/bin/sh\necho '{}'\n")
+	var decision permission.PermissionDecision
+	asks := 0
+	e.cfg.Gate = gateFunc(func(context.Context, permission.PermissionRequest) (permission.PermissionDecision, error) {
+		asks++
+		return decision, nil
+	})
+	if result := toolTurn(t, e, id); !result.IsError || wardenRequests() != 0 {
+		t.Fatalf("refused: %+v, warden requests %d", result, wardenRequests())
+	}
+	decision = permission.PermissionDecision{Allow: true, Scope: permission.ScopeConversation}
+	if result := toolTurn(t, e, id); result.IsError || wardenRequests() != 1 {
+		t.Fatalf("approved: %+v, warden requests %d", result, wardenRequests())
+	}
+	// The conversation grant covers the same package without asking.
+	if result := toolTurn(t, e, id); result.IsError || asks != 2 {
+		t.Fatalf("granted: %+v, asks %d", result, asks)
+	}
+	// A rewritten package asks again.
+	if err := os.WriteFile(filepath.Join(e.cfg.Dir, "tools", "peek", "run.sh"), []byte("#!/bin/sh\necho '{\"v\":2}'\n"), 0o700); err != nil { //nolint:gosec // G306: the entry must be executable
+		t.Fatal(err)
+	}
+	if result := toolTurn(t, e, id); result.IsError || asks != 3 {
+		t.Fatalf("rewritten: %+v, asks %d", result, asks)
 	}
 }
 

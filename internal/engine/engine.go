@@ -43,6 +43,9 @@ type Config struct {
 	Events               events.Sink
 	Logger               *slog.Logger
 	Dir, GlobalSkillsDir string
+	// ToolPackageEnv names credential-like host variables tool packages may
+	// pass through (authored.CheckToolEnv).
+	ToolPackageEnv []string
 	// Builtins limits which of Nanite's own tool groups are offered. Nil offers all.
 	Builtins       tools.Builtins
 	Provider       llmcontracts.Provider

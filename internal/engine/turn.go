@@ -37,8 +37,10 @@ import (
 )
 
 type execution struct {
-	// toolPkgs are the agent's tool packages, read for this turn.
+	// toolPkgs are the agent's tool packages, read for this turn, and
+	// pkgNotes what an approval prompt shows about each, by package name.
 	toolPkgs   map[string]authored.ToolPackage
+	pkgNotes   map[string]string
 	engine     *Engine
 	run        *Run
 	info       store.Conversation

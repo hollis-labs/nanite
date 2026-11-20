@@ -47,6 +47,8 @@ func (Plain) Run(ctx context.Context, command Command) (Result, error) {
 
 // Process is a started shell command. Its caller must Wait exactly once.
 type Process struct {
+	// label names what runs in errors ("bash", or a tool package).
+	label   string
 	cmd     *exec.Cmd
 	ctx     context.Context
 	release func()
@@ -74,7 +76,7 @@ func start(ctx context.Context, command Command, writer io.Writer) (*Process, er
 	if err != nil {
 		return nil, fmt.Errorf("start bash: %w", err)
 	}
-	process.output = output
+	process.output, process.label = output, "bash"
 	return process, nil
 }
 
@@ -144,7 +146,7 @@ func (p *Process) Wait() (Result, error) {
 		return result, nil
 	}
 	if err != nil {
-		return result, fmt.Errorf("run bash: %w", err)
+		return result, fmt.Errorf("run %s: %w", p.label, err)
 	}
 	return result, nil
 }

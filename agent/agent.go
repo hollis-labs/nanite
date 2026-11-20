@@ -55,6 +55,12 @@ type Options struct {
 	WorkDir string
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
+	// ToolPackageEnv names credential-like host variables (provider key
+	// variables, or names containing KEY, TOKEN, SECRET, AUTH, PASSWORD or
+	// CREDENTIAL) that tool packages may pass through with env. Without it a
+	// package that lists one does not load; it should ask for a Warden token
+	// with needs instead.
+	ToolPackageEnv []string
 	// Provider defaults to the adapter selected by host.yaml and Gateway.
 	// When set, it serves every use except one that providers.yaml points at
 	// a provider in Providers.
@@ -328,7 +334,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		providers[spec.Name] = spec
 	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,

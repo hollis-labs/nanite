@@ -101,6 +101,7 @@ type Dispatched = github.com/hollis-labs/nanite/internal/events.Dispatched struc
 var ErrAuthRequestGone error
 var ErrBusy error
 var ErrNoConversation error
+var ErrNoInterrupted error
 var ErrNoStarts error
 var ErrNoSteering error
 var ErrNoWarden error

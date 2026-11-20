@@ -9,6 +9,11 @@
   is the model's context window, so an over-window history now compacts
   before the first request instead of after the provider refuses it.
 
+- Interrupted-turn holds retry after a failed or cancelled resume or a failed
+  timeout discard. Hold timestamps belong to a specific turn, obsolete waiting
+  notices are withdrawn, and a new message racing timeout discard succeeds.
+  `agent.ErrNoInterrupted` identifies an already resolved interrupted turn.
+
 - Recovery after compaction: the `history` built-in group
   (`agent.BuiltinHistory`) offers root conversations `history_search` (words,
   `k` up to 20) and `history_get` (up to 20 messages, stopping between messages after 32,000 characters, by

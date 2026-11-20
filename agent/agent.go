@@ -35,6 +35,8 @@ import (
 var (
 	// ErrBusy means a run is already active in the conversation.
 	ErrBusy = engine.ErrBusy
+	// ErrNoInterrupted means there is no interrupted turn to resume or discard.
+	ErrNoInterrupted = engine.ErrNoInterrupted
 	// ErrNoConversation means the requested conversation does not exist.
 	ErrNoConversation = nanitestore.ErrNoConversation
 )

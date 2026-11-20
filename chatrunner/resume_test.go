@@ -371,6 +371,9 @@ func TestDiscardTheInterruptedTurn(t *testing.T) {
 				if turn, err := w.runner.Interrupted(t.Context(), w.conv); err != nil || turn != nil {
 					t.Fatalf("still interrupted: %+v, %v", turn, err)
 				}
+				// Discard publishes a separate run. Wait for that announcement
+				// before submitting a turn, and do not mistake it for the answer.
+				w.until(t, "the discard announcement", func(ev chatstream.Event) bool { return ev.IsTerminal() })
 			}
 			if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "hello"}); err != nil {
 				t.Fatal(err)

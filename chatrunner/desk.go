@@ -975,6 +975,18 @@ func (d *Desk) submit(chatID string, it desk.Item) {
 	d.pump(chatID)
 }
 
+// withdraw removes an obsolete queued notice and persists the editor state.
+func (d *Desk) withdraw(chatID, itemID string) {
+	d.mu.Lock()
+	c := d.chats[chatID]
+	d.mu.Unlock()
+	if c == nil {
+		return
+	}
+	c.editor.Remove(itemID)
+	d.pump(chatID)
+}
+
 func (d *Desk) state(chatID string) desk.State {
 	d.mu.Lock()
 	typing := d.chat(chatID).typing

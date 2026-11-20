@@ -307,7 +307,7 @@ func (r *Runner) discardInterrupted(ctx context.Context, chatID string, c *agent
 	if turn == nil {
 		return "", nil
 	}
-	if err := c.Discard(ctx); err != nil {
+	if err := c.Discard(ctx); err != nil && !errors.Is(err, agent.ErrNoInterrupted) {
 		return "", fmt.Errorf("discard interrupted turn: %w", err)
 	}
 	r.endHold(chatID)

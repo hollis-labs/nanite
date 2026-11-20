@@ -407,3 +407,76 @@ func answered(ev chatstream.Event) bool {
 	raw, _ := json.Marshal(ev)
 	return strings.Contains(string(raw), "granted and answering")
 }
+
+// A retry after a restart must still remove the chat from the watch. The
+// source must remember that this conversation previously lacked the grant.
+func TestAuthOwnerRetryAfterRestartSuppressesApproval(t *testing.T) {
+	chatrunner.UseAuthClock(t)
+	ws := newFakeWarden(t)
+	llm := gatewayLLM(t)
+	dir := t.TempDir()
+	tweak := func(o *chatrunner.Options) { o.AuthStatus = pending }
+	first := wardenRunner(t, dir, ws, llm, tweak)
+	first.waitForGrant(t)
+	waitFor(t, "saved auth watch", func() bool {
+		raw, err := first.runner.Agent().HostState(t.Context(), "auth.waits")
+		return err == nil && strings.Contains(raw, "req-1")
+	})
+	if err := first.runner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = first.svc.Close(t.Context())
+	ws.set("approved")
+	second := wardenRunner(t, dir, ws, llm, tweak)
+	if _, err := second.svc.Submit(t.Context(), second.conv, chat.Turn{Text: "try again"}); err != nil {
+		t.Fatal(err)
+	}
+	events := second.until(t, "owner retry end", func(ev chatstream.Event) bool { return ev.IsTerminal() })
+	sawAnswer := false
+	for _, ev := range events {
+		sawAnswer = sawAnswer || answered(ev)
+	}
+	if !sawAnswer {
+		t.Fatal("owner retry did not answer")
+	}
+	waitFor(t, "cleared auth watch", func() bool {
+		raw, err := second.runner.Agent().HostState(t.Context(), "auth.waits")
+		return err == nil && raw == ""
+	})
+	raw, err := second.runner.Agent().HostState(t.Context(), "auth.source-waiters")
+	if err != nil || raw != "" {
+		t.Fatalf("source still waits: %q, %v", raw, err)
+	}
+	notices := second.runner.Agent().SubscribeNotices(t.Context())
+	if err := second.runner.AuthDecided(t.Context(), "req-1", "approved"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-notices:
+		t.Fatalf("successful owner retry got another notice: %+v", n)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestAuthUnknownPollStatusKeepsWatching(t *testing.T) {
+	clock := chatrunner.UseAuthClock(t)
+	ws := newFakeWarden(t)
+	var polls atomic.Int32
+	w := wardenRunner(t, t.TempDir(), ws, gatewayLLM(t), func(o *chatrunner.Options) {
+		o.AuthStatus = func(context.Context, string) (string, error) {
+			if polls.Add(1) == 1 {
+				return "unexpected", nil
+			}
+			return "approved", nil
+		}
+	})
+	w.waitForGrant(t)
+	ws.set("approved")
+	if !clock.Tick() {
+		t.Fatal("no first poll")
+	}
+	if !clock.Tick() {
+		t.Fatal("unknown status stopped the watch")
+	}
+	w.authNotice(t, "approval after unknown status", "approved grant request req-1")
+}

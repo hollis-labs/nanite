@@ -48,6 +48,11 @@ Also in this release:
   so fast jobs cannot leave accepted plans waiting forever. Concurrent pumps
   and explicit flushes publish each chat’s releases in order.
 
+- Auth decisions accept only `approved`, `denied`, `expired` or `withdrawn`;
+  unknown poll statuses keep watching. Warden conversation waiters persist
+  across restarts, so a successful owner retry still suppresses the later
+  approval notice and automatic retry.
+
 - Compaction protects both host context slots and checks the threshold before
   a root turn’s first model request, including text-only conversations.
   In-turn host context that would be lost is kept in the summary under a

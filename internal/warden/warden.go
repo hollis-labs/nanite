@@ -163,9 +163,12 @@ type Config struct {
 
 // Source mints and caches tokens for one agent.
 type Source struct {
-	cfg    Config
-	mu     sync.Mutex
-	tokens map[string]*entry
+	cfg          Config
+	mu           sync.Mutex
+	tokens       map[string]*entry
+	waiterMu     sync.Mutex
+	waiterStore  WaiterStore
+	savedWaiters map[string]map[string]string
 }
 
 type entry struct {
@@ -314,6 +317,7 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 		// A conversation that waited got its token: it no longer waits.
 		id := e.waiters[conversation]
 		delete(e.waiters, conversation)
+		s.saveWaiters(key(audience, scopes), e)
 		if s.cfg.OnGranted != nil {
 			s.cfg.OnGranted(Waiting{RequestID: id, Status: "granted", Audience: audience, Scopes: slices.Clone(scopes), Conversation: conversation, For: forFrom(ctx)})
 		}
@@ -321,7 +325,10 @@ func (s *Source) Token(ctx context.Context, audience string, scopes []string) (s
 		if e.waiters == nil {
 			e.waiters = map[string]string{}
 		}
-		e.waiters[conversation] = missing.Waiting.RequestID
+		if e.waiters[conversation] != missing.Waiting.RequestID {
+			e.waiters[conversation] = missing.Waiting.RequestID
+			s.saveWaiters(key(audience, scopes), e)
+		}
 	}
 	return tok, err
 }
@@ -432,12 +439,12 @@ func (s *Source) Request(ctx context.Context, id string) (Waiting, error) {
 func (s *Source) Decided(id, status string) {
 	approved := status == "approved" || status == "granted"
 	s.mu.Lock()
-	entries := make([]*entry, 0, len(s.tokens))
-	for _, e := range s.tokens {
-		entries = append(entries, e)
+	entries := make(map[string]*entry, len(s.tokens))
+	for k, e := range s.tokens {
+		entries[k] = e
 	}
 	s.mu.Unlock()
-	for _, e := range entries {
+	for k, e := range entries {
 		e.mu.Lock()
 		if e.request == id {
 			if approved {
@@ -447,10 +454,15 @@ func (s *Source) Decided(id, status string) {
 			}
 		}
 		if !approved {
+			changed := false
 			for c, req := range e.waiters {
 				if req == id {
 					delete(e.waiters, c)
+					changed = true
 				}
+			}
+			if changed {
+				s.saveWaiters(k, e)
 			}
 		}
 		e.mu.Unlock()

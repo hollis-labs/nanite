@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/recovery"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"

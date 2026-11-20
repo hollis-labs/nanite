@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 )
 
 // DefaultLastN is how many parent messages a child starts with when neither

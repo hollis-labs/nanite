@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 )
 
 func write(t *testing.T, dir, name, body string) {

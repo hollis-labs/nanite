@@ -21,7 +21,7 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/libs/security/policy"
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"

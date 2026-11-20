@@ -15,7 +15,7 @@ import (
 
 	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/tools"
 
 	"github.com/hollis-labs/libs/agent/agentdir"

@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/provider/fake"

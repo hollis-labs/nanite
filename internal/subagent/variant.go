@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/authored"
 )
 
 // Variant is a kind of subtask: the authored fields (agent/authored: role

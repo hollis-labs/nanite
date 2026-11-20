@@ -152,7 +152,9 @@ func (g gate) Decide(ctx context.Context, req agent.PermissionRequest) (agent.Pe
 	p.settle(false)
 	select {
 	case d := <-p.answer:
-		out := agent.PermissionDecision{Allow: d.Allow, Reason: d.Reason}
+		// A controller's answer is a person's; an expiry the Service issued
+		// is not.
+		out := agent.PermissionDecision{Allow: d.Allow, Reason: d.Reason, Human: d.Reason != chat.ReasonExpired}
 		if d.Allow && !confirm && (d.Scope == chat.ScopeConversation || d.Scope == chat.ScopeAlways) {
 			// "conversation" and "always" both stand for the rest of this
 			// conversation; the host's store keeps "always" beyond it.

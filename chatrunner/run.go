@@ -281,7 +281,7 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 
 	case agent.PermissionAsked:
 		if e.Request.ConversationID != x.nanite {
-			return nil // a child conversation's ask; the gate refuses it
+			return nil // not this conversation's: a subtask's ask arrives relayed, under the root's ID
 		}
 		p := x.approval(e.Request.ID)
 		select {
@@ -300,7 +300,21 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 			"tool":        e.Request.Tool,
 			"input":       e.Request.Input,
 		}
-		return []chatstream.Event{{Verb: chatstream.VerbApprovalRequest, ApprovalID: e.Request.ID, CallID: e.Request.ID,
+		callID := e.Request.ID
+		if o := e.Request.Subtask; o != nil {
+			// A subtask's ask, relayed to this conversation: say which one.
+			// It is answered once: the chat Service would keep a standing
+			// grant against the root chat, which would reach the root and
+			// the subtask's siblings.
+			descriptor["description"] = fmt.Sprintf("subtask %q wants %s: %s (this call only)", o.Goal, e.Request.Tool, descriptor["description"])
+			descriptor["subtask"] = o
+			descriptor["standing"] = false
+			descriptor["grant_scope"] = "once"
+			if o.CallID != "" {
+				callID = o.CallID // the root's subtask call, so a client can attach the card to it
+			}
+		}
+		return []chatstream.Event{{Verb: chatstream.VerbApprovalRequest, ApprovalID: e.Request.ID, CallID: callID,
 			Reason: e.Request.Reason, Descriptor: raw(descriptor), Mode: chatstream.ApprovalInBand}}
 
 	case agent.PermissionResolved:

@@ -12,7 +12,9 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   (a malformed one is refused up front), with one repair, then `partial`
   with the validation error. The parent gets `{status, result, artifacts,
   notes, reason, cost{tokens_in, tokens_out}, child_id, variant, steps}`;
-  status is `ok`, `partial`, `limit`, `error` or `cancelled`. A child that
+  status is `ok`, `partial`, `limit`, `error`, `cancelled` or `denied`
+  (set only by the engine, when a person refused an approval the subtask
+  asked for; `return_result` refuses `denied`). A child that
   never calls `return_result` gives `partial` (`no_return_result`) with the
   last 2KB of its output. The whole result is capped for every status
   (variant `result_cap`, else the new `agent.Options.SubtaskResultCap`, else
@@ -88,6 +90,28 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   activity carries `variant` (and `status` when done) instead of `role`.
 - `context` is recorded and passed to the child; forked context comes in a
   later release.
+- Subtask approvals. A subtask is now evaluated with its root conversation's
+  role and conversation (scope), and the PDP request ID is `<child>:<call>`;
+  the request context's `subtask_variant` carries the variant for rules that
+  treat subtasks differently, with `subtask_conversation` and
+  `subtask_depth`. Grants flow down: one given in the root covers its
+  subtasks; one given on a subtask's relayed ask covers that subtask and its
+  own subtasks only. An ask they do not cover, and an MCP elicitation, is
+  relayed to the root: the gate gets a request with the root's
+  `ConversationID`, ID `<child>:<call>` and the new
+  `PermissionRequest.Subtask` (`agent.SubtaskOrigin`, with a scrubbed goal
+  and the root's subtask call ID), and `Question` gains `Subtask`. One ask is
+  open at a time per root conversation. `PermissionDecision` gains `Human`;
+  a refusal a person gave ends the subtask with status `denied`. A
+  background subtask's ask waits for the root's next turn, posts a notice
+  that it is waiting, and ends `unanswered` after `Options.SubtaskAskWait`
+  (default 30 minutes); the notice is withdrawn if the ask ends before a
+  turn shows it. chatrunner shows a relayed ask as one `approval.request`
+  attached to the root's subtask call, with `descriptor.subtask`, and takes
+  only a once answer on it (`standing` false), so no standing grant against
+  the root chat can reach the root or a sibling; before, a subtask's ask was
+  denied. The REPL names the subtask when it asks. A subtask's title is
+  stored with its goal scrubbed.
 
 - Every turn writes one trace record (`libs/agent/trace`, schema version 1),
   however it ends. It holds identity and source, provider and model, slots

@@ -216,8 +216,20 @@ The agent's `permissions.yaml` and mode still apply to every tool.
 for the answer the Service delivers. Its `descriptor` carries `description`,
 `standing` (false for a `LevelConfirm` tool), `tool` and `input`. The scopes
 `conversation` and `always` both stand for the rest of the conversation in
-Nanite; keeping `always` beyond it is the application's `Granted` function. A
-tool call made inside a subtask cannot ask and is denied.
+Nanite; keeping `always` beyond it is the application's `Granted` function.
+
+**Subtask approvals.** A subtask asks through its root conversation. Its
+call is decided under the root's rules and grants, so a tool the conversation
+already allowed runs in the subtask without asking. Anything still needing an
+answer arrives on the root's turn as one `approval.request` with ID
+`<child>:<call>`, `call_id` set to the root's `subtask` tool call (so the card
+can be shown with it), a `descriptor.description` of `subtask "<goal>" wants
+<tool>: … (this call only)`, `descriptor.standing` false, `grant_scope`
+`once` and a `descriptor.subtask` object (`child_id`, `variant`, `goal`,
+`depth`, `call_id`). It takes only a once answer: a standing grant would be
+kept against the root chat and reach the root and the subtask's siblings,
+and the chat wire has no scope for one subtask. A controller's denial ends
+the subtask with status `denied`; an expiry does not count as one.
 
 **Events.** Each model step is a `step.start` / `step.finish` pair around one
 assistant message that holds the step's text, reasoning, tool calls and tool

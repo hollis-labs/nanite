@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/libs/core/store"
@@ -59,6 +60,11 @@ type Options struct {
 	Events EventSink
 	// Gate defaults to DenyGate for tool calls that require approval.
 	Gate Gate
+	// SubtaskAskWait bounds how long a subtask's approval or question waits,
+	// in total, for its root conversation to have a running turn to be asked
+	// on (a background subtask can ask between turns). It then ends denied,
+	// "unanswered". Zero means 30 minutes.
+	SubtaskAskWait time.Duration
 	// PDP defaults to nil, with authorization based on the agent's authored rules.
 	PDP policy.PDP
 	// SlotSources defaults to an empty list. Sources contribute entries at the start of each turn.
@@ -218,7 +224,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		providers[spec.Name] = spec
 	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,

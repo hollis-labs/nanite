@@ -48,3 +48,13 @@ func (s *Store) MarkNoticesDelivered(ctx context.Context, conversation, turn str
 		return nil
 	})
 }
+
+// WithdrawNotice deletes a notice not yet marked delivered. A turn marks the
+// notices it showed only when it ends, so the caller must not withdraw one a
+// running turn may have read.
+func (s *Store) WithdrawNotice(ctx context.Context, conversation, id string) error {
+	return s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM notices WHERE id=? AND conversation_id=? AND delivered_turn_id IS NULL`, id, conversation)
+		return err
+	})
+}

@@ -108,7 +108,15 @@ const (
 	StatusLimit     Status = "limit"
 	StatusError     Status = "error"
 	StatusCancelled Status = "cancelled"
+	// StatusDenied: the owner denied an approval the subtask asked for, and
+	// the subtask then ended without reaching a limit or an error. Its
+	// result is still returned; the reason names the denied tools.
+	StatusDenied Status = "denied"
 )
+
+// DeniedPrefix starts the recorded reason of a background subtask that ended
+// denied, so its job status maps back to StatusDenied.
+const DeniedPrefix = "denied: "
 
 // Failed reports whether the parent model must treat the result as an error.
 func (s Status) Failed() bool { return s != StatusOK }
@@ -153,6 +161,9 @@ func AllowsTool(root bool, chain []Variant, canSpawn bool, name string, readOnly
 func StatusOf(job, reason string) string {
 	switch job {
 	case "succeeded":
+		if strings.HasPrefix(reason, DeniedPrefix) {
+			return string(StatusDenied)
+		}
 		if reason != "" {
 			return string(StatusPartial)
 		}

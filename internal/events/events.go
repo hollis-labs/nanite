@@ -89,6 +89,9 @@ type Question struct {
 	EventMeta
 	ID, Prompt string
 	Schema     json.RawMessage
+	// Subtask names the subtask that asked, when a child's question (an MCP
+	// elicitation) was relayed to this root conversation; nil otherwise.
+	Subtask *permission.SubtaskOrigin
 }
 
 // SubagentStarted reports the launch of a subtask's child conversation.
@@ -99,7 +102,7 @@ type SubagentStarted struct {
 }
 
 // SubagentFinished reports the outcome of a foreground subtask. Status is
-// ok, partial, limit, error or cancelled. Limit is the child's stop reason
+// ok, partial, limit, error, cancelled or denied. Limit is the child's stop reason
 // when it stopped at a step, token, time or context limit before finishing;
 // the child did not fail, but its work is incomplete.
 type SubagentFinished struct {

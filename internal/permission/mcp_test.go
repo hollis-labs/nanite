@@ -15,7 +15,7 @@ func TestServerRulesOverrideMCPReadOnlyHint(t *testing.T) {
 			t.Fatal(err)
 		}
 		req := PermissionRequest{ID: "mcp", ConversationID: "test", Tool: "mcp__fixture__inspect", ReadOnly: true}
-		got, err := Evaluate(t.Context(), slog.Default(), nil, local, "urn:nanite:agent:fixture", "chat", req, nil)
+		got, err := Evaluate(t.Context(), slog.Default(), nil, local, "urn:nanite:agent:fixture", "chat", req, nil, nil)
 		if err != nil || got.Effect != want {
 			t.Fatalf("decision = %+v, %v; want %s", got, err, want)
 		}

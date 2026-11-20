@@ -12,6 +12,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/events"
+	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -20,7 +21,7 @@ type pendingQuestion struct {
 	answer chan json.RawMessage
 }
 
-func (r *Run) ask(ctx context.Context, prompt string, schema, displaySchema json.RawMessage) (json.RawMessage, error) {
+func (r *Run) ask(ctx context.Context, prompt string, schema, displaySchema json.RawMessage, origin *permission.SubtaskOrigin) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (r *Run) ask(ctx context.Context, prompt string, schema, displaySchema json
 	r.questionMu.Unlock()
 	defer func() { r.questionMu.Lock(); delete(r.questions, id); r.questionMu.Unlock() }()
 	r.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.Question{EventMeta: meta, ID: id, Prompt: prompt, Schema: slices.Clone(displaySchema)}
+		return events.Question{EventMeta: meta, ID: id, Prompt: prompt, Schema: slices.Clone(displaySchema), Subtask: origin}
 	})
 	select {
 	case answer := <-pending.answer:

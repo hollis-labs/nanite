@@ -46,6 +46,10 @@ type Runner struct {
 	mu     sync.Mutex
 	tools  map[string]Tool
 	active map[string]*run // by Nanite conversation ID
+	// chats maps a Nanite conversation to the chat conversation it serves,
+	// kept after its turn ends: a background subtask's ask may be decided
+	// between turns.
+	chats map[string]string
 }
 
 var _ chat.Runner = (*Runner)(nil)
@@ -59,7 +63,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 	if opts.ContextSlot == "" {
 		opts.ContextSlot = agent.SlotUserContext
 	}
-	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}}
+	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}}
 	ao := opts.Agent
 	ao.Gate = gate{r}
 	ao.PDP = pdp{runner: r, host: opts.Agent.PDP}
@@ -106,6 +110,9 @@ func (r *Runner) conversation(ctx context.Context, chatID string) (*agent.Conver
 	if err != nil {
 		return nil, fmt.Errorf("chatrunner: open conversation: %w", err)
 	}
+	r.mu.Lock()
+	r.chats[id] = chatID
+	r.mu.Unlock()
 	if c.Interrupted() != nil {
 		if err := c.Discard(ctx); err != nil {
 			return nil, fmt.Errorf("chatrunner: discard interrupted turn: %w", err)
@@ -203,11 +210,13 @@ func (r *Runner) release(x *run) {
 	}
 }
 
-// chatID is the chat conversation a Nanite conversation is serving right
-// now, or empty when no turn is running in it.
+// chatID is the chat conversation a Nanite conversation serves: the running
+// turn's, or else the one it last served, or empty if it never served one.
 func (r *Runner) chatID(naniteID string) string {
 	if x := r.activeRun(naniteID); x != nil {
 		return x.turn.ConversationID
 	}
-	return ""
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.chats[naniteID]
 }

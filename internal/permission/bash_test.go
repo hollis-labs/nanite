@@ -23,7 +23,7 @@ func TestBashPermissionModes(t *testing.T) {
 			t.Fatal(err)
 		}
 		req := PermissionRequest{ID: "one", ConversationID: "test", Tool: "bash", Destructive: true}
-		d, err := Evaluate(t.Context(), slog.Default(), nil, local, "urn:nanite:agent:test", "chat", req, map[string]any{"command": "printf test"})
+		d, err := Evaluate(t.Context(), slog.Default(), nil, local, "urn:nanite:agent:test", "chat", req, map[string]any{"command": "printf test"}, nil)
 		if err != nil || d.Effect != tc.want {
 			t.Fatalf("mode %s decision = %+v, %v", tc.mode, d, err)
 		}
@@ -56,7 +56,7 @@ func TestToolPermissionModeMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				req := PermissionRequest{ID: "one", ConversationID: "test", Tool: tool.name, ReadOnly: tool.readonly, Destructive: tool.destructive}
-				got, err := Evaluate(t.Context(), slog.Default(), nil, local, "urn:nanite:agent:test", "chat", req, nil)
+				got, err := Evaluate(t.Context(), slog.Default(), nil, local, "urn:nanite:agent:test", "chat", req, nil, nil)
 				if err != nil || got.Effect != tool.expected {
 					t.Fatalf("decision = %+v, %v; want %s", got, err, tool.expected)
 				}

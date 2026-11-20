@@ -67,10 +67,19 @@ func Rules(mode string, data []byte) (*RulePDP, error) {
 	return &RulePDP{rules.NewEngine(rules.Mode(mode), &file.Permissions, rules.WithFileEditTools("write_file", "edit_file"))}, nil
 }
 
-func Evaluate(ctx context.Context, logger *slog.Logger, outer, local policy.PDP, principal, role string, req PermissionRequest, args map[string]any) (policy.Decision, error) {
+// Evaluate decides one tool call. extra is added to the request context; a
+// subtask passes its variant, child conversation and depth there, so a host
+// PDP may narrow a subtask further.
+func Evaluate(ctx context.Context, logger *slog.Logger, outer, local policy.PDP, principal, role string, req PermissionRequest, args, extra map[string]any) (policy.Decision, error) {
+	values := map[string]any{"input": args, "read_only": req.ReadOnly, "destructive": req.Destructive, "conversation": req.ConversationID, "role": role}
+	for k, v := range extra {
+		if _, taken := values[k]; !taken {
+			values[k] = v
+		}
+	}
 	input := policy.Request{RequestID: req.ID, Principal: policy.Principal{URN: principal, Kind: "agent"},
 		Action: "tool.call", Scope: req.ConversationID, Resource: policy.Resource{Type: "tool", ID: req.Tool},
-		Context: map[string]any{"input": args, "read_only": req.ReadOnly, "destructive": req.Destructive, "conversation": req.ConversationID, "role": role}}
+		Context: values}
 	decision := policy.Decision{Effect: policy.Allow}
 	for _, pdp := range []policy.PDP{outer, local} {
 		if pdp == nil {

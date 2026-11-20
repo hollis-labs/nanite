@@ -3,8 +3,9 @@
 ## Unreleased
 
 - evals: `Scenario.Stubs` declares stub host tools (name, description,
-  schema, read-only, canned results in order) offered in every arm;
-  `Result.StubCalls` counts their calls.
+  schema, read-only, canned results matched by input fields or served in
+  order) offered in every arm; `Result.StubCalls` counts the task turn's
+  calls. Stubs are checked with the agent's host-tool rules before any run.
 - New public package `agent/providers`: `New(Config{Name, Gateway,
   Options})` builds a built-in provider (anthropic, openai) from its name
   and an `agent.Gateway` (key reference, optional endpoint, headers, auth);

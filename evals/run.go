@@ -363,6 +363,7 @@ func runOne(ctx context.Context, cfg Config, modelName string, meter *meter, s S
 	first := len(records)
 	mu.Unlock()
 	gate.n.Store(0)
+	stubs.reset()
 	start := time.Now()
 	var result agent.Result
 	if runErr == nil {

@@ -251,7 +251,10 @@ commented example, `variants/reviewer.md`. The fields, the built-in variants
 and how subtasks work are in [code-mode.md](code-mode.md).
 `agent/authored` exports the same checks for editors: `ParseVariant(name,
 content)`, `LoadVariants(dir)` and `CheckVariantName`; Nanite loads variants
-through them.
+through them. Variants are read through an `os.Root` on the agent
+directory, so `variants/` and its files must be inside it: a symlink that
+points outside (including a `variants/` linked to a shared directory) is an
+error, and the agent runs with the built-in variants only.
 
 ## Generated state
 

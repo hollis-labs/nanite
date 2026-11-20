@@ -82,3 +82,18 @@ func TestLoadVariantsStaysInTheAgentDirectory(t *testing.T) {
 		t.Fatalf("symlink out of the agent directory: %v %+v", err, v)
 	}
 }
+
+// TestSymlinkedVariantsDirectoryIsRefused: a variants/ directory linked to a
+// shared directory outside the agent directory is an error.
+func TestSymlinkedVariantsDirectoryIsRefused(t *testing.T) {
+	dir, shared := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, "shared.md"), []byte("Shared."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(dir, "variants")); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := LoadVariants(dir); err == nil || len(v) != 0 {
+		t.Fatalf("symlinked variants directory: %v %+v", err, v)
+	}
+}

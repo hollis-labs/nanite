@@ -1,6 +1,9 @@
 package authored_test
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,10 +29,27 @@ func TestPublicRulesAreTheEngines(t *testing.T) {
 	if err := authored.CheckVariantName("ok-name"); err != nil {
 		t.Error(err)
 	}
-	if v, err := authored.LoadVariants(t.TempDir()); err != nil || len(v) != 0 {
-		t.Errorf("LoadVariants on an empty dir: %v %v", v, err)
+	if err := authored.CheckVariantName("Bad"); err == nil {
+		t.Error("CheckVariantName accepted Bad")
 	}
-	if p, err := authored.LoadProviders(t.TempDir()); err != nil || p.Named != nil {
-		t.Errorf("LoadProviders on an empty dir: %+v %v", p, err)
+	if !slices.Equal(authored.BuiltinVariants(), []string{"code", "planner", "research", "worker"}) ||
+		!slices.Equal(authored.Uses(), []string{"chat", "summarizer", "subtask", "desk"}) ||
+		!slices.Equal(authored.BuiltinProviders(), []string{"anthropic", "openai"}) {
+		t.Errorf("lists: %v %v %v", authored.BuiltinVariants(), authored.Uses(), authored.BuiltinProviders())
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "variants"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"variants/good.md": "Good.", "variants/bad.md": "---\nlast_n: 99\n---\nBad.", "providers.yaml": "use:\n  chat: {provider: local, model: m}\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if v, err := authored.LoadVariants(dir); err == nil || len(v) != 1 || v["good"].Prompt != "Good." {
+		t.Errorf("LoadVariants: %v %v", v, err)
+	}
+	if p, err := authored.LoadProviders(dir); err != nil || p.Use[authored.UseChat].Provider != "local" {
+		t.Errorf("LoadProviders: %+v %v", p, err)
 	}
 }

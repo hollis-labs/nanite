@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/hollis-labs/nanite/internal/recovery"
+	"github.com/hollis-labs/nanite/internal/store"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/events"
@@ -17,10 +21,10 @@ import (
 )
 
 func TestClosingReplyAtLimits(t *testing.T) {
-	for _, limit := range []string{"max_steps", "max_tokens"} {
+	for _, limit := range []string{"max_steps", "turn_limit"} {
 		t.Run(limit, func(t *testing.T) {
 			first := toolResponse("unknown")
-			if limit == "max_tokens" {
+			if limit == "turn_limit" {
 				first = fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "partial"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: limit}}, {Type: llmtypes.EventDone}}}
 			}
 			p := &watchedProvider{Provider: fake.New(first, fake.Text("Work remains."))}
@@ -33,10 +37,10 @@ func TestClosingReplyAtLimits(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.StopReason != limit || result.Steps != 2 || !strings.HasSuffix(result.Text, "Work remains.") {
+			if result.StopReason != limit || result.Steps != 1 || !strings.HasSuffix(result.Text, "Work remains.") {
 				t.Fatalf("result: %+v", result)
 			}
-			if len(p.requests) != 2 || len(p.requests[1].Tools) != 0 {
+			if len(p.requests) != 2 || !p.toolChoiceNone[1] || !reflect.DeepEqual(p.requests[0].Tools, p.requests[1].Tools) || !reflect.DeepEqual(p.requests[0].CacheHints, p.requests[1].CacheHints) {
 				t.Fatalf("closing request: %+v", p.requests)
 			}
 			history, err := db.History(t.Context(), id)
@@ -68,7 +72,7 @@ func TestClosingReplyNeverRunsToolsOrRetries(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := run.Wait()
-			if failure != (err != nil) || called || len(p.requests) != 2 || result.StopReason != "max_steps" {
+			if err != nil || called || len(p.requests) != 2 || result.StopReason != "max_steps" {
 				t.Fatalf("result=%+v err=%v called=%v requests=%d", result, err, called, len(p.requests))
 			}
 			if !failure {
@@ -170,7 +174,7 @@ func TestClosingReplyCancellation(t *testing.T) {
 		}
 	}
 	result, err := run.Wait()
-	if !errors.Is(err, context.Canceled) || result.StopReason != "max_steps" || result.Text != "closing partial" {
+	if err != nil || result.StopReason != "max_steps" || result.Text != "closing partial" {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	h, err := db.History(t.Context(), id)
@@ -222,5 +226,81 @@ func TestParallelDeferredDescriptions(t *testing.T) {
 	x.promoteTools()
 	if len(x.specs) != 3 {
 		t.Fatal("repeated promotion duplicated schemas")
+	}
+}
+
+func TestLengthStopDoesNotClose(t *testing.T) {
+	p := &watchedProvider{Provider: fake.New(fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: "partial"}, {Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{StopReason: llmtypes.StopReasonMaxTokens}}, {Type: llmtypes.EventDone}}})}
+	e, db, id := setupEngine(t, p, "")
+	run, err := e.Send(t.Context(), id, Input{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StopReason != "max_tokens" || result.Text != "partial" || result.Steps != 1 || len(p.requests) != 1 {
+		t.Fatalf("result %+v requests=%d", result, len(p.requests))
+	}
+	h, err := db.History(t.Context(), id)
+	if err != nil || len(h) != 2 {
+		t.Fatalf("history %+v %v", h, err)
+	}
+}
+
+func TestResumeAtStepLimitDoesNotRunMoreTools(t *testing.T) {
+	for _, savedClosing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before closing", true: "closing already journaled"}[savedClosing], func(t *testing.T) {
+			p := &watchedProvider{Provider: fake.New(fake.Text("closing"))}
+			e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
+			now := time.Now().UTC()
+			turn := store.Turn{ID: store.NewID(now), UserMessageID: store.NewID(now)}
+			journal, err := db.OpenJournal(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = journal.StartTurn(turn, now); err != nil {
+				t.Fatal(err)
+			}
+			messages := []store.Message{{ID: turn.UserMessageID, Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "go"}}}, {Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "tool_use", ID: "call", Name: "unknown"}}}}
+			if savedClosing {
+				messages = append(messages, store.Message{Role: "tool", Blocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "call", Content: "done"}}}, store.Message{Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Name: recovery.ClosingPromptPrefix + "max_steps", Text: "Close now"}}}, store.Message{Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "saved closing"}}})
+			}
+			for _, m := range messages {
+				if m.ID == "" {
+					m.ID = store.NewID(now)
+				}
+				m.TurnID = turn.ID
+				m.CreatedAt = now
+				if err = journal.AppendMessage(m, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = journal.InterruptTurn(turn.ID, now); err != nil {
+				t.Fatal(err)
+			}
+			if err = journal.Close(); err != nil {
+				t.Fatal(err)
+			}
+			run, err := e.Resume(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := run.Wait()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Steps != 1 || result.StopReason != "max_steps" {
+				t.Fatalf("result %+v", result)
+			}
+			if savedClosing {
+				if len(p.requests) != 0 || result.Text != "saved closing" {
+					t.Fatalf("replayed closing: %+v requests=%d", result, len(p.requests))
+				}
+			} else if len(p.requests) != 1 || !p.toolChoiceNone[0] {
+				t.Fatal("resume allowed more tool steps")
+			}
+		})
 	}
 }

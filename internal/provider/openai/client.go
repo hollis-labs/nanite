@@ -120,7 +120,7 @@ func (c *Client) Complete(ctx context.Context, req llmtypes.ChatRequest) (string
 	if c.responses(ctx, req) {
 		return c.completeResponse(ctx, req)
 	}
-	params, err := buildChatParams(req)
+	params, err := buildChatParamsForContext(ctx, req)
 	if err != nil {
 		return "", err
 	}

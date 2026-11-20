@@ -520,7 +520,7 @@ func TestStepBudgetOnlyNarrows(t *testing.T) {
 		Steps          int
 	}
 	results := toolResults(t, db, id)
-	if len(results) != 1 || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "max_steps" || out.Steps != 2 {
+	if len(results) != 1 || json.Unmarshal([]byte(results[0].Content), &out) != nil || out.Status != "limit" || out.Reason != "max_steps" || out.Steps != 1 {
 		t.Fatalf("a variant raised the agent's step limit: %+v", results)
 	}
 }

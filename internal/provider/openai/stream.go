@@ -29,7 +29,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 	if c.responses(ctx, req) {
 		return c.streamResponse(ctx, req)
 	}
-	params, err := buildChatParams(req)
+	params, err := buildChatParamsForContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}

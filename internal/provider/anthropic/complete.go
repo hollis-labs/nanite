@@ -30,7 +30,7 @@ func (c *Client) Complete(ctx context.Context, in llmtypes.ChatRequest) (string,
 	}
 	reasoningCfg := llmcontracts.ReasoningConfigFromContext(ctx)
 	interleavedThinking := c.interleavedThinking(reasoningCfg, model)
-	params := c.buildMessageParams(nonStreamingRequest(in), model, interleavedThinking, reasoningCfg)
+	params := c.buildRequestParams(ctx, nonStreamingRequest(in), model, interleavedThinking, reasoningCfg)
 
 	opts := c.requestOptions(ctx, interleavedThinking)
 	resp, err := api.Messages.New(ctx, params, opts...)

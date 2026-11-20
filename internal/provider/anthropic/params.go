@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/hollis-labs/nanite/internal/provider/toolchoice"
 	"maps"
 	"slices"
 
@@ -457,4 +458,13 @@ func cacheControl(ttl string) sdk.CacheControlEphemeralParam {
 		marker.TTL = sdk.CacheControlEphemeralTTL(ttl)
 	}
 	return marker
+}
+
+func (c *Client) buildRequestParams(ctx context.Context, in llmtypes.ChatRequest, model string, thinking bool, reasoning llmcontracts.ReasoningConfig) sdk.MessageNewParams {
+	params := c.buildMessageParams(in, model, thinking, reasoning)
+	if toolchoice.IsNone(ctx) {
+		none := sdk.NewToolChoiceNoneParam()
+		params.ToolChoice = sdk.ToolChoiceUnionParam{OfNone: &none}
+	}
+	return params
 }

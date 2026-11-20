@@ -2,12 +2,13 @@ package elicitation
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 // Resolve compiles a local-only JSON schema. It refuses, with
@@ -26,6 +27,9 @@ func Resolve(raw json.RawMessage) (*jsonschema.Resolved, error) {
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			return nil, err
 		}
+		if err := checkPatterns(&schema); err != nil {
+			return nil, err
+		}
 		resolved, err := schema.Resolve(nil)
 		if err != nil {
 			return nil, err
@@ -39,7 +43,7 @@ func Resolve(raw json.RawMessage) (*jsonschema.Resolved, error) {
 
 // ValidateResponse adapts legacy string/boolean question validation to JSON
 // answers. Null represents a declined or cancelled prompt.
-func ValidateResponse(schema *jsonschema.Resolved, value json.RawMessage) error {
+func ValidateResponse(ctx context.Context, schema *jsonschema.Resolved, value json.RawMessage) error {
 	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 		return nil
 	}
@@ -55,5 +59,5 @@ func ValidateResponse(schema *jsonschema.Resolved, value json.RawMessage) error 
 	if s, ok := answer.(string); ok && strings.TrimSpace(s) == "" && schema.Schema().Type == "string" {
 		return fmt.Errorf("string answer requires non-empty content")
 	}
-	return Validate(schema, answer)
+	return Validate(ctx, schema, answer)
 }

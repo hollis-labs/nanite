@@ -54,7 +54,7 @@ func TestResolveLimitedAllowsRecursionThroughValues(t *testing.T) {
 	}
 	var value any
 	_ = json.Unmarshal([]byte(`{"name":"a","children":[{"name":"b","children":[]}]}`), &value)
-	if err := resolved.Validate(value); err != nil {
+	if err := Validate(t.Context(), resolved, value); err != nil {
 		t.Fatal(err)
 	}
 	for name, schema := range map[string]string{

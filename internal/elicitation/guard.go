@@ -1,24 +1,30 @@
 package elicitation
 
 import (
+	"container/list"
+	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"reflect"
+	"regexp/syntax"
 	"slices"
 	"strings"
 	"sync"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
-// jsonschema-go v0.4.3 validates by plain recursion and explores every
-// alternative of anyOf, allOf and the like. Some schemas therefore never
-// finish, or overflow the stack (a fatal runtime error that no recover
-// catches, so it ends the whole process), or exhaust memory. Every schema
-// Nanite resolves, from the model, a host or an MCP server, is held to these
-// limits, and every value is checked before it is validated.
+// jsonschema-go validates by plain recursion and explores every alternative
+// of anyOf, allOf and the like, so a schema and value can take unbounded
+// time and memory, or overflow the stack (a fatal runtime error that no
+// recover catches, so it ends the whole process). Nanite validates with a
+// vendored copy (internal/third_party/jsonschema) patched to take a context
+// and a work budget, which bounds every call. The static limits below are
+// cheap checks made once per schema that refuse what could never validate
+// well; the value depth limit keeps recursion off the stack.
 const (
 	// MaxToolSchemaBytes bounds a tool input schema from a host or MCP
 	// server. A schema the model writes is held to MaxSchemaBytes.
@@ -27,15 +33,18 @@ const (
 	MaxSchemaNesting = 256
 	// MaxInPlaceChain bounds the longest run of keywords that apply to the
 	// same value ($ref, allOf, anyOf, oneOf, not, if/then/else, ...).
-	MaxInPlaceChain = 32
+	MaxInPlaceChain = 64
 	// MaxInPlacePaths bounds how many such runs start at one schema: the
 	// work Validate does for one location in a value.
-	MaxInPlacePaths = 1000
+	MaxInPlacePaths = 10_000
 	// MaxValueDepth bounds how deeply a value (tool input, a returned result,
 	// an answer) nests before it is validated.
 	MaxValueDepth = 64
 	// MaxValidationError bounds the validation error text passed on.
 	MaxValidationError = 4 << 10
+	// MaxSchemaRegexpInsts bounds the compiled size of all of a schema's
+	// patterns together (each is also held to jsonschema.MaxRegexpInsts).
+	MaxSchemaRegexpInsts = 100_000
 )
 
 // ErrUnsafeSchema marks a schema Nanite will not validate against: one that
@@ -46,16 +55,27 @@ var ErrUnsafeSchema = errors.New("unsafe schema")
 // ErrValueTooDeep marks a value nested more than MaxValueDepth levels.
 var ErrValueTooDeep = errors.New("value nests too deeply")
 
+// ValidationBudget is the work budget for one Validate call.
+var ValidationBudget = jsonschema.Budget{Visits: jsonschema.DefaultVisits, ErrorBytes: MaxValidationError}
+
 // Validate checks value against a resolved schema. A value nested more than
-// MaxValueDepth levels is refused before validation, and the error text is
-// cut to MaxValidationError bytes.
-func Validate(schema *jsonschema.Resolved, value any) error {
+// MaxValueDepth levels is refused before validation; validation stops with
+// an error wrapping jsonschema.ErrBudget once it exceeds ValidationBudget, or
+// when ctx is done; and the error text is cut to MaxValidationError bytes.
+//
+// value is a decoded JSON value (map[string]any, []any and scalars), as
+// json.Unmarshal into an any produces; other maps and slices are measured
+// through reflection.
+func Validate(ctx context.Context, schema *jsonschema.Resolved, value any) error {
 	if depth(value, 0) > MaxValueDepth {
 		return fmt.Errorf("%w: more than %d levels", ErrValueTooDeep, MaxValueDepth)
 	}
-	err := schema.Validate(value)
+	err := schema.Validate(ctx, value, ValidationBudget)
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, jsonschema.ErrBudget) {
+		return err
 	}
 	if text := err.Error(); len(text) > MaxValidationError {
 		return errors.New(cut(text, MaxValidationError) + " … (truncated)")
@@ -63,29 +83,51 @@ func Validate(schema *jsonschema.Resolved, value any) error {
 	return err
 }
 
-// depth is how deeply a decoded JSON value nests, stopping once past the
-// limit so a pathological value costs no more than the limit.
+// depth is how deeply a JSON value nests, stopping once past the limit so a
+// pathological value costs no more than the limit.
 func depth(value any, level int) int {
 	if level > MaxValueDepth {
 		return level
 	}
 	deepest := level
+	visit := func(c any) bool {
+		d := depth(c, level+1)
+		deepest = max(deepest, d)
+		return d <= MaxValueDepth
+	}
 	switch v := value.(type) {
+	case nil, string, bool, float64, json.Number:
 	case map[string]any:
 		for _, c := range v {
-			if d := depth(c, level+1); d > deepest {
-				deepest = d
-				if d > MaxValueDepth {
-					return d
-				}
+			if !visit(c) {
+				break
 			}
 		}
 	case []any:
 		for _, c := range v {
-			if d := depth(c, level+1); d > deepest {
-				deepest = d
-				if d > MaxValueDepth {
-					return d
+			if !visit(c) {
+				break
+			}
+		}
+	default:
+		rv := reflect.ValueOf(value)
+		for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
+			if rv.IsNil() {
+				return deepest
+			}
+			rv = rv.Elem()
+		}
+		switch rv.Kind() { //nolint:exhaustive // only containers nest
+		case reflect.Map:
+			for it := rv.MapRange(); it.Next(); {
+				if !visit(it.Value().Interface()) {
+					break
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := range rv.Len() {
+				if !visit(rv.Index(i).Interface()) {
+					break
 				}
 			}
 		}
@@ -130,37 +172,104 @@ func jsonNesting(raw []byte) int {
 	return deepest
 }
 
-// resolveCache keeps resolved schemas by content, so a tool's schema is
-// resolved once rather than on every turn. A Resolved is read-only and safe
-// to share between goroutines.
+// resolveCache keeps resolved schemas by content, least recently used first
+// out, so a tool's schema is resolved once rather than on every turn. Its
+// size is estimated from the schema text (resolveCost bytes held per byte)
+// and bounded by resolveCacheBytes. A Resolved is read-only and safe to
+// share between goroutines.
 var resolveCache = struct {
 	sync.Mutex
-	entries map[[sha256.Size]byte]resolvedEntry
-}{entries: map[[sha256.Size]byte]resolvedEntry{}}
+	order   *list.List // of *resolvedEntry, most recent first
+	entries map[[sha256.Size]byte]*list.Element
+	bytes   int
+}{order: list.New(), entries: map[[sha256.Size]byte]*list.Element{}}
 
 type resolvedEntry struct {
+	key    [sha256.Size]byte
 	schema *jsonschema.Resolved
 	err    error
+	cost   int
 }
 
-const resolveCacheEntries = 1024
+const (
+	resolveCacheBytes = 64 << 20
+	resolveCost       = 16
+)
 
 func cachedResolve(raw []byte, resolve func() (*jsonschema.Resolved, error)) (*jsonschema.Resolved, error) {
 	key := sha256.Sum256(raw)
 	resolveCache.Lock()
-	entry, ok := resolveCache.entries[key]
-	resolveCache.Unlock()
-	if ok {
+	if el, ok := resolveCache.entries[key]; ok {
+		resolveCache.order.MoveToFront(el)
+		entry := el.Value.(*resolvedEntry)
+		resolveCache.Unlock()
 		return entry.schema, entry.err
 	}
-	schema, err := resolve()
-	resolveCache.Lock()
-	if len(resolveCache.entries) >= resolveCacheEntries {
-		clear(resolveCache.entries)
-	}
-	resolveCache.entries[key] = resolvedEntry{schema, err}
 	resolveCache.Unlock()
+	schema, err := resolve()
+	entry := &resolvedEntry{key: key, schema: schema, err: err, cost: 256 + len(raw)*resolveCost}
+	if entry.cost > resolveCacheBytes {
+		return schema, err
+	}
+	resolveCache.Lock()
+	defer resolveCache.Unlock()
+	if _, ok := resolveCache.entries[key]; ok {
+		return schema, err
+	}
+	resolveCache.entries[key] = resolveCache.order.PushFront(entry)
+	resolveCache.bytes += entry.cost
+	for resolveCache.bytes > resolveCacheBytes {
+		last := resolveCache.order.Back()
+		old := last.Value.(*resolvedEntry)
+		resolveCache.order.Remove(last)
+		delete(resolveCache.entries, old.key)
+		resolveCache.bytes -= old.cost
+	}
 	return schema, err
+}
+
+// checkPatterns refuses a schema whose patterns together compile to more than
+// MaxSchemaRegexpInsts instructions, before the library compiles any of them.
+// It stops counting at the limit, so a schema with thousands of large
+// patterns costs no more than the limit.
+func checkPatterns(root *jsonschema.Schema) error {
+	order, paths := index(root)
+	total := 0
+	count := func(pattern, where string) error {
+		// A pattern that does not parse or compile adds nothing here; the
+		// library refuses it when it resolves the schema.
+		total += regexpInsts(pattern)
+		if total > MaxSchemaRegexpInsts {
+			return fmt.Errorf("%w: its patterns compile to more than %d instructions together (at %s)", ErrUnsafeSchema, MaxSchemaRegexpInsts, where)
+		}
+		return nil
+	}
+	for _, s := range order {
+		if s.Pattern != "" {
+			if err := count(s.Pattern, paths[s]+"/pattern"); err != nil {
+				return err
+			}
+		}
+		for _, p := range slices.Sorted(maps.Keys(s.PatternProperties)) {
+			if err := count(p, paths[s]+"/patternProperties"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// regexpInsts is the compiled size of a pattern, or 0 if it does not compile.
+func regexpInsts(pattern string) int {
+	parsed, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return 0
+	}
+	prog, err := syntax.Compile(parsed.Simplify())
+	if err != nil {
+		return 0
+	}
+	return len(prog.Inst)
 }
 
 // checkResolved refuses a resolved schema that validation could not finish
@@ -192,14 +301,9 @@ func checkResolved(rs *jsonschema.Resolved) error {
 			anchors[s.DynamicAnchor] = append(anchors[s.DynamicAnchor], s)
 		}
 	}
-	refs, err := resolvedTargets(rs, nodes)
+	refs, err := resolvedTargets(rs, order, nodes)
 	if err != nil {
-		for _, s := range order {
-			if s.Ref != "" || s.DynamicRef != "" {
-				return fmt.Errorf("%w: cannot check this schema (library layout changed): %w", ErrUnsafeSchema, err)
-			}
-		}
-		refs = nil
+		return fmt.Errorf("%w: %w", ErrUnsafeSchema, err)
 	}
 
 	edges := func(s *jsonschema.Schema) []*jsonschema.Schema {
@@ -362,67 +466,34 @@ type refTargets struct {
 	dynamicAnchor string               // set when the $dynamicRef resolves at validation time
 }
 
-// resolvedTargets reads, without modifying anything, the reference targets
-// jsonschema-go recorded during Resolve. They are unexported in v0.4.3
-// (Resolved.resolvedInfos[schema].resolvedRef / resolvedDynamicRef /
-// dynamicRefAnchor), so this uses read-only reflection. TestResolvedLayout
-// fails if a library upgrade changes that layout, and any mismatch at run
-// time is an error, never a silently missing edge.
-func resolvedTargets(rs *jsonschema.Resolved, nodes map[uintptr]*jsonschema.Schema) (map[*jsonschema.Schema]refTargets, error) {
-	infos := reflect.ValueOf(rs).Elem().FieldByName("resolvedInfos")
-	if !infos.IsValid() || infos.Kind() != reflect.Map || infos.Type().Key() != schemaType {
-		return nil, errors.New("jsonschema.Resolved has no resolvedInfos map keyed by schema")
-	}
+// resolvedTargets is each referring schema's targets, as the library
+// resolved them. A reference without a target in the tree is an error.
+func resolvedTargets(rs *jsonschema.Resolved, order []*jsonschema.Schema, nodes map[uintptr]*jsonschema.Schema) (map[*jsonschema.Schema]refTargets, error) {
+	inTree := func(s *jsonschema.Schema) bool { return s != nil && nodes[reflect.ValueOf(s).Pointer()] == s }
 	out := map[*jsonschema.Schema]refTargets{}
-	iter := infos.MapRange()
-	for iter.Next() {
-		key, info := iter.Key(), iter.Value()
-		if info.Kind() != reflect.Pointer || info.IsNil() || info.Elem().Kind() != reflect.Struct {
-			return nil, errors.New("unexpected resolvedInfos entry")
+	for _, s := range order {
+		if s.Ref == "" && s.DynamicRef == "" {
+			continue
 		}
-		s := nodes[key.Pointer()]
-		if s == nil {
-			continue // a schema outside the tree, such as a meta-schema
-		}
-		info = info.Elem()
-		ref := info.FieldByName("resolvedRef")
-		dyn := info.FieldByName("resolvedDynamicRef")
-		anchor := info.FieldByName("dynamicRefAnchor")
-		if !ref.IsValid() || !dyn.IsValid() || !anchor.IsValid() ||
-			ref.Type() != schemaType || dyn.Type() != schemaType || anchor.Kind() != reflect.String {
-			return nil, errors.New("resolvedInfo layout changed")
-		}
+		ref, dyn, anchor := rs.RefTargets(s)
 		var t refTargets
 		if s.Ref != "" {
-			target := targetOf(ref, nodes)
-			if target == nil {
+			if !inTree(ref) {
 				return nil, fmt.Errorf("no resolved target for $ref %q", s.Ref)
 			}
-			t.targets = append(t.targets, target)
+			t.targets = append(t.targets, ref)
 		}
 		if s.DynamicRef != "" {
-			t.dynamicAnchor = anchor.String()
-			if target := targetOf(dyn, nodes); target != nil {
-				t.targets = append(t.targets, target)
-			} else if t.dynamicAnchor == "" {
+			switch {
+			case inTree(dyn):
+				t.targets = append(t.targets, dyn)
+			case anchor != "":
+				t.dynamicAnchor = anchor
+			default:
 				return nil, fmt.Errorf("no resolved target for $dynamicRef %q", s.DynamicRef)
 			}
 		}
-		if len(t.targets) > 0 || t.dynamicAnchor != "" {
-			out[s] = t
-		}
-	}
-	for _, s := range nodes {
-		if _, ok := out[s]; !ok && (s.Ref != "" || s.DynamicRef != "") {
-			return nil, errors.New("a reference has no resolved target")
-		}
+		out[s] = t
 	}
 	return out, nil
-}
-
-func targetOf(v reflect.Value, nodes map[uintptr]*jsonschema.Schema) *jsonschema.Schema {
-	if v.IsNil() {
-		return nil
-	}
-	return nodes[v.Pointer()]
 }

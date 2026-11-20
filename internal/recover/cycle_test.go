@@ -10,7 +10,7 @@ import (
 // error instead of overflowing the stack inside validation.
 func TestCyclicToolSchemaFailsTheCallNotTheProcess(t *testing.T) {
 	v := NewValidator(json.RawMessage(`{"type":"object","allOf":[{"$ref":"#"}]}`))
-	err := v.Validate(map[string]any{"x": 1})
+	err := v.Validate(t.Context(), map[string]any{"x": 1})
 	if err == nil || !strings.Contains(err.Error(), "invalid tool schema") || !strings.Contains(err.Error(), "refers back to itself") {
 		t.Fatalf("Validate = %v", err)
 	}
@@ -23,7 +23,7 @@ func TestDeepToolInputIsRefused(t *testing.T) {
 	for range 5000 {
 		deep = []any{deep}
 	}
-	err := v.Validate(map[string]any{"x": deep})
+	err := v.Validate(t.Context(), map[string]any{"x": deep})
 	if err == nil || !strings.Contains(err.Error(), "nests too deeply") {
 		t.Fatalf("Validate = %v", err)
 	}

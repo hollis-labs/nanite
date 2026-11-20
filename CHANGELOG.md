@@ -59,24 +59,27 @@ Breaking (next minor version): the subagent tools are replaced by `subtask`.
   and is now a reserved tool name. A child gets `fetch_tool_result` and
   `search_tool_result` even when its variant's allow list leaves them out;
   an explicit deny removes them.
-- Schema and value limits, so no schema or value from a host, an MCP server
-  or the model can crash, hang or exhaust the process. jsonschema-go
-  validates by plain recursion and explores every alternative; a stack
-  overflow there is a fatal error no recover catches. Every schema Nanite
-  resolves (tool input schemas included) is refused (`ErrUnsafeSchema`) when:
-  its in-place keywords (`$ref`, `$dynamicRef`, `allOf`, `anyOf`, `oneOf`,
-  `not`, `if`/`then`/`else`, `dependentSchemas`, draft-07 schema
-  `dependencies`) refer back to themselves; more than 32 of them apply to one
-  value in a row; more than 1,000 such runs start at one schema; it is over
-  256KB (a schema the model writes keeps its 16KB); or its JSON nests more
-  than 256 levels. The check follows jsonschema-go's own resolution of every
-  reference. Every value (tool input, `return_result`, `ask_user` answers)
-  nesting more than 64 levels is refused before validation and is not sent
-  to argument repair, and validation error text is cut to 4KB. An MCP tool
-  with an unsafe schema is left out of the catalog with a warning naming the
-  server and tool; the server's other tools stay. A host tool keeps its entry
-  and each call fails with `invalid tool schema`. Resolved schemas are
-  cached by content, so a tool's schema is resolved once.
+- Bounded schema validation, so no schema or value from a host, an MCP
+  server or the model can crash, hang or exhaust the process. Nanite now
+  validates with a vendored copy of jsonschema-go v0.4.3
+  (`internal/third_party/jsonschema`, MIT, see its README) patched so
+  `Validate` takes a context and a work budget: it stops past 200,000 units
+  of work (schema-value visits, enum and uniqueItems comparisons, and regular
+  expression matching charged by input length times program size), bounds
+  the error text it builds, and refuses a pattern compiling to more than
+  20,000 instructions. Cheap static checks still refuse, with
+  `ErrUnsafeSchema`: a cycle among in-place keywords (`$ref`, `$dynamicRef`,
+  `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, `dependentSchemas`,
+  draft-07 schema `dependencies`); more than 64 of them in a row on one
+  value; more than 10,000 such runs from one schema; patterns compiling to
+  more than 100,000 instructions together; a schema over 256KB (16KB for one
+  the model writes); and JSON nesting past 256 levels. A value (tool input,
+  `return_result`, `ask_user` answers) nesting more than 64 levels is
+  refused before validation and is not sent to argument repair; validation
+  error text is cut to 4KB. An MCP tool with an unsafe schema is left out of
+  the catalog with a warning naming the server and tool; a host tool keeps
+  its entry and each call fails with `invalid tool schema`. Resolved schemas
+  are cached by content in a 64MB LRU.
 - Schemas the model writes (`return_spec`, `ask_user`) are held to a strict
   subset: at most 16KB, no `$id`/`$anchor`/`$dynamicRef`/`$recursiveRef`,
   keywords spelled exactly, `$ref` only to `#/$defs/<name>` or

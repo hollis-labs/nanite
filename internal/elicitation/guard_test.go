@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 // Each of these makes jsonschema-go v0.4.3 recurse without end on Validate
@@ -77,17 +77,16 @@ func TestResolveKeepsSchemasThatTerminate(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.value), &value); err != nil {
 				t.Fatal(err)
 			}
-			if err := resolved.Validate(value); err != nil {
+			if err := Validate(t.Context(), resolved, value); err != nil {
 				t.Fatalf("Validate(%s): %v", tc.value, err)
 			}
 		})
 	}
 }
 
-// The check reads reference targets the library keeps unexported. If an
-// upgrade changes that layout, this fails rather than the check quietly
-// refusing every schema with a $ref.
-func TestResolvedLayout(t *testing.T) {
+// The check takes reference targets from the vendored library's RefTargets
+// accessor (part of the Nanite patch).
+func TestResolvedTargets(t *testing.T) {
 	for name, tc := range map[string]struct {
 		schema string
 		from   func(*jsonschema.Schema) *jsonschema.Schema
@@ -120,7 +119,7 @@ func TestResolvedLayout(t *testing.T) {
 			for _, s := range order {
 				nodes[reflect.ValueOf(s).Pointer()] = s
 			}
-			targets, err := resolvedTargets(resolved, nodes)
+			targets, err := resolvedTargets(resolved, order, nodes)
 			if err != nil {
 				t.Fatal(err)
 			}

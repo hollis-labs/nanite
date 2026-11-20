@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 // MaxSchemaBytes bounds a schema the model writes itself (a subtask's

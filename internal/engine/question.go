@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/hollis-labs/nanite/internal/elicitation"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
 
 type pendingQuestion struct {
@@ -64,7 +64,7 @@ func (r *Run) Answer(id string, answer events.Answer) error {
 	if pending == nil {
 		return fmt.Errorf("nanite: no pending question %q", id)
 	}
-	if err := elicitation.ValidateResponse(pending.schema, answer.Value); err != nil {
+	if err := elicitation.ValidateResponse(context.Background(), pending.schema, answer.Value); err != nil {
 		return err
 	}
 	pending.answer <- slices.Clone(answer.Value)

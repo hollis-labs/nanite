@@ -213,7 +213,7 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 			results[i].Content = "tool unavailable: " + call.Name
 			continue
 		}
-		if err := x.validators[t.Name].Validate(call.Input); err != nil {
+		if err := x.validators[t.Name].Validate(ctx, call.Input); err != nil {
 			results[i].Content = "invalid tool arguments: " + x.engine.scrub.Text(err.Error())
 			continue
 		}

@@ -27,7 +27,7 @@ func (x *execution) repairArgs(ctx context.Context, s *step) {
 		if !known || ctx.Err() != nil {
 			continue
 		}
-		err := validator.Validate(call.Input)
+		err := validator.Validate(ctx, call.Input)
 		if !validator.Classify(err) {
 			continue
 		}
@@ -51,7 +51,7 @@ func (x *execution) repairArgs(ctx context.Context, s *step) {
 			continue
 		}
 		fixed, err := recover.ParseRepair(response, call.Input, tool.InputSchema)
-		if err != nil || validator.Validate(fixed) != nil {
+		if err != nil || validator.Validate(ctx, fixed) != nil {
 			continue
 		}
 		encoded, err := json.Marshal(fixed)

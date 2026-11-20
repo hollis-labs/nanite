@@ -36,8 +36,9 @@ func TestOversizedHostContextArrivesTrimmed(t *testing.T) {
 	if d := report[slots.UserContext].Decisions; len(d) != 1 || d[0].Disposition != slots.Trim {
 		t.Fatalf("decisions %+v", d)
 	}
-	if !slices.ContainsFunc(p.requests[0].SlotBlocks, func(b llmtypes.SlotBlock) bool {
-		return b.Name == string(slots.UserContext) && strings.HasPrefix(b.Content, "START ") && strings.Contains(b.Content, "[trimmed to fit the user_context slot budget of 300 tokens]")
+	// user_context is placed in the turn, in front of the user's message.
+	if !slices.ContainsFunc(p.requests[0].Messages[0].ContentBlocks, func(b llmtypes.ContentBlock) bool {
+		return b.Name == TurnContextBlock && strings.Contains(b.Text, "START ") && strings.Contains(b.Text, "[trimmed to fit the user_context slot budget of 300 tokens]")
 	}) {
 		t.Fatal("the request lost the trimmed context")
 	}

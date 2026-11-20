@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Per-turn context no longer breaks the prompt cache. Slots now have a
+  placement. `user_context` (including chatrunner's turn context) is
+  placed in the turn: it goes in a `nanite.turn_context` text block in front
+  of the user's message and is stored with it, so the system blocks and
+  earlier messages stay byte-identical across turns. Other slots stay in
+  the system prefix. `agent.Options.SlotPlacement` moves slots, and
+  `agent.TurnContextBlock` names the block for hosts that show history.
+  A turn's context is now part of that message's history instead of being
+  dropped after the turn.
 - No slot entry is dropped silently. An entry over what is left of its
   slot's budget is replaced by its pointer, or else trimmed to fit with a
   marker (new `SlotTrim`). It is left out only when no room is left. Trims

@@ -110,6 +110,12 @@ func (b *brain) Complete(context.Context, llmtypes.ChatRequest) (string, error) 
 func (*brain) Capabilities() llmtypes.ProviderCapabilities { return llmtypes.ProviderCapabilities{} }
 
 // last is everything the model was sent in its most recent request.
+func (b *brain) request() llmtypes.ChatRequest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.requests[len(b.requests)-1]
+}
+
 func (b *brain) last() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -363,15 +369,28 @@ func TestSetToolsReplacesTheGroup(t *testing.T) {
 	}
 }
 
-func TestTurnContextLastsOneTurn(t *testing.T) {
+func TestTurnContextTravelsWithItsMessage(t *testing.T) {
 	h := newHost(t)
 	h.play(t, chat.Turn{Text: "first", Context: json.RawMessage(`"DESK-MARKER on the desk"`)}, chat.Decision{})
+	first := h.brain.request()
 	if !strings.Contains(h.brain.last(), "DESK-MARKER on the desk") {
 		t.Fatal("the turn's context is not in that turn's request")
 	}
+	if strings.Contains(first.EffectiveSystemPrompt(), "DESK-MARKER") {
+		t.Fatal("the turn's context is in the system prompt, which breaks the cache")
+	}
 	h.play(t, chat.Turn{Text: "second"}, chat.Decision{})
-	if strings.Contains(h.brain.last(), "DESK-MARKER") {
-		t.Fatal("the first turn's context is in the second turn's request")
+	second := h.brain.request()
+	// The first turn's context stays with the first message, unchanged, and
+	// is not repeated as the second turn's context.
+	if first.EffectiveSystemPrompt() != second.EffectiveSystemPrompt() {
+		t.Fatal("the system prompt changed between turns")
+	}
+	if messageText(first.Messages[0]) != messageText(second.Messages[0]) {
+		t.Fatalf("the first message changed between turns:\n%q\n%q", messageText(first.Messages[0]), messageText(second.Messages[0]))
+	}
+	if newest := second.Messages[len(second.Messages)-1]; strings.Contains(messageText(newest), "DESK-MARKER") {
+		t.Fatal("the first turn's context was repeated in the second turn's message")
 	}
 	h.play(t, chat.Turn{Text: "third", Context: json.RawMessage(`{"open":["OBJECT-MARKER"]}`)}, chat.Decision{})
 	if !strings.Contains(h.brain.last(), `{"open":["OBJECT-MARKER"]}`) {

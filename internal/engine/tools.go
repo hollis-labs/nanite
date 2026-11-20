@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/hollis-labs/libs/agent/trace"
-	"github.com/hollis-labs/libs/core/panics"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/hollis-labs/libs/agent/trace"
+	"github.com/hollis-labs/libs/core/panics"
 
 	"github.com/hollis-labs/libs/agent/core/loopdetect"
 	"github.com/hollis-labs/libs/agent/core/toolresult"

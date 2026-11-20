@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/libs/core/panics"
 	"io"
 	"os"
 	"os/signal"
 	"strings"
+
+	"github.com/hollis-labs/libs/core/panics"
 
 	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/events"

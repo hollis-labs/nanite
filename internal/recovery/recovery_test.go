@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"github.com/hollis-labs/nanite/internal/slots"
 	"testing"
 	"time"
 
@@ -12,7 +13,10 @@ import (
 
 func TestResumePlanCases(t *testing.T) {
 	turn := store.InterruptedTurn{ID: "one", UserMessageID: "user"}
-	user := store.Message{ID: "user", TurnID: "one", Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "continue"}}}
+	// The user message carries the turn's context block in front of what
+	// was said; the plan's UserText is only what was said.
+	user := store.Message{ID: "user", TurnID: "one", Role: "user", Blocks: []llmtypes.ContentBlock{
+		{Type: "text", Name: slots.TurnContextBlock, Text: "<user_context>\nDESK\n</user_context>"}, {Type: "text", Text: "continue"}}}
 	assistant := store.Message{ID: "assistant", TurnID: "one", Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "complete"}}}
 	tool := store.Message{ID: "assistant", TurnID: "one", Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "tool_use", ID: "call"}}}
 	result := store.Message{ID: "result", TurnID: "one", Role: "tool", Blocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "call"}}}

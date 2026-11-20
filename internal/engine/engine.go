@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/hollis-labs/libs/llm/core/llmtypes"
-	"github.com/hollis-labs/nanite/internal/recovery"
 	"log/slog"
 	"maps"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/recovery"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
@@ -66,6 +67,10 @@ type Config struct {
 	// SlotBudgets overrides the token budget of the slots it names. The
 	// Universal slot (the base prompt) keeps its own budget.
 	SlotBudgets map[slots.Name]int
+	// SlotPlacement overrides where the slots it names go in a request (see
+	// slots.DefaultPlacement). Universal, System and Agent always stay in the
+	// system prefix.
+	SlotPlacement map[slots.Name]slots.Placement
 	// PanicReporter also receives each contained panic. The engine always
 	// logs one; this adds the host's own record.
 	PanicReporter panics.Reporter
@@ -534,4 +539,54 @@ func (e *Engine) SlotBudgets() map[slots.Name]int {
 		}
 	}
 	return budgets
+}
+
+// placement is where a slot's content goes in a request.
+func (e *Engine) placement(name slots.Name) slots.Placement {
+	if name == slots.Universal || name == slots.System || name == slots.Agent {
+		return slots.InSystem
+	}
+	if p, ok := e.cfg.SlotPlacement[name]; ok {
+		return p
+	}
+	return slots.DefaultPlacement(name)
+}
+
+// TurnContextBlock is the Name of the text block that carries a turn's
+// in-turn slots in front of the user's message.
+const TurnContextBlock = slots.TurnContextBlock
+
+// turnContext renders the slots placed in the turn that changed since the
+// last turn as one text block for the front of the user's message, or
+// reports false when there are none. An unchanged slot is already in the
+// history, with the message it last changed for, so it is not repeated.
+func (e *Engine) turnContext(assembled slots.Assembled) (llmtypes.ContentBlock, bool) {
+	var b strings.Builder
+	for _, block := range assembled.Blocks {
+		name := slots.Name(block.SlotName)
+		if e.placement(name) != slots.InTurn || strings.TrimSpace(block.Content) == "" || !assembled.Report[name].Changed {
+			continue
+		}
+		fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n", block.SlotName, block.Content, block.SlotName)
+	}
+	if b.Len() == 0 {
+		return llmtypes.ContentBlock{}, false
+	}
+	return llmtypes.ContentBlock{Type: "text", Name: TurnContextBlock, Text: e.scrub.Text(strings.TrimSuffix(b.String(), "\n"))}, true
+}
+
+// forgetTurnContext marks the conversation's in-turn slots as changed, so
+// the next turn sends them again. It is called after a compaction replaced
+// older messages with a summary: an unchanged in-turn slot lived in one of
+// those messages and would otherwise be gone until it changed.
+func (e *Engine) forgetTurnContext(conversation string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	hashes := maps.Clone(e.previous[conversation])
+	for name := range hashes {
+		if e.placement(slots.Name(name)) == slots.InTurn {
+			delete(hashes, name)
+		}
+	}
+	e.previous[conversation] = hashes
 }

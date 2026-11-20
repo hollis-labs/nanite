@@ -170,6 +170,36 @@ Compaction is skipped in two cases:
   budget. Compaction cannot help then, and the engine logs a warning once
   per turn.
 
+The Context slot (the agent directory's `context/*.md` and host context)
+is never dropped by compaction: its blocks are already in the request, so
+dropping it would free nothing.
+
+### What compaction keeps
+
+A pass summarizes the older part of the conversation and keeps the rest
+whole. By default it keeps the last four messages. With
+`agent.Options.CompactKeepTokens` set it keeps whole turns instead: the
+recent turns that fit that many estimated tokens, cut only where the
+person's own message starts a turn (never between a tool call and its
+result), and always the last turn. A turn too long to keep is cut inside,
+before one of the agent's steps, keeping the latest steps that fit; its
+own message is then in the summary. Everything before the cut, an earlier
+summary included, is summarized. The keep budget is at most half the
+compaction budget. With it the summary comes first, and deduplicating or
+stripping tool results happens only while the request still does not fit.
+In requests the summary is merged into the person's message after it.
+
+The summary is written by one model call with `DefaultCompactionPrompt`,
+or `agent.Options.CompactionPrompt` when set, given the span as one plain
+transcript with long blocks clipped. Its input is bounded by
+`agent.Options.CompactionInputTokens` (100,000 estimated tokens by
+default); past that the transcript's start is left out.
+
+`CompactionStarted` and `Compacted` carry the conversation's estimated
+size (`Before`, `After`) and the whole request's (`RequestBefore`,
+`RequestAfter`: fixed slots, tool schemas and conversation, calibrated by
+what the provider counted for the last request).
+
 The trace lists the tool schemas' size as the `tool_schemas` slot.
 
 ## MCP and skills

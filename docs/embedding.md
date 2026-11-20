@@ -468,7 +468,10 @@ changed, plus `cuts`: entries that did not ship whole, with `disposition`
 child conversation, with `variant`, `parent_id` and `depth`, and `status`
 when done; state `progress` carries `step`, `tool` and `status_line` while
 it runs, and a background subtask's start and progress carry `background`) and
-`nanite.compact` (`value.state` is `start`, `done` or `failed`). `run.finish`
+`nanite.compact` (`value.state` is `start`, `done` or `failed`; `start`
+and `done` carry `before` and `request_before`, `done` also `after` and
+`request_after`: the conversation's and the whole request's estimated
+tokens). `run.finish`
 has reason `turn_limit` at the step limit and `length` at the model's output
 limit. A cancelled turn ends in `run.abort`, a failed one in `run.error` with
 code `turn_failed`. The `ask_user` tool is declined.

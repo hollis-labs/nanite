@@ -171,6 +171,18 @@ type Options struct {
 	// reported input for the last request is checked against it too. Zero
 	// uses 80% of host.yaml's runtime.context_window (200,000 when unset).
 	CompactAt int
+	// CompactKeepTokens, when positive, is about how much of the end of the
+	// conversation compaction keeps whole, in estimated tokens: the recent
+	// turns that fit, cut only where the person's message starts a turn,
+	// and always the last turn. Zero keeps the last four messages.
+	CompactKeepTokens int
+	// CompactionPrompt replaces the system prompt of the call that writes a
+	// compaction summary (DefaultCompactionPrompt when empty).
+	CompactionPrompt string
+	// CompactionInputTokens bounds what one summary call is sent, in
+	// estimated tokens. A longer span is sent as a transcript with long
+	// blocks clipped and its start left out. Zero means 100,000.
+	CompactionInputTokens int
 	// SlotBudgets overrides the token budget of the slots it names (sizes
 	// are estimated at about 4 bytes a token). Budgets must be positive, and
 	// the Universal slot cannot be named: its budget is set by the base
@@ -241,6 +253,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.CompactAt < 0 {
 		return nil, fmt.Errorf("nanite: CompactAt must not be negative")
 	}
+	if opts.CompactKeepTokens < 0 || opts.CompactionInputTokens < 0 {
+		return nil, fmt.Errorf("nanite: CompactKeepTokens and CompactionInputTokens must not be negative")
+	}
 	for name, size := range opts.SlotBudgets {
 		switch {
 		case !slices.Contains(SlotNames(), name):
@@ -270,6 +285,10 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	subtasks, err := subtaskSettings(opts, def.Profile.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("load agent: %w", err)
+	}
+	rt, err := runtimeSettings(opts, def.Profile.Runtime)
+	if err != nil {
+		return nil, err
 	}
 	data := opts.DataDir
 	if data == "" {
@@ -354,7 +373,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: opts.IdleTimeout, CompactAt: opts.CompactAt, Steering: opts.Steering,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: subtasks.resultCap, SubtaskLimit: subtasks.limit, TurnTokenBudget: subtasks.turnBudget, IdleTimeout: rt.idleTimeout, CompactAt: rt.compactAt, CompactKeepTokens: rt.keepTokens, CompactionPrompt: rt.prompt, CompactionInputTokens: rt.inputTokens, Steering: opts.Steering,
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {
@@ -433,6 +452,43 @@ type subtaskConfig struct{ limit, turnBudget, resultCap int }
 // host.yaml's runtime value, then the engine's default (zero). host.yaml is
 // read when the agent opens. A host.yaml subtask_limit above the most the
 // agent runs at once is refused, not clamped.
+// runtimeConfig is the compaction and stream settings an agent runs with.
+type runtimeConfig struct {
+	compactAt, keepTokens, inputTokens int
+	prompt                             string
+	idleTimeout                        time.Duration
+}
+
+// runtimeSettings resolves the compaction and stream settings: a non-zero
+// Option wins over host.yaml's runtime key, which is read when the agent
+// opens.
+func runtimeSettings(opts Options, runtime agentdir.Runtime) (runtimeConfig, error) {
+	idle, err := runtime.IdleTimeoutDuration()
+	if err != nil {
+		return runtimeConfig{}, fmt.Errorf("host.yaml runtime: %w", err)
+	}
+	if opts.IdleTimeout != 0 {
+		idle = opts.IdleTimeout
+	}
+	pick := func(option, file int) int {
+		if option != 0 {
+			return option
+		}
+		return file
+	}
+	prompt := opts.CompactionPrompt
+	if prompt == "" {
+		prompt = runtime.CompactPrompt
+	}
+	return runtimeConfig{
+		compactAt:   pick(opts.CompactAt, runtime.CompactAt),
+		keepTokens:  pick(opts.CompactKeepTokens, runtime.CompactKeepTokens),
+		inputTokens: pick(opts.CompactionInputTokens, runtime.CompactInputTokens),
+		prompt:      prompt,
+		idleTimeout: idle,
+	}, nil
+}
+
 func subtaskSettings(opts Options, runtime agentdir.Runtime) (subtaskConfig, error) {
 	if err := subagent.CheckLimit(runtime.SubtaskLimit); err != nil {
 		return subtaskConfig{}, fmt.Errorf("host.yaml runtime: %w", err)
@@ -508,3 +564,7 @@ func IsAuthWaiting(err error) (AuthWaiting, bool) {
 // be saved, or Warden refused it. Whoever enrolled the agent places a new
 // credential and removes the <credential_file>.inflight marker.
 var ErrReenroll = warden.ErrReenroll
+
+// DefaultCompactionPrompt is the system prompt of the call that writes a
+// compaction summary when Options.CompactionPrompt is empty.
+const DefaultCompactionPrompt = engine.DefaultCompactionPrompt

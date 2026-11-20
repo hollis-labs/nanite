@@ -61,6 +61,10 @@ runtime:
   subtask_limit: 4
   turn_token_budget: 200000
   subtask_result_cap: 6000
+  compact_at: 110000
+  compact_keep_tokens: 22000
+  compact_input_tokens: 100000
+  idle_timeout: 3m
   env:
     PROJECT_MODE: development
 permissions:
@@ -76,8 +80,17 @@ is how many subtasks run at once, separately for leads and other subtasks
 (default 4, at most 8; a higher value is refused when the agent opens).
 `turn_token_budget` is a token ceiling a turn shares with its subtasks (zero
 is unlimited). `subtask_result_cap` caps a subtask's result in tokens (zero
-means about 5,900, the most one tool result shows in full). An embedding
-host's non-zero `agent.Options` value wins over these. `env` supplies
+means about 5,900, the most one tool result shows in full). `compact_at` is the request size in tokens at which the root conversation
+compacts (zero uses 80% of `context_window`); `compact_keep_tokens` is about
+how much of the end of the conversation a compaction keeps whole, by turns
+(zero keeps the last four messages; it must be below `compact_at`);
+`compact_prompt` replaces the summary prompt; `compact_input_tokens` bounds a
+summary call's input (zero means 100,000). `idle_timeout` is how long a
+model stream may send nothing before the turn gives up, as a Go duration
+(default `90s`). These are read when the agent opens. An embedding
+host's non-zero `agent.Options` value wins over these (`CompactAt`,
+`CompactKeepTokens`, `CompactionPrompt`, `CompactionInputTokens`,
+`IdleTimeout`). `env` supplies
 literal values to both foreground and background Bash. Use shell variable
 names and keep credentials out of this file.
 

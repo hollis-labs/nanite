@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Compaction parity with libs agent/host:
+  - `Options.CompactKeepTokens` keeps recent turns whole: the turns that fit, cut only where the person's message starts a turn, and always the last turn. A turn too long to keep is cut inside, before one of the agent's steps (never between a tool call and its result), keeping the latest steps that fit. The keep budget is clamped to half the compaction budget, with a warning. With a keep budget the summary comes first, and the pipeline's dedupe and strip run only while the request still does not fit. Zero keeps the last four messages, as before.
+  - A summary call is sent one plain transcript in one user message, never the raw messages, so the request cannot end with the agent's message.
+  - A leading summary is merged into the person's message after it in requests, so there are never two user messages in a row.
+  - `Options.CompactionPrompt` replaces the summary prompt. The default is now `agent.DefaultCompactionPrompt`, which asks for what was asked, decided and done, with the specifics, and what is unfinished.
+  - `Options.CompactionInputTokens` (default 100,000) bounds a summary call's input; a longer span is sent as a clipped transcript with its start left out.
+  - The Context slot is never dropped by compaction. Dropping it freed nothing, since its blocks were already in the request, and a pass then failed as "freed too little" on every turn.
+  - `CompactionStarted` and `Compacted` carry `RequestBefore` and `RequestAfter` (the whole request, calibrated), and so does the `nanite.compact` activity.
+  - Compaction no longer rewrites the live history's tool results while it dedupes.
+  - host.yaml `runtime.compact_at`, `compact_keep_tokens`, `compact_prompt`, `compact_input_tokens` and `idle_timeout` (libs agent/agentdir v0.3.0), read when the agent opens; a non-zero Option wins.
+
 ## 0.7.0
 
 Steering, the front desk, Warden auth and the Workbench APIs. Root turns can

@@ -228,7 +228,10 @@ const (
 // compacted. Exactly one Compacted or CompactionFailed follows it.
 type CompactionStarted struct {
 	EventMeta
-	Before int
+	// Before is the conversation's estimated size in tokens; RequestBefore
+	// the whole request's (fixed slots, tool schemas and conversation),
+	// calibrated by what the provider counted for the last request.
+	Before, RequestBefore int
 }
 
 // CompactionFailed reports that compaction did not complete. The history is
@@ -241,7 +244,10 @@ type CompactionFailed struct {
 // Compacted reports the change in token usage after context compaction.
 type Compacted struct {
 	EventMeta
-	Before, After int
+	// Before and After are the conversation's estimated size in tokens;
+	// RequestBefore and RequestAfter the whole request's, calibrated as in
+	// CompactionStarted.
+	Before, After, RequestBefore, RequestAfter int
 }
 
 // Usage reports model token use.

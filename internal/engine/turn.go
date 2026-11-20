@@ -71,6 +71,7 @@ type execution struct {
 	// warnedStatic is set once the turn has warned that fixed content alone
 	// fills the compaction budget.
 	warnedStatic bool
+	warnedKeep   bool
 	// toolCalls and passes record the turn's tool calls and compaction
 	// passes for its trace record.
 	toolCalls []trace.ToolCall
@@ -549,7 +550,7 @@ func (x *execution) generate(ctx context.Context) error {
 			return attempt{}, runloop.Terminate
 		}
 		req := llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens,
-			SlotBlocks: blocks, Messages: x.messages, Tools: x.specs, CacheHints: []llmtypes.CacheHint{
+			SlotBlocks: blocks, Messages: requestMessages(x.messages, x.messageIDs), Tools: x.specs, CacheHints: []llmtypes.CacheHint{
 				{Position: "system"}, {Position: "tools"}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
 			}}
 		safeModel := x.engine.scrub.Text(req.Model)
@@ -689,8 +690,9 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	}
 	x.compactions++
 	before := est.Estimate(string(raw))
+	requestBefore := x.requestTokens(window, before)
 	x.run.emit(ctx, func(meta events.EventMeta) events.Event {
-		return events.CompactionStarted{EventMeta: meta, Before: before}
+		return events.CompactionStarted{EventMeta: meta, Before: before, RequestBefore: requestBefore}
 	})
 	// Every start is followed by exactly one outcome.
 	//   - A pass that fails, or changes nothing, emits CompactionFailed and
@@ -732,7 +734,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			if failure != nil {
 				return events.CompactionFailed{EventMeta: meta, Err: failure}
 			}
-			return events.Compacted{EventMeta: meta, Before: before, After: after}
+			return events.Compacted{EventMeta: meta, Before: before, After: after, RequestBefore: requestBefore, RequestAfter: x.requestTokens(window, after)}
 		})
 		if failure == nil && x.depth == 0 {
 			// Steering hears of it, so an event reflex can run (saving
@@ -744,7 +746,13 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	if summaryProvider == nil {
 		summaryProvider, summaryModel = x.provider, x.definition.Runtime.Model
 	}
-	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(summaryProvider, summaryModel), messages: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(summaryModel),
+	prompt := x.engine.cfg.CompactionPrompt
+	if prompt == "" {
+		prompt = DefaultCompactionPrompt
+	}
+	keep := x.keepTokens(window)
+	summarizer := &capturingSummarizer{Summarizer: ctxpkg.NewProviderSummarizer(summaryProvider, summaryModel), messages: x.messages, structure: x.messages, messageIDs: x.messageIDs, model: x.engine.scrub.Text(summaryModel),
+		prompt: prompt, keepTokens: keep, inputTokens: x.engine.cfg.CompactionInputTokens,
 		// A summary is model spend too. The summarizer's Complete call
 		// reports no usage, so the shared budget is charged an estimate.
 		spend: func(prompt string, span []llmtypes.ChatMessage, summary string) {
@@ -754,7 +762,85 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			raw, _ := json.Marshal(span)
 			x.shared.add(est.Estimate(prompt) + est.Estimate(string(raw)) + est.Estimate(summary))
 		}}
-	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
+	// applySummary makes the summarizer's summary durable and replaces the
+	// span it covers with it.
+	applySummary := func() error {
+		count := summarizer.count
+		through := x.messageIDs[count-1]
+		if through == "" {
+			return nil
+		}
+		summary := fmt.Sprintf("[Conversation summary — %d messages compacted]\n\n%s", count, x.engine.scrub.Text(summarizer.summary))
+		compacted := append([]llmtypes.ChatMessage{{Role: "user", Content: summary}}, summarizer.messages[count:]...)
+		remaining, err := json.Marshal(compacted)
+		if err != nil {
+			return err
+		}
+		shrunk := est.Estimate(string(remaining))
+		now := time.Now().UTC()
+		if err := x.journal.RecordCompaction(store.NewID(now), now, store.Compaction{
+			TurnID: x.run.id, ThroughMessageID: through, Summary: summary, Before: before, After: shrunk,
+		}); err != nil {
+			journalErr = true
+			return err
+		}
+		recorded = true
+		x.engine.forgetTurnContext(x.info.ID)
+		x.messages = compacted
+		x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
+		after = shrunk
+		return nil
+	}
+	summarized := func() bool { return summarizer.count > 0 && strings.TrimSpace(summarizer.summary) != "" }
+	conv := window.Slot(ctxpkg.SlotConversation)
+	summarize := conv == nil || conv.Compactable
+
+	if keep > 0 {
+		// Summarize first, by whole turns (or inside a turn too long to
+		// keep); then, only while the request still does not fit, let the
+		// pipeline dedupe and strip what is left. Positions are unchanged by
+		// those stages, so their result is kept.
+		if summarize && !handoffPresent(window) {
+			if _, err := summarizer.Summarize(ctx, prompt, nil); err != nil {
+				return err
+			}
+			if summarized() {
+				if err := applySummary(); err != nil {
+					return err
+				}
+				if raw, err := json.Marshal(x.messages); err == nil {
+					window.SetContent(ctxpkg.SlotConversation, string(raw))
+				}
+				if !x.needsCompaction(window) {
+					return nil
+				}
+			}
+		}
+		pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: cloneMessages(x.messages), SessionID: x.info.ID}
+		if conv != nil {
+			conv.Compactable = false
+		}
+		if force && !summarized() {
+			_, err = pipeline.RunForce(ctx)
+		} else {
+			_, err = pipeline.Run(ctx)
+		}
+		if conv != nil {
+			conv.Compactable = summarize
+		}
+		if err != nil {
+			return err
+		}
+		if len(pipeline.ConversationMessages) == len(x.messages) {
+			x.messages = pipeline.ConversationMessages
+			if remaining, err := json.Marshal(x.messages); err == nil {
+				after = min(after, est.Estimate(string(remaining)))
+			}
+		}
+		return nil
+	}
+
+	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: cloneMessages(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
 	if force {
 		_, err = pipeline.RunForce(ctx)
 	} else {
@@ -763,7 +849,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	if err != nil {
 		return err
 	}
-	if summarizer.count == 0 || strings.TrimSpace(summarizer.summary) == "" {
+	if !summarized() {
 		// Stage-only changes preserve message positions. A durable summary must
 		// carry a message ID so future turns can reconstruct exactly its coverage.
 		if len(pipeline.ConversationMessages) == len(x.messageIDs) {
@@ -774,59 +860,59 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 		}
 		return nil
 	}
-	count := summarizer.count
-	through := x.messageIDs[count-1]
-	if through == "" {
-		return nil
-	}
-	summary := fmt.Sprintf("[Conversation summary — %d messages compacted]\n\n%s", count, x.engine.scrub.Text(summarizer.summary))
-	compacted := append([]llmtypes.ChatMessage{{Role: "user", Content: summary}}, x.messages[count:]...)
-	remaining, err := json.Marshal(compacted)
-	if err != nil {
-		return err
-	}
-	shrunk := est.Estimate(string(remaining))
-	now := time.Now().UTC()
-	if err := x.journal.RecordCompaction(store.NewID(now), now, store.Compaction{
-		TurnID: x.run.id, ThroughMessageID: through, Summary: summary, Before: before, After: shrunk,
-	}); err != nil {
-		journalErr = true
-		return err
-	}
-	recorded = true
-	x.engine.forgetTurnContext(x.info.ID)
-	x.messages = compacted
-	x.messageIDs = append([]string{""}, x.messageIDs[count:]...)
-	after = shrunk
-	return nil
+	return applySummary()
 }
 
 type capturingSummarizer struct {
 	ctxpkg.Summarizer
-	messages   []llmtypes.ChatMessage
+	messages []llmtypes.ChatMessage
+	// structure is the history before the pipeline's stages, which still
+	// marks tool results (strip removes them) and so where turns start.
+	structure  []llmtypes.ChatMessage
 	messageIDs []string
 	model      string
 	count      int
 	summary    string
+	// prompt, when set, replaces the pipeline's summary prompt. keepTokens,
+	// when positive, picks the span by turns (keepCut) instead of taking the
+	// pipeline's. inputTokens bounds the summary call's input.
+	prompt      string
+	keepTokens  int
+	inputTokens int
+	// called is set once Summarize has run.
+	called bool
 	// spend, when set, is told of each summary call made.
 	spend func(prompt string, span []llmtypes.ChatMessage, summary string)
 }
 
 func (s *capturingSummarizer) Summarize(ctx context.Context, prompt string, span []llmtypes.ChatMessage) (string, error) {
+	s.called = true
+	if s.prompt != "" {
+		prompt = s.prompt
+	}
 	end := len(span)
-	// Keep a tool call and its immediately following result together.
-	if end < len(s.messages) && slices.ContainsFunc(s.messages[end].ContentBlocks, func(b llmtypes.ContentBlock) bool { return b.Type == "tool_result" }) {
+	if s.keepTokens > 0 {
+		// The kept part is whole turns; the span is everything before it.
+		end = keepCut(s.structure, s.messages, s.messageIDs, s.keepTokens)
+		span = s.messages
+	} else if end < len(s.messages) && slices.ContainsFunc(s.messages[end].ContentBlocks, func(b llmtypes.ContentBlock) bool { return b.Type == "tool_result" }) {
+		// Keep a tool call and its immediately following result together.
 		end--
 	}
-	if end < 1 || s.messageIDs[end-1] == "" {
+	if end < 1 || end > len(span) || s.messageIDs[end-1] == "" {
 		return "", nil
 	}
+	if s.keepTokens > 0 && messagesTokens(span[:end]) < ctxpkg.SummarizeMinTokens {
+		// Too little to be worth a summary call.
+		return "", nil
+	}
+	input := summaryInput(span[:end], s.inputTokens)
 	spanCtx, endSpan := events.ModelSpan(ctx, s.model)
 	defer endSpan()
-	summary, err := s.Summarizer.Summarize(spanCtx, prompt, span[:end])
+	summary, err := s.Summarizer.Summarize(spanCtx, prompt, input)
 	if s.spend != nil && err == nil {
 		// A failed summary call is not charged: it reports nothing to count.
-		s.spend(prompt, span[:end], summary)
+		s.spend(prompt, input, summary)
 	}
 	if err == nil && strings.TrimSpace(summary) == "" {
 		// An empty summary would drop the span with nothing in its place.

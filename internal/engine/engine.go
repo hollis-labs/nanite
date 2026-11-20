@@ -108,6 +108,17 @@ type Config struct {
 	// (system blocks, tool schemas and conversation together) at which the
 	// conversation is compacted. Zero uses 80% of the runtime context window.
 	CompactAt int
+	// CompactKeepTokens, when positive, is about how much of the end of the
+	// conversation compaction keeps whole, in estimated tokens: the recent
+	// turns that fit, cut only where the person's message starts a turn, and
+	// always the last turn. Zero keeps the last four messages.
+	CompactKeepTokens int
+	// CompactionPrompt replaces the summary prompt (DefaultCompactionPrompt).
+	CompactionPrompt string
+	// CompactionInputTokens bounds what one summary call is sent, in
+	// estimated tokens; past it the span is sent as a clipped transcript
+	// with its start left out. Zero uses DefaultCompactionInputTokens.
+	CompactionInputTokens int
 	// Steering, when set, runs libs agent/steer before each root turn: the
 	// conversation's mode, work slots, reflexes and classifier.
 	Steering *Steering

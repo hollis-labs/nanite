@@ -384,6 +384,12 @@ func LoadTool(dir, name string, allowEnv ...string) (ToolPackage, error) {
 }
 
 func loadTool(root *os.Root, name string, allowEnv []string) (ToolPackage, error) {
+	return loadToolWithDigest(root, name, allowEnv, packageDigest)
+}
+
+// The digest operation is passed explicitly so consistency checks can be tested
+// with a filesystem change at the boundary, without timing or global hooks.
+func loadToolWithDigest(root *os.Root, name string, allowEnv []string, digest func(*os.Root, string) (string, error)) (ToolPackage, error) {
 	dir := "tools/" + name
 	info, err := root.Lstat(dir + "/tool.yaml")
 	if err != nil {
@@ -425,7 +431,7 @@ func loadTool(root *os.Root, name string, allowEnv []string) (ToolPackage, error
 		// without changing anything Nanite reads under tools/.
 		return ToolPackage{}, fmt.Errorf("entry %s has other hard links; copy it into the package instead", pkg.Entry)
 	}
-	if pkg.Digest, err = packageDigest(root, dir); err != nil {
+	if pkg.Digest, err = digest(root, dir); err != nil {
 		return ToolPackage{}, err
 	}
 	current, err := root.Lstat(dir + "/tool.yaml")

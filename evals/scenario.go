@@ -93,6 +93,10 @@ type Scenario struct {
 	Requires []string
 	// Stubs are host tools offered in every arm, with canned results.
 	Stubs []Stub
+	// HostStubs answer steering host actions; unmatched actions are recorded only.
+	HostStubs HostStubs
+	// HostTriggers fire event/focus reflexes before the task, after the prelude.
+	HostTriggers []HostTrigger
 	// Arms are run after DefaultArms.
 	Arms []Arm
 	// Grade checks the final answer and the workspace the run left behind. It

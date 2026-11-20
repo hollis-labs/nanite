@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Evals can stub steering host commands and tools by name, fire event/focus
+  reflexes offline, and record fired actions and canned results as run evidence
+  (`Scenario.HostStubs`, `Scenario.HostTriggers`, `Result.HostActions`).
+
 ## 0.8.0
 
 Safe first use of a conversation from concurrent callers, Warden waiters that

@@ -57,8 +57,14 @@ type execution struct {
 	loop            *loopdetect.Detector
 	result          events.Result
 	// lastRequestTokens is the input the provider reported for the latest
-	// request, the ground truth the compaction check is held to.
-	lastRequestTokens int
+	// request and lastRequestEstimate what Nanite estimated for it; their
+	// ratio calibrates the compaction check.
+	lastRequestTokens, lastRequestEstimate int
+	// schemaTokens is the estimated size of this turn's tool schemas.
+	schemaTokens int
+	// warnedStatic is set once the turn has warned that fixed content alone
+	// fills the compaction budget.
+	warnedStatic bool
 	// toolCalls and passes record the turn's tool calls and compaction
 	// passes for its trace record.
 	toolCalls []trace.ToolCall
@@ -309,9 +315,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		return events.Result{}, err
 	}
 	x.sizeWindow()
-	if tools := x.assembled.Window.Slot(ctxpkg.SlotTools); tools != nil && tools.TokenCount > 0 {
+	if x.schemaTokens > 0 {
 		// The trace shows the tool schemas' share of the request.
-		tr.rec.Slots = append(tr.rec.Slots, trace.Slot{Name: "tool_schemas", Tokens: tools.TokenCount})
+		tr.rec.Slots = append(tr.rec.Slots, trace.Slot{Name: "tool_schemas", Tokens: x.schemaTokens})
 	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)
 	if err != nil {
@@ -459,6 +465,7 @@ func (x *execution) generate(ctx context.Context) error {
 		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)
 		callCtx, cancelCall := context.WithCancel(spanCtx)
 		cancel := func() { cancelCall(); endSpan() }
+		x.estimateRequest()
 		stream, err := x.provider.StreamChat(callCtx, req)
 		if err != nil {
 			cancel()
@@ -578,6 +585,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 	}
 	window := x.assembled.Window
 	window.SetContent(ctxpkg.SlotConversation, string(raw))
+	defer x.calibrate(window)()
 	if !force && (x.stalled || !x.needsCompaction(window)) {
 		return nil
 	}
@@ -651,9 +659,7 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			x.shared.add(est.Estimate(prompt) + est.Estimate(string(raw)) + est.Estimate(summary))
 		}}
 	pipeline := ctxpkg.CompactionPipeline{Window: window, Estimator: est, ConversationMessages: slices.Clone(x.messages), Summarizer: summarizer, SessionID: x.info.ID}
-	// The pipeline's own check uses the estimate; when the provider's count
-	// is what says the request is too big, run it without that check.
-	if force || (x.lastRequestTokens > window.TotalBudget && !window.NeedsCompaction()) {
+	if force {
 		_, err = pipeline.RunForce(ctx)
 	} else {
 		_, err = pipeline.Run(ctx)

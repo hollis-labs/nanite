@@ -295,7 +295,7 @@ func TestStreamChat_PromptTokensDetailsCachedTokens(t *testing.T) {
 		{
 			name:              "nonzero_cache_read_and_write",
 			usageJSON:         `{"prompt_tokens":100,"completion_tokens":25,"total_tokens":125,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":20}}`,
-			wantInput:         100,
+			wantInput:         20, // uncached: 100 - 60 read - 20 written
 			wantOutput:        25,
 			wantCacheRead:     60,
 			wantCacheCreation: 20,

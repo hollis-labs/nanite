@@ -113,6 +113,9 @@ func TestCompactionWithoutProgressIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Just enough budget for the fixed slots, so the conversation is always
+	// over it.
+	assembled.Window.TotalBudget = staticTokens(assembled.Window) + 1
 	r := &Run{id: "run", events: make(chan events.Event, 16), done: make(chan struct{})}
 	x := execution{engine: e, run: r, info: store.Conversation{ID: id, Role: "chat"}, definition: def, provider: p, assembled: assembled,
 		messages: []llmtypes.ChatMessage{{Role: "user", ContentBlocks: []llmtypes.ContentBlock{{Type: "text", Text: "go"}}}}, messageIDs: []string{"m1"}}
@@ -166,7 +169,10 @@ func TestEmptySummaryIsNotACompaction(t *testing.T) {
 func TestStepCompactionFailureDoesNotEndTurn(t *testing.T) {
 	// The window needs compaction after the tool step; the summarizer fails.
 	p := failingSummaries{&watchedProvider{Provider: fake.New(toolResponse("unknown"), fake.Text("finished anyway"))}}
-	e, db, id := setupEngine(t, p, "runtime:\n  context_window: 2000\n")
+	e, db, id := setupEngine(t, p, "")
+	// Room for the fixed slots and tool schemas (~3,000 tokens), not for
+	// the seeded conversation beside them.
+	e.cfg.CompactAt = 4000
 	seedLongHistory(t, db, id)
 	run, err := e.Send(t.Context(), id, Input{Text: "go"})
 	if err != nil {

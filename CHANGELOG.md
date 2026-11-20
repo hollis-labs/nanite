@@ -7,6 +7,12 @@
   the last request is checked against the budget too. Before, a host with
   hundreds of tools could grow requests past the window without compaction
   ever firing. New `agent.Options.CompactAt` sets the budget in tokens.
+  When the fixed slots and tool schemas alone fill the budget, compaction
+  is skipped with a warning, since it cannot help.
+- OpenAI usage: `InputTokens` now excludes cached and cache-written tokens,
+  which is its meaning on the Anthropic wire and everywhere Nanite sums
+  usage. Cached tokens were previously counted twice in turn usage, the
+  turn token budget, traces and chatstream's uncached input.
 Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
 - Code Mode evals (experimental): six scenarios (code search, research from a

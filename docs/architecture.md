@@ -133,12 +133,21 @@ The check counts everything a request carries:
   the Tools slot of its context window;
 - the conversation.
 
-It compacts when that estimate passes the budget, or when the provider's
-own count of the last request's input (cached or not) does. The budget is
-80% of `runtime.context_window` (200,000 tokens when unset), or
-`agent.Options.CompactAt` when a host sets it. A pass that frees nothing
-stops compaction for the rest of the turn. The trace lists the tool schemas'
-size as the `tool_schemas` slot.
+It compacts when that estimate passes the budget. The estimate is
+calibrated: when the provider counted more input for the last request
+(cached or not) than Nanite estimated, the budget is scaled down by that
+ratio, so the checks see the request's real size.
+
+The budget is 80% of `runtime.context_window` (200,000 tokens when unset),
+or `agent.Options.CompactAt` for the root conversation when a host sets it.
+
+Compaction is skipped in two cases:
+- a pass freed nothing, which stops compaction for the rest of the turn;
+- the fixed part of the request (slots and tool schemas) already fills the
+  budget. Compaction cannot help then, and the engine logs a warning once
+  per turn.
+
+The trace lists the tool schemas' size as the `tool_schemas` slot.
 
 ## MCP and skills
 

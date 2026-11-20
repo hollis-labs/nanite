@@ -173,7 +173,7 @@ func TestResponsesToolContinuationPreservesNativeOutput(t *testing.T) {
 	if tool == nil || tool.ID != "call_1" || tool.Input["value"] != float64(7) {
 		t.Fatalf("tool = %+v", tool)
 	}
-	if usage == nil || usage.InputTokens != 27 || usage.OutputTokens != 12 || usage.CacheReadTokens != 10 || usage.StopReason != "tool_use" {
+	if usage == nil || usage.InputTokens != 17 || usage.OutputTokens != 12 || usage.CacheReadTokens != 10 || usage.StopReason != "tool_use" {
 		t.Fatalf("usage = %+v", usage)
 	}
 	req.Messages = append(req.Messages,

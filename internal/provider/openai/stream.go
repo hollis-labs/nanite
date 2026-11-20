@@ -68,7 +68,7 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 			// Capture usage when present (final chunk under include_usage).
 			if chunk.JSON.Usage.Valid() {
 				lastUsage = &llmtypes.Usage{
-					InputTokens:         int(chunk.Usage.PromptTokens),
+					InputTokens:         uncachedInput(chunk.Usage.PromptTokens, chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.PromptTokensDetails.CacheWriteTokens),
 					OutputTokens:        int(chunk.Usage.CompletionTokens),
 					CacheReadTokens:     int(chunk.Usage.PromptTokensDetails.CachedTokens),
 					CacheCreationTokens: int(chunk.Usage.PromptTokensDetails.CacheWriteTokens),
@@ -201,4 +201,13 @@ func mapStopReason(r string) string {
 	default:
 		return r
 	}
+}
+
+// uncachedInput converts OpenAI's prompt count, which includes cached and
+// cache-written tokens, to the meaning Usage.InputTokens has across Nanite:
+// input that was neither read from nor written to the cache, as the
+// Anthropic wire reports it. Without this, every consumer that adds
+// InputTokens and the cache counts counted cached tokens twice.
+func uncachedInput(prompt, cached, written int64) int {
+	return int(max(0, prompt-cached-written))
 }

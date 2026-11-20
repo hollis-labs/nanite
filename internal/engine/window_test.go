@@ -38,12 +38,14 @@ func countStarts(t *testing.T, e *Engine, id string) (int, *Run) {
 }
 
 func TestToolSchemasCountTowardCompaction(t *testing.T) {
-	// 20,000-token window: the conversation alone (~2,000 tokens) fits, but
-	// 250 tool schemas (~20,000 tokens) do not fit beside it.
+	// A 32,000-token window (budget 25,600): the fixed slots and 200 tool
+	// schemas (~25,000 together) fit, but not with the seeded conversation
+	// (~2,000) beside them. Without the schemas counted, ~3,000 of fixed
+	// slots leave plenty of room and nothing compacts.
 	p := &watchedProvider{Provider: fake.New(toolResponse("tool_000"), fake.Text("done"))}
-	e, db, id := setupEngine(t, p, "runtime:\n  context_window: 20000\n")
+	e, db, id := setupEngine(t, p, "runtime:\n  context_window: 32000\n")
 	seedLongHistory(t, db, id)
-	manyTools(t, e, 250)
+	manyTools(t, e, 200)
 	starts, run := countStarts(t, e, id)
 	if _, err := run.Wait(); err != nil {
 		t.Fatal(err)
@@ -71,7 +73,9 @@ func TestReportedInputTriggersCompaction(t *testing.T) {
 }
 
 func TestCompactAtOption(t *testing.T) {
-	for _, at := range []int{0, 1500} {
+	// The fixed slots and tool schemas are about 3,000 tokens; 4,000 leaves
+	// no room for the seeded conversation.
+	for _, at := range []int{0, 4000} {
 		p := &watchedProvider{Provider: fake.New(toolResponse("unknown"), fake.Text("done"))}
 		e, db, id := setupEngine(t, p, "")
 		e.cfg.CompactAt = at
@@ -83,5 +87,21 @@ func TestCompactAtOption(t *testing.T) {
 		if (starts > 0) != (at > 0) {
 			t.Fatalf("CompactAt=%d: compaction starts=%d", at, starts)
 		}
+	}
+}
+
+func TestFixedContentOverBudgetSkipsCompaction(t *testing.T) {
+	// The fixed slots and schemas alone exceed the budget: compaction cannot
+	// help, so it does not run.
+	p := &watchedProvider{Provider: fake.New(toolResponse("unknown"), fake.Text("done"))}
+	e, db, id := setupEngine(t, p, "")
+	e.cfg.CompactAt = 500
+	seedLongHistory(t, db, id)
+	starts, run := countStarts(t, e, id)
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if starts != 0 || p.summaries != 0 {
+		t.Fatalf("compaction ran though it could not help: starts=%d summaries=%d", starts, p.summaries)
 	}
 }

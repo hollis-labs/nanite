@@ -229,6 +229,11 @@ func New(cfg Config) (*Engine, error) {
 		if err != nil {
 			return nil, err
 		}
+		if src != nil {
+			if err := src.UseWaiterStore(context.Background(), cfg.Store); err != nil {
+				return nil, err
+			}
+		}
 		cfg.ProviderConfig.Warden = src
 		mcpAuth = &mcpclient.Auth{Principal: cfg.Identity.Principal, Warden: cfg.ProviderConfig.Warden, Servers: cfg.Identity.MCP}
 	}

@@ -175,6 +175,7 @@ func (r *Runner) watchAuth(id string) {
 				return // decided some other way, or nobody waits any more
 			}
 			status, err := r.authStatus(ctx, id)
+			status = normalizeAuthStatus(status)
 			switch {
 			case ctx.Err() != nil:
 				return
@@ -183,11 +184,13 @@ func (r *Runner) watchAuth(id string) {
 				return
 			case err != nil:
 				r.logger().Warn("chatrunner: grant request lookup", "request", id, "error", err.Error())
-			case status != "" && status != "pending":
+			case authDecision(status):
 				if err := r.AuthDecided(ctx, id, status); err != nil && ctx.Err() == nil {
 					r.logger().Warn("chatrunner: grant request decided", "request", id, "error", err.Error())
 				}
 				return
+			case status != "" && status != "pending":
+				r.logger().Warn("chatrunner: unknown grant request status", "request", id, "status", status)
 			}
 			if authNow().Sub(since) > maxAge {
 				r.stopAuthWatch(ctx, id, fmt.Sprintf("no decision after %s", maxAge))
@@ -247,9 +250,10 @@ func (r *Runner) stopAuthWatch(ctx context.Context, id, reason string) {
 	}
 }
 
-// AuthDecided records a Warden grant request's decision ("approved" or
-// "granted", or a refusal such as "denied" or "expired") and tells each chat
-// still waiting on it with a notice. On approval the notice starts a notice
+// AuthDecided records a Warden grant request's decision ("approved",
+// "denied", "expired" or "withdrawn") and notifies each chat still waiting.
+// Statuses are trimmed and case-insensitive; "granted" means "approved".
+// On approval the notice starts a notice
 // turn (with Options.NoticeTurns, while the chat has notice turns left) so
 // the agent retries what needed the grant; otherwise it asks the owner to
 // send the message again. A chat whose own later turn already got the token
@@ -257,7 +261,8 @@ func (r *Runner) stopAuthWatch(ctx context.Context, id, reason string) {
 // host that is pushed decisions calls it directly. Deciding a request the
 // runner does not watch does nothing.
 func (r *Runner) AuthDecided(ctx context.Context, requestID, status string) error {
-	if status == "" || status == "pending" {
+	status = normalizeAuthStatus(status)
+	if !authDecision(status) {
 		return fmt.Errorf("chatrunner: %q is not a decision", status)
 	}
 	wait := r.takeAuthWait(requestID)
@@ -265,7 +270,7 @@ func (r *Runner) AuthDecided(ctx context.Context, requestID, status string) erro
 		return nil
 	}
 	r.agent.AuthDecided(requestID, status)
-	approved := status == "approved" || status == "granted"
+	approved := status == "approved"
 	what := authWhat(wait.Audience, wait.For)
 	return r.tellAuthChats(ctx, wait, func(naniteID string) string {
 		switch {
@@ -277,6 +282,23 @@ func (r *Runner) AuthDecided(ctx context.Context, requestID, status string) erro
 			return fmt.Sprintf("Warden approved grant request %s for %s. Send your message again to continue.", requestID, what)
 		}
 	}, approved)
+}
+
+func normalizeAuthStatus(status string) string {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "granted" {
+		return "approved"
+	}
+	return status
+}
+
+// authDecision excludes pending and unknown statuses without consuming a watch.
+func authDecision(status string) bool {
+	switch status {
+	case "approved", "denied", "expired", "withdrawn":
+		return true
+	}
+	return false
 }
 
 // tellAuthChats posts a notice to each chat that waited, in a stable order,

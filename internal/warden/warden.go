@@ -163,20 +163,24 @@ type Config struct {
 
 // Source mints and caches tokens for one agent.
 type Source struct {
-	cfg    Config
-	mu     sync.Mutex
-	tokens map[string]*entry
+	cfg          Config
+	mu           sync.Mutex
+	tokens       map[string]*entry
+	waiterMu     sync.Mutex
+	waiterStore  WaiterStore
+	savedWaiters map[string]savedWaiterEntry
 }
 
 type entry struct {
-	mu        sync.Mutex // one mint at a time per key
-	token     string
-	renewAt   time.Time
-	expiresAt time.Time
-	request   string // a pending grant request's ID
+	mu           sync.Mutex // one mint at a time per key
+	token        string
+	renewAt      time.Time
+	expiresAt    time.Time
+	request      string // a pending grant request's ID
+	requestSince time.Time
 	// waiters is the conversations a token request failed for while a
 	// grant request was pending, with that request's ID.
-	waiters map[string]string
+	waiters map[string]waiter
 	checked time.Time
 	// After a failed mint, nothing is tried again before retryAt; the wait
 	// doubles from minBackoff to maxBackoff.
@@ -303,25 +307,47 @@ const requestRecheck = 30 * time.Second
 
 // Token returns a valid token for audience and scopes.
 func (s *Source) Token(ctx context.Context, audience string, scopes []string) (string, error) {
+	// The Warden-audience request can be nested under another entry's lock.
+	// Sweep only after the outer token operation has released its entry.
+	if audience != wardenAudience {
+		defer s.sweepWaiters()
+	}
 	e := s.entry(audience, scopes)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	changed := pruneLiveWaiters(e, s.cfg.Now())
+	previousRequest := e.request
 	tok, err := s.token(ctx, e, audience, scopes)
+	if previousRequest != e.request {
+		changed = true
+		e.requestSince = time.Time{}
+		if e.request != "" {
+			e.requestSince = s.cfg.Now()
+		}
+	}
 	conversation := conversationFrom(ctx)
 	var missing *MissingGrantError
+	var granted *Waiting
 	switch {
-	case err == nil && conversation != "" && e.waiters[conversation] != "":
-		// A conversation that waited got its token: it no longer waits.
-		id := e.waiters[conversation]
+	case err == nil && conversation != "" && e.waiters[conversation].RequestID != "":
+		id := e.waiters[conversation].RequestID
 		delete(e.waiters, conversation)
-		if s.cfg.OnGranted != nil {
-			s.cfg.OnGranted(Waiting{RequestID: id, Status: "granted", Audience: audience, Scopes: slices.Clone(scopes), Conversation: conversation, For: forFrom(ctx)})
-		}
+		changed = true
+		granted = &Waiting{RequestID: id, Status: "granted", Audience: audience, Scopes: slices.Clone(scopes), Conversation: conversation, For: forFrom(ctx)}
 	case errors.As(err, &missing) && conversation != "":
 		if e.waiters == nil {
-			e.waiters = map[string]string{}
+			e.waiters = map[string]waiter{}
 		}
-		e.waiters[conversation] = missing.Waiting.RequestID
+		if e.waiters[conversation].RequestID != missing.Waiting.RequestID {
+			e.waiters[conversation] = waiter{RequestID: missing.Waiting.RequestID, Since: s.cfg.Now()}
+			changed = true
+		}
+	}
+	if changed {
+		s.saveWaiters(key(audience, scopes), e)
+	}
+	if granted != nil && s.cfg.OnGranted != nil {
+		s.cfg.OnGranted(*granted)
 	}
 	return tok, err
 }
@@ -428,30 +454,46 @@ func (s *Source) Request(ctx context.Context, id string) (Waiting, error) {
 // Decided tells the source a grant request has been decided. On approval
 // ("approved" or "granted") the next token request looks it up at once
 // instead of waiting out the recheck interval; on any other decision the
-// request is forgotten, so the next token request files a new one.
+// request is forgotten ("denied", "expired" or "withdrawn"), so the next
+// token request files a new one. An empty or unknown status is not a
+// decision and changes nothing.
 func (s *Source) Decided(id, status string) {
-	approved := status == "approved" || status == "granted"
+	var approved bool
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "approved", "granted":
+		approved = true
+	case "denied", "expired", "withdrawn":
+	default:
+		return
+	}
 	s.mu.Lock()
-	entries := make([]*entry, 0, len(s.tokens))
-	for _, e := range s.tokens {
-		entries = append(entries, e)
+	entries := make(map[string]*entry, len(s.tokens))
+	for k, e := range s.tokens {
+		entries[k] = e
 	}
 	s.mu.Unlock()
-	for _, e := range entries {
+	for k, e := range entries {
 		e.mu.Lock()
+		changed := pruneLiveWaiters(e, s.cfg.Now())
 		if e.request == id {
 			if approved {
 				e.checked = time.Time{}
 			} else {
 				e.request = ""
+				e.requestSince = time.Time{}
+				changed = true
 			}
 		}
 		if !approved {
 			for c, req := range e.waiters {
-				if req == id {
+				if req.RequestID == id {
 					delete(e.waiters, c)
+					changed = true
 				}
 			}
+		}
+		if changed {
+			s.saveWaiters(k, e)
 		}
 		e.mu.Unlock()
 	}

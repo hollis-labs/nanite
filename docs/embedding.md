@@ -528,15 +528,22 @@ decided, each chat that waited gets a notice of kind `auth`
 (`chatrunner.NoticeKindAuth`): on approval it says to continue, and with
 `Options.NoticeTurns` it starts a notice turn that retries; on a denial or
 expiry it says so, and the next attempt files a new request. A chat whose
-own later turn already got the token is not told again; when several chats
+own later turn already got the token is not told again, including after a
+restart: the source persists its conversation/request waiting set and pending
+request IDs in engine-owned state, without persisting minted tokens. Waiters
+older than 24 hours are dropped on load and save. Invalid saved state logs a
+warning and starts empty; the next save replaces it. When several chats
 waited, their notices are spaced out; and a chat with no notice turn left
 (or without `NoticeTurns`) is asked to send its message again instead. The
 watch stops when Warden no longer shows the request (not found or
 forbidden), when the agent has no Warden identity, or after
 `Options.AuthWaitMax` (default 24 hours) without a decision; each chat that
 waited is told. A host that is pushed decisions (from Gatecrasher or
-Warden) calls `Runner.AuthDecided(ctx, requestID, status)` itself;
-`Options.AuthStatus` replaces the lookup the polling uses.
+Warden) calls `Runner.AuthDecided(ctx, requestID, status)` itself. It accepts
+`approved`, `denied`, `expired` or `withdrawn`, ignoring case and surrounding
+whitespace; `granted` is an alias for `approved`. Other statuses return an
+error without consuming the watch. `Options.AuthStatus` replaces the lookup
+the polling uses; unknown poll statuses leave the watch active.
 `Options.Agent.OnAuthGranted` sees a conversation that waited get its
 token.
 

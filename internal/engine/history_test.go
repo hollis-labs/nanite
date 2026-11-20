@@ -173,6 +173,55 @@ func TestHistorySnippetsAreRedacted(t *testing.T) {
 	}
 }
 
+// A query word inside a secret, or near one, in a long message: no part of a
+// secret reaches the snippet, whatever the whitespace around it.
+func TestHistorySnippetNeverShowsACutSecret(t *testing.T) {
+	gh := "ghp_" + "Zq9Xw8Vu7Ts6Rq5Po4Nm3Lk2Jh1Gf0EdCbA9z8y"
+	var pem strings.Builder
+	// The boundary lines are built at run time so the public-history scan does
+	// not take this fixture for a real key.
+	boundary := func(edge string) string { return "-----" + edge + " RSA PRIV" + "ATE KEY-----" }
+	pem.WriteString("intro text\n" + boundary("BEGIN") + "\n")
+	for range 50 {
+		pem.WriteString("MIIJKAIBAAKCAgEAz8L0vWq1RtYp3Nx7QkVb2HsJ9mFc4DgEaUoTl6ZyXiPrSwKnMhBe\n")
+	}
+	pem.WriteString("MIIJKAIBAAKCAgEAz8LHERONq1RtYp3Nx7QkVb2HsJ9mFc4DgEaUoTl6ZyXiPrSwKnM\n" + boundary("END") + "\n")
+	pem.WriteString(strings.Repeat("filler words ", 600) + " the heron flew")
+	cases := []struct {
+		name, msg, query string
+		secrets          []string
+		placeholder      bool
+	}{
+		{"match inside a key, token near the window edge",
+			strings.Repeat("b ", 500) + "xxxxxx " + gh + strings.Repeat(" ", 2000-len(gh)-7+20) + testKey + strings.Repeat("a", 6000),
+			"api03", []string{gh[len(gh)-12:], testKey[len(testKey)-12:]}, true},
+		{"no whitespace before the match",
+			`{"pad":"` + strings.Repeat("q", 2500) + `","key":"` + testKey + `"}` + strings.Repeat(" tail", 1500),
+			"api03", []string{testKey[len(testKey)-12:], testKey[14:30]}, true},
+		{"match inside a PEM block", pem.String(), "heron", []string{"z8LHERONq1Rt", "Nx7QkVb2HsJ9"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &watchedProvider{Provider: fake.New()}
+			e, db, id := setupEngine(t, p, "")
+			appendParent(t, db, id, c.msg)
+			hits, err := e.SearchHistory(t.Context(), id, c.query, 5)
+			if err != nil || len(hits) != 1 {
+				t.Fatalf("hits: %+v, %v", hits, err)
+			}
+			s := hits[0].Snippet
+			for _, secret := range c.secrets {
+				if strings.Contains(s, secret) {
+					t.Fatalf("snippet shows %q: %q", secret, s)
+				}
+			}
+			if c.placeholder && s != redactedMatch {
+				t.Fatalf("snippet = %q, want the placeholder", s)
+			}
+		})
+	}
+}
+
 func TestHistoryLimits(t *testing.T) {
 	p := &watchedProvider{Provider: fake.New()}
 	e, db, id := setupEngine(t, p, "")

@@ -4,6 +4,22 @@
 
 Breaking (next minor version): the subagent tools are replaced by `subtask`.
 
+- Breaking, fan-out: several `subtask` calls in one assistant step now run
+  side by side (bounded by `runtime.tool_concurrency`), with results in call
+  order. `subtask` is concurrency-safe but not read-only, and like read-only
+  tools it now runs before the step's other calls instead of in model order.
+  The over-limit refusal text changed (it names the limit). No option to
+  restore one-at-a-time subtasks. New
+  `agent.Options.SubtaskLimit` (default 4, at most 8) bounds how many run at
+  once across the agent, leads' children included; one over the limit is
+  refused with a clear message, never queued. New
+  `agent.Options.TurnTokenBudget` is a token ceiling a root turn shares with
+  its foreground subtasks at any depth; reaching it ends the turn or child
+  with `limit` (`token_budget`). Background subtasks keep only their
+  variant's budget. Neither setting is in `host.yaml` yet (it needs an
+  `agentdir` key and a libs tag). A cost budget is not enforced: usage
+  carries no price yet.
+
 - New `subtask` tool, `subtask({goal, return_spec, variant, inputs?,
   context?, background?})`. `variant` is required; the model chooses and
   there is no default.

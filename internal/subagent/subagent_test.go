@@ -1,9 +1,12 @@
 package subagent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMaximumFourChildren(t *testing.T) {
-	limit := NewLimit()
+	limit := NewLimit(0)
 	var releases []func()
 	for range 4 {
 		release, err := limit.Acquire()
@@ -12,8 +15,12 @@ func TestMaximumFourChildren(t *testing.T) {
 		}
 		releases = append(releases, release)
 	}
-	if _, err := limit.Acquire(); err == nil {
+	_, err := limit.Acquire()
+	if err == nil {
 		t.Fatal("allowed a fifth child")
+	}
+	if !strings.Contains(err.Error(), "4 subtasks are already running") || !strings.Contains(err.Error(), "did not start") {
+		t.Fatalf("unclear refusal: %v", err)
 	}
 	releases[0]()
 	releases[0]()
@@ -27,5 +34,13 @@ func TestMaximumFourChildren(t *testing.T) {
 	}
 	for _, release := range releases[1:] {
 		release()
+	}
+}
+
+func TestLimitIsConfigurableUpToEight(t *testing.T) {
+	for _, tc := range []struct{ set, want int }{{0, 4}, {-1, 4}, {2, 2}, {8, 8}, {20, 8}} {
+		if got := cap(NewLimit(tc.set)); got != tc.want {
+			t.Errorf("NewLimit(%d) holds %d, want %d", tc.set, got, tc.want)
+		}
 	}
 }

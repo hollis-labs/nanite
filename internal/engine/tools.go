@@ -244,7 +244,11 @@ func (x *execution) callTools(ctx context.Context, calls []llmtypes.ToolUseBlock
 		// A ready call stays "cancelled" until it runs, and "panic" while it
 		// runs, so a call that never finishes is not recorded as a success.
 		traced[i].ErrorKind = trace.ErrorCancelled
-		jobs[i] = tooluse.Job{Ready: true, Concurrent: t.ReadOnly}
+		// Read-only tools run side by side, and so does subtask: it is not
+		// read-only (its child may write), but each child runs in its own
+		// conversation, its approvals reach the owner one at a time, and the
+		// agent-wide subtask limit bounds how many run.
+		jobs[i] = tooluse.Job{Ready: true, Concurrent: t.ReadOnly || t.Name == subagent.ToolName}
 	}
 	tooluse.Batch(ctx, jobs, x.definition.Runtime.ToolConcurrency, func(i int, _ bool) {
 		call := calls[i]

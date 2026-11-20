@@ -291,9 +291,32 @@ Subtasks run one level deep. A variant with `can_spawn: true` (a "lead") may
 start subtasks one more level down; nothing deeper. A lead's children get a
 tool only when both the lead and their own variant allow it, so a lead cannot
 hand its children a tool it lacks, and `read_only` cannot be combined with
-`can_spawn`. A lead with an allow list must list `subtask` itself. Up to four
-children run per agent. Cancelling a parent turn cancels its foreground
-child.
+`can_spawn`. A lead with an allow list must list `subtask` itself.
+
+Several `subtask` calls in one assistant step run side by side, as read-only
+tools do (bounded by `runtime.tool_concurrency`, default 4). `subtask` is not
+marked read-only: its child may write, but each child runs in its own
+conversation and its approvals reach the owner one at a time. As with
+read-only tools, calls that run side by side run before the step's other
+calls; results come back in call order. At most `Options.SubtaskLimit`
+subtasks (default 4, at most 8) run at once across the whole agent: every
+conversation, background subtasks and a lead's own children count against
+the same limit. A subtask over the limit does not start; the model is told
+how many are running and to wait or start fewer. It never waits for a slot,
+because a lead holds its own slot while it starts children, and waiting
+could deadlock a council of leads.
+
+`Options.TurnTokenBudget`, when set, is a token ceiling one root turn shares
+with every foreground subtask it starts, at any depth. Each turn adds its
+own model usage (cached tokens included) as it arrives, so a child's tokens
+count once. A turn or child that reaches it ends with status `limit` and
+reason `token_budget`, checked between steps, and a new foreground subtask
+on a spent budget does not start. Background subtasks outlive the turn and
+draw only on their variant's own budget. A cost (USD) budget is not
+enforced yet: usage carries no price.
+
+Cancelling a parent turn cancels every foreground child it started, and
+their slots are released.
 
 Only a root chat starts background subtasks, and only when it is also offered
 `background_status`; otherwise the `background` field is not in the tool's

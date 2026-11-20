@@ -81,6 +81,9 @@ type execution struct {
 	lineage []string
 	// deadline is the child's wall-clock budget, checked between steps.
 	deadline time.Time
+	// shared is the root turn's token budget, shared with its foreground
+	// subtasks at every depth; nil when the agent sets none.
+	shared *turnBudget
 	// usageMu guards result.Usage, which subtask handlers add child usage to.
 	usageMu sync.Mutex
 	// returned is set once this child has called return_result; the turn
@@ -290,6 +293,7 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	if variant.Budgets.Wall > 0 {
 		x.deadline = time.Now().Add(variant.Budgets.Wall)
 	}
+	x.shared = sharedBudget(ctx, depth, e.cfg.TurnTokenBudget)
 	tr.x = x
 	tr.rec.Slots, tr.rec.Trimmed = traceSlots(assembled, e.scrub.Text)
 	if err := x.prepareTools(hostTools, mcpTools, catalog); err != nil {
@@ -775,6 +779,7 @@ func (x *execution) consume(ctx context.Context, stream <-chan llmtypes.StreamEv
 			x.result.Usage.CacheReadTokens += u.CacheReadTokens
 			x.result.Usage.CacheWriteTokens += u.CacheCreationTokens
 			x.usageMu.Unlock()
+			x.shared.add(u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens)
 			if u.StopReason != "" {
 				x.result.StopReason = u.StopReason
 			}
@@ -798,7 +803,8 @@ func appendStepText(all *strings.Builder, text string) {
 }
 
 // budgetStop is the stop reason when a child has spent its variant's token
-// or wall-clock budget, checked between steps; "" while within budget.
+// or wall-clock budget, or any turn has spent the token budget its root turn
+// shares with its subtasks, checked between steps; "" while within budget.
 func (x *execution) budgetStop() string {
 	if limit := x.variant.Budgets.Tokens; limit > 0 {
 		// Every token counts, cached ones included, and a lead's spend
@@ -810,6 +816,9 @@ func (x *execution) budgetStop() string {
 		if spent >= limit {
 			return events.StopTokenBudget
 		}
+	}
+	if x.shared.spent() {
+		return events.StopTokenBudget
 	}
 	if !x.deadline.IsZero() && !time.Now().Before(x.deadline) {
 		return events.StopWallBudget

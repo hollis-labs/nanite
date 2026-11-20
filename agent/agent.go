@@ -25,6 +25,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/slots"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/subagent"
 )
 
 var (
@@ -101,6 +102,17 @@ type Options struct {
 	// full (about 5,900 tokens). A larger result is stored for 30 days and
 	// the parent gets a pointer it can read with fetch_tool_result.
 	SubtaskResultCap int
+	// SubtaskLimit is how many subtasks may run at once across the agent,
+	// counting every conversation, background subtasks and a lead's own
+	// children. Zero means 4; at most 8. A subtask over the limit does not
+	// start and the model is told why.
+	SubtaskLimit int
+	// TurnTokenBudget, when positive, caps the tokens one turn may spend,
+	// shared with every foreground subtask it starts at any depth, cached
+	// tokens included. The turn, or a child, that reaches it ends with a
+	// token limit. Background subtasks have only their variant's budget.
+	// Zero is no shared budget.
+	TurnTokenBudget int
 }
 
 // TraceRecord is one turn's trace record. Its schema is documented in
@@ -159,6 +171,12 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	if opts.SubtaskResultCap < 0 {
 		return nil, fmt.Errorf("nanite: SubtaskResultCap must not be negative")
+	}
+	if opts.SubtaskLimit < 0 || opts.SubtaskLimit > subagent.MaxLimit {
+		return nil, fmt.Errorf("nanite: SubtaskLimit must be between 0 and %d", subagent.MaxLimit)
+	}
+	if opts.TurnTokenBudget < 0 {
+		return nil, fmt.Errorf("nanite: TurnTokenBudget must not be negative")
 	}
 	def, err := agentdir.Load(opts.Dir)
 	if err != nil {
@@ -228,7 +246,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,
-		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: opts.SubtaskResultCap,
+		TraceSink: opts.TraceSink, TraceDir: traceDir, SubtaskResultCap: opts.SubtaskResultCap, SubtaskLimit: opts.SubtaskLimit, TurnTokenBudget: opts.TurnTokenBudget,
 	})
 	if err != nil {
 		_ = db.Close()

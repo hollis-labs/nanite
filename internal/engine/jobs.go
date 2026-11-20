@@ -84,6 +84,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	if seed != "" {
 		message += "\n\n" + seed
 	}
+	if !request.Background && x.shared.spent() {
+		return tools.Result{}, fmt.Errorf("this turn has spent its shared token budget; the subtask did not start")
+	}
 	e := x.engine
 	release, err := e.children.Acquire()
 	if err != nil {
@@ -120,7 +123,9 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 		}{child.ID, variant.Name, request.Goal, request.ReturnSpec, request.Context})
 		job, err := e.jobs.Start(ctx, store.Job{ID: child.ID, ConversationID: x.info.ID, Kind: subtaskJobKind, Spec: string(spec)},
 			func(jobCtx context.Context, _ io.Writer) (background.Task, error) {
-				runCtx, stopWall := wallContext(jobCtx, variant)
+				// A background subtask outlives the turn, so it has only its
+				// variant's budget, never the turn's shared one.
+				runCtx, stopWall := wallContext(withBudget(jobCtx, nil), variant)
 				run, err := start(runCtx)
 				if err != nil {
 					stopWall()
@@ -162,7 +167,8 @@ func (x *execution) subtask(ctx context.Context, request subagent.Request) (tool
 	defer release()
 	defer e.closeSubtask(child.ID)
 	defer forget()
-	runCtx, stopWall := wallContext(ctx, variant)
+	// A foreground child spends from the turn's shared budget.
+	runCtx, stopWall := wallContext(withBudget(ctx, x.shared), variant)
 	defer stopWall()
 	run, err := start(runCtx)
 	if err != nil {

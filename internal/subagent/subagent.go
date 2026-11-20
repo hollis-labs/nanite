@@ -205,14 +205,37 @@ func ResultCapBytes(variant Variant, agent int) int {
 	return tokens * BytesPerToken
 }
 
+// DefaultLimit is how many subtasks may run at once on one agent when the
+// host sets no limit; MaxLimit is the most a host may set.
+const (
+	DefaultLimit = 4
+	MaxLimit     = 8
+)
+
+// Limit bounds how many subtasks run at once across the whole agent: every
+// conversation, background subtasks and a lead's own children included.
 type Limit chan struct{}
 
-func NewLimit() Limit { return make(Limit, 4) }
+// NewLimit returns a limit of n subtasks at once; n <= 0 is DefaultLimit and
+// n above MaxLimit is MaxLimit.
+func NewLimit(n int) Limit {
+	switch {
+	case n <= 0:
+		n = DefaultLimit
+	case n > MaxLimit:
+		n = MaxLimit
+	}
+	return make(Limit, n)
+}
+
+// Acquire takes a slot or refuses at once. It never waits: a lead holds its
+// own slot while it starts children, so waiting for a slot could deadlock a
+// council of leads.
 func (l Limit) Acquire() (func(), error) {
 	select {
 	case l <- struct{}{}:
 		return sync.OnceFunc(func() { <-l }), nil
 	default:
-		return nil, fmt.Errorf("four subtasks are already running")
+		return nil, fmt.Errorf("%d subtasks are already running, the most this agent runs at once; this subtask did not start. Wait for one to finish, or start fewer at a time", cap(l))
 	}
 }

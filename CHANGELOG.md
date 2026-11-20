@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Auth decisions normalize case and whitespace, accepting `approved`, `denied`,
+  `expired` or `withdrawn`, with `granted` as an approval alias. Unknown poll
+  statuses keep watching. Warden waiters and pending request IDs persist in
+  engine-owned state across restarts; successful retries suppress later notices.
+  Waiters expire after 24 hours. Bad saved state warns and starts empty. A cached token
+  never waits for another audience's mint, and an empty or unknown decision
+  status leaves a pending request in place.
 - `Agent.EnsureConversation(ctx, id, options...)` opens a conversation by ID,
   creating it on first use; concurrent first uses on one Agent create it once.
   chatrunner uses it, so a turn start racing a host event (`SteerEvent`,
@@ -47,12 +54,6 @@ Also in this release:
 - Front-desk completion notices wait for dispatched jobs to be registered,
   so fast jobs cannot leave accepted plans waiting forever. Concurrent pumps
   and explicit flushes publish each chat’s releases in order.
-
-- Auth decisions normalize case and whitespace, accepting `approved`, `denied`,
-  `expired` or `withdrawn`, with `granted` as an approval alias. Unknown poll
-  statuses keep watching. Warden waiters and pending request IDs persist in
-  engine-owned state across restarts; successful retries suppress later notices.
-  Waiters expire after 24 hours. Bad saved state warns and starts empty.
 
 - Compaction protects both host context slots and checks the threshold before
   a root turn’s first model request, including text-only conversations.

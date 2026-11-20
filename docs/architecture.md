@@ -171,9 +171,10 @@ is refused before a child starts. Tool input schemas from the host and MCP
 servers are not held to this subset. Validation of every schema, from any
 source, is bounded at run time: Nanite uses a vendored jsonschema-go
 (`internal/third_party/jsonschema`) whose `Validate` takes a context and a
-work budget (200,000 units of schema-value visits, comparisons and
-regular-expression matching), bounds the error text it builds, and refuses
-a pattern compiling to more than 20,000 instructions. Cheap static checks
+work budget: 200,000 units, charged in proportion to the work each keyword
+does, with the context checked every 64 units and a 2-second cutoff. It
+bounds the error text it builds while keeping the failing leaf's path, and
+refuses a pattern compiling to more than 20,000 instructions. Cheap static checks
 made once per schema refuse what could never validate well: a cycle among
 the in-place keywords above, more than 64 of them in a row on one value,
 more than 10,000 such runs from one schema, patterns compiling to more than

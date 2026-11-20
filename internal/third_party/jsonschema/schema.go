@@ -2,7 +2,6 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-//nolint:all // Vendored upstream code, kept as upstream wrote it; see README.md.
 package jsonschema
 
 import (

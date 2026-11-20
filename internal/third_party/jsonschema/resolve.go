@@ -5,7 +5,6 @@
 // This file deals with preparing a schema for validation, including various checks,
 // optimizations, and the resolution of cross-schema references.
 
-//nolint:all // Vendored upstream code, kept as upstream wrote it; see README.md.
 package jsonschema
 
 import (

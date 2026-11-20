@@ -192,8 +192,14 @@ linters:
         linters:
           - all
 
+      # Vendored third-party code is kept byte-identical to upstream, so it
+      # is not linted here. A local patch beside it, in files named budget*,
+      # is: the pattern matches every Go file under third_party/ whose name
+      # does not start with "budget" (Go regexps have no lookahead).
+      - path: (^|/)third_party/(.+/)?([^b/]|b[^u]|bu[^d]|bud[^g]|budg[^e]|budge[^t])[^/]*\.go$
+        text: .*
+
     paths:
-      - third_party$
       - builtin$
       - examples$
 

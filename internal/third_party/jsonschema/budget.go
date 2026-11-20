@@ -13,8 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
+	"reflect"
 	"regexp"
 	"regexp/syntax"
+	"strconv"
+	"strings"
 )
 
 // Budget bounds the work of one Validate call.
@@ -39,8 +43,10 @@ const (
 	MaxRegexpInsts = 20_000
 	// maxShownValue bounds how much of one value an error message shows.
 	maxShownValue = 256
-	// ctxEvery is how many visits pass between context checks.
-	ctxEvery = 1024
+	// ctxEvery is how many units pass between context checks. Every unit is
+	// bounded work (a node, or 64 bytes of a string), so this is well under a
+	// millisecond.
+	ctxEvery = 64
 )
 
 // ErrBudget is returned (wrapped) when validation exceeds its Budget.
@@ -59,6 +65,7 @@ func (st *state) init(ctx context.Context, b Budget) {
 	if st.errBytesLeft <= 0 {
 		st.errBytesLeft = DefaultErrorBytes
 	}
+	st.sinceCtx = ctxEvery // the first charge checks the context
 }
 
 // charge spends n units of the budget. Once the budget is spent, or the
@@ -88,14 +95,15 @@ func (st *state) charge(n int) error {
 }
 
 // errorf is fmt.Errorf with every argument shown in at most maxShownValue
-// bytes, and nothing built once the error text budget is spent.
+// bytes. Once the error text budget is spent, it builds nothing.
 func (st *state) errorf(format string, args ...any) error {
 	if st.abort != nil {
 		return st.abort
 	}
-	if st.ctx != nil && st.errBytesLeft <= 0 {
+	if st.textSpent() {
 		return errOmitted
 	}
+	format = typeVerbs(format, args)
 	for i, a := range args {
 		if _, isErr := a.(error); !isErr {
 			args[i] = bounded{a}
@@ -106,8 +114,10 @@ func (st *state) errorf(format string, args ...any) error {
 	return err
 }
 
-// wrap prefixes *errp with the schema it came from, as upstream's wrapf did,
-// unless the error text budget is spent or validation was aborted.
+// wrap prefixes *errp with the schema it came from, as upstream's wrapf did.
+// The prefix is kept apart from the inner error and joined only when Error
+// is called, so wrapping is charged (and allocates) only the bytes it adds.
+// Once the error text budget is spent, the inner error is kept as it is.
 func (st *state) wrap(errp *error, schema *Schema) {
 	if *errp == nil {
 		return
@@ -116,13 +126,24 @@ func (st *state) wrap(errp *error, schema *Schema) {
 		*errp = st.abort
 		return
 	}
-	if st.ctx != nil && st.errBytesLeft <= 0 {
-		*errp = errOmitted
+	if st.textSpent() || *errp == errOmitted { //nolint:errorlint // the sentinel itself, never wrapped
 		return
 	}
-	*errp = fmt.Errorf("validating %s: %w", st.rs.schemaString(schema), *errp)
-	st.spendText(len((*errp).Error()))
+	prefix := "validating " + st.rs.schemaString(schema)
+	*errp = &wrappedError{prefix: prefix, err: *errp}
+	st.spendText(len(prefix) + 2)
 }
+
+// wrappedError is "prefix: err", built when Error is called.
+type wrappedError struct {
+	prefix string
+	err    error
+}
+
+func (e *wrappedError) Error() string { return e.prefix + ": " + e.err.Error() }
+func (e *wrappedError) Unwrap() error { return e.err }
+
+func (st *state) textSpent() bool { return st.ctx != nil && (st.errBytesLeft <= 0 || st.quiet > 0) }
 
 func (st *state) spendText(n int) {
 	if st.ctx != nil {
@@ -130,14 +151,163 @@ func (st *state) spendText(n int) {
 	}
 }
 
-// joined is errors.Join that builds nothing once the error text budget is spent.
+// joined is errors.Join of the errors that still carry detail; the text is
+// built only when Error is called.
 func (st *state) joined(errs []error) error {
-	if st.ctx != nil && st.errBytesLeft <= 0 {
+	kept := make([]error, 0, len(errs))
+	for _, err := range errs {
+		if err != errOmitted { //nolint:errorlint // the sentinel itself, never wrapped
+			kept = append(kept, err)
+		}
+	}
+	if len(kept) == 0 {
 		return errOmitted
 	}
-	err := errors.Join(errs...)
-	st.spendText(len(err.Error()))
-	return err
+	st.spendText(len(kept))
+	return errors.Join(kept...)
+}
+
+// equal is equalValue that charges the budget for each node it compares and
+// stops at the first difference.
+func (st *state) equal(x, y reflect.Value) (bool, error) {
+	if err := st.charge(1); err != nil {
+		return false, err
+	}
+	if !x.IsValid() || !y.IsValid() {
+		return x.IsValid() == y.IsValid(), nil
+	}
+	for x.Kind() == reflect.Interface && !x.IsNil() {
+		x = x.Elem()
+	}
+	for y.Kind() == reflect.Interface && !y.IsNil() {
+		y = y.Elem()
+	}
+	switch {
+	case x.Kind() == reflect.String && y.Kind() == reflect.String:
+		if err := st.charge(min(x.Len(), y.Len()) / 64); err != nil {
+			return false, err
+		}
+		return x.String() == y.String(), nil
+	case (x.Kind() == reflect.Slice || x.Kind() == reflect.Array) && x.Kind() == y.Kind():
+		if x.Len() != y.Len() {
+			return false, nil
+		}
+		for i := range x.Len() {
+			if ok, err := st.equal(x.Index(i), y.Index(i)); !ok || err != nil {
+				return false, err
+			}
+		}
+		return true, nil
+	case x.Kind() == reflect.Map && y.Kind() == reflect.Map:
+		if x.Len() != y.Len() || x.IsNil() != y.IsNil() {
+			return false, nil
+		}
+		for it := x.MapRange(); it.Next(); {
+			vy := y.MapIndex(it.Key())
+			if !vy.IsValid() {
+				return false, nil
+			}
+			if ok, err := st.equal(it.Value(), vy); !ok || err != nil {
+				return false, err
+			}
+		}
+		return true, nil
+	}
+	// Numbers, booleans, nil and the rest are compared as upstream does.
+	return equalValue(x, y), nil
+}
+
+// chargeSize charges the budget for walking v (one unit per node, and one
+// per 64 bytes of a string), stopping as soon as the budget is spent.
+func (st *state) chargeSize(v reflect.Value) error {
+	if err := st.charge(1); err != nil {
+		return err
+	}
+	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	switch v.Kind() { //nolint:exhaustive // only strings and containers cost more than a node
+	case reflect.String:
+		return st.charge(v.Len() / 64)
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			if err := st.chargeSize(v.Index(i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		for it := v.MapRange(); it.Next(); {
+			if err := st.chargeSize(it.Key()); err != nil {
+				return err
+			}
+			if err := st.chargeSize(it.Value()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// typeVerbs replaces each %T verb in format with the type name of the
+// argument it refers to (as text), because fmt prints %T itself and would
+// otherwise show the bounded wrapper's type. Only the plain forms are used
+// here: %T and %[n]T.
+func typeVerbs(format string, args []any) string {
+	if !strings.Contains(format, "T") {
+		return format
+	}
+	var b strings.Builder
+	next := 0 // the argument the next sequential verb uses
+	for i := 0; i < len(format); i++ {
+		c := format[i]
+		if c != '%' {
+			b.WriteByte(c)
+			continue
+		}
+		j := i + 1
+		if j < len(format) && format[j] == '%' {
+			b.WriteString("%%")
+			i = j
+			continue
+		}
+		arg := next
+		if j < len(format) && format[j] == '[' {
+			end := strings.IndexByte(format[j:], ']')
+			if end < 0 {
+				b.WriteString(format[i:])
+				return b.String()
+			}
+			n, err := strconv.Atoi(format[j+1 : j+end])
+			if err != nil {
+				b.WriteString(format[i:])
+				return b.String()
+			}
+			arg = n - 1
+			j += end + 1
+		}
+		// Flags, width and precision.
+		k := j
+		for k < len(format) && strings.IndexByte("+-# 0123456789.", format[k]) >= 0 {
+			k++
+		}
+		if k >= len(format) {
+			b.WriteString(format[i:])
+			return b.String()
+		}
+		if format[k] == 'T' && arg >= 0 && arg < len(args) {
+			b.WriteString(strings.ReplaceAll(fmt.Sprintf("%T", args[arg]), "%", "%%"))
+		} else {
+			// Index every other verb explicitly: a %T taken out no longer
+			// consumes its argument.
+			b.WriteString("%[" + strconv.Itoa(arg+1) + "]" + format[j:k+1])
+		}
+		next = arg + 1
+		i = k
+	}
+	return b.String()
 }
 
 // bounded formats its value as fmt would, but writes at most maxShownValue
@@ -212,4 +382,27 @@ func (rs *Resolved) RefTargets(s *Schema) (ref, dyn *Schema, anchor string) {
 		return nil, nil, ""
 	}
 	return info.resolvedRef, info.resolvedDynamicRef, info.dynamicRefAnchor
+}
+
+// smallerSide iterates the schema properties that the instance has, from
+// whichever side is smaller: the schema's properties, or a map instance's
+// keys. Visiting a schema property the instance lacks finds nothing, so the
+// result is the same either way.
+func smallerSide(props map[string]*Schema, instance reflect.Value) iter.Seq2[string, *Schema] {
+	return func(yield func(string, *Schema) bool) {
+		if instance.Kind() == reflect.Map && instance.Len() < len(props) && instance.Type().Key().Kind() == reflect.String {
+			for it := instance.MapRange(); it.Next(); {
+				prop := it.Key().String()
+				if sub, ok := props[prop]; ok && !yield(prop, sub) {
+					return
+				}
+			}
+			return
+		}
+		for prop, sub := range props {
+			if !yield(prop, sub) {
+				return
+			}
+		}
+	}
 }

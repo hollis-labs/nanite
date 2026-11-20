@@ -112,5 +112,4 @@ the behavior from versions prior to v0.3.0. The default behavior is to include
 [this table of differences]: https://github.com/dlclark/regexp2?tab=readme-ov-file#compare-regexp-and-regexp2
 [annotations]: https://json-schema.org/draft/2020-12/json-schema-core#name-annotations
 */
-//nolint:all // Vendored upstream code, kept as upstream wrote it; see README.md.
 package jsonschema

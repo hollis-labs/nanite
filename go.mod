@@ -3,6 +3,7 @@ module github.com/hollis-labs/nanite
 go 1.26.11
 
 require (
+	github.com/google/go-cmp v0.7.0
 	github.com/hollis-labs/libs/agent/agentdir v0.2.0
 	github.com/hollis-labs/libs/agent/chat v0.1.0
 	github.com/hollis-labs/libs/agent/trace v0.2.0

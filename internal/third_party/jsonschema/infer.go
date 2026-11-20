@@ -4,7 +4,6 @@
 
 // This file contains functions that infer a schema from a Go type.
 
-//nolint:all // Vendored upstream code, kept as upstream wrote it; see README.md.
 package jsonschema
 
 import (

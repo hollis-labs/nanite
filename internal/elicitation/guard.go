@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/third_party/jsonschema"
 )
@@ -40,6 +41,9 @@ const (
 	// MaxValueDepth bounds how deeply a value (tool input, a returned result,
 	// an answer) nests before it is validated.
 	MaxValueDepth = 64
+	// MaxValidationTime bounds the wall time of one Validate call, on top of
+	// its work budget.
+	MaxValidationTime = 2 * time.Second
 	// MaxValidationError bounds the validation error text passed on.
 	MaxValidationError = 4 << 10
 	// MaxSchemaRegexpInsts bounds the compiled size of all of a schema's
@@ -70,17 +74,34 @@ func Validate(ctx context.Context, schema *jsonschema.Resolved, value any) error
 	if depth(value, 0) > MaxValueDepth {
 		return fmt.Errorf("%w: more than %d levels", ErrValueTooDeep, MaxValueDepth)
 	}
+	ctx, cancel := context.WithTimeout(ctx, MaxValidationTime)
+	defer cancel()
 	err := schema.Validate(ctx, value, ValidationBudget)
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, jsonschema.ErrBudget) {
+	if errors.Is(err, jsonschema.ErrBudget) || ctx.Err() != nil {
 		return err
 	}
 	if text := err.Error(); len(text) > MaxValidationError {
-		return errors.New(cut(text, MaxValidationError) + " … (truncated)")
+		// The innermost failure (the leaf path and what was wrong) is at the
+		// end, so keep the start and the end.
+		head := cut(text, MaxValidationError/4)
+		return errors.New(head + " … " + tailCut(text, MaxValidationError-len(head)-5))
 	}
 	return err
+}
+
+// tailCut is the last at most limit bytes of text, starting on a rune.
+func tailCut(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	start := len(text) - limit
+	for start < len(text) && text[start]&0xC0 == 0x80 {
+		start++
+	}
+	return text[start:]
 }
 
 // depth is how deeply a JSON value nests, stopping once past the limit so a
@@ -173,10 +194,10 @@ func jsonNesting(raw []byte) int {
 }
 
 // resolveCache keeps resolved schemas by content, least recently used first
-// out, so a tool's schema is resolved once rather than on every turn. Its
-// size is estimated from the schema text (resolveCost bytes held per byte)
-// and bounded by resolveCacheBytes. A Resolved is read-only and safe to
-// share between goroutines.
+// out, so a tool's schema is resolved once rather than on every turn. An
+// entry's size is estimated from its schema text and bounded in total by
+// resolveCacheBytes. A Resolved is read-only and safe to share between
+// goroutines.
 var resolveCache = struct {
 	sync.Mutex
 	order   *list.List // of *resolvedEntry, most recent first
@@ -193,8 +214,22 @@ type resolvedEntry struct {
 
 const (
 	resolveCacheBytes = 64 << 20
-	resolveCost       = 16
+	// A resolved schema holds up to about 45 bytes per byte of schema text (the
+	// parsed tree, per-schema resolution data and compiled patterns), plus a
+	// few KB, measured on webhook-union, inheritance-chain, Kubernetes-style
+	// and small schemas; TestCacheCostEstimate checks it. A refused schema
+	// holds only its error.
+	resolveFixedCost   = 4 << 10
+	resolveCostPerByte = 52
+	refusedCost        = 512
 )
+
+func entryCost(raw []byte, schema *jsonschema.Resolved) int {
+	if schema == nil {
+		return refusedCost
+	}
+	return resolveFixedCost + resolveCostPerByte*len(raw)
+}
 
 func cachedResolve(raw []byte, resolve func() (*jsonschema.Resolved, error)) (*jsonschema.Resolved, error) {
 	key := sha256.Sum256(raw)
@@ -207,7 +242,7 @@ func cachedResolve(raw []byte, resolve func() (*jsonschema.Resolved, error)) (*j
 	}
 	resolveCache.Unlock()
 	schema, err := resolve()
-	entry := &resolvedEntry{key: key, schema: schema, err: err, cost: 256 + len(raw)*resolveCost}
+	entry := &resolvedEntry{key: key, schema: schema, err: err, cost: entryCost(raw, schema)}
 	if entry.cost > resolveCacheBytes {
 		return schema, err
 	}

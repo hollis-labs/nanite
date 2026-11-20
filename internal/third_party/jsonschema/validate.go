@@ -2,7 +2,6 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-//nolint:all // Vendored upstream code, kept as upstream wrote it; see README.md.
 package jsonschema
 
 import (
@@ -97,6 +96,7 @@ type state struct {
 	sinceCtx     int
 	errBytesLeft int
 	abort        error
+	quiet        int // > 0 while a failure's text would be discarded
 }
 
 // validate validates the reflected value of the instance.
@@ -158,10 +158,11 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 	if schema.Enum != nil {
 		ok := false
 		for _, e := range schema.Enum {
-			if err := st.charge(1); err != nil { // Nanite patch
+			eq, err := st.equal(reflect.ValueOf(e), instance) // Nanite patch: was equalValue
+			if err != nil {
 				return err
 			}
-			if equalValue(reflect.ValueOf(e), instance) {
+			if eq {
 				ok = true
 				break
 			}
@@ -173,7 +174,11 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 
 	// const: https://json-schema.org/draft/2020-12/draft-bhutton-json-schema-validation-01#section-6.1.3
 	if schema.Const != nil {
-		if !equalValue(reflect.ValueOf(*schema.Const), instance) {
+		eq, err := st.equal(reflect.ValueOf(*schema.Const), instance) // Nanite patch: was equalValue
+		if err != nil {
+			return err
+		}
+		if !eq {
 			return st.errorf("const: %v does not equal %v", instance, *schema.Const)
 		}
 	}
@@ -212,6 +217,9 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 	// strings: https://json-schema.org/draft/2020-12/draft-bhutton-json-schema-validation-01#section-6.3
 	if instance.Kind() == reflect.String && (schema.MinLength != nil || schema.MaxLength != nil || schema.Pattern != "") {
 		str := instance.String()
+		if err := st.charge(len(str) / 64); err != nil { // Nanite patch
+			return err
+		}
 		n := utf8.RuneCountInString(str)
 		if schema.MinLength != nil {
 			if m := *schema.MinLength; n < m {
@@ -282,7 +290,13 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 	// If any of these fail, then validation fails, even if there is an unevaluatedXXX
 	// keyword in the schema. The spec is unclear about this, but that is the intention.
 
-	valid := func(s *Schema, anns *annotations) bool { return st.validate(instance, s, anns) == nil }
+	// Nanite patch: these results are only tested, never shown, so build no
+	// error text for them.
+	valid := func(s *Schema, anns *annotations) bool {
+		st.quiet++
+		defer func() { st.quiet-- }()
+		return st.validate(instance, s, anns) == nil
+	}
 
 	if schema.AllOf != nil {
 		for _, ss := range schema.AllOf {
@@ -293,6 +307,7 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 	}
 	if schema.AnyOf != nil {
 		// We must visit them all, to collect annotations.
+		textLeft := st.errBytesLeft // Nanite patch
 		var errs []error
 		for _, ss := range schema.AnyOf {
 			if err := st.validate(instance, ss, &anns); err != nil {
@@ -303,6 +318,7 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 			return st.errorf("anyOf: did not validate against any of %v:\n%v",
 				schema.AnyOf, st.joined(errs)) // Nanite patch: was errors.Join
 		}
+		st.errBytesLeft = textLeft // Nanite patch: the failed branches' text is discarded
 	}
 	if schema.OneOf != nil {
 		// Exactly one.
@@ -400,7 +416,10 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 		nContains := 0
 		if schema.Contains != nil {
 			for i := range instance.Len() {
-				if err := st.validate(instance.Index(i), schema.Contains, nil); err == nil {
+				st.quiet++ // Nanite patch: an item's failure here is only counted
+				err := st.validate(instance.Index(i), schema.Contains, nil)
+				st.quiet--
+				if err == nil {
 					nContains++
 					anns.noteIndex(i)
 				}
@@ -442,17 +461,21 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 				hashes := map[uint64][]int{} // from hash to indices
 				seed := maphash.MakeSeed()
 				for i := range instance.Len() {
-					if err := st.charge(1); err != nil { // Nanite patch
+					item := instance.Index(i)
+					if err := st.chargeSize(item); err != nil { // Nanite patch
 						return err
 					}
-					item := instance.Index(i)
 					var h maphash.Hash
 					h.SetSeed(seed)
 					hashValue(&h, item)
 					hv := h.Sum64()
 					if sames := hashes[hv]; len(sames) > 0 {
 						for _, j := range sames {
-							if equalValue(item, instance.Index(j)) {
+							eq, err := st.equal(item, instance.Index(j)) // Nanite patch: was equalValue
+							if err != nil {
+								return err
+							}
+							if eq {
 								return st.errorf("uniqueItems: array items %d and %d are equal", i, j)
 							}
 						}
@@ -491,7 +514,12 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 		// If we used anns here, then we'd be including properties evaluated in subschemas
 		// from allOf, etc., which additionalProperties shouldn't observe.
 		evalProps := map[string]bool{}
-		for prop, subschema := range schema.Properties {
+		// Nanite patch: visit the smaller side, the schema's properties or the
+		// instance's keys, and charge for it.
+		if err := st.charge(min(len(schema.Properties), instance.Len())); err != nil {
+			return err
+		}
+		for prop, subschema := range smallerSide(schema.Properties, instance) {
 			val := property(instance, prop)
 			if !val.IsValid() {
 				// It's OK if the instance doesn't have the property.
@@ -536,6 +564,9 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 			//
 			// Note: this is much faster than comparing with falseSchema using Equal.
 			isFalsy := schema.AdditionalProperties.Not != nil && reflect.ValueOf(*schema.AdditionalProperties.Not).IsZero()
+			if err := st.charge(instance.Len()); err != nil { // Nanite patch
+				return err
+			}
 			if isFalsy {
 				var disallowed []string
 				for prop := range properties(instance) {
@@ -590,6 +621,7 @@ func (st *state) validate(instance reflect.Value, schema *Schema, callerAnns *an
 		}
 
 		missingProperties := func(props []string) []string {
+			_ = st.charge(len(props)) // Nanite patch: an abort is returned after validate unwinds
 			var missing []string
 			for _, p := range props {
 				if !hasProperty(p) {

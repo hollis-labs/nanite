@@ -52,6 +52,9 @@ func repeat(n int, item string) string {
 
 var harmless = []string{"refused", "budget", "too deep"}
 
+// harmless2 also accepts an ordinary verdict: these cases are about time.
+var harmless2 = []string{"refused", "budget", "too deep", "valid", "invalid"}
+
 func reproCases() map[string]reproCase {
 	ref := func(i int) string { return fmt.Sprintf(`{"$ref":"#/$defs/a%d"}`, i) }
 	dag := func(kw string, width, levels int) string {
@@ -126,6 +129,40 @@ func reproCases() map[string]reproCase {
 		// Regular expressions.
 		"regex anyOf 30": {`{"type":"object","properties":{"text":{"anyOf":[` + strings.Join(rxAnyOf, ",") + `]}}}`, `{"text":"` + strings.Repeat("a", 100000) + `"}`, harmless},
 		"regex many":     {`{"type":"object","patternProperties":{` + strings.Join(rxMany, ",") + `}}`, `{` + strings.Join(rxKeys, ",") + `}`, harmless},
+	}
+	// Proportional charging (cases3 in review): each of these made one
+	// budget unit stand for unbounded work.
+	zeros := func(n int, last string) string {
+		return "[" + strings.TrimSuffix(strings.Repeat("0,", n-1), ",") + "," + last + "]"
+	}
+	props := make([]string, 22000)
+	for i := range props {
+		props[i] = fmt.Sprintf(`"p%d":{}`, i)
+	}
+	required := make([]string, 29000)
+	for i := range required {
+		required[i] = fmt.Sprintf(`"r%d"`, i)
+	}
+	keys := make([]string, 60000)
+	for i := range keys {
+		keys[i] = fmt.Sprintf(`"k%d":0`, i)
+	}
+	anyOfRefs := func(n int, def, body string) string {
+		return `{"anyOf":[` + repeat(n, `{"$ref":"#/$defs/`+def+`"}`) + `],"$defs":{"` + def + `":` + body + `}}`
+	}
+	empties := "[" + repeat(100000, "{}") + "]"
+	for name, tc := range map[string]reproCase{
+		"A props x items":              {`{"type":"array","items":{"properties":{` + strings.Join(props, ",") + `}}}`, empties, harmless2},
+		"B required x items":           {`{"type":"array","items":{"anyOf":[{"required":[` + strings.Join(required, ",") + `]},{"required":["x"]}]}}`, "[" + repeat(66000, "{}") + "]", harmless2},
+		"C2 deep enum":                 {anyOfRefs(100, "E", `{"enum":[`+zeros(60000, "1")+`]}`), zeros(60000, "0"), harmless2},
+		"C2 deep enum, wide":           {anyOfRefs(4900, "E", `{"enum":[`+zeros(6000, "1")+`]}`), zeros(6000, "0"), harmless2},
+		"C3 deep const":                {anyOfRefs(100, "E", `{"const":{"a":`+zeros(60000, "1")+`}}`), `{"a":` + zeros(60000, "0") + `}`, harmless2},
+		"D uniqueItems, big items":     {anyOfRefs(4900, "U", `{"uniqueItems":true,"type":"integer"}`), "[" + zeros(30000, "0") + "," + zeros(30000, "0") + "]", harmless2},
+		"D3 uniqueItems":               {anyOfRefs(100, "U", `{"uniqueItems":true}`), "[" + zeros(60000, "0") + "," + zeros(60000, "0") + "]", harmless2},
+		"F additionalProperties false": {anyOfRefs(4900, "F", `{"additionalProperties":false}`), "{" + strings.Join(keys, ",") + "}", harmless2},
+		"I minLength":                  {anyOfRefs(4900, "L", `{"type":"string","minLength":1,"maxLength":2}`), `"` + strings.Repeat("é", 125000) + `"`, harmless2},
+	} {
+		cases[name] = tc
 	}
 	for name, tc := range realCases() {
 		cases[name] = tc
@@ -205,8 +242,8 @@ func runCase(schema, value []byte) {
 		switch err := Validate(context.Background(), resolved, v); {
 		case errors.Is(err, ErrValueTooDeep):
 			outcome = "too deep"
-		case errors.Is(err, jsonschema.ErrBudget):
-			outcome = "budget"
+		case errors.Is(err, jsonschema.ErrBudget), errors.Is(err, context.DeadlineExceeded):
+			outcome = "budget" // of work or of time
 		case err != nil:
 			outcome = "invalid"
 			if len(err.Error()) > MaxValidationError+64 {
@@ -287,14 +324,21 @@ func runChild(t *testing.T, env ...string) childResult {
 
 func checkChild(t *testing.T, r childResult, want []string) {
 	t.Helper()
+	wall, rss := caseWall, int64(caseRSS)
+	if raceEnabled {
+		// The race detector makes the same work several times slower and
+		// larger, and validation's own 2s cutoff may then decide the case.
+		wall, rss = 10*caseWall, 4*rss
+		want = append(want, "budget")
+	}
 	if !contains(want, r.outcome) {
 		t.Errorf("outcome %q, want one of %q", r.outcome, want)
 	}
-	if r.took > caseWall {
-		t.Errorf("took %s, limit %s", r.took, caseWall)
+	if r.took > wall {
+		t.Errorf("took %s, limit %s", r.took, wall)
 	}
-	if r.rss > caseRSS {
-		t.Errorf("peak RSS %d MB, limit %d MB", r.rss>>20, caseRSS>>20)
+	if r.rss > rss {
+		t.Errorf("peak RSS %d MB, limit %d MB", r.rss>>20, rss>>20)
 	}
 }
 
@@ -499,4 +543,156 @@ func TestResolveIsCached(t *testing.T) {
 	if resolveCache.bytes > resolveCacheBytes || resolveCache.order.Len() != len(resolveCache.entries) {
 		t.Fatalf("cache %d bytes, %d/%d entries", resolveCache.bytes, resolveCache.order.Len(), len(resolveCache.entries))
 	}
+}
+
+func TestErrorsNameTheLeaf(t *testing.T) {
+	nested := func(depth int) (string, string) {
+		schema, value := `{"type":"string"}`, `5`
+		for i := range depth {
+			schema = fmt.Sprintf(`{"type":"object","properties":{"field_%d":%s}}`, i, schema)
+			value = fmt.Sprintf(`{"field_%d":%s}`, i, value)
+		}
+		return schema, value
+	}
+	for _, depth := range []int{6, 10, 14, 40} {
+		schema, value := nested(depth)
+		resolved, err := Resolve(json.RawMessage(schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal([]byte(value), &v)
+		err = Validate(t.Context(), resolved, v)
+		if err == nil || !strings.Contains(err.Error(), "/properties/field_0: type: 5 has type \"integer\", want \"string\"") ||
+			len(err.Error()) > MaxValidationError {
+			t.Errorf("depth %d (%d bytes): %.300v", depth, len(err.Error()), err)
+		}
+	}
+	for name, tc := range realCases() {
+		if !contains(tc.want, "invalid") {
+			continue
+		}
+		resolved, err := Resolve(json.RawMessage(tc.schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal([]byte(tc.value), &v)
+		first := Validate(t.Context(), resolved, v)
+		if first == nil || strings.Contains(first.Error(), "further detail omitted") {
+			t.Errorf("%s: no useful message: %v", name, first)
+			continue
+		}
+		for range 10 {
+			if again := Validate(t.Context(), resolved, v); again.Error() != first.Error() {
+				t.Fatalf("%s: message varies:\n%v\n%v", name, first, again)
+			}
+		}
+		t.Logf("%s: %.200s", name, first)
+	}
+}
+
+func TestDeadlineStopsValidationPromptly(t *testing.T) {
+	saved := ValidationBudget
+	ValidationBudget.Visits = 1 << 40 // only the deadline stops it
+	defer func() { ValidationBudget = saved }()
+	resolved, err := Resolve(json.RawMessage(`{"allOf":[{"type":"array","items":{"$ref":"#"}},{"type":"array","items":{"$ref":"#"}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v any = []any{}
+	for range 40 {
+		v = []any{v}
+	}
+	const deadline = 300 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), deadline)
+	defer cancel()
+	start := time.Now()
+	err = Validate(ctx, resolved, v)
+	if took := time.Since(start); !errors.Is(err, context.DeadlineExceeded) || took > deadline+100*time.Millisecond {
+		t.Fatalf("took %s: %v", took, err)
+	}
+}
+
+// TestCacheCostEstimate checks, in a child process per schema so earlier
+// allocations do not skew the heap figures, that the cache's per-entry
+// estimate covers what a resolved schema really holds, and does not
+// overstate it by more than 3x.
+func TestCacheCostEstimate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns child processes")
+	}
+	for name := range costSchemas() {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCacheCostChild$", "-test.count=1") //nolint:gosec // re-runs this test binary
+			cmd.Env = append(os.Environ(), "NANITE_CACHE_COST="+name)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			var measured, estimate float64
+			if _, err := fmt.Sscanf(lastLine(string(out), "COST: "), "COST: %f %f", &measured, &estimate); err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			t.Logf("measured %.0f bytes, estimate %.0f", measured, estimate)
+			if estimate < measured || estimate > 3*measured {
+				t.Errorf("estimate %.0f for measured %.0f", estimate, measured)
+			}
+		})
+	}
+}
+
+func costSchemas() map[string]string {
+	out := map[string]string{"small": `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"integer"}},"required":["a"]}`}
+	for name, tc := range realCases() {
+		if strings.HasSuffix(name, ", valid") {
+			out[name] = tc.schema
+		}
+	}
+	return out
+}
+
+func lastLine(out, prefix string) string {
+	line := ""
+	for l := range strings.Lines(out) {
+		if strings.HasPrefix(l, prefix) {
+			line = strings.TrimSpace(l)
+		}
+	}
+	return line
+}
+
+func TestCacheCostChild(t *testing.T) {
+	name := os.Getenv("NANITE_CACHE_COST")
+	if name == "" {
+		t.Skip("run by TestCacheCostEstimate")
+	}
+	raw := costSchemas()[name]
+	const n = 20
+	keep := make([]*jsonschema.Resolved, n)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := range n {
+		// Distinct text each time, so the cache does not answer.
+		r, err := Resolve([]byte(raw + strings.Repeat(" ", i+1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		keep[i] = r
+	}
+	resolveCache.Lock()
+	clear(resolveCache.entries)
+	resolveCache.order.Init()
+	resolveCache.bytes = 0
+	resolveCache.Unlock()
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(keep)
+	measured := (float64(after.HeapAlloc) - float64(before.HeapAlloc)) / n
+	fmt.Printf("COST: %.0f %d\n", measured, entryCost([]byte(raw), keep[0]))
 }

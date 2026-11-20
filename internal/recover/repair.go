@@ -33,9 +33,11 @@ func (v Validator) Validate(ctx context.Context, input map[string]any) error {
 }
 
 // Classify identifies invalid arguments to a valid schema. Input refused for
-// nesting too deeply is not repairable: it is never sent back to a model.
+// nesting too deeply, or whose validation ran out of budget or time, is not
+// repairable: it is never sent back to a model.
 func (v Validator) Classify(err error) bool {
-	return v.schema != nil && err != nil && !errors.Is(err, elicitation.ErrValueTooDeep)
+	return v.schema != nil && err != nil && !errors.Is(err, elicitation.ErrValueTooDeep) &&
+		!errors.Is(err, jsonschema.ErrBudget) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 type outcome struct {

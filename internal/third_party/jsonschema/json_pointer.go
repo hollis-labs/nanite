@@ -18,7 +18,6 @@
 // the JSON Pointer "/points/1/x" refers to the number 3.
 // See the spec at https://datatracker.ietf.org/doc/html/rfc6901.
 
-//nolint:all // Vendored upstream code, kept as upstream wrote it; see README.md.
 package jsonschema
 
 import (

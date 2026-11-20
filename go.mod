@@ -4,7 +4,7 @@ go 1.26.11
 
 require (
 	github.com/google/go-cmp v0.7.0
-	github.com/hollis-labs/libs/agent/agentdir v0.3.0
+	github.com/hollis-labs/libs/agent/agentdir v0.3.1-0.20261120182002-fc6d5fff282c
 	github.com/hollis-labs/libs/agent/chat v0.1.0
 	github.com/hollis-labs/libs/agent/steer v0.1.0
 	github.com/hollis-labs/libs/agent/trace v0.2.0
@@ -46,7 +46,7 @@ require (
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
-	github.com/hollis-labs/libs/llm/core v0.4.0
+	github.com/hollis-labs/libs/llm/core v0.4.1-0.20261120182002-fc6d5fff282c
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/oklog/ulid/v2 v2.1.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect

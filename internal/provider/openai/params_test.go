@@ -129,3 +129,27 @@ func TestBuildChatParams_MaxTokensField(t *testing.T) {
 		}
 	}
 }
+
+func TestCacheTTLIgnored(t *testing.T) {
+	req := toolReq("gpt-4o")
+	before, err := buildChatParams(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.CacheHints = []llmtypes.CacheHint{{Position: "system", TTL: "1h"}, {Position: "tools", TTL: "1h"}}
+	after, err := buildChatParams(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := json.Marshal(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) != string(b) {
+		t.Fatalf("cache TTL changed OpenAI request: %s != %s", a, b)
+	}
+}

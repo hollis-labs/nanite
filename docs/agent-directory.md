@@ -56,6 +56,7 @@ runtime:
   model: claude-sonnet-5-5
   max_output_tokens: 4096
   max_steps: 50
+  cache_ttl: 1h
   context_window: 200000
   tool_concurrency: 4
   subtask_limit: 4
@@ -472,3 +473,12 @@ out of the turn with a warning.
 Keep this directory private and out of version control. Back up the transcripts
 to preserve conversation history. `nanite rebuild-index` replays transcript
 records into the index.
+
+### Prompt-cache lifetime
+
+Set `runtime.cache_ttl` to `1h` to retain Anthropic's system and tool prompt
+caches for one hour, or `5m` for five minutes. Empty keeps the provider default
+and omits TTL from the wire request. Other values fail validation. Recent
+message markers retain their provider default. TTL travels with each request;
+conversations sharing a provider do not change one another's hints. OpenAI
+ignores the hint.

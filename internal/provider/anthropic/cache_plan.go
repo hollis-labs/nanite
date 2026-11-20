@@ -15,10 +15,12 @@ const maxCacheControlMarkers = 4
 // and recent user messages. Slot markers only cover the unchanged prefix
 // formed by the universal and system slots.
 type cachePlan struct {
-	System         bool
-	Tools          bool
-	SlotMarkers    []string
-	RecentMessages int
+	System              bool
+	Tools               bool
+	SlotMarkers         []string
+	RecentMessages      int
+	SystemTTL, ToolsTTL string
+	RecentTTLs          map[int]string
 }
 
 var stablePrefixSlotPriority = []string{ctxpkg.SlotUniversal, ctxpkg.SlotSystem}
@@ -37,6 +39,21 @@ func planCacheMarkersWithHints(req llmtypes.ChatRequest, hints []llmcontracts.Ca
 		System:         hasCacheHintIn(hints, "system"),
 		Tools:          hasCacheHintIn(hints, "tools"),
 		RecentMessages: recentMessageCacheCountIn(hints),
+	}
+	for _, hint := range hints {
+		switch hint.Position {
+		case "system":
+			plan.SystemTTL = hint.TTL
+		case "tools":
+			plan.ToolsTTL = hint.TTL
+		case "recent_message":
+			if hint.TTL != "" {
+				if plan.RecentTTLs == nil {
+					plan.RecentTTLs = make(map[int]string)
+				}
+				plan.RecentTTLs[hint.Index] = hint.TTL
+			}
+		}
 	}
 	// Slot markers require the "system" hint to be active — the slot
 	// section is part of the system context; marking the slot boundary
@@ -130,4 +147,15 @@ func collectStablePrefixSlots(blocks []llmtypes.SlotBlock) []string {
 		markers = append(markers, s.Name)
 	}
 	return markers
+}
+
+// validateCacheTTLs fails before credentials or network access. The hints
+// are per request, so concurrently used clients do not share TTL state.
+func (c *Client) validateCacheTTLs(req llmtypes.ChatRequest) error {
+	for _, hint := range c.effectiveCacheHints(req) {
+		if err := hint.ValidateTTL(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

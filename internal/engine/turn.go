@@ -582,7 +582,7 @@ func (x *execution) generate(ctx context.Context) error {
 		}
 		req := llmtypes.ChatRequest{Model: x.definition.Runtime.Model, MaxTokens: x.definition.Runtime.MaxOutputTokens,
 			SlotBlocks: blocks, Messages: requestMessages(x.messages, x.messageIDs), Tools: x.specs, CacheHints: []llmtypes.CacheHint{
-				{Position: "system"}, {Position: "tools"}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
+				{Position: "system", TTL: x.definition.Runtime.CacheTTL}, {Position: "tools", TTL: x.definition.Runtime.CacheTTL}, {Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1},
 			}}
 		safeModel := x.engine.scrub.Text(req.Model)
 		spanCtx, endSpan := events.ModelSpan(ctx, safeModel)

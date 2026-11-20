@@ -12,6 +12,9 @@
   immediately before each process start, including reconnects. Environment
   filtering also refuses database URLs, PATs, DSNs and credential-bearing URLs
   unless explicitly allowed by the host.
+- Support `runtime.cache_ttl: 1h` (or `5m`) for system and tool cache markers.
+  Empty preserves provider defaults and existing request bytes. Anthropic
+  translates per-request TTL hints to `cache_control.ttl`; OpenAI ignores them.
 
 ## 0.7.0
 

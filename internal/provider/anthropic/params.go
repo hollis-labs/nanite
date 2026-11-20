@@ -37,7 +37,7 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 		}
 		block := sdk.TextBlockParam{Text: in.SystemPrompt}
 		if plan.System {
-			block.CacheControl = sdk.NewCacheControlEphemeralParam()
+			block.CacheControl = cacheControl(plan.SystemTTL)
 		}
 		return []sdk.TextBlockParam{block}
 	}
@@ -66,7 +66,7 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 		// the stable content lives in the slots. Caching a string that
 		// changes every turn buys no hit and invalidates the offset.
 		if plan.System && len(plan.SlotMarkers) == 0 {
-			block.CacheControl = sdk.NewCacheControlEphemeralParam()
+			block.CacheControl = cacheControl(plan.SystemTTL)
 		}
 		out = append(out, block)
 	}
@@ -76,7 +76,7 @@ func (c *Client) buildSystemBlocks(in llmtypes.ChatRequest, plan cachePlan) []sd
 		}
 		block := sdk.TextBlockParam{Text: s.Content}
 		if markedSlotNames[s.Name] {
-			block.CacheControl = sdk.NewCacheControlEphemeralParam()
+			block.CacheControl = cacheControl(plan.SystemTTL)
 		}
 		out = append(out, block)
 	}
@@ -109,7 +109,7 @@ func (c *Client) buildTools(tools []llmtypes.ToolDefinition, plan cachePlan) []s
 			toolParam.Strict = sdk.Bool(true)
 		}
 		if shouldCache && i == len(tools)-1 {
-			toolParam.CacheControl = sdk.NewCacheControlEphemeralParam()
+			toolParam.CacheControl = cacheControl(plan.ToolsTTL)
 		}
 		out[i] = sdk.ToolUnionParam{OfTool: &toolParam}
 	}
@@ -126,12 +126,12 @@ func (c *Client) buildMessages(messages []llmtypes.ChatMessage, plan cachePlan) 
 
 	// Identify the indices of the trailing user messages (last N user messages
 	// where N=cacheCount). Walk backwards counting user messages.
-	cacheableUserIdx := map[int]bool{}
+	cacheableUserIdx := map[int]int{}
 	if cacheCount > 0 {
 		seen := 0
 		for i := len(messages) - 1; i >= 0 && seen < cacheCount; i-- {
 			if messages[i].Role == "user" {
-				cacheableUserIdx[i] = true
+				cacheableUserIdx[i] = seen
 				seen++
 			}
 		}
@@ -150,8 +150,8 @@ func (c *Client) buildMessages(messages []llmtypes.ChatMessage, plan cachePlan) 
 			role = sdk.MessageParamRoleUser
 		}
 
-		applyCache := cacheableUserIdx[i]
-		blocks := contentBlocksFromMessage(m, applyCache)
+		recentIndex, applyCache := cacheableUserIdx[i]
+		blocks := contentBlocksFromMessage(m, applyCache, plan.RecentTTLs[recentIndex])
 		if len(blocks) == 0 {
 			// Anthropic requires every message to carry content and rejects
 			// the whole request otherwise — 400 "messages.N.content: Field
@@ -180,14 +180,14 @@ func (c *Client) buildMessages(messages []llmtypes.ChatMessage, plan cachePlan) 
 // on the last non-thinking block — Anthropic rejects cache_control on
 // thinking blocks. When the message has no ContentBlocks, falls back to a
 // single text block from m.Content.
-func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.ContentBlockParamUnion {
+func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool, ttl string) []sdk.ContentBlockParamUnion {
 	if len(m.ContentBlocks) == 0 {
 		if m.Content == "" {
 			return nil
 		}
 		text := sdk.TextBlockParam{Text: m.Content}
 		if applyCache {
-			text.CacheControl = sdk.NewCacheControlEphemeralParam()
+			text.CacheControl = cacheControl(ttl)
 		}
 		return []sdk.ContentBlockParamUnion{{OfText: &text}}
 	}
@@ -209,7 +209,7 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 		case "text":
 			text := sdk.TextBlockParam{Text: b.Text}
 			if applyCache && i == lastNonThinking {
-				text.CacheControl = sdk.NewCacheControlEphemeralParam()
+				text.CacheControl = cacheControl(ttl)
 			}
 			out = append(out, sdk.ContentBlockParamUnion{OfText: &text})
 		case "tool_use":
@@ -225,7 +225,7 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 				Input: input,
 			}
 			if applyCache && i == lastNonThinking {
-				tu.CacheControl = sdk.NewCacheControlEphemeralParam()
+				tu.CacheControl = cacheControl(ttl)
 			}
 			out = append(out, sdk.ContentBlockParamUnion{OfToolUse: &tu})
 		case "tool_result":
@@ -239,7 +239,7 @@ func contentBlocksFromMessage(m llmtypes.ChatMessage, applyCache bool) []sdk.Con
 				tr.IsError = sdk.Bool(true)
 			}
 			if applyCache && i == lastNonThinking {
-				tr.CacheControl = sdk.NewCacheControlEphemeralParam()
+				tr.CacheControl = cacheControl(ttl)
 			}
 			out = append(out, sdk.ContentBlockParamUnion{OfToolResult: &tr})
 		case "thinking":
@@ -448,4 +448,13 @@ func betaHeaderRequestOption(interleavedThinking bool) option.RequestOption {
 		value += "," + InterleavedThinkingBetaHeader
 	}
 	return option.WithHeader("anthropic-beta", value)
+}
+
+// cacheControl keeps the old wire bytes when no TTL is requested.
+func cacheControl(ttl string) sdk.CacheControlEphemeralParam {
+	marker := sdk.NewCacheControlEphemeralParam()
+	if ttl != "" {
+		marker.TTL = sdk.CacheControlEphemeralTTL(ttl)
+	}
+	return marker
 }

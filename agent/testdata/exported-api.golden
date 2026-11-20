@@ -67,6 +67,8 @@ type Conversation struct
   (*Conversation) SetHostState(ctx context.Context, key string, value string) error
   (*Conversation) SetMode(ctx context.Context, name string) error
   (*Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error)
+  (*Conversation) SteerEvent(ctx context.Context, topic string) (HostFired, error)
+  (*Conversation) SteerFocus(ctx context.Context, view string) (HostFired, error)
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
   field ID string
   field ParentID string
@@ -95,6 +97,7 @@ var ErrNoStarts error
 var ErrNoSteering error
 var ErrNoWarden error
 var ErrReenroll error
+func ErrandSource(module string) (string, error)
 type Event = github.com/hollis-labs/nanite/internal/events.Event interface
 type EventMeta = github.com/hollis-labs/nanite/internal/events.EventMeta struct
   field RunID string
@@ -109,6 +112,9 @@ type Gateway = github.com/hollis-labs/nanite/internal/provider.Gateway struct
   field KeyRef string
   field Auth string
 var GeneralSlot github.com/hollis-labs/libs/agent/steer.Slot
+type HostFired = github.com/hollis-labs/nanite/internal/engine.HostFired struct
+  field Fired []string
+  field Actions []github.com/hollis-labs/libs/agent/steer.Action
 type Info struct
   field Dir string
   field Definition github.com/hollis-labs/libs/agent/agentdir.Snapshot
@@ -326,6 +332,8 @@ type Slots struct
 type SlotsAssembled = github.com/hollis-labs/nanite/internal/events.SlotsAssembled struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Report github.com/hollis-labs/nanite/internal/slots.Report
+const SourceAuto untyped string
+const SourceErrandPrefix untyped string
 const SourceNotice untyped string
 type SteerVerdict = github.com/hollis-labs/libs/agent/steer.Verdict struct
   field Facet github.com/hollis-labs/libs/agent/steer.Facet
@@ -336,6 +344,7 @@ type SteerVerdict = github.com/hollis-labs/libs/agent/steer.Verdict struct
   field Why string
 type Steered = github.com/hollis-labs/nanite/internal/events.Steered struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
+  field Event string
   field Mode string
   field ModeSource string
   field Slots []string
@@ -423,6 +432,7 @@ type ToolResult = github.com/hollis-labs/nanite/internal/tools.Result struct
 type ToolSet struct
   (*ToolSet) RemoveGroup(group string)
   (*ToolSet) SetGroup(group string, specs ...Tool) error
+const TopicCompacted untyped string
 type TraceRecord = github.com/hollis-labs/libs/agent/trace.Turn struct
   field Version int
   field At time.Time

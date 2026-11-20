@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -245,8 +246,11 @@ func newGuard(logger *slog.Logger, scrub *redact.Redactor, host panics.Reporter)
 type Input struct {
 	Text  string
 	Slots []slots.Update
-	// Source says what started the turn: empty for a person's message, or
-	// SourceNotice for a turn a host starts because a notice arrived.
+	// Source says what started the turn: empty for a person's message,
+	// SourceNotice for a turn a host starts because a notice arrived,
+	// SourceAuto for a turn the host sends on its own, or ErrandSource(m)
+	// for a turn module m of the host asked for. Only a person's message is
+	// classified, runs reflexes or reaches a front desk.
 	Source string
 	// Situation is what is in front of the person, for steering (the window
 	// in front, the open windows, the layout). Input and Source are filled
@@ -266,6 +270,33 @@ const SourceNotice = "notice"
 
 // NoticeTurnText is the user message of every notice turn.
 const NoticeTurnText = "A notice arrived."
+
+// SourceAuto marks a turn the host sent on its own (a trigger, a reflex of
+// the host's, another agent), not a person's message. Its trace record has
+// source "host".
+const SourceAuto = "auto"
+
+// SourceErrandPrefix starts the Source of a turn a host's module asked for:
+// "errand:<module>". Its trace record has source "host".
+const SourceErrandPrefix = "errand:"
+
+// errandModule is a module name an errand source may carry.
+var errandModule = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// ErrandSource is the Input.Source of a turn module asked for. A module name
+// is 1 to 64 letters, digits, '.', '_' or '-', starting with a letter or digit.
+func ErrandSource(module string) (string, error) {
+	if !errandModule.MatchString(module) {
+		return "", fmt.Errorf("nanite: errand module %q is not a valid name (1-64 letters, digits, '.', '_' or '-')", module)
+	}
+	return SourceErrandPrefix + module, nil
+}
+
+// hostSource reports whether source is a turn the host or one of its modules
+// started (SourceAuto or an errand).
+func hostSource(source string) bool {
+	return source == SourceAuto || strings.HasPrefix(source, SourceErrandPrefix)
+}
 
 func (e *Engine) Send(ctx context.Context, id string, input Input) (*Run, error) {
 	if p := input.Steer; p != nil && (p.conversation != id || p.text != input.Text || input.Source != "") {
@@ -389,8 +420,21 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 			return nil, fmt.Errorf("a notice turn's text is set by the engine; leave Input.Text empty")
 		}
 		input.Text = NoticeTurnText
+	case SourceAuto:
+		if strings.TrimSpace(input.Text) == "" {
+			return nil, fmt.Errorf("an auto turn needs text")
+		}
 	default:
-		return nil, fmt.Errorf("unknown turn source %q", input.Source)
+		module, ok := strings.CutPrefix(input.Source, SourceErrandPrefix)
+		if !ok {
+			return nil, fmt.Errorf("unknown turn source %q", input.Source)
+		}
+		if _, err := ErrandSource(module); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(input.Text) == "" {
+			return nil, fmt.Errorf("an errand turn needs text")
+		}
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()

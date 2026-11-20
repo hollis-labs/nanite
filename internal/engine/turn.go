@@ -140,9 +140,14 @@ func (e *Engine) execute(ctx context.Context, r *Run, info store.Conversation, i
 	// after the guard, so a panic anywhere in the turn is recorded as failed
 	// with its ref.
 	tr := &turnTrace{rec: newTraceRecord(time.Now().UTC(), r.id, info, interrupted != nil, e.subtaskLinkOf(info.ID))}
-	if input.Source == SourceNotice && interrupted == nil {
+	switch {
+	case interrupted != nil:
+	case input.Source == SourceNotice:
 		// A notice turn is an automatic activation: its source is reflex.
 		tr.rec.Source = trace.SourceReflex
+	case hostSource(input.Source):
+		// The host or one of its modules sent it; the situation says which.
+		tr.rec.Source = trace.SourceHost
 	}
 	// A panic while preparing the turn fails it with a ref; the host and the
 	// conversation stay usable.
@@ -326,6 +331,12 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 			ev.EventMeta = meta
 			return ev
 		})
+	}
+	if tr.rec.Situation == nil && input.Source != "" && interrupted == nil {
+		// Without steering, the trace still says what started the turn.
+		tr.rec.Situation, _ = json.Marshal(struct {
+			Source string `json:"source"`
+		}{input.Source})
 	}
 	pending, err := e.cfg.Store.PendingNotices(ctx, info.ID)
 	if err != nil {
@@ -722,6 +733,11 @@ func (x *execution) compact(ctx context.Context, force bool) (retErr error) {
 			}
 			return events.Compacted{EventMeta: meta, Before: before, After: after}
 		})
+		if failure == nil && x.depth == 0 {
+			// Steering hears of it, so an event reflex can run (saving
+			// state, say).
+			x.engine.compactedReflexes(context.WithoutCancel(ctx), x.run, x.info.ID)
+		}
 	}()
 	summaryProvider, summaryModel := x.summaryProvider, x.summaryModel
 	if summaryProvider == nil {

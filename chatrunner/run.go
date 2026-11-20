@@ -448,6 +448,9 @@ func (x *run) translate(ev agent.Event) []chatstream.Event {
 		return []chatstream.Event{noticeActivity(e)}
 
 	case agent.Steered:
+		if e.Event != "" {
+			return []chatstream.Event{activity(ActivitySteer, map[string]any{"event": e.Event, "fired": e.Fired})}
+		}
 		suggestions := make([]map[string]any, 0, len(e.Suggestions))
 		for _, v := range e.Suggestions {
 			suggestions = append(suggestions, map[string]any{"facet": string(v.Facet), "label": v.Label, "p": v.P})

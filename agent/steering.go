@@ -27,3 +27,14 @@ var ErrNoSteering = engine.ErrNoSteering
 // Conversation.Steer. Halted reports whether a reflex answered it; send the
 // turn with it in Input.Steer.
 type PreparedSteer = engine.PreparedSteer
+
+// HostFired is what a host event or a focus change fired
+// (Conversation.SteerEvent, SteerFocus): the reflexes by name and the
+// actions the host carries out. A halt reflex needs a message to answer, so
+// one on an event or focus trigger is invalid and skipped.
+type HostFired = engine.HostFired
+
+// TopicCompacted is the event topic Nanite posts to a root conversation's
+// steering after a compaction pass. What it fires arrives on the turn's run
+// as a Steered event with Event set to the topic.
+const TopicCompacted = engine.TopicCompacted

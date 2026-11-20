@@ -75,8 +75,12 @@ type steering struct {
 	// in memory is the mode on disk; it also guards last.
 	mu sync.Mutex
 	// last is the classified preset the latest person's turn applied. The
-	// notice and resumed turns after it keep that mode.
+	// notice, host and resumed turns after it keep that mode.
 	last *steer.FacetResult
+	// carried are reminders an event or focus reflex fired that a turn other
+	// than a person's took from steer's queue; the next person's turn gets
+	// them first.
+	carried []string
 	// used is when the state was last asked for, under Engine.steerMu.
 	used time.Time
 }
@@ -271,7 +275,8 @@ type steerKind int
 const (
 	// steerPerson is a person's message: reflexes and the classifier run.
 	steerPerson steerKind = iota
-	// steerNotice is a turn a notice started: the mode and work slots only.
+	// steerNotice is a turn a notice, the host or a host's module started:
+	// the mode and work slots only.
 	steerNotice
 	// steerResumed is an interrupted turn resumed: the mode only.
 	steerResumed
@@ -328,6 +333,140 @@ func (e *Engine) Steer(ctx context.Context, conversation string, input Input) (*
 	return &PreparedSteer{conversation: conversation, text: input.Text, out: out, taken: new(atomic.Bool)}, nil
 }
 
+// maxCarried is how many reminders wait for the next person's message,
+// matching steer's own queue; older ones are dropped.
+const maxCarried = 10
+
+// lastClassified is the preset the last person's message was classified
+// into, as a classification, or nil.
+func (st *steering) lastClassified() steer.Classification {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.last == nil {
+		return nil
+	}
+	return steer.Classification{steer.FacetPreset: *st.last}
+}
+
+// validReflexes are the host's reflexes now, without the invalid ones, which
+// are skipped with a warning. It calls the host: run it guarded.
+func (e *Engine) validReflexes(ctx context.Context) []steer.Reflex {
+	cfg := e.cfg.Steering
+	if cfg.Reflexes == nil {
+		return nil
+	}
+	vocab := cfg.Vocabulary
+	if vocab == nil {
+		vocab = steer.NewVocabulary()
+	}
+	var out []steer.Reflex
+	for _, rx := range cfg.Reflexes() {
+		if err := rx.Validate(vocab); err != nil {
+			e.cfg.Logger.WarnContext(ctx, "a reflex was skipped", "err", e.scrub.Text(err.Error()))
+			continue
+		}
+		out = append(out, rx)
+	}
+	return out
+}
+
+// keepCooldowns stores when the conversation's reflexes last fired, so a
+// restart does not fire them again too soon.
+func (e *Engine) keepCooldowns(ctx context.Context, conversation string, st *steering) {
+	raw, err := json.Marshal(st.cooldowns.Snapshot())
+	if err != nil {
+		return
+	}
+	if err := e.cfg.Store.SetSetting(context.WithoutCancel(ctx), conversation, settingCooldowns, string(raw)); err != nil {
+		e.cfg.Logger.WarnContext(ctx, "reflex cooldowns were not kept", "err", e.scrub.Text(err.Error()))
+	}
+}
+
+// TopicCompacted is the host event Nanite posts to a root conversation's
+// steering after a compaction pass shortened its history, so an event
+// reflex (saving state, say) can run.
+const TopicCompacted = "nanite.compacted"
+
+// HostFired is what a host event or a focus change fired: the reflexes, by
+// name, and the actions the host carries out. A remind reflex's reminder
+// waits for the conversation's next person's message. (Steer refuses a halt
+// reflex on an event or focus trigger: there is no message to answer.)
+type HostFired struct {
+	Fired   []string
+	Actions []steer.Action
+}
+
+// SteerEvent runs a root conversation's active event reflexes for a host
+// event topic (a reflex for "a.b" fires on "a.b" and "a.b.c"). Like SetMode,
+// it is for the host: the model has no tool for it.
+func (e *Engine) SteerEvent(ctx context.Context, conversation, topic string) (HostFired, error) {
+	if strings.TrimSpace(topic) == "" {
+		return HostFired{}, errors.New("nanite: an event needs a topic")
+	}
+	return e.steerHost(ctx, conversation, func(x *steer.Reflexes, active []steer.Reflex) (steer.Fired, error) {
+		return x.OnEvent(ctx, topic, active)
+	})
+}
+
+// SteerFocus runs a root conversation's active focus reflexes for the view
+// that came in front. It is for the host: the model has no tool for it.
+func (e *Engine) SteerFocus(ctx context.Context, conversation, view string) (HostFired, error) {
+	if strings.TrimSpace(view) == "" {
+		return HostFired{}, errors.New("nanite: a focus change needs a view")
+	}
+	return e.steerHost(ctx, conversation, func(x *steer.Reflexes, active []steer.Reflex) (steer.Fired, error) {
+		return x.OnFocus(ctx, view, active)
+	})
+}
+
+// steerHost runs fire against the reflexes active in the conversation's
+// mode in force (deliberate, else the last classified preset, else the
+// default). A reflex that cannot be fired is skipped with a warning.
+func (e *Engine) steerHost(ctx context.Context, conversation string, fire func(*steer.Reflexes, []steer.Reflex) (steer.Fired, error)) (HostFired, error) {
+	st, err := e.rootSteerer(ctx, conversation)
+	if err != nil {
+		return HostFired{}, err
+	}
+	var fired steer.Fired
+	err = e.guardHost(conversation, func() error {
+		mode := steer.Resolve(e.cfg.Steering.Registry, st.steer.Modes().Current(), st.lastClassified(), st.steer.Policy())
+		var ferr error
+		fired, ferr = fire(st.steer.Reflexes(), steer.Active(e.validReflexes(ctx), mode.Preset))
+		if ferr != nil {
+			e.cfg.Logger.WarnContext(ctx, "a reflex could not be evaluated or fired", "err", e.scrub.Text(ferr.Error()))
+		}
+		return nil
+	})
+	if err != nil {
+		return HostFired{}, err
+	}
+	if len(fired.Names) == 0 {
+		return HostFired{}, nil
+	}
+	e.keepCooldowns(ctx, conversation, st)
+	return HostFired{Fired: fired.Names, Actions: fired.Actions}, nil
+}
+
+// compactedReflexes posts TopicCompacted to a root conversation's steering
+// after a compaction pass, and reports what fired on the turn's run as a
+// Steered event with Event set, so the host carries out the actions.
+func (e *Engine) compactedReflexes(ctx context.Context, r *Run, conversation string) {
+	if e.cfg.Steering == nil {
+		return
+	}
+	fired, err := e.SteerEvent(ctx, conversation, TopicCompacted)
+	if err != nil {
+		e.cfg.Logger.WarnContext(ctx, "compaction reflexes did not run", "conversation", conversation, "err", e.scrub.Text(err.Error()))
+		return
+	}
+	if len(fired.Fired) == 0 {
+		return
+	}
+	r.emit(ctx, func(meta events.EventMeta) events.Event {
+		return events.Steered{EventMeta: meta, Event: TopicCompacted, Fired: fired.Fired, Actions: fired.Actions}
+	})
+}
+
 // priorSignals is how many earlier messages predicate reflexes see.
 const priorSignals = 8
 
@@ -371,19 +510,7 @@ func (e *Engine) steerWith(ctx context.Context, info store.Conversation, input I
 	}
 	in := steer.Input{Sit: sit, Slots: all}
 	if person {
-		if cfg.Reflexes != nil {
-			vocab := cfg.Vocabulary
-			if vocab == nil {
-				vocab = steer.NewVocabulary()
-			}
-			for _, rx := range cfg.Reflexes() {
-				if err := rx.Validate(vocab); err != nil {
-					e.cfg.Logger.WarnContext(ctx, "a reflex was skipped", "err", e.scrub.Text(err.Error()))
-					continue
-				}
-				in.Reflexes = append(in.Reflexes, rx)
-			}
-		}
+		in.Reflexes = e.validReflexes(ctx)
 		if prior, err := e.cfg.Store.LastMessages(ctx, info.ID, priorSignals); err == nil {
 			for i := len(prior) - 1; i >= 0; i-- {
 				in.Prior = append(in.Prior, signal(prior[i]))
@@ -403,11 +530,7 @@ func (e *Engine) steerWith(ctx context.Context, info store.Conversation, input I
 		}
 	} else {
 		// Keep the preset the last person's message was classified into.
-		st.mu.Lock()
-		if st.last != nil {
-			in.Classified = steer.Classification{steer.FacetPreset: *st.last}
-		}
-		st.mu.Unlock()
+		in.Classified = st.lastClassified()
 	}
 	turn, err := st.steer.Prepare(ctx, in)
 	if err != nil {
@@ -420,19 +543,29 @@ func (e *Engine) steerWith(ctx context.Context, info store.Conversation, input I
 			r := in.Classified[steer.FacetPreset]
 			st.last = &r
 		}
+		// Reminders another kind of turn took from the queue come first.
+		if len(st.carried) > 0 {
+			turn.Fired.Reminders = append(st.carried, turn.Fired.Reminders...)
+			st.carried = nil
+		}
 		st.mu.Unlock()
 	} else {
+		// Steer hands the reminders waiting for the next message to any
+		// Prepare; they belong to the next person's message, so keep them.
+		if len(turn.Fired.Reminders) > 0 {
+			st.mu.Lock()
+			st.carried = append(st.carried, turn.Fired.Reminders...)
+			if len(st.carried) > maxCarried {
+				st.carried = st.carried[len(st.carried)-maxCarried:]
+			}
+			st.mu.Unlock()
+		}
 		// Nothing was classified and no reflex layer ran for this turn.
 		turn.Decision.Classified, turn.Decision.Verdicts, turn.Decision.Fired = nil, nil, nil
 		turn.Suggestions, turn.Fired = nil, steer.Fired{}
 	}
 	if len(turn.Fired.Names) > 0 {
-		// Keep the cooldowns, so a restart does not fire these again too soon.
-		if raw, err := json.Marshal(st.cooldowns.Snapshot()); err == nil {
-			if err := e.cfg.Store.SetSetting(ctx, info.ID, settingCooldowns, string(raw)); err != nil {
-				e.cfg.Logger.WarnContext(ctx, "reflex cooldowns were not kept", "err", e.scrub.Text(err.Error()))
-			}
-		}
+		e.keepCooldowns(ctx, info.ID, st)
 	}
 	out := &steered{halt: turn.Fired.Halt, decision: turn.Decision}
 	if text := modeText(turn.Mode.Preset); text != "" {

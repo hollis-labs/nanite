@@ -164,8 +164,12 @@ type SubtaskProgress struct {
 // reflexes that fired, classifier suggestions the owner may accept (they are
 // never applied on their own) and reflex actions the host carries out.
 // Halted means a reflex answered the message and the model was not called.
+//
+// A Steered with Event set reports reflexes a host event fired during the
+// turn (Nanite's own TopicCompacted): only Fired and Actions are set.
 type Steered struct {
 	EventMeta
+	Event            string
 	Mode, ModeSource string
 	Slots            []string
 	Why              string

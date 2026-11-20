@@ -65,7 +65,9 @@ type Options struct {
 	// steering. Nil steers with no situation.
 	Situation func(turn chat.Turn) steer.Situation
 	// OnSteered, with Agent.Steering, sees what steering decided for each
-	// root turn, including the reflex actions for the host to carry out.
+	// root turn, including the reflex actions for the host to carry out, and
+	// what a host event during the turn fired (a Steered with Event set, as
+	// after a compaction).
 	// Those actions never go on the wire; the nanite.steer activity carries
 	// the rest. It runs inline with the turn's wire events: keep it fast,
 	// and hand slow work off.
@@ -321,7 +323,24 @@ func TurnFromContext(ctx context.Context) (chat.Turn, bool) {
 // chat agent is told about the plan in the turn's context.
 func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	r.serve() // the Service calls Start, so it runs
-	in := agent.Input{Text: turn.Text}
+	source, err := turnSource(turn.Meta)
+	if err != nil {
+		return nil, err
+	}
+	in := agent.Input{Text: turn.Text, Source: source}
+	person := source == ""
+	if !person {
+		// Only the owner's new message replaces their interrupted turn. A
+		// host turn is refused (busy, so the host can retry it) until they
+		// resume or discard it.
+		c, err := r.conversation(ctx, turn.ConversationID)
+		if err != nil {
+			return nil, err
+		}
+		if held := c.Interrupted(); held != nil {
+			return nil, fmt.Errorf("chatrunner: %w: the owner's interrupted turn %s waits for them to resume or discard it", agent.ErrBusy, held.ID)
+		}
+	}
 	if r.opts.Situation != nil {
 		sit := r.opts.Situation(turn)
 		in.Situation = &sit
@@ -329,16 +348,18 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 	text := contextText(turn.Context)
 	var prelude []chatstream.Event
 	x, err := r.beginAfterDesk(ctx, turn, func(c *agent.Conversation, runCtx context.Context) (*agent.Run, error) {
-		discarded, err := r.discardInterrupted(runCtx, turn.ConversationID, c)
-		if err != nil {
-			return nil, err
-		}
-		if discarded != "" {
-			// Close the owner's offer: their new message replaced it.
-			prelude = append(prelude, discardedActivity(discarded, "new message"))
+		if person {
+			discarded, err := r.discardInterrupted(runCtx, turn.ConversationID, c)
+			if err != nil {
+				return nil, err
+			}
+			if discarded != "" {
+				// Close the owner's offer: their new message replaced it.
+				prelude = append(prelude, discardedActivity(discarded, "new message"))
+			}
 		}
 		halted := false
-		if r.desk != nil && r.opts.Agent.Steering != nil {
+		if person && r.desk != nil && r.opts.Agent.Steering != nil {
 			// Steer first: a reflex that halts answers the message, and the
 			// desk must not plan it.
 			prepared, err := c.Steer(runCtx, in)
@@ -350,7 +371,7 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 		// The desk works only once the turn holds the conversation, so a
 		// turn that could not start has not answered or planned anything.
 		var plan *planRun
-		if r.desk != nil && !halted {
+		if person && r.desk != nil && !halted {
 			var note string
 			note, prelude, plan = r.desk.beforeTurn(runCtx, turn.ConversationID, turn.Text)
 			if note != "" {
@@ -376,11 +397,49 @@ func (r *Runner) Start(ctx context.Context, turn chat.Turn) (chat.Run, error) {
 		return nil, err
 	}
 	x.prelude = prelude
-	// A user turn lets notices start notice turns again.
-	r.mu.Lock()
-	delete(r.noticeTurns, x.nanite)
-	r.mu.Unlock()
+	if person {
+		// A user turn lets notices start notice turns again.
+		r.mu.Lock()
+		delete(r.noticeTurns, x.nanite)
+		r.mu.Unlock()
+	}
 	return x, nil
+}
+
+// turnSource is the agent.Input.Source a chat turn's meta asks for: a
+// non-empty "errand" (a module's errand) is agent.ErrandSource of it, else
+// a set "auto" (true or a non-empty string) is agent.SourceAuto, else the
+// turn is the owner's ("").
+func turnSource(meta json.RawMessage) (string, error) {
+	if len(meta) == 0 {
+		return "", nil
+	}
+	var m struct {
+		Auto   any    `json:"auto"`
+		Errand string `json:"errand"`
+	}
+	if err := json.Unmarshal(meta, &m); err != nil {
+		return "", fmt.Errorf("chatrunner: turn meta: %w", err)
+	}
+	if m.Errand != "" {
+		return agent.ErrandSource(m.Errand)
+	}
+	switch v := m.Auto.(type) {
+	case nil:
+		return "", nil
+	case bool:
+		if v {
+			return agent.SourceAuto, nil
+		}
+		return "", nil
+	case string:
+		if v != "" {
+			return agent.SourceAuto, nil
+		}
+		return "", nil
+	default:
+		return "", fmt.Errorf("chatrunner: turn meta: auto must be a boolean or a string")
+	}
 }
 
 // begin opens the chat conversation's Nanite conversation and starts a run
@@ -433,6 +492,27 @@ func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool
 	out.inner = inner
 	r.mu.Unlock()
 	return out, nil
+}
+
+// SteerEvent runs a chat conversation's active event reflexes for a host
+// event topic (agent.Conversation.SteerEvent) and returns what fired for the
+// host to carry out. It needs Agent.Steering.
+func (r *Runner) SteerEvent(ctx context.Context, conversationID, topic string) (agent.HostFired, error) {
+	c, err := r.conversation(ctx, conversationID)
+	if err != nil {
+		return agent.HostFired{}, err
+	}
+	return c.SteerEvent(ctx, topic)
+}
+
+// SteerFocus runs a chat conversation's active focus reflexes for the view
+// that came in front (agent.Conversation.SteerFocus).
+func (r *Runner) SteerFocus(ctx context.Context, conversationID, view string) (agent.HostFired, error) {
+	c, err := r.conversation(ctx, conversationID)
+	if err != nil {
+		return agent.HostFired{}, err
+	}
+	return c.SteerFocus(ctx, view)
 }
 
 // Dispatch starts subtasks for the host on a chat conversation, without a

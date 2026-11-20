@@ -539,3 +539,24 @@ func TestCancelAResume(t *testing.T) {
 		t.Fatalf("the next turn ended %+v", last)
 	}
 }
+
+// A host turn (an errand or an automatic turn) does not replace the owner's
+// interrupted turn: it is refused as busy, so the host can retry it, and the
+// interrupted turn is still there for the owner.
+func TestHostTurnWaitsForTheInterruptedTurn(t *testing.T) {
+	dir := crashedDir(t)
+	w := newWiredIn(t, dir, false, nil)
+	turn, err := w.runner.Interrupted(t.Context(), w.conv)
+	if err != nil || turn == nil {
+		t.Fatalf("interrupted: %+v, %v", turn, err)
+	}
+	for _, meta := range []string{`{"errand":"late-answer"}`, `{"auto":true}`} {
+		_, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "from the host", Meta: json.RawMessage(meta)})
+		if !errors.Is(err, agent.ErrBusy) {
+			t.Fatalf("%s: want busy, got %v", meta, err)
+		}
+	}
+	if held, err := w.runner.Interrupted(t.Context(), w.conv); err != nil || held == nil || held.ID != turn.ID {
+		t.Fatalf("the host turn discarded the owner's turn: %+v, %v", held, err)
+	}
+}

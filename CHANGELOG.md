@@ -7,6 +7,9 @@
   chatrunner uses it, so a turn start racing a host event (`SteerEvent`,
   `SteerFocus`) on a new chat no longer fails with
   "transcript: conversation already has a writer".
+- Tool-package change-time checks compile on other Unix targets, including
+  FreeBSD, now covered by the CI cross-build. Deterministic regressions cover
+  load-time credential URLs and files changed during package validation.
 - Breaking: tool-package approvals no longer use the agent-local database.
   Existing packages need approval again; old approvals are not migrated.
   Explicit host `DataDir` uses `DataDir/tool-approvals`; otherwise approvals

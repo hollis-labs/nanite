@@ -162,8 +162,10 @@ func TestReplayMaxTokensDuringToolCall(t *testing.T) {
 		}
 	}
 
-	// Derived: cut inside the argument JSON. The partial arguments are kept
-	// as _raw rather than parsed into a half object.
+	// Derived, in the recorded shape: the budget runs out inside the
+	// argument JSON and, as recorded, no content_block_stop follows. The
+	// unfinished call is never emitted: there is nothing to run, and nothing
+	// stored without a result.
 	tool := fixture(t, "tool_use")
 	var kept strings.Builder
 	for _, ev := range providertest.Events(tool.Response.Body) {
@@ -172,19 +174,20 @@ func TestReplayMaxTokensDuringToolCall(t *testing.T) {
 		}
 		kept.WriteString(ev)
 	}
-	kept.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+	if !strings.Contains(kept.String(), `{\"key\":`) {
+		t.Fatal("the cut does not fall inside the arguments")
+	}
 	kept.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":40}}\n\n")
 	kept.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
-	c, _ = replayClient(t, providertest.Derive(tool, "max_tokens inside the tool arguments", kept.String()))
+	c, _ = replayClient(t, providertest.Derive(tool, "max_tokens inside the tool arguments, recorded shape", kept.String()))
 	events = drain(t.Context(), t, c, scenarioRequest(t, "tool_use"))
-	var call *llmtypes.ToolUseBlock
 	for _, ev := range events {
 		if ev.ToolUse != nil {
-			call = ev.ToolUse
+			t.Fatalf("an unfinished call was emitted: %+v", ev.ToolUse)
 		}
 	}
-	if call == nil || call.Input["_raw"] != `{"key": "capit` || usageOf(events).StopReason != "max_tokens" {
-		t.Fatalf("partial call %+v", call)
+	if usageOf(events).StopReason != "max_tokens" || last(events).Type != llmtypes.EventDone {
+		t.Fatalf("usage %+v last %+v", usageOf(events), last(events))
 	}
 }
 
@@ -305,16 +308,29 @@ func TestReplayOverloadedMidStream(t *testing.T) {
 }
 
 func TestReplayTruncatedStreamHasNoDone(t *testing.T) {
-	for name, f := range map[string]providertest.Fixture{
-		"mid text":      providertest.CutAfter(t, fixture(t, "text"), "text_delta", 1),
-		"mid tool JSON": providertest.CutAfter(t, fixture(t, "tool_use"), "input_json_delta", 3),
+	for _, tc := range []struct {
+		name, scenario string
+		f              providertest.Fixture
+		wantText       string
+	}{
+		{"mid text", "text", providertest.CutAfter(t, fixture(t, "text"), "text_delta", 1), "pong"},
+		{"mid tool JSON", "tool_use", providertest.CutAfter(t, fixture(t, "tool_use"), "input_json_delta", 3), ""},
 	} {
-		t.Run(name, func(t *testing.T) {
-			c, _ := replayClient(t, f)
-			for _, ev := range drain(t.Context(), t, c, scenarioRequest(t, "tool_use")) {
-				if ev.Type == llmtypes.EventDone || ev.ToolUse != nil {
+		t.Run(tc.name, func(t *testing.T) {
+			c, srv := replayClient(t, tc.f)
+			events := drain(t.Context(), t, c, scenarioRequest(t, tc.scenario))
+			var text string
+			for _, ev := range events {
+				switch {
+				case ev.Type == llmtypes.EventDone || ev.ToolUse != nil || ev.Type == llmtypes.EventError:
 					t.Fatalf("a cut stream produced %+v", ev)
+				case ev.Type == llmtypes.EventDelta:
+					text += ev.Content
 				}
+			}
+			// Served and read up to the cut: truncation, not a failed request.
+			if text != tc.wantText || len(srv.Received()) != 1 || usageOf(events).InputTokens == 0 {
+				t.Fatalf("text %q requests %d usage %+v", text, len(srv.Received()), usageOf(events))
 			}
 		})
 	}

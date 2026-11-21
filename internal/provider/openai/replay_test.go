@@ -156,22 +156,7 @@ func TestReplayClosingReplySendsToolChoiceNone(t *testing.T) {
 func TestReplayLengthDuringToolCall(t *testing.T) {
 	// Derived: the budget ends inside the tool arguments, with OpenAI's
 	// finish_reason "length". The partial arguments are kept as _raw.
-	tool := fixture(t, "tool_use")
-	var kept strings.Builder
-	n := 0
-	for _, c := range providertest.Events(tool.Response.Body) {
-		if strings.Contains(c, `"arguments"`) {
-			if n++; n > 2 {
-				break
-			}
-		}
-		kept.WriteString(c)
-	}
-	id := `"id":"` + strings.SplitN(strings.SplitN(tool.Response.Body, `"id":"`, 2)[1], `"`, 2)[0] + `"`
-	kept.WriteString(`data: {` + id + `,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}` + "\n\n")
-	kept.WriteString(`data: {` + id + `,"object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":64,"total_tokens":184}}` + "\n\n")
-	kept.WriteString("data: [DONE]\n\n")
-	c, _ := replayClient(t, providertest.Derive(tool, "finish_reason length inside the tool arguments", kept.String()))
+	c, _ := replayClient(t, providertest.OpenAILengthInToolCall(t, fixture(t, "tool_use")))
 	events := replayDrain(t.Context(), t, c, scenarioRequest(t, "tool_use"))
 	var call *llmtypes.ToolUseBlock
 	for _, ev := range events {
@@ -185,18 +170,48 @@ func TestReplayLengthDuringToolCall(t *testing.T) {
 }
 
 func TestReplayTruncatedStreamHasNoDone(t *testing.T) {
-	for name, f := range map[string]providertest.Fixture{
-		"mid text":      providertest.CutAfter(t, fixture(t, "text"), `"content":"pong"`, 1),
-		"mid tool JSON": providertest.CutAfter(t, fixture(t, "tool_use"), `"arguments"`, 2),
+	for _, tc := range []struct {
+		name, scenario string
+		f              providertest.Fixture
+		wantText       string
+	}{
+		{"mid text", "text", providertest.CutAfter(t, fixture(t, "text"), `"content":"pong"`, 1), "pong"},
+		{"mid tool JSON", "tool_use", providertest.CutAfter(t, fixture(t, "tool_use"), `"arguments"`, 2), ""},
 	} {
-		t.Run(name, func(t *testing.T) {
-			c, _ := replayClient(t, f)
-			for _, ev := range replayDrain(t.Context(), t, c, scenarioRequest(t, "tool_use")) {
-				if ev.Type == llmtypes.EventDone || ev.ToolUse != nil {
+		t.Run(tc.name, func(t *testing.T) {
+			c, srv := replayClient(t, tc.f)
+			events := replayDrain(t.Context(), t, c, scenarioRequest(t, tc.scenario))
+			var text string
+			for _, ev := range events {
+				switch {
+				case ev.Type == llmtypes.EventDone || ev.ToolUse != nil || ev.Type == llmtypes.EventError:
 					t.Fatalf("a cut stream produced %+v", ev)
+				case ev.Type == llmtypes.EventDelta:
+					text += ev.Content
 				}
 			}
+			// The stream itself was served and read up to the cut: this is
+			// truncation, not a failed request.
+			if text != tc.wantText || len(srv.Received()) != 1 || srv.Remaining() != 0 {
+				t.Fatalf("text %q requests %d", text, len(srv.Received()))
+			}
 		})
+	}
+}
+
+func TestReplayCompleteWithoutFinishReason(t *testing.T) {
+	// Derived: a server that never sends finish_reason but ends with the
+	// usage chunk and [DONE] answered completely.
+	f := fixture(t, "text")
+	f = providertest.Derive(f, "finish_reason null", strings.Replace(f.Response.Body, `"finish_reason":"stop"`, `"finish_reason":null`, 1))
+	if !strings.Contains(f.Response.Body, `"finish_reason":null`) {
+		t.Fatal("fixture has no stop finish_reason to remove")
+	}
+	c, _ := replayClient(t, f)
+	events := replayDrain(t.Context(), t, c, scenarioRequest(t, "text"))
+	u := usageOf(events)
+	if last(events).Type != llmtypes.EventDone || u.InputTokens != 11 || u.OutputTokens != 10 {
+		t.Fatalf("usage %+v last %+v", u, last(events))
 	}
 }
 

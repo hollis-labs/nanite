@@ -5,9 +5,11 @@
 // the request's method, path and JSON body (never its headers, so no key or
 // token is ever written) and the response's status, Content-Type and
 // Retry-After headers and raw body bytes. Source says where the fixture came
-// from: "recorded" for a live exchange, or "derived from <file>: <edit>" for
-// one built from a recording to reproduce a failure a live provider does not
+// from: "recorded" for a live exchange, or "derived: <edit>" for one built
+// from a recording to reproduce a failure a live provider does not
 // produce on demand (an overloaded error mid-stream, a 429, a cut stream).
+// Derived exchanges are built in test code from the recordings, and their
+// Source reads "derived: <edit>".
 package providertest
 
 import (
@@ -152,23 +154,29 @@ func (r *Recorder) Take() []Fixture {
 	return out
 }
 
-// hostLike matches anything that looks like a hostname or URL, which a
-// committed fixture must not carry.
-var hostLike = regexp.MustCompile(`(?i)https?://|[a-z0-9-]+\.(cloud|com|net|org|io|dev|ai)\b`)
+// Patterns a committed fixture must not carry: a URL or hostname (common
+// public and private suffixes), an IP address or localhost, and
+// credential shapes (provider keys, bearer tokens, JWTs).
+var (
+	hostLike   = regexp.MustCompile(`(?i)https?://|\blocalhost\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[a-z0-9-]+\.(?:cloud|com|net|org|io|dev|ai|app|co|internal|local|lan|corp|home)\b`)
+	secretLike = regexp.MustCompile(`(?i)\bsk-[a-z0-9_-]{6,}|\bbearer\s+\S|\beyJ[a-z0-9_-]{10,}|x-api-key`)
+)
 
-// CheckClean fails when a fixture carries a credential-shaped string or a
-// hostname. Recorded bodies are provider output; this is the last guard
-// before they are committed.
+// CheckClean fails when any part of a fixture (body, path, kept headers or
+// source) carries a credential-shaped string or a hostname. It runs on each
+// recording before it is saved, and over every committed fixture in tests.
 func CheckClean(t testing.TB, name string, f Fixture) {
 	t.Helper()
-	for _, s := range []string{string(f.Request.Body), f.Response.Body} {
-		for _, bad := range []string{"sk-ant-", "sk-proj-", "Bearer ", "eyJ"} {
-			if strings.Contains(s, bad) {
-				t.Fatalf("%s carries a credential-shaped string (%q)", name, bad)
-			}
+	parts := []string{f.Source, f.Request.Method, f.Request.Path, string(f.Request.Body), f.Response.Body}
+	for k, v := range f.Response.Headers {
+		parts = append(parts, k, v)
+	}
+	for _, s := range parts {
+		if m := secretLike.FindString(s); m != "" {
+			t.Fatalf("%s carries a credential-shaped string (%q)", name, m)
 		}
 		if m := hostLike.FindString(s); m != "" {
-			t.Fatalf("%s carries a hostname or URL (%q)", name, m)
+			t.Fatalf("%s carries a hostname, address or URL (%q)", name, m)
 		}
 	}
 }
@@ -204,6 +212,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	if f == nil {
 		http.Error(w, fmt.Sprintf("replay: no fixture left for %s %s", r.Method, r.URL.Path), http.StatusInternalServerError)
+		return
+	}
+	if (f.Request.Method != "" && r.Method != f.Request.Method) || (f.Request.Path != "" && APIPath(r.URL.Path) != f.Request.Path) {
+		http.Error(w, fmt.Sprintf("replay: %s %s does not match the fixture's %s %s", r.Method, r.URL.Path, f.Request.Method, f.Request.Path), http.StatusInternalServerError)
 		return
 	}
 	for name, v := range f.Response.Headers {
@@ -291,4 +303,34 @@ func AnthropicMessage(text string) Fixture {
 		"usage": map[string]any{"input_tokens": 50, "output_tokens": 20}})
 	return Fixture{Source: "derived: non-streaming text answer", Request: Request{Method: http.MethodPost, Path: "/v1/messages"},
 		Response: Response{Status: http.StatusOK, Headers: map[string]string{"Content-Type": "application/json"}, Body: string(body)}}
+}
+
+// OpenAILengthInToolCall cuts a recorded Chat Completions tool call after
+// its second arguments chunk and ends the response the way OpenAI ends one
+// that ran out of tokens: finish_reason "length", then the usage chunk and
+// [DONE]. The call's arguments are left half-written.
+func OpenAILengthInToolCall(t testing.TB, f Fixture) Fixture {
+	t.Helper()
+	var kept strings.Builder
+	n := 0
+	for _, ev := range Events(f.Response.Body) {
+		if strings.Contains(ev, `"arguments"`) {
+			if n++; n > 2 {
+				break
+			}
+		}
+		kept.WriteString(ev)
+	}
+	if n <= 2 {
+		t.Fatal("the recording has too few argument chunks to cut")
+	}
+	rest, ok := strings.CutPrefix(f.Response.Body, `data: {"id":"`)
+	if !ok {
+		t.Fatal("unexpected Chat Completions stream")
+	}
+	id, _, _ := strings.Cut(rest, `"`)
+	kept.WriteString(`data: {"id":"` + id + `","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}` + "\n\n")
+	kept.WriteString(`data: {"id":"` + id + `","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":64,"total_tokens":184}}` + "\n\n")
+	kept.WriteString("data: [DONE]\n\n")
+	return Derive(f, "finish_reason length inside the tool arguments", kept.String())
 }

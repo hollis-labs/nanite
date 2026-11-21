@@ -369,12 +369,16 @@ func (l lockedLog) Write(p []byte) (int, error) {
 // A message that opened the chat's conversation just before a reset, and
 // registers its run only after the reset has switched conversations, is
 // refused at registration and runs on the new conversation instead: never
-// on the old one.
+// on the old one. The hook is a package variable: chatrunner tests do not
+// run in parallel.
 func TestResetLandingBetweenOpenAndRegister(t *testing.T) {
 	dir := t.TempDir()
 	w := newWiredIn(t, dir, false, nil)
 	opened, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
+	var once, released sync.Once
+	letGo := func() { released.Do(func() { close(release) }) }
+	// A failure before the release below must not leave the message held.
+	t.Cleanup(letGo)
 	chatrunner.HoldBeforeRegister(t, func(chatID string) {
 		if chatID == w.conv {
 			once.Do(func() {
@@ -394,7 +398,7 @@ func TestResetLandingBetweenOpenAndRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reset while a message was opening: %v", err)
 	}
-	close(release)
+	letGo()
 	if err := <-submitted; err != nil {
 		t.Fatal(err)
 	}

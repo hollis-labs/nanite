@@ -162,11 +162,9 @@ func TestReplayMaxTokensDuringToolCall(t *testing.T) {
 			t.Fatalf("stored history: %v, %v", report.Findings, err)
 		}
 	})
-	t.Run("derived: cut inside the arguments", func(t *testing.T) {
-		// The partial arguments arrive as _raw, which no repair can fix: the
-		// call is answered with an error, paired in the next request, and
-		// the turn goes on.
-		t.Setenv("NANITE_AUTO_REPAIR", "false")
+	t.Run("derived: cut inside the arguments, recorded shape", func(t *testing.T) {
+		// As recorded, no content_block_stop follows the cut, so the call is
+		// never emitted: the turn ends at max_tokens with nothing unpaired.
 		tool := recorded(t, "tool_use")
 		var kept strings.Builder
 		for _, ev := range providertest.Events(tool.Response.Body) {
@@ -175,43 +173,18 @@ func TestReplayMaxTokensDuringToolCall(t *testing.T) {
 			}
 			kept.WriteString(ev)
 		}
-		kept.WriteString("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 		kept.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":40}}\n\n")
 		kept.WriteString("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 		e, srv, id, _ := replayEngine(t, "", providertest.Derive(tool, "max_tokens inside the tool arguments", kept.String()), recorded(t, "text"))
 		ran := false
 		registerLookup(t, e, &ran, nil)
 		result, err := send(t, e, id)
-		if err != nil || result.Text != "pong" || ran || len(srv.Received()) != 2 {
+		if err != nil || result.StopReason != "max_tokens" || ran || len(srv.Received()) != 1 {
 			t.Fatalf("result %+v, %v, ran %v, requests %d", result, err, ran, len(srv.Received()))
 		}
-		var next struct {
-			Messages []struct {
-				Content []struct {
-					Type      string `json:"type"`
-					ID        string `json:"id"`
-					ToolUseID string `json:"tool_use_id"`
-					IsError   bool   `json:"is_error"`
-				} `json:"content"`
-			} `json:"messages"`
-		}
-		if err := json.Unmarshal(srv.Received()[1], &next); err != nil {
-			t.Fatal(err)
-		}
-		var callID string
-		answered := false
-		for _, m := range next.Messages {
-			for _, b := range m.Content {
-				if b.Type == "tool_use" {
-					callID = b.ID
-				}
-				if b.Type == "tool_result" && b.ToolUseID == callID && b.IsError {
-					answered = true
-				}
-			}
-		}
-		if callID == "" || !answered {
-			t.Fatalf("call %q answered with an error: %v", callID, answered)
+		report, err := e.cfg.Store.ValidateConversation(t.Context(), id, nil)
+		if err != nil || len(report.Findings) != 0 {
+			t.Fatalf("stored history: %v, %v", report.Findings, err)
 		}
 	})
 }
@@ -473,4 +446,58 @@ func openAIUsage(t *testing.T, f providertest.Fixture) (in, out int) {
 	}
 	t.Fatal("no usage chunk")
 	return 0, 0
+}
+
+func TestReplayOpenAILengthDuringToolCall(t *testing.T) {
+	// OpenAI does deliver the half-written call, with finish_reason length.
+	// Its arguments arrive as _raw, which no repair can fix: the call is
+	// answered with an error, paired in the next request, and the turn goes
+	// on.
+	t.Setenv("NANITE_AUTO_REPAIR", "false")
+	e, srv, id := replayOpenAIEngine(t, providertest.OpenAILengthInToolCall(t, recordedOpenAI(t, "tool_use")), recordedOpenAI(t, "text"))
+	ran := false
+	registerLookup(t, e, &ran, nil)
+	result, err := send(t, e, id)
+	if err != nil || result.Text != "pong" || ran || len(srv.Received()) != 2 {
+		t.Fatalf("result %+v, %v, ran %v, requests %d", result, err, ran, len(srv.Received()))
+	}
+	var next struct {
+		Messages []struct {
+			Role       string `json:"role"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(srv.Received()[1], &next); err != nil {
+		t.Fatal(err)
+	}
+	var callID, answered string
+	for _, m := range next.Messages {
+		for _, c := range m.ToolCalls {
+			callID = c.ID
+		}
+		if m.Role == "tool" {
+			answered = m.ToolCallID
+		}
+	}
+	if callID == "" || answered != callID {
+		t.Fatalf("call %q answered by %q", callID, answered)
+	}
+	history, err := e.cfg.Store.History(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	isError := false
+	for _, m := range history {
+		for _, b := range m.Blocks {
+			if b.Type == "tool_result" && b.ToolUseID == callID {
+				isError = b.IsError
+			}
+		}
+	}
+	if !isError {
+		t.Fatal("the half-written call was not answered with an error")
+	}
 }

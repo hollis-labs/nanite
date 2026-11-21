@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
 
 Mailbox delivery fixes, conversation integrity checks that tell an ordinary
 interruption from a corrupt transcript, and workspace and tool-input fixes

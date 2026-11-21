@@ -2,7 +2,8 @@ kind: embedded
 lifetime: application
 application_id: nanite-setup-expert
 runtime:
-  # A host app supplies the model and gateway. These apply standalone.
+  # Standalone only: a host app (e.g. a Surface binding) supplies the model,
+  # gateway and runtime limits and does not read this file.
   provider: anthropic
   max_steps: 40
   cache_ttl: 1h

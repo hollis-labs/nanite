@@ -33,8 +33,9 @@ the current details; this is the working summary.
 3. **A per-module binding**: an app setting maps a module id to an agent
    folder on disk, e.g. `~/.config/<app>/agents/<name>/`, which replaces
    that module's built-in profile. It is checked when bound and at boot.
-   The agent's tools, levels and grants do not change. (Being built; check
-   the app's docs for the exact setting name.)
+   The agent's tools, levels and grants do not change, and the folder's
+   `host.yaml` is not used: the bound agent runs with the app's runtime
+   limits. (Being built; check the app's docs for the exact setting name.)
 
 All profiles share one conversation, front desk, mailbox, tools, approvals
 and identity: one app, one agent, many faces.

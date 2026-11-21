@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.14.0
+
+Agents materialize from the live Registry: `nanite agents materialize` reads
+agent/1 and launch_profile/1 records (published, or drafts explicitly) with a
+read-only bearer credential and builds an ordinary agent folder. No breaking
+changes.
 
 - Materialize live Registry records with explicit publication selection, reader
   credential files, exact revision checks and publication provenance. Fetch

@@ -64,6 +64,11 @@ func (e *Engine) Dispatch(ctx context.Context, id string, starts []subagent.Requ
 	if !e.cfg.Builtins.Offers(subagent.ToolName) {
 		return nil, fmt.Errorf("dispatch: this agent does not offer the subtask tool")
 	}
+	// Subtasks may copy the conversation's history: never from a history an
+	// integrity check found unsafe.
+	if err := e.runGate(ctx, id, false); err != nil {
+		return nil, err
+	}
 	input := Input{}
 	var err error
 	ctx, err = e.prepareProfile(ctx, &input)
@@ -96,7 +101,7 @@ func (e *Engine) Dispatch(ctx context.Context, id string, starts []subagent.Requ
 	if err := e.checkDaily(); err != nil {
 		return nil, err
 	}
-	if e.active[id] != nil {
+	if e.busyLocked(id) {
 		return nil, ErrBusy
 	}
 	info, err := e.cfg.Store.Conversation(ctx, id)

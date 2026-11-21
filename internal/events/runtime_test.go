@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"slices"
@@ -56,4 +57,27 @@ func TestTracingSpansClose(t *testing.T) {
 	endModel()
 	_, endTool := ToolSpan(ctx, "fixture")
 	endTool()
+}
+
+func TestRuntimeIntegrityEvent(t *testing.T) {
+	var sink recordSink
+	NewRuntime(&sink, slog.Default()).Observe(t.Context(), "conversation", "", IntegrityChecked{
+		Conversation: "conversation", Stage: "resume", Disposition: "blocked", Severity: "unsafe",
+		Codes: map[string]int{"orphan_tool_result": 2, "interrupted_turn": 1},
+	})
+	if len(sink) != 1 || sink[0].Kind != runtimeevents.KindAgentDelta {
+		t.Fatalf("events %+v", sink)
+	}
+	var p struct {
+		Phase, Stage, Disposition, Severity string
+		Codes                               map[string]int
+		Text                                *string
+	}
+	if err := json.Unmarshal(sink[0].Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Phase != "integrity" || p.Stage != "resume" || p.Disposition != "blocked" || p.Severity != "unsafe" ||
+		p.Codes["orphan_tool_result"] != 2 || p.Codes["interrupted_turn"] != 1 || p.Text != nil {
+		t.Fatalf("payload %s", sink[0].Payload)
+	}
 }

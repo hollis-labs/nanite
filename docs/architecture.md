@@ -169,8 +169,9 @@ recovery fills, is `recoverable` and never `unsafe`. Automatic repair is allowed
 only where it is deterministic and loses nothing committed: resuming or
 discarding an interrupted turn, replaying an index that is behind,
 rebuilding an index that disagrees with a sound transcript, and clearing a
-stale hold. A torn tail, a gap and every contradiction inside the transcript
-need an operator. A record the index projection would refuse (a field of the
+stale hold. A torn tail's fix is typed too (`truncate_torn_tail`, with the
+segment and committed byte count): its bytes were never committed. A gap and
+every contradiction inside the transcript need an operator. A record the index projection would refuse (a field of the
 wrong type, or a turn, message or compaction whose row references one the
 index does not have) is `unsafe`, because the store cannot open a journal on
 that conversation or replay it. Tool calls pair step by step, so a provider
@@ -634,7 +635,32 @@ reaches its wall budget.
 
 ## Recovery and observability
 
-On open, Nanite marks running turns as interrupted and running jobs as lost.
+On open, Nanite validates the conversations recovery touches: those with a
+running turn, and those whose transcript replay stopped at a torn tail (open
+replays every transcript anyway, so finding these costs no extra scan). Then
+it marks running turns interrupted and running jobs lost. A conversation with
+an unsafe finding is marked blocked in its settings; the mark survives a
+restart. A torn tail is only an incomplete final line of the last segment.
+Append writes each record in one write and fsyncs it, so those bytes were
+never committed. The store projects the committed prefix, so the rest of the
+agent opens, and the transcript writer refuses to append until an operator
+removes the tail. Damage anywhere before the tail is changed history: the
+store refuses to open, as it always has.
+
+`Resume` always validates before it reads any history. Any other run that
+could use the history (`Send`, `Dispatch`, `Record`) validates only a
+conversation marked blocked, and a passing check clears the mark. An unsafe
+finding refuses the run with a typed error that carries the findings, and the
+CLI prints them, with the exact truncation for a torn tail. A check claims its
+conversation, so no run, `Discard` or `Record` writes the transcript while it
+reads; other conversations do not wait. Events are emitted with no engine lock
+held. A tail torn while the process runs is found by the next run that opens
+the journal, which marks the conversation blocked.
+`Discard` stays available and closes an interrupted turn, but the history it
+leaves stays blocked until it passes a check. Each check emits a content-free
+runtime event with its stage (`recover`, `resume`, `send` or `discard`), its
+disposition (`resumable` or `blocked`), the worst severity and per-code
+counts.
 It verifies a recorded shell process-group leader before signaling the group.
 The terminal chat asks what to do with an interrupted conversation: resume
 it, discard the turn, or leave it and start a new conversation. Use

@@ -1009,7 +1009,7 @@ func (d *Desk) state(chatID string) desk.State {
 	d.mu.Lock()
 	typing := d.chat(chatID).typing
 	d.mu.Unlock()
-	return desk.State{Mode: d.mode(chatID), Busy: typing || d.r.ownerTurn(ConversationID(chatID))}
+	return desk.State{Mode: d.mode(chatID), Busy: typing || d.r.ownerTurn(d.r.naniteID(chatID))}
 }
 
 // pump publishes what a chat's editor has due and sets its timer for the
@@ -1053,7 +1053,7 @@ func (d *Desk) publish(chatID string, m desk.Message) {
 	d.mu.Lock()
 	id := d.nextID("desk-")
 	d.mu.Unlock()
-	d.r.enqueueNotice(agent.NoticePosted{ID: id, ConversationID: ConversationID(chatID), Kind: NoticeKindDesk, Body: m.Text})
+	d.r.enqueueNotice(agent.NoticePosted{ID: id, ConversationID: d.r.naniteID(chatID), Kind: NoticeKindDesk, Body: m.Text})
 }
 
 // idle runs when a chat's turn ends: start what waited for the

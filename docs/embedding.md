@@ -466,6 +466,25 @@ on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
 each Nanite conversation serves (host state `chat`), so a restarted runner can
 find its interrupted turns.
 
+**Conversation integrity.** `Conversation.Resume` checks the conversation's
+transcript and its index before it reads the history. A conversation found
+unsafe there, or by recovery on open, is marked blocked. Every later run on it
+(`Resume`, `Send`, notice and host turns) checks again first and is refused
+until a check passes, and so are `Dispatch` and `Record`. The refusal is an `*agent.IntegrityError`
+(`errors.Is(err, agent.ErrIntegrity)`) whose `Report` lists every finding,
+each with a stable `Code`, a `Severity`, the transcript records it concerns,
+and identifier-only `Evidence`. `Discard` still closes an interrupted turn, but
+the conversation stays blocked: start a new conversation, or repair the
+transcript. A torn tail is never committed data and is safe to remove.
+`Conversation.CheckIntegrity` returns the same report without writing; it
+refuses with `ErrBusy` while the conversation has a run.
+`Conversation.Verify` runs the check `Resume` runs, without a turn, and
+records the outcome (blocked or cleared). `Agent.BlockedConversations` lists
+the conversations marked blocked. `IntegrityError.Interrupted` says whether an
+interrupted turn is left to discard. A runtime event
+(`phase: integrity`) records each check's stage, disposition, worst severity
+and per-code counts, and never message content.
+
 **Interrupted turns.** A turn the previous process left unfinished (it was
 killed mid-turn) is kept until the owner decides. **Hosts upgrading should
 call `Runner.RecoverTurns(ctx)` once the chat Service starts**; without it
@@ -484,6 +503,31 @@ the owner is not offered the turn, and it waits out its hold.
   ends fails with "no interrupted turn" and publishes nothing. `Resume`
   returns once `Observe` accepts the run, which waits while another run holds
   the chat.
+- **Integrity.** A conversation that fails integrity checks is never resumed.
+  `Runner.Resume` checks it under the same claim `Resume` uses and returns the
+  agent's `*IntegrityError` before publishing anything. Both `RecoverTurns`
+  modes then offer the turn with `integrity: blocked` and no `resume` action:
+  `discard` while there is a turn the transcript can still close, and `reset`.
+  `RecoverTurns` also offers `reset` alone for a blocked chat that has no turn
+  left to discard (a torn tail leaves its turn running), and so does a discard
+  that leaves the chat blocked. When the hold runs out on a turn that cannot
+  be discarded, the hold stops and `reset` is offered instead of retrying.
+- **Reset.** A blocked chat takes no new messages; the refusal says so.
+  `Runner.ResetChat(ctx, chatID)` moves the chat to a new, empty Nanite
+  conversation and returns its ID. It refuses while a run, a `Resume` or
+  another reset holds the chat (`agent.ErrBusy`), and while the chat has an
+  interrupted turn that `Discard` can still close (`ErrResetInterrupted`):
+  discard it first. A turn whose transcript refuses the discard (a torn tail)
+  stays behind with the old conversation. A message arriving during a reset
+  is refused rather than run on the old conversation. The move is saved in agent host
+  state, so a restart keeps it; `Runner.ConversationOf(chatID)` names the
+  conversation serving a chat now (`ConversationID` is only the first). The
+  previous conversation stays on disk untouched, for inspection and
+  `nanite rebuild-index`. The chat is told with a `nanite.chat_reset` activity
+  (`previous_conversation`, `conversation`, `reason`: `integrity` or
+  `requested`). The front desk's state belongs to the chat, so its plans and
+  ledger carry over to the new conversation. Grant waits a turn of the old
+  conversation left behind are dropped: nothing resumes that turn.
 - `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
   `Record`, also discards it: the owner has moved on.
 - `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report

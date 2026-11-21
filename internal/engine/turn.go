@@ -35,6 +35,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
+	transcriptlog "github.com/hollis-labs/nanite/internal/transcript"
 )
 
 type execution struct {
@@ -412,6 +413,18 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 		return events.Result{}, err
 	}
 	journal, err := e.cfg.Store.OpenJournal(ctx, info.ID)
+	if errors.Is(err, transcriptlog.ErrTorn) {
+		// Torn while this process ran (a short write, a full disk): check it
+		// now, which marks it blocked, so the next run is refused up front
+		// and this one fails with the findings.
+		report, gateErr := e.validate(ctx, info.ID)
+		if checkRan(gateErr) {
+			e.ObserveIntegrity(ctx, info.ID, "send", report)
+		}
+		if gateErr != nil {
+			return events.Result{}, gateErr
+		}
+	}
 	if err != nil {
 		return events.Result{}, err
 	}

@@ -248,7 +248,9 @@ func TestTornTailRangeIsAfterLastCommittedRecord(t *testing.T) {
 	}
 	report := integrity.Validate(integrity.Input{ConversationID: fixtureConversation, Entries: entries, ReplayErr: err})
 	last := report.Findings[len(report.Findings)-1]
-	if last.Code != integrity.CodeTornTail || last.AutoRepair || last.Records.FirstCursor != entries[len(entries)-1].Cursor {
+	c := entries[len(entries)-1].Cursor
+	if last.Code != integrity.CodeTornTail || !last.AutoRepair || last.Repair != integrity.RepairTruncateTail || last.Records.FirstCursor != c ||
+		last.Evidence["segment"] != fmt.Sprint(c.Segment) || last.Evidence["committed_bytes"] != fmt.Sprint(c.Offset) {
 		t.Fatalf("torn tail finding = %+v", last)
 	}
 }
@@ -366,6 +368,9 @@ func TestSeverityJSON(t *testing.T) {
 func TestResumeRepairOnlyForASoundTranscript(t *testing.T) {
 	for _, name := range []string{"mixed", "torn_tail"} {
 		for _, f := range validateFixture(t, build(t, name).bytes()).Findings {
+			if f.Code == integrity.CodeTornTail {
+				continue // cutting uncommitted bytes needs nothing else to be sound
+			}
 			if f.AutoRepair || f.Repair != "" {
 				t.Fatalf("%s: %+v offers a repair on an unsound transcript", name, f)
 			}

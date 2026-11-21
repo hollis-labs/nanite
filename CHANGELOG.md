@@ -21,7 +21,7 @@ from the test-suite audit. No breaking changes.
 - Add `internal/integrity`, a pure validator that classifies a conversation's
   transcript and index into typed findings, separating ordinary interruption
   from corruption. `Store.ValidateConversation` reads its input without
-  writing. Validation does not gate recovery yet.
+  writing.
 - Recovery pairs tool calls with results per model step. Providers that
   number calls per response reuse an ID in later steps; a reused call left
   unanswered at a crash was taken as answered, so Resume and Discard sent
@@ -35,6 +35,23 @@ from the test-suite audit. No breaking changes.
 - MCP tool model names stay within 64 characters: a longer name is
   shortened to a stable prefix plus a hash, and still calls the original
   tool. Nil content in an MCP tool result is skipped instead of panicking.
+- Recovery validates the conversations it touches (a running turn, or a torn
+  transcript tail) and marks an unsafe one blocked; the mark survives a
+  restart. `Resume` always validates, and any other run validates only a
+  blocked conversation, before reading history. An unsafe finding refuses the
+  run with `*agent.IntegrityError` (`agent.ErrIntegrity`) carrying the
+  findings, and `nanite --resume` prints them. `Discard` stays available but
+  does not unblock. Adds `Conversation.CheckIntegrity` and a content-free
+  `integrity` runtime event. A torn tail (an incomplete final line, never
+  committed) no longer keeps the agent from opening: its committed prefix is
+  projected and the conversation is refused until the tail is removed; the
+  finding names the exact cut (`truncate_torn_tail`).
+  Damage before the tail is now reported as changed history and still
+  refuses to open. The chatrunner never resumes through an unsafe finding:
+  its offers drop `resume` for a blocked chat and add `reset`, and the new
+  `Runner.ResetChat` moves a blocked chat to a new conversation, kept across
+  restarts, leaving the old one on disk. Adds `Conversation.Verify` and
+  `Agent.BlockedConversations`.
 
 ## 0.15.0
 

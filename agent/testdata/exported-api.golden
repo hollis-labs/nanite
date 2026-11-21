@@ -2,6 +2,7 @@ const ActivityAuthWaiting untyped string
 type Agent struct
   (*Agent) AuthDecided(id string, status string)
   (*Agent) AuthRequest(ctx context.Context, id string) (AuthWaiting, error)
+  (*Agent) BlockedConversations(ctx context.Context) ([]string, error)
   (*Agent) Close() error
   (*Agent) Complete(ctx context.Context, use string, system string, prompt string, maxTokens int) (string, error)
   (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
@@ -71,6 +72,7 @@ type CompactionStarted = github.com/hollis-labs/nanite/internal/events.Compactio
   field RequestBefore int
 type Conversation struct
   (*Conversation) AcceptSuggestion(ctx context.Context, suggestion SteerVerdict, view string) error
+  (*Conversation) CheckIntegrity(ctx context.Context) (IntegrityReport, error)
   (*Conversation) Discard(ctx context.Context) error
   (*Conversation) Dispatch(ctx context.Context, starts []DispatchStart) (*Run, error)
   (*Conversation) History(ctx context.Context) ([]Message, error)
@@ -92,6 +94,7 @@ type Conversation struct
   (*Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error)
   (*Conversation) SteerEvent(ctx context.Context, topic string) (HostFired, error)
   (*Conversation) SteerFocus(ctx context.Context, view string) (HostFired, error)
+  (*Conversation) Verify(ctx context.Context) error
   (*Conversation) WithdrawQueuedNotice(ctx context.Context, key string) error
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
   field ID string
@@ -118,6 +121,7 @@ type Dispatched = github.com/hollis-labs/nanite/internal/events.Dispatched struc
 var ErrAuthRequestGone error
 var ErrBusy error
 var ErrDailyBudget error
+var ErrIntegrity error
 var ErrNoConversation error
 var ErrNoInterrupted error
 var ErrNoStarts error
@@ -160,6 +164,44 @@ type Input = github.com/hollis-labs/nanite/internal/engine.Input struct
   field Source string
   field Situation *github.com/hollis-labs/libs/agent/steer.Situation
   field Steer *github.com/hollis-labs/nanite/internal/engine.PreparedSteer
+type IntegrityCode = github.com/hollis-labs/nanite/internal/integrity.Code string
+type IntegrityError = github.com/hollis-labs/nanite/internal/engine.IntegrityError struct
+  field Conversation string
+  field Report github.com/hollis-labs/nanite/internal/integrity.Report
+  field Interrupted bool
+  (*IntegrityError) Error() string
+  (*IntegrityError) Unwrap() error
+type IntegrityFinding = github.com/hollis-labs/nanite/internal/integrity.Finding struct
+  field Code github.com/hollis-labs/nanite/internal/integrity.Code
+  field Severity github.com/hollis-labs/nanite/internal/integrity.Severity
+  field Records github.com/hollis-labs/nanite/internal/integrity.Range
+  field Evidence map[string]string
+  field AutoRepair bool
+  field Repair github.com/hollis-labs/nanite/internal/integrity.Repair
+  field Detail string
+  (IntegrityFinding) String() string
+const IntegrityInfo github.com/hollis-labs/nanite/internal/integrity.Severity
+type IntegrityRange = github.com/hollis-labs/nanite/internal/integrity.Range struct
+  field First int
+  field Last int
+  field FirstCursor github.com/hollis-labs/nanite/internal/transcript.Cursor
+  field LastCursor github.com/hollis-labs/nanite/internal/transcript.Cursor
+const IntegrityRecoverable github.com/hollis-labs/nanite/internal/integrity.Severity
+type IntegrityRepair = github.com/hollis-labs/nanite/internal/integrity.Repair string
+type IntegrityReport = github.com/hollis-labs/nanite/internal/integrity.Report struct
+  field ConversationID string
+  field Records int
+  field Findings []github.com/hollis-labs/nanite/internal/integrity.Finding
+  field Highest github.com/hollis-labs/nanite/internal/integrity.Severity
+  field Truncated bool
+  (IntegrityReport) Safe() bool
+  (IntegrityReport) Unsafe() []github.com/hollis-labs/nanite/internal/integrity.Finding
+  (IntegrityReport) Worst() github.com/hollis-labs/nanite/internal/integrity.Severity
+type IntegritySeverity = github.com/hollis-labs/nanite/internal/integrity.Severity int
+  (IntegritySeverity) MarshalText() ([]byte, error)
+  (IntegritySeverity) String() string
+const IntegrityUnsafe github.com/hollis-labs/nanite/internal/integrity.Severity
+const IntegrityWarning github.com/hollis-labs/nanite/internal/integrity.Severity
 type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedTurn struct
   field ID string
   field UserMessageID string

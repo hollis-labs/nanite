@@ -143,9 +143,13 @@ func (s *Store) replayConversation(ctx context.Context, id string) error {
 		return err
 	}
 	entries, err := transcript.Replay(s.transcripts, id, after)
-	if err != nil {
+	// A torn tail leaves the committed prefix readable. Project it and leave
+	// the tail to integrity checks: the writer still refuses to append, and
+	// Resume reports the torn tail instead of the store failing to open.
+	if err != nil && !errors.Is(err, transcript.ErrTorn) {
 		return err
 	}
+	s.markTorn(id, err != nil)
 	for _, entry := range entries {
 		if err := s.project(ctx, id, entry); err != nil {
 			return err

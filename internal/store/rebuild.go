@@ -32,7 +32,8 @@ func (s *Store) RebuildIndex(ctx context.Context) error {
 				continue
 			}
 			entries, err := transcript.Replay(s.transcripts, dir.Name(), transcript.Cursor{})
-			if err != nil {
+			// As on open, a torn tail's committed prefix is projected.
+			if err != nil && !errors.Is(err, transcript.ErrTorn) {
 				return err
 			}
 			for _, entry := range entries {

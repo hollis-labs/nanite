@@ -15,19 +15,112 @@ import (
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/transcript"
 )
 
-func Recover(ctx context.Context, db *store.Store) error {
+// Disposition is what recovery did with a conversation it checked.
+type Disposition string
+
+const (
+	// Resumable: the interrupted turn may be resumed or discarded.
+	Resumable Disposition = "resumable"
+	// Blocked: an unsafe finding refuses Resume. Discard stays available
+	// unless the transcript itself refuses writes (a torn tail).
+	Blocked Disposition = "blocked"
+)
+
+// Check is one conversation recovery validated before touching it.
+type Check struct {
+	Conversation string
+	Turns        []string // the running turns it found there
+	Report       integrity.Report
+	Disposition  Disposition
+}
+
+// MarkBlocked records whether a conversation failed its last integrity
+// check. It writes only when the state changes.
+func MarkBlocked(ctx context.Context, db *store.Store, conversation string, blocked bool) error {
+	current, err := db.Setting(ctx, conversation, store.SettingIntegrity)
+	if err != nil {
+		return err
+	}
+	want := ""
+	if blocked {
+		want = string(Blocked)
+	}
+	if current == want {
+		return nil
+	}
+	return db.SetSetting(ctx, conversation, store.SettingIntegrity, want)
+}
+
+// DispositionOf is the disposition a report allows.
+func DispositionOf(report integrity.Report) Disposition {
+	if report.Safe() {
+		return Resumable
+	}
+	return Blocked
+}
+
+// Recover reconciles what the previous process left in flight, after the
+// agent lock is held. Candidates are bounded: conversations with a running
+// turn, and those whose transcript replay on open stopped at a torn tail;
+// never the whole history. Each is checked before its turns are marked
+// interrupted; observe, if set, receives every check. An unsafe conversation
+// is marked blocked (store.SettingIntegrity), which refuses every new run on
+// it until a check passes, and its turns are still marked interrupted so
+// Discard can close them, unless its transcript refuses writes (a torn
+// tail).
+func Recover(ctx context.Context, db *store.Store, observe func(Check)) error {
 	turns, err := db.RunningTurns(ctx)
 	if err != nil {
 		return err
 	}
+	var order []string
+	running := map[string][]string{}
+	seen := map[string]bool{}
 	for _, turn := range turns {
-		journal, err := db.OpenJournal(ctx, turn.ConversationID)
+		if !seen[turn.ConversationID] {
+			seen[turn.ConversationID] = true
+			order = append(order, turn.ConversationID)
+		}
+		running[turn.ConversationID] = append(running[turn.ConversationID], turn.TurnID)
+	}
+	for _, id := range db.TornConversations() {
+		if !seen[id] {
+			seen[id] = true
+			order = append(order, id)
+		}
+	}
+	for _, conversation := range order {
+		report, err := db.ValidateConversation(ctx, conversation, nil)
+		if err != nil {
+			return fmt.Errorf("validate conversation %s: %w", conversation, err)
+		}
+		check := Check{Conversation: conversation, Turns: running[conversation], Report: report, Disposition: DispositionOf(report)}
+		if observe != nil {
+			observe(check)
+		}
+		if err := MarkBlocked(ctx, db, conversation, check.Disposition == Blocked); err != nil {
+			return err
+		}
+		if len(check.Turns) == 0 {
+			continue
+		}
+		journal, err := db.OpenJournal(ctx, conversation)
+		if errors.Is(err, transcript.ErrTorn) && check.Disposition == Blocked {
+			continue
+		}
 		if err != nil {
 			return err
 		}
-		if err := errors.Join(journal.InterruptTurn(turn.TurnID, time.Now().UTC()), journal.Close()); err != nil {
+		now := time.Now().UTC()
+		for _, turn := range check.Turns {
+			if err = journal.InterruptTurn(turn, now); err != nil {
+				break
+			}
+		}
+		if err := errors.Join(err, journal.Close()); err != nil {
 			return err
 		}
 	}

@@ -81,7 +81,9 @@ type Options struct {
 	OnSteered func(chatID string, s agent.Steered)
 	// ResumeInterrupted makes RecoverTurns resume each turn the previous
 	// process left unfinished. Without it, RecoverTurns offers each one to
-	// the owner (a nanite.interrupted activity) to Resume or Discard.
+	// the owner (a nanite.interrupted activity) to Resume or Discard. A turn
+	// whose conversation fails integrity checks is never resumed: it is
+	// offered for Discard only, and RecoverTurns reports the refusal.
 	ResumeInterrupted bool
 	// InterruptedHold is how long an interrupted turn waits for the owner
 	// (or RecoverTurns) before the runner discards it (default 15 minutes;
@@ -140,6 +142,11 @@ type Runner struct {
 	// resuming is the chats whose turn a Resume has claimed.
 	holds    map[string]*hold
 	resuming map[string]bool
+	// resetting is the chats a ResetChat has claimed: no run starts on them.
+	resetting map[string]bool
+	// generations counts how many times each chat was reset (ResetChat):
+	// it picks the Nanite conversation that serves the chat now.
+	generations map[string]int
 	// serving is set once the chat Service is known to run.
 	serving bool
 	// auth is the Warden grant requests turns wait on.
@@ -161,7 +168,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		return nil, errors.New("chatrunner: Options.Desk needs Options.Observe")
 	}
 	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}, publishers: map[string]*publisher{},
-		recorded: map[string]bool{}, holds: map[string]*hold{}, resuming: map[string]bool{}}
+		recorded: map[string]bool{}, holds: map[string]*hold{}, resuming: map[string]bool{}, resetting: map[string]bool{}}
 	if opts.Desk != nil {
 		desk := *opts.Desk
 		if desk.Mode == nil && opts.Agent.Steering != nil {
@@ -183,6 +190,10 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		return nil, err
 	}
 	r.agent = a
+	if err := r.loadGenerations(ctx); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
 	if err := r.SetTools(opts.Tools...); err != nil {
 		_ = a.Close()
 		return nil, err
@@ -218,7 +229,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 // yet: the desk's default Mode when steering is on.
 func (r *Runner) mode(chatID string) string {
 	ctx := context.Background()
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if err != nil {
 		return ""
 	}
@@ -263,8 +274,9 @@ func (r *Runner) Close() error {
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
-// ConversationID is the Nanite conversation that serves a chat conversation.
-// It is the RunnerRef on the chat conversation record.
+// ConversationID is the Nanite conversation that first serves a chat
+// conversation. After Runner.ResetChat a chat is served by a newer one; use
+// Runner.ConversationOf for the current one.
 func ConversationID(chatID string) string {
 	if safeID.MatchString(chatID) {
 		return "chat-" + chatID
@@ -279,7 +291,7 @@ func ConversationID(chatID string) string {
 // previous process left unfinished is kept: see Interrupted, Resume and
 // Discard.
 func (r *Runner) conversation(ctx context.Context, chatID string) (*agent.Conversation, error) {
-	id := ConversationID(chatID)
+	id := r.naniteID(chatID)
 	c, err := r.agent.EnsureConversation(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("chatrunner: open conversation: %w", err)
@@ -498,7 +510,10 @@ func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool
 	out.ctx, out.stop = runCtx, cancel
 
 	r.mu.Lock()
-	if r.active[out.nanite] != nil {
+	// A reset in progress, or one that finished since c was opened, means c
+	// no longer serves the chat: start nothing on it.
+	stale := r.resetting[turn.ConversationID] || out.nanite != generationID(turn.ConversationID, r.generations[turn.ConversationID])
+	if r.active[out.nanite] != nil || stale {
 		r.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("chatrunner: %w", agent.ErrBusy)
@@ -592,7 +607,7 @@ func contextText(raw json.RawMessage) string {
 // Info reports what the runner does and the Nanite conversation that serves
 // a chat conversation.
 func (r *Runner) Info(_ context.Context, conversationID string) (chat.Info, error) {
-	return chat.Info{Deltas: true, Approvals: true, RunnerRef: ConversationID(conversationID)}, nil
+	return chat.Info{Deltas: true, Approvals: true, RunnerRef: r.naniteID(conversationID)}, nil
 }
 
 // Record adds an exchange the host answered itself to the agent's history.
@@ -684,7 +699,7 @@ func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(
 		if err == nil || !errors.Is(err, agent.ErrBusy) {
 			return x, err
 		}
-		held := r.activeRun(ConversationID(turn.ConversationID))
+		held := r.activeRun(r.naniteID(turn.ConversationID))
 		if held == nil {
 			continue // it was released meanwhile: try again
 		}

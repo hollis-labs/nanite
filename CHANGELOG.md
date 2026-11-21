@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
+Specialist agents and Registry-defined agents. A starter template and two
+specialist agents under `agents/`; Registry agent records materialize into
+ordinary agent folders, keeping an agent's conversations across updates; a
+live front desk pilot. No breaking changes.
+
+- `agent.Open` takes a shared lock file beside the agent folder
+  (`.nanite-publish-<name>.lock`) so a materializer cannot replace a folder an
+  agent has open. It is skipped when the parent directory cannot be written.
 - `agents/workflow-designer` carries the Surface Module conventions pack
   (v1.0.0, from Surface) as the `design-surface-workflow` skill and context notes.
 - Materialize Registry agent records into validated local folders with provenance,

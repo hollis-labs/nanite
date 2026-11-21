@@ -33,23 +33,23 @@ page.
 
 ## host.yaml
 
-```yaml
-kind: embedded            # embedded | stable | task
-lifetime: application     # application | on-demand | until-task-end
-application_id: my-agent  # the identity key for the kind (seat_id, task_id)
-runtime:
-  provider: anthropic     # or openai (then set model)
-  model: <optional; a host usually supplies it>
-  max_steps: 40           # model steps per turn
-  max_output_tokens: 0    # 0 = adapter default
-  cache_ttl: 1h           # "", 5m or 1h prompt caching
-  compact_at: 110000      # tokens before older turns are summarised
-  compact_keep_tokens: 22000
-  daily_token_budget: 2000000   # per UTC day; 0 = no cap
-  turn_token_budget: 0    # per turn incl. subtasks; 0 = no cap
-permissions:
-  mode: default           # default | accept-edits | plan | yolo
-```
+| Key | Example value | Meaning |
+|---|---|---|
+| `kind` | `embedded` | `embedded`, `stable` or `task` |
+| `lifetime` | `application` | `application`, `on-demand` or `until-task-end` |
+| `application_id` | the agent's name | the identity key for the kind (`seat_id`, `task_id` for the others) |
+| `runtime.provider` | `anthropic` | or `openai` (then set a model) |
+| `runtime.model` | (optional) | a host usually supplies it |
+| `runtime.max_steps` | 40 | model steps per turn |
+| `runtime.max_output_tokens` | 0 | 0 means the adapter default |
+| `runtime.cache_ttl` | `1h` | empty, `5m` or `1h` prompt caching |
+| `runtime.compact_at` | 110000 | token count at which older turns are summarised |
+| `runtime.compact_keep_tokens` | 22000 | how much recent history compaction keeps whole |
+| `runtime.daily_token_budget` | 2000000 | cap per UTC day; 0 means no cap |
+| `runtime.turn_token_budget` | 0 | cap per turn including subtasks; 0 means no cap |
+| `permissions.mode` | `default` | `default`, `accept-edits`, `plan` or `yolo` |
+
+`runtime` and `permissions` are nested maps in the YAML file.
 
 Safe defaults for a new agent: `max_steps` 40, `compact_at` 110000 with
 `compact_keep_tokens` 22000, and always a `daily_token_budget` during pilots.

@@ -77,8 +77,14 @@ type Plan struct {
 func ResumePlan(history []store.Message, turn store.InterruptedTurn) (Plan, error) {
 	var out Plan
 	var userFound bool
-	var calls []string
-	results := make(map[string]bool)
+	// Calls pair with results per step: a model step's calls are answered by
+	// the tool results after it, before the next step. Providers that number
+	// calls per response reuse an ID in a later step, so matching by ID
+	// across the turn would take a reused, unanswered call as answered.
+	// Only the last step can still be answered: its pending calls are what
+	// the turn is missing.
+	var calls []string               // the last step's calls, in order
+	results := make(map[string]bool) // which of them have a result
 	sawSynthetic := false
 	for _, m := range history {
 		if m.TurnID != turn.ID {
@@ -104,6 +110,8 @@ func ResumePlan(history []store.Message, turn store.InterruptedTurn) (Plan, erro
 				out.Steps++
 			}
 			sawSynthetic = false
+			calls = calls[:0]
+			clear(results)
 			for _, b := range m.Blocks {
 				if b.Type == "text" {
 					out.AssistantText += b.Text

@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-Mailbox delivery fixes. No breaking changes.
+Mailbox delivery fixes, and conversation integrity checks that tell an
+ordinary interruption from a corrupt transcript. No breaking changes.
 
 - Mail polling no longer skips the oldest unread message when mail arrives
   during a poll of more than 50 unread messages; the tail fetch repeats until
@@ -20,6 +21,10 @@ Mailbox delivery fixes. No breaking changes.
   transcript and index into typed findings, separating ordinary interruption
   from corruption. `Store.ValidateConversation` reads its input without
   writing. Validation does not gate recovery yet.
+- Recovery pairs tool calls with results per model step. Providers that
+  number calls per response reuse an ID in later steps; a reused call left
+  unanswered at a crash was taken as answered, so Resume and Discard sent
+  the model a call with no result. It now gets its interrupted result.
 
 ## 0.15.0
 

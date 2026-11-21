@@ -34,11 +34,9 @@
 // or message that references a row the index does not have) is Unsafe: the
 // store cannot open a journal on that conversation, or replay it.
 //
-// Tool calls pair per model step. A provider may reuse a call ID in a later
-// step or turn; only a repeat within one step is a finding. One exception:
-// recovery pairs by ID across a turn, so an interrupted call whose ID an
-// earlier step of the turn already answered cannot be recovered and is
-// Unsafe.
+// Tool calls pair per model step, as recovery.ResumePlan pairs them. A
+// provider may reuse a call ID in a later step or turn; only a repeat within
+// one step is a finding.
 //
 // # Unknown record kinds
 //

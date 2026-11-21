@@ -24,9 +24,17 @@
 //     provider rejects. A caller must not resume through it.
 //
 // AutoRepair marks a finding whose fix is deterministic and loses nothing
-// that was committed, and Repair names that fix. Only Recoverable findings
-// and an index that is merely behind the transcript are auto-repairable;
-// every other Unsafe finding needs an operator decision.
+// that was committed, and Repair names that fix: resuming or discarding an
+// interruption, clearing a stale hold, and replaying or rebuilding the index
+// from a sound transcript (one with no unsafe finding of its own, which the
+// projection can replay). Every other Unsafe finding needs an operator.
+//
+// A record the store's projection would refuse (a wrong field type, a turn
+// or message that references a row the index does not have) is Unsafe: the
+// store cannot open a journal on that conversation, or replay it.
+//
+// Tool calls pair per model step. A provider may reuse a call ID in a later
+// step or turn; only a repeat within one step is a finding.
 //
 // # Unknown record kinds
 //
@@ -178,8 +186,11 @@ type Report struct {
 	ConversationID string    `json:"conversation_id"`
 	Records        int       `json:"records"`
 	Findings       []Finding `json:"findings"`
+	// Highest is the highest severity of every finding, including any the
+	// bound left out.
+	Highest Severity `json:"highest"`
 	// Truncated is set when more than MaxFindings were found; the report
-	// keeps the first MaxFindings in order.
+	// keeps the first MaxFindings detected (byte-layer findings first).
 	Truncated bool `json:"truncated,omitempty"`
 }
 
@@ -187,9 +198,10 @@ type Report struct {
 // an unbounded one.
 const MaxFindings = 256
 
-// Worst is the highest severity in the report, or Info when it is clean.
+// Worst is the highest severity found, including findings the bound left
+// out, or Info when the conversation is clean.
 func (r Report) Worst() Severity {
-	worst := Info
+	worst := r.Highest
 	for _, f := range r.Findings {
 		worst = max(worst, f.Severity)
 	}
@@ -199,7 +211,8 @@ func (r Report) Worst() Severity {
 // Safe reports whether nothing in the report blocks resuming.
 func (r Report) Safe() bool { return r.Worst() < Unsafe }
 
-// Unsafe returns the findings that block resuming, in order.
+// Unsafe returns the reported findings that block resuming, in order. When
+// the report is Truncated, Safe can be false with this list empty.
 func (r Report) Unsafe() []Finding {
 	var out []Finding
 	for _, f := range r.Findings {

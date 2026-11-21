@@ -18,24 +18,33 @@ type turn struct {
 	userMessageID string
 	outcome       string // first terminal status recorded, "" while unfinished
 	messages      int
-	pending       []string       // tool_use IDs awaiting a result, in call order
-	pendingAt     map[string]int // tool_use ID -> record index of its call
-	answered      map[string]bool
-	superseded    map[string]bool // calls a later step went past unanswered
+	// Tool pairing is per model step: a step's calls are answered by the
+	// tool results that follow it, before the next step. Providers may
+	// reuse an ID in a later step or turn (some number calls per response),
+	// so an ID is only ever matched against the current step.
+	pending    []int           // calls of the current step awaiting a result, in call order (indexes into walker.calls)
+	stepCalls  map[string]int  // ID -> call of the current step
+	answered   map[string]bool // IDs of the current step already answered
+	superseded map[string]bool // IDs earlier steps left unanswered
 }
 
 func (t *turn) unfinished() bool { return t.outcome == "" }
 
-// call locates one tool_use block.
+// call is one tool_use block.
 type call struct {
+	id      string
 	turn    string
 	record  int
-	message int // position of its message in transcript order
+	message int // position of its message among messages
+	result  int // position of the message holding its result, -1 if none
 }
 
 type walker struct {
 	in       Input
 	findings []Finding
+	highest  Severity
+	dropped  int
+	lastKept bool
 
 	turns     map[string]*turn
 	turnOrder []string
@@ -43,10 +52,11 @@ type walker struct {
 	messageAt map[string]int // message ID -> record index
 	msgOrder  map[string]int // message ID -> position among messages
 	messages  int
-	calls     map[string]call
-	resultMsg map[string]int // tool_use ID -> message position of its first result
+	calls     []call
+	callTurns map[string]string // tool_use ID -> the turn that last called it (evidence only)
 
 	conversationRecords int
+	noConversation      bool // reported a record before the conversation record
 	compactions         []compactionRef
 }
 
@@ -58,18 +68,23 @@ type compactionRef struct {
 
 // Validate checks one conversation. It is pure and deterministic: the same
 // Input always yields the same Report, findings ordered by the first record
-// they concern and then in detection order.
+// they concern and then in detection order. It expects a quiescent
+// transcript; a writer appending while the entries were read can make the
+// tail look torn.
 func Validate(in Input) Report {
-	w := &walker{in: in, turns: map[string]*turn{}, messageAt: map[string]int{}, msgOrder: map[string]int{},
-		calls: map[string]call{}, resultMsg: map[string]int{}}
+	w := &walker{in: in, turns: map[string]*turn{}, messageAt: map[string]int{}, msgOrder: map[string]int{}, callTurns: map[string]string{}}
+	// Byte-layer findings first, so the report bound never drops them.
+	w.byteLayer()
 	for i, entry := range in.Entries {
 		w.record(i, entry)
 	}
-	w.byteLayer()
 	w.finish()
-	w.compare()
-	w.notices()
-	w.hold()
+	sound := w.highest < Unsafe
+	w.compare(sound)
+	if replayed(in.ReplayErr) {
+		w.notices()
+		w.hold()
+	}
 
 	// Byte-layer and index-only findings (First == -1) sort after the
 	// records; a torn tail is after every committed record by definition.
@@ -81,12 +96,12 @@ func Validate(in Input) Report {
 		return f.Records.First
 	}
 	sort.SliceStable(w.findings, func(i, j int) bool { return position(w.findings[i]) < position(w.findings[j]) })
-	report := Report{ConversationID: in.ConversationID, Records: len(in.Entries), Findings: w.findings}
-	if len(report.Findings) > MaxFindings {
-		report.Findings, report.Truncated = report.Findings[:MaxFindings], true
-	}
-	return report
+	return Report{ConversationID: in.ConversationID, Records: len(in.Entries), Findings: w.findings, Highest: w.highest, Truncated: w.dropped > 0}
 }
+
+// replayed reports whether Entries hold the whole committed history: replay
+// succeeded or stopped only at a torn tail.
+func replayed(err error) bool { return err == nil || errors.Is(err, transcript.ErrTorn) }
 
 func (w *walker) at(i int) Range {
 	if i < 0 || i >= len(w.in.Entries) {
@@ -104,7 +119,16 @@ func (w *walker) span(first, last int) Range {
 	return r
 }
 
+// add records a finding. Past MaxFindings it only counts it, so a badly
+// damaged transcript cannot grow the report without bound; Highest still
+// includes every finding.
 func (w *walker) add(code Code, severity Severity, records Range, detail string, evidence ...string) {
+	w.highest = max(w.highest, severity)
+	if len(w.findings) >= MaxFindings {
+		w.dropped++
+		w.lastKept = false
+		return
+	}
 	f := Finding{Code: code, Severity: severity, Records: records, Detail: detail}
 	if len(evidence) > 0 {
 		f.Evidence = make(map[string]string, len(evidence)/2)
@@ -113,35 +137,57 @@ func (w *walker) add(code Code, severity Severity, records Range, detail string,
 		}
 	}
 	w.findings = append(w.findings, f)
+	w.lastKept = true
 }
 
+// repairable marks the finding just added as automatically repairable.
 func (w *walker) repairable(repair Repair) {
+	if !w.lastKept {
+		return
+	}
 	f := &w.findings[len(w.findings)-1]
 	f.AutoRepair, f.Repair = true, repair
 }
 
+// record follows projectEntry: a known sideband subtype is applied whatever
+// the record's type, then a user or assistant record is a message.
 func (w *walker) record(i int, entry transcript.Entry) {
 	var r record
 	if err := json.Unmarshal(entry.Record, &r); err != nil {
-		w.add(CodeInvalidRecord, Unsafe, w.at(i), "the record is not a JSON object")
+		w.add(CodeInvalidRecord, Unsafe, w.at(i), "the record cannot be read as the store reads it (shape or timestamp)")
 		return
 	}
 	if w.in.ConversationID != "" && r.SessionID != w.in.ConversationID {
 		w.add(CodeSessionMismatch, Unsafe, w.at(i), "the record belongs to another conversation", "record", r.UUID, "session", r.SessionID)
 		return
 	}
+	known := w.sideband(i, r)
 	switch r.Type {
 	case "user", "assistant":
 		w.message(i, r)
 	case "system", "summary":
-		w.sideband(i, r)
+		if !known {
+			w.add(CodeUnknownSideband, Info, w.at(i), "a sideband subtype this version does not know; skipped", "record", r.UUID, "subtype", r.Subtype)
+		}
 	default:
 		w.add(CodeUnknownRecordType, Unsafe, w.at(i), "no Nanite writer emits this record type; it may carry history this version cannot read",
 			"record", r.UUID, "type", r.Type)
 	}
 }
 
-func (w *walker) sideband(i int, r record) {
+// needsConversation reports, once, a record the index cannot hold because
+// no conversation record precedes it: its row references the conversation.
+// The walk goes on so the other checks still run.
+func (w *walker) needsConversation(i int, what string) bool {
+	if w.conversationRecords == 0 && !w.noConversation {
+		w.noConversation = true
+		w.add(CodeConversationMeta, Unsafe, w.at(i), "a "+what+" comes before any conversation record; the index cannot hold it")
+	}
+	return true
+}
+
+// sideband applies a known subtype and reports whether it knew it.
+func (w *walker) sideband(i int, r record) bool {
 	switch r.Subtype {
 	case subtypeConversation:
 		w.conversationRecords++
@@ -158,51 +204,60 @@ func (w *walker) sideband(i int, r record) {
 		p, err := decodePayload[turnPayload](r.Payload)
 		if err != nil || p.ID == "" {
 			w.add(CodeInvalidRecord, Unsafe, w.at(i), "the turn record has no readable turn", "record", r.UUID, "subtype", r.Subtype)
-			return
+			return true
 		}
 		w.turnRecord(i, r.Subtype, p)
 	case subtypeCompaction:
 		p, err := decodePayload[compactionPayload](r.Payload)
 		if err != nil {
 			w.add(CodeInvalidRecord, Unsafe, w.at(i), "the compaction record has no readable payload", "record", r.UUID)
-			return
+			return true
 		}
 		// Compaction telemetry without a summary (older development
 		// transcripts) covers nothing and is not projected.
 		if p.ThroughMessageID == "" || p.Summary == "" {
-			return
+			return true
 		}
-		if _, known := w.turns[p.TurnID]; p.TurnID != "" && !known {
-			w.add(CodeUnknownTurn, Warning, w.at(i), "the compaction names a turn that never started", "compaction", r.UUID, "turn", p.TurnID)
+		if !w.needsConversation(i, "compaction") {
+			return true
+		}
+		if _, known := w.turns[p.TurnID]; !known {
+			// compactions.turn_id references turns: the projection refuses it.
+			w.add(CodeUnknownTurn, Unsafe, w.at(i), "the compaction names a turn that never started; the index cannot hold it",
+				"compaction", r.UUID, "turn", p.TurnID)
+			return true
 		}
 		if _, seen := w.messageAt[p.ThroughMessageID]; !seen {
 			w.add(CodeCompactionUnknownMessage, Unsafe, w.at(i), "the compaction covers through a message the transcript does not have before it; history after the summary cannot be located",
 				"compaction", r.UUID, "through", p.ThroughMessageID)
-			return
+			return true
 		}
 		w.compactions = append(w.compactions, compactionRef{record: i, id: r.UUID, through: p.ThroughMessageID})
 	case subtypePermission:
 	default:
-		w.add(CodeUnknownSideband, Info, w.at(i), "a sideband subtype this version does not know; skipped", "record", r.UUID, "subtype", r.Subtype)
+		return false
 	}
+	return true
 }
 
 func (w *walker) turnRecord(i int, subtype string, p turnPayload) {
 	t := w.turns[p.ID]
 	switch subtype {
 	case subtypeTurnStart:
+		if !w.needsConversation(i, "turn") {
+			return
+		}
 		if t != nil {
 			w.add(CodeIllegalTurnTransition, Unsafe, w.span(t.start, i), "the turn started twice", "turn", p.ID)
 			return
 		}
 		for _, id := range w.open {
-			if other := w.turns[id]; other.unfinished() {
-				w.add(CodeOverlappingTurns, Unsafe, w.span(other.start, i), "a turn started while an earlier turn had not ended",
-					"turn", p.ID, "unfinished_turn", other.id, "unfinished_status", other.status)
-			}
+			other := w.turns[id]
+			w.add(CodeOverlappingTurns, Unsafe, w.span(other.start, i), "a turn started while an earlier turn had not ended",
+				"turn", p.ID, "unfinished_turn", other.id, "unfinished_status", other.status)
 		}
 		w.turns[p.ID] = &turn{id: p.ID, start: i, status: statusRunning, userMessageID: p.UserMessageID,
-			pendingAt: map[string]int{}, answered: map[string]bool{}, superseded: map[string]bool{}}
+			stepCalls: map[string]int{}, answered: map[string]bool{}, superseded: map[string]bool{}}
 		w.turnOrder = append(w.turnOrder, p.ID)
 		w.open = append(w.open, p.ID)
 		return
@@ -243,9 +298,9 @@ func (w *walker) turnRecord(i int, subtype string, p turnPayload) {
 			t.status = p.Status
 			return
 		}
-		for _, id := range t.pending {
-			w.add(CodeToolUseWithoutResult, Unsafe, w.span(t.pendingAt[id], i), "the turn finished with a tool call unanswered; the next request would pair a call with no result",
-				"turn", t.id, "tool_use_id", id)
+		for _, c := range t.pending {
+			w.add(CodeToolUseWithoutResult, Unsafe, w.span(w.calls[c].record, i), "the turn finished with a tool call unanswered; the next request would pair a call with no result",
+				"turn", t.id, "tool_use_id", w.calls[c].id)
 		}
 		t.pending = nil
 		t.outcome, t.status = p.Status, p.Status
@@ -257,10 +312,13 @@ func (w *walker) message(i int, r record) {
 	m, err := decodeMessage(r)
 	switch {
 	case err != nil:
-		w.add(CodeInvalidRecord, Unsafe, w.at(i), "the message body is not a role and a block array", "record", r.UUID)
+		w.add(CodeInvalidRecord, Unsafe, w.at(i), "the message body is not a role and an array of readable content blocks", "record", r.UUID)
 		return
 	case m.role != r.Type || m.id == "":
 		w.add(CodeInvalidRecord, Unsafe, w.at(i), "the message role or UUID does not match its record", "record", r.UUID, "type", r.Type, "role", m.role)
+		return
+	}
+	if !w.needsConversation(i, "message") {
 		return
 	}
 	if first, dup := w.messageAt[m.id]; dup {
@@ -273,14 +331,14 @@ func (w *walker) message(i int, r record) {
 	w.messages++
 	k := m.kind()
 
-	if m.turn == "" {
-		w.add(CodeMessageWithoutTurn, Warning, w.at(i), "the message names no turn", "message", m.id)
-		return
-	}
 	t := w.turns[m.turn]
 	switch {
+	case m.turn == "":
+		// messages.turn_id references turns: the projection refuses it.
+		w.add(CodeMessageWithoutTurn, Unsafe, w.at(i), "the message names no turn; the index cannot hold it", "message", m.id)
+		return
 	case t == nil:
-		w.add(CodeUnknownTurn, Unsafe, w.at(i), "the message names a turn that never started", "message", m.id, "turn", m.turn)
+		w.add(CodeUnknownTurn, Unsafe, w.at(i), "the message names a turn that never started; the index cannot hold it", "message", m.id, "turn", m.turn)
 		return
 	case !t.unfinished():
 		w.add(CodeMessageAfterOutcome, Unsafe, w.span(t.start, i), "the message was written after its turn finished", "message", m.id, "turn", t.id, "status", t.outcome)
@@ -305,65 +363,73 @@ func (w *walker) message(i int, r record) {
 		}
 	case kindClosing:
 		if len(t.pending) > 0 {
-			w.add(CodeIllegalRoleOrdering, Unsafe, w.span(t.pendingAt[t.pending[0]], i), "a closing host note was written while tool calls were unanswered",
-				"message", m.id, "turn", t.id, "tool_use_id", t.pending[0])
+			c := w.calls[t.pending[0]]
+			w.add(CodeIllegalRoleOrdering, Unsafe, w.span(c.record, i), "a closing host note was written while tool calls were unanswered",
+				"message", m.id, "turn", t.id, "tool_use_id", c.id)
 		}
 	case kindAssistant:
-		for _, id := range t.pending {
-			t.superseded[id] = true
-			w.add(CodeToolUseWithoutResult, Unsafe, w.span(t.pendingAt[id], i), "a later model step went past a tool call with no result",
-				"turn", t.id, "tool_use_id", id, "message", m.id)
-		}
-		t.pending = nil
-		for _, b := range m.blocks {
-			if b.Type != "tool_use" {
-				continue
-			}
-			if b.ID == "" {
-				w.add(CodeInvalidRecord, Unsafe, w.at(i), "a tool call has no ID", "message", m.id)
-				continue
-			}
-			if prior, dup := w.calls[b.ID]; dup {
-				w.add(CodeDuplicateRecordID, Unsafe, w.span(prior.record, i), "two tool calls share one ID", "tool_use_id", b.ID, "message", m.id)
-				continue
-			}
-			w.calls[b.ID] = call{turn: t.id, record: i, message: position}
-			t.pending = append(t.pending, b.ID)
-			t.pendingAt[b.ID] = i
-		}
+		w.step(i, position, t, m)
 	case kindTool:
 		for _, b := range m.blocks {
-			if b.Type != "tool_result" {
-				continue
+			if b.Type == "tool_result" {
+				w.result(i, position, t, m, b.ToolUseID)
 			}
-			w.result(i, position, t, m, b.ToolUseID)
 		}
 	}
 }
 
+// step starts a model step: calls the previous step left unanswered are
+// reported, and this step's calls become pending.
+func (w *walker) step(i, position int, t *turn, m message) {
+	for _, c := range t.pending {
+		t.superseded[w.calls[c].id] = true
+		w.add(CodeToolUseWithoutResult, Unsafe, w.span(w.calls[c].record, i), "a later model step went past a tool call with no result",
+			"turn", t.id, "tool_use_id", w.calls[c].id, "message", m.id)
+	}
+	t.pending = nil
+	clear(t.stepCalls)
+	clear(t.answered)
+	for _, b := range m.blocks {
+		if b.Type != "tool_use" {
+			continue
+		}
+		if b.ID == "" {
+			w.add(CodeInvalidRecord, Unsafe, w.at(i), "a tool call has no ID", "message", m.id)
+			continue
+		}
+		if _, dup := t.stepCalls[b.ID]; dup {
+			w.add(CodeDuplicateRecordID, Unsafe, w.at(i), "two tool calls in one step share an ID; their results cannot be told apart",
+				"tool_use_id", b.ID, "message", m.id)
+			continue
+		}
+		delete(t.superseded, b.ID)
+		w.calls = append(w.calls, call{id: b.ID, turn: t.id, record: i, message: position, result: -1})
+		t.stepCalls[b.ID] = len(w.calls) - 1
+		t.pending = append(t.pending, len(w.calls)-1)
+		w.callTurns[b.ID] = t.id
+	}
+}
+
 func (w *walker) result(i, position int, t *turn, m message, id string) {
-	c, known := w.calls[id]
+	c, current := t.stepCalls[id]
 	switch {
-	case !known:
-		w.add(CodeOrphanToolResult, Unsafe, w.at(i), "a tool result answers no earlier tool call", "message", m.id, "turn", t.id, "tool_use_id", id)
+	case current && t.answered[id]:
+		w.add(CodeDuplicateToolResult, Unsafe, w.span(w.calls[c].record, i), "a tool call has more than one result", "message", m.id, "turn", t.id, "tool_use_id", id)
 		return
-	case c.turn != t.id:
-		w.add(CodeOrphanToolResult, Unsafe, w.span(c.record, i), "a tool result answers a call from another turn",
-			"message", m.id, "turn", t.id, "tool_use_id", id, "call_turn", c.turn)
-		return
-	case t.answered[id]:
-		w.add(CodeDuplicateToolResult, Unsafe, w.span(c.record, i), "a tool call has more than one result", "message", m.id, "turn", t.id, "tool_use_id", id)
+	case current:
+		t.answered[id] = true
+		w.calls[c].result = position
+		t.pending = slices.DeleteFunc(t.pending, func(p int) bool { return p == c })
 		return
 	case t.superseded[id]:
-		w.add(CodeOrphanToolResult, Unsafe, w.span(c.record, i), "a tool result arrived after a later model step", "message", m.id, "turn", t.id, "tool_use_id", id)
-		t.answered[id] = true
+		w.add(CodeOrphanToolResult, Unsafe, w.at(i), "a tool result arrived after a later model step", "message", m.id, "turn", t.id, "tool_use_id", id)
 		return
 	}
-	t.answered[id] = true
-	if _, seen := w.resultMsg[id]; !seen {
-		w.resultMsg[id] = position
+	evidence := []string{"message", m.id, "turn", t.id, "tool_use_id", id}
+	if other, ok := w.callTurns[id]; ok && other != t.id {
+		evidence = append(evidence, "call_turn", other)
 	}
-	t.pending = slices.DeleteFunc(t.pending, func(p string) bool { return p == id })
+	w.add(CodeOrphanToolResult, Unsafe, w.at(i), "a tool result answers no call of the step before it", evidence...)
 }
 
 func (w *walker) byteLayer() {
@@ -393,15 +459,12 @@ func (w *walker) byteLayer() {
 // interruption), their unanswered calls, a missing conversation record and
 // compactions that split a tool step.
 func (w *walker) finish() {
-	if len(w.in.Entries) > 0 && w.conversationRecords == 0 && w.in.ReplayErr == nil {
+	if len(w.in.Entries) > 0 && w.conversationRecords == 0 && !w.noConversation && replayed(w.in.ReplayErr) {
 		w.add(CodeConversationMeta, Unsafe, w.at(0), "the transcript has no conversation record; the index has no conversation to hold its turns")
 	}
 	last := len(w.in.Entries) - 1
-	for _, id := range w.turnOrder {
+	for _, id := range w.open {
 		t := w.turns[id]
-		if !t.unfinished() {
-			continue
-		}
 		w.add(CodeInterruptedTurn, Recoverable, w.span(t.start, last), "the turn stopped before it ended; resume or discard it",
 			"turn", t.id, "status", t.status)
 		w.repairable(RepairResume)
@@ -411,40 +474,45 @@ func (w *walker) finish() {
 				"turn", t.id, "expected", t.userMessageID)
 			w.repairable(RepairResume)
 		}
-		for _, call := range t.pending {
-			w.add(CodeToolUseWithoutResult, Recoverable, w.span(t.pendingAt[call], last), "the turn stopped before this tool call returned; recovery answers it with an interrupted result",
-				"turn", t.id, "tool_use_id", call)
+		for _, c := range t.pending {
+			w.add(CodeToolUseWithoutResult, Recoverable, w.span(w.calls[c].record, last), "the turn stopped before this tool call returned; recovery answers it with an interrupted result",
+				"turn", t.id, "tool_use_id", w.calls[c].id)
 			w.repairable(RepairResume)
 		}
 	}
-	for _, c := range w.compactions {
-		through := w.msgOrder[c.through]
-		for _, id := range sortedKeys(w.calls) {
-			call := w.calls[id]
-			result, answered := w.resultMsg[id]
-			if call.message <= through && answered && result > through {
-				w.add(CodeCompactionSplitsToolStep, Unsafe, w.span(call.record, c.record),
+	// One pass per compaction over the calls, which are in message order.
+	for _, comp := range w.compactions {
+		through := w.msgOrder[comp.through]
+		for _, c := range w.calls {
+			if c.message > through {
+				break
+			}
+			if c.result > through {
+				w.add(CodeCompactionSplitsToolStep, Unsafe, w.span(c.record, comp.record),
 					"the compaction summarizes a tool call but keeps its result; the kept history would open with an unpaired result",
-					"compaction", c.id, "through", c.through, "tool_use_id", id)
+					"compaction", comp.id, "through", comp.through, "tool_use_id", c.id)
 			}
 		}
 	}
 }
 
-func (w *walker) compare() {
+// compare checks the index against the projection of the committed records.
+// Its fixes (replay, rebuild) are automatic only for a sound transcript: one
+// with no unsafe finding of its own, which the projection can replay.
+func (w *walker) compare(sound bool) {
 	idx := w.in.Index
-	if idx == nil {
-		return
-	}
-	if err := w.in.ReplayErr; err != nil && !errors.Is(err, transcript.ErrTorn) {
+	if idx == nil || !replayed(w.in.ReplayErr) {
 		// Without the committed records there is nothing to compare with.
 		return
 	}
+	repair := func(r Repair) {
+		if sound {
+			w.repairable(r)
+		}
+	}
 	n := len(w.in.Entries)
 	upto := 0
-	switch {
-	case idx.Cursor == nil || *idx.Cursor == (transcript.Cursor{}):
-	default:
+	if idx.Cursor != nil && *idx.Cursor != (transcript.Cursor{}) {
 		upto = -1
 		for i, e := range w.in.Entries {
 			if e.Cursor == *idx.Cursor {
@@ -455,19 +523,19 @@ func (w *walker) compare() {
 		if upto < 0 {
 			w.add(CodeIndexDisagreement, Unsafe, Range{First: -1, Last: -1, FirstCursor: *idx.Cursor, LastCursor: *idx.Cursor},
 				"the index has projected through a cursor the transcript does not have", "index_cursor", cursorString(*idx.Cursor))
-			w.repairable(RepairRebuildIndex)
+			repair(RepairRebuildIndex)
 			return
 		}
 	}
 	if upto < n {
 		w.add(CodeIndexBehind, Recoverable, w.span(upto, n-1), "the index has not projected the last committed records; replay brings it up to date",
 			"projected", fmt.Sprint(upto), "records", fmt.Sprint(n))
-		w.repairable(RepairReplayIndex)
+		repair(RepairReplayIndex)
 	}
 	want := Project(w.in.ConversationID, w.in.Entries[:upto])
 	disagree := func(at int, detail string, evidence ...string) {
 		w.add(CodeIndexDisagreement, Unsafe, w.at(at), detail, evidence...)
-		w.repairable(RepairRebuildIndex)
+		repair(RepairRebuildIndex)
 	}
 	recordOf := func(id string) int {
 		if i, ok := w.messageAt[id]; ok && i < upto {
@@ -506,8 +574,10 @@ func (w *walker) compare() {
 	}
 
 	wantMsgs := map[string]IndexMessage{}
-	for _, m := range want.Messages {
+	position := map[string]int{}
+	for i, m := range want.Messages {
 		wantMsgs[m.ID] = m
+		position[m.ID] = i
 	}
 	gotMsgs := map[string]IndexMessage{}
 	for _, m := range idx.Messages {
@@ -530,10 +600,6 @@ func (w *walker) compare() {
 			continue
 		}
 		common = append(common, m.ID)
-	}
-	position := map[string]int{}
-	for i, m := range want.Messages {
-		position[m.ID] = i
 	}
 	for i := 1; i < len(common); i++ {
 		if position[common[i-1]] > position[common[i]] {
@@ -600,13 +666,4 @@ func (w *walker) hold() {
 
 func cursorString(c transcript.Cursor) string {
 	return fmt.Sprintf("%d:%d:%s", c.Segment, c.Offset, c.Hash)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

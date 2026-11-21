@@ -170,7 +170,11 @@ only where it is deterministic and loses nothing committed: resuming or
 discarding an interrupted turn, replaying an index that is behind,
 rebuilding an index that disagrees with a sound transcript, and clearing a
 stale hold. A torn tail, a gap and every contradiction inside the transcript
-need an operator.
+need an operator. A record the index projection would refuse (a field of the
+wrong type, or a turn, message or compaction whose row references one the
+index does not have) is `unsafe`, because the store cannot open a journal on
+that conversation or replay it. Tool calls pair step by step, so a provider
+that reuses call IDs across steps or turns is not reported.
 
 Unknown record kinds: a `system` or `summary` record with an unknown subtype is
 skipped and reported as `info`, matching the index projection, which ignores

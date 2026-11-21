@@ -151,3 +151,56 @@ func TestHold(t *testing.T) {
 		}
 	}
 }
+
+// Replay and rebuild are offered as automatic repairs only when the
+// transcript itself is sound: the projection fails the same way on every
+// replay of a record it refuses.
+func TestIndexRepairIsAutomaticOnlyForASoundTranscript(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		f     *fixture
+		sound bool
+	}{
+		{"sound", newFixture().toolTurn("t1"), true},
+		{"unsound", newFixture().toolTurn("t1").message("assistant", "x1", "", text("no turn")), false},
+	} {
+		entries, err := replayFixture(t, tc.f.bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, index := range []integrity.Index{
+			integrity.Project(fixtureConversation, entries[:2]), // behind
+			func() integrity.Index { // disagrees
+				i := integrity.Project(fixtureConversation, entries)
+				i.Turns[0].Status = "failed"
+				return i
+			}(),
+		} {
+			report := integrity.Validate(integrity.Input{ConversationID: fixtureConversation, Entries: entries, Index: &index})
+			found := false
+			for _, f := range report.Findings {
+				if f.Code == integrity.CodeIndexBehind || f.Code == integrity.CodeIndexDisagreement {
+					found = true
+					if f.AutoRepair != tc.sound || (f.Repair != "") != tc.sound {
+						t.Fatalf("%s: %+v", tc.name, f)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("%s: no index finding in %v", tc.name, report.Findings)
+			}
+		}
+	}
+}
+
+// Without the committed records, nothing can say a hold or a notice's turn
+// is stale.
+func TestGapSkipsHoldAndNoticeChecks(t *testing.T) {
+	index := integrity.Index{Notices: []integrity.IndexNotice{{ID: "n1", DeliveredTurnID: "t1"}}}
+	for _, err := range []error{transcript.ErrGap, transcript.ErrInvalid} {
+		report := integrity.Validate(integrity.Input{ConversationID: fixtureConversation, ReplayErr: err, Index: &index, Hold: &integrity.Hold{TurnID: "t1"}})
+		if len(report.Findings) != 1 || report.Findings[0].AutoRepair {
+			t.Fatalf("%v: %v", err, report.Findings)
+		}
+	}
+}

@@ -1,0 +1,2 @@
+{"parentUuid":null,"payload":{"ID":"conv-1","Role":"","Status":"active","Title":""},"sessionId":"conv-1","subtype":"nanite.conversation","timestamp":"2026-11-21T08:00:01Z","type":"system","uuid":"conv-1"}
+{"parentUuid":null,"payload":{"Headers":5,"ID":"t1","UserMessageID":"u-t1"},"sessionId":"conv-1","subtype":"nanite.turn.start","timestamp":"2026-11-21T08:00:02Z","type":"system","uuid":"t1"}

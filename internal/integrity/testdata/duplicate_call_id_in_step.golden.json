@@ -1,0 +1,12 @@
+[
+  {
+    "code": "duplicate_record_id",
+    "severity": "unsafe",
+    "first": 3,
+    "last": 3,
+    "evidence": {
+      "message": "a1",
+      "tool_use_id": "c1"
+    }
+  }
+]

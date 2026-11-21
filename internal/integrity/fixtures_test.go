@@ -264,6 +264,40 @@ var fixtures = []struct {
 		f := &fixture{conv: fixtureConversation}
 		return f.start("t1").owner("t1").say("a1", "t1").finish("t1", "completed")
 	}},
+	{"clean_reused_tool_ids", func() *fixture {
+		// Some OpenAI-compatible servers number calls per response: the same
+		// ID in a later step and a later turn still pairs step by step.
+		return newFixture().start("t1").owner("t1").
+			calls("a1", "t1", "call_0").results("r1", "t1", "call_0").
+			calls("a2", "t1", "call_0").results("r2", "t1", "call_0").
+			say("a3", "t1").finish("t1", "completed").
+			start("t2").owner("t2").calls("a1-t2", "t2", "call_0").results("r1-t2", "t2", "call_0").
+			say("a2-t2", "t2").finish("t2", "completed")
+	}},
+	{"duplicate_call_id_in_step", func() *fixture {
+		return newFixture().start("t1").owner("t1").calls("a1", "t1", "c1", "c1").results("r1", "t1", "c1").
+			say("a2", "t1").finish("t1", "completed")
+	}},
+	{"compaction_unknown_turn", func() *fixture {
+		// compactions.turn_id references turns: the store cannot project it.
+		return newFixture().toolTurn("t1").compaction("k1", "", "u-t1").compaction("k2", "ghost", "u-t1")
+	}},
+	{"payload_wrong_type", func() *fixture {
+		// The store decodes into its own Turn type and fails on this field.
+		return newFixture().side("nanite.turn.start", "t1", map[string]any{"ID": "t1", "UserMessageID": "u-t1", "Headers": 5})
+	}},
+	{"bad_timestamp", func() *fixture {
+		f := newFixture()
+		return f.raw(map[string]any{"type": "system", "subtype": "nanite.permission", "uuid": "p1", "sessionId": f.conv,
+			"timestamp": "yesterday", "payload": map[string]any{}})
+	}},
+	{"unreadable_block", func() *fixture {
+		// History decodes blocks into llmtypes.ContentBlock, whose content is
+		// a string: an array here makes the conversation unreadable.
+		return newFixture().start("t1").owner("t1").calls("a1", "t1", "c1").
+			message("user", "r1", "t1", map[string]any{"type": "tool_result", "tool_use_id": "c1", "content": []any{"x"}}).
+			say("a2", "t1").finish("t1", "completed")
+	}},
 	{"mixed", func() *fixture {
 		return newFixture().toolTurn("t1").
 			start("t2").owner("t2").calls("a1-t2", "t2", "c1", "c2").results("r1-t2", "t2", "c1", "ghost").

@@ -2,7 +2,7 @@
   {
     "code": "orphan_tool_result",
     "severity": "unsafe",
-    "first": 3,
+    "first": 9,
     "last": 9,
     "evidence": {
       "call_turn": "t1",

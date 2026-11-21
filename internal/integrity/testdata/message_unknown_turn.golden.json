@@ -11,7 +11,7 @@
   },
   {
     "code": "message_without_turn",
-    "severity": "warning",
+    "severity": "unsafe",
     "first": 2,
     "last": 2,
     "evidence": {

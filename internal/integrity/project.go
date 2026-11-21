@@ -52,7 +52,7 @@ func Project(conversationID string, entries []transcript.Entry) Index {
 			out.Compactions = append(out.Compactions, IndexCompaction{ID: r.UUID, TurnID: p.TurnID, ThroughMessageID: p.ThroughMessageID})
 		}
 		if r.Type == "user" || r.Type == "assistant" {
-			m, err := decodeMessage(r)
+			m, err := projected(r)
 			if err != nil || messages[m.id] {
 				continue
 			}

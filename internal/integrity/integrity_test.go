@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -138,6 +139,12 @@ func TestFixtureClassification(t *testing.T) {
 		"duplicate_message_uuid":            {integrity.Unsafe, []integrity.Code{integrity.CodeDuplicateRecordID}},
 		"invalid_message_content":           {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
 		"missing_conversation_record":       {integrity.Unsafe, []integrity.Code{integrity.CodeConversationMeta}},
+		"clean_reused_tool_ids":             {integrity.Info, nil},
+		"duplicate_call_id_in_step":         {integrity.Unsafe, []integrity.Code{integrity.CodeDuplicateRecordID}},
+		"compaction_unknown_turn":           {integrity.Unsafe, []integrity.Code{integrity.CodeUnknownTurn}},
+		"payload_wrong_type":                {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
+		"bad_timestamp":                     {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
+		"unreadable_block":                  {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
 		"mixed": {integrity.Unsafe, []integrity.Code{integrity.CodeOrphanToolResult, integrity.CodeConflictingTurnOutcome,
 			integrity.CodeToolUseWithoutResult, integrity.CodeUnknownSideband, integrity.CodeInterruptedTurn, integrity.CodeTornTail}},
 	}
@@ -297,11 +304,49 @@ func TestOtherReplayErrors(t *testing.T) {
 func TestReportIsBounded(t *testing.T) {
 	f := newFixture().start("t1").owner("t1")
 	for i := range integrity.MaxFindings + 10 {
-		f.results("r"+string(rune('a'+i%26))+strings.Repeat("x", i/26), "t1", "ghost")
+		f.results(fmt.Sprintf("r%d", i), "t1", "ghost")
 	}
 	report := validateFixture(t, f.bytes())
 	if len(report.Findings) != integrity.MaxFindings || !report.Truncated {
 		t.Fatalf("findings = %d, truncated = %v", len(report.Findings), report.Truncated)
+	}
+}
+
+// Many calls under many compactions that split them must not build every
+// finding before the bound applies.
+func TestSplitCompactionsAreBounded(t *testing.T) {
+	const n = 300
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("c%d", i)
+	}
+	f := newFixture().start("t1").owner("t1").calls("a1", "t1", ids...)
+	for i := range n {
+		f.compaction(fmt.Sprintf("k%d", i), "t1", "a1")
+	}
+	f.results("r1", "t1", ids...).say("a2", "t1").finish("t1", "completed")
+	report := validateFixture(t, f.bytes())
+	if len(report.Findings) != integrity.MaxFindings || !report.Truncated || report.Worst() != integrity.Unsafe {
+		t.Fatalf("findings = %d, truncated = %v, worst = %s", len(report.Findings), report.Truncated, report.Worst())
+	}
+}
+
+// A finding the bound leaves out still counts: an unsafe one after many
+// recoverable ones keeps the report unsafe.
+func TestTruncationKeepsTheWorstSeverity(t *testing.T) {
+	ids := make([]string, integrity.MaxFindings+5)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("c%d", i)
+	}
+	entries, err := replayFixture(t, newFixture().start("t1").owner("t1").calls("a1", "t1", ids...).bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := integrity.Project(fixtureConversation, entries)
+	index.Turns[0].Status = "completed" // an index disagreement, found after the calls
+	report := integrity.Validate(integrity.Input{ConversationID: fixtureConversation, Entries: entries, Index: &index})
+	if !report.Truncated || report.Safe() || report.Worst() != integrity.Unsafe || len(report.Unsafe()) != 0 {
+		t.Fatalf("truncated = %v, safe = %v, worst = %s, unsafe kept = %d", report.Truncated, report.Safe(), report.Worst(), len(report.Unsafe()))
 	}
 }
 

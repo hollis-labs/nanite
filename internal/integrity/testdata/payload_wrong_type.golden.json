@@ -1,0 +1,12 @@
+[
+  {
+    "code": "invalid_record",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 1,
+    "evidence": {
+      "record": "t1",
+      "subtype": "nanite.turn.start"
+    }
+  }
+]

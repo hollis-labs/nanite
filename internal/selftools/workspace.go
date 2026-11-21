@@ -18,8 +18,12 @@ const maxWorkspaceFile = 1 << 20
 
 type workspace struct{ roots []string }
 
+// protected reports whether any part of path names a credential, history or
+// agent-state location. Names compare case-insensitively: on a
+// case-insensitive filesystem (the macOS default) ".GIT" is ".git".
 func protected(path string) bool {
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		part = strings.ToLower(part)
 		switch part {
 		case ".nanite", ".ssh", ".gnupg", ".aws", ".kube", ".docker", ".netrc", ".codex", ".config", ".local",
 			".bash_profile", ".bashrc", ".zshrc", ".zprofile", ".profile", ".git":
@@ -138,7 +142,7 @@ func (w workspace) list(ctx context.Context, args pathArgs) (string, error) {
 	defer func() { _ = root.Close() }() // Closing the directory handle does not commit writes.
 	entries, err := fs.ReadDir(root.FS(), filepath.ToSlash(path))
 	if err != nil {
-		return "", err
+		return "", relativeError(err, path)
 	}
 	var names []string
 	for _, entry := range entries {
@@ -213,4 +217,14 @@ func writeRegular(ctx context.Context, root *os.Root, path, text string) error {
 		return err
 	}
 	return root.Rename(temp, path)
+}
+
+// relativeError restates a path error with the workspace-relative path: some
+// root operations report the absolute host path, which the model must not see.
+func relativeError(err error, rel string) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return &fs.PathError{Op: pathErr.Op, Path: filepath.ToSlash(rel), Err: pathErr.Err}
+	}
+	return err
 }

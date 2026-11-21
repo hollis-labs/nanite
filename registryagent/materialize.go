@@ -206,6 +206,31 @@ func Materialize(ctx context.Context, resolver Resolver, agentRef Reference, dir
 	return result, nil
 }
 
+// hostRuntime flattens a launch profile's runtime, lifting runtime.settings
+// into the host.yaml runtime map. The schema requires settings to be an
+// object; this check keeps that true if the schema is ever relaxed.
+func hostRuntime(profile map[string]any) (map[string]any, error) {
+	runtime := map[string]any{}
+	r, ok := profile["runtime"].(map[string]any)
+	if !ok {
+		return runtime, nil
+	}
+	for k, v := range r {
+		if k != "settings" {
+			runtime[k] = v
+			continue
+		}
+		settings, ok := v.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("registryagent: launch profile runtime.settings must be an object")
+		}
+		for key, value := range settings {
+			runtime[key] = value
+		}
+	}
+	return runtime, nil
+}
+
 func build(ctx context.Context, resolver Resolver, ref Reference, dir string, root *os.Root, opts Options) (Manifest, error) {
 	m := Manifest{Version: 1, Agent: ref}
 	record, _, src, err := fetch(ctx, resolver, ref, "")
@@ -247,17 +272,9 @@ func build(ctx context.Context, resolver Resolver, ref Reference, dir string, ro
 	default:
 		return m, fmt.Errorf("registryagent: supported launch profile host required")
 	}
-	runtime := map[string]any{}
-	if r, ok := profile["runtime"].(map[string]any); ok {
-		for k, v := range r {
-			if k == "settings" {
-				for key, value := range v.(map[string]any) {
-					runtime[key] = value
-				}
-			} else {
-				runtime[k] = v
-			}
-		}
+	runtime, err := hostRuntime(profile)
+	if err != nil {
+		return m, err
 	}
 	config["runtime"] = runtime
 	raw, err := json.MarshalIndent(config, "", "  ")

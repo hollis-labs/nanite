@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -321,5 +322,62 @@ func TestOversizedToolSchemaLeavesOnlyThatToolOut(t *testing.T) {
 	if len(discover) != 1 || !strings.Contains(discover[0], `MCP server "fixture"`) || !strings.Contains(discover[0], `tool "huge" left out`) ||
 		!strings.Contains(discover[0], "bytes; the limit is 262144") {
 		t.Fatalf("warnings %.300v", discover)
+	}
+}
+
+var legalToolName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// Providers reject function names over 64 characters, failing the whole
+// request. Long MCP names are shortened to a stable, distinct, legal name
+// that still calls the original tool.
+func TestLongToolNamesAreShortenedAndCallable(t *testing.T) {
+	server := testServer("ok")
+	long := strings.Repeat("t", 70)
+	for _, name := range []string{long + "_one", long + "_two", "日本語_" + strings.Repeat("x", 60)} {
+		reply := name
+		server.AddTool(&sdk.Tool{Name: name, InputSchema: json.RawMessage(`{"type":"object"}`)},
+			func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: reply}}}, nil
+			})
+	}
+	httpServer := httptest.NewServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil))
+	defer httpServer.Close()
+	client := New(t.TempDir(), nil, redact.NewScope(), slog.Default(), nil)
+	defer client.Close()
+	lease, warnings := client.Reconcile(t.Context(), agentdir.MCPConfig{Servers: map[string]agentdir.MCPServer{"a-long-server-name-for-testing": {Type: "http", URL: httpServer.URL}}})
+	if len(warnings) > 0 {
+		t.Fatal(warnings)
+	}
+	defer lease.Close()
+	got, discover := lease.Tools(t.Context())
+	if len(discover) > 0 || len(got) != 4 {
+		t.Fatalf("tools %d, warnings %v", len(got), discover)
+	}
+	replies := map[string]bool{}
+	for _, tool := range got {
+		if !legalToolName.MatchString(tool.Name) {
+			t.Fatalf("illegal model name %q (%d chars)", tool.Name, len(tool.Name))
+		}
+		result, err := tool.Handler(t.Context(), tools.Call{Input: json.RawMessage("{}")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		replies[result.Text] = true
+	}
+	if len(replies) != 4 {
+		t.Fatalf("shortened names do not reach distinct tools: %v", replies)
+	}
+	// Shortening is stable across discoveries and leaves short names alone.
+	first, again := fitToolName("mcp__s__"+long), fitToolName(strings.Repeat("mcp__s__", 1)+long)
+	if first != again || len(first) != maxToolName || fitToolName("mcp__s__short") != "mcp__s__short" {
+		t.Fatalf("fitToolName: %q %q", first, again)
+	}
+}
+
+// Nil content entries are skipped rather than dereferenced or shown as null.
+func TestToolResultSkipsNilContent(t *testing.T) {
+	result, err := toolResult(&sdk.CallToolResult{Content: []sdk.Content{nil, (*sdk.TextContent)(nil), (*sdk.ImageContent)(nil), &sdk.TextContent{Text: "kept"}}})
+	if err != nil || result.Text != "kept" {
+		t.Fatalf("result %+v, %v", result, err)
 	}
 }

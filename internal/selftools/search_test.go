@@ -88,3 +88,34 @@ func TestSearchStopsAtLimit(t *testing.T) {
 		t.Fatalf("lines=%d err=%v tail=%q", strings.Count(got, "many.txt:"), err, got[max(0, len(got)-80):])
 	}
 }
+
+// Globs match non-ASCII names: each UTF-8 sequence is quoted whole.
+func TestFindFilesNonASCII(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"é.md", "日本/語.txt", "naïve-notes.md", "plain.md"} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("accent\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := workspace{roots: []string{dir}}
+	for pattern, want := range map[string]string{
+		"é.md":     "é.md",
+		"日本/*":     "日本/語.txt",
+		"語.txt":    "日本/語.txt",
+		"na?ve-*":  "naïve-notes.md",
+		"*é*":      "é.md",
+		"**/*.txt": "日本/語.txt",
+	} {
+		got, err := w.find(t.Context(), findArgs{Pattern: pattern})
+		if err != nil || got != want {
+			t.Errorf("find %q: got %q, %v; want %q", pattern, got, err, want)
+		}
+	}
+	if got, err := w.search(t.Context(), searchArgs{Pattern: "accent", Glob: "é.md"}); err != nil || got != "é.md:1: accent" {
+		t.Errorf("search with non-ASCII glob: got %q, %v", got, err)
+	}
+}

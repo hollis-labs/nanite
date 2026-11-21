@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -48,7 +49,11 @@ func globRegexp(glob string) (*regexp.Regexp, error) {
 		case '?':
 			out.WriteString("[^/]")
 		default:
-			out.WriteString(regexp.QuoteMeta(string(c)))
+			// Quote the whole UTF-8 sequence: string(c) of one byte would
+			// turn each byte of "é" into its own Latin-1 rune.
+			_, size := utf8.DecodeRuneInString(glob[i:])
+			out.WriteString(regexp.QuoteMeta(glob[i : i+size]))
+			i += size - 1
 		}
 	}
 	out.WriteString("$")

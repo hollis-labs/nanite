@@ -1,0 +1,12 @@
+[
+  {
+    "code": "unknown_record_type",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 1,
+    "evidence": {
+      "record": "x1",
+      "type": "attachment"
+    }
+  }
+]

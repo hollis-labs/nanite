@@ -1,0 +1,12 @@
+[
+  {
+    "code": "duplicate_turn_outcome",
+    "severity": "warning",
+    "first": 1,
+    "last": 5,
+    "evidence": {
+      "status": "completed",
+      "turn": "t1"
+    }
+  }
+]

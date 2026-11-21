@@ -1,0 +1,12 @@
+[
+  {
+    "code": "compaction_unknown_message",
+    "severity": "unsafe",
+    "first": 7,
+    "last": 7,
+    "evidence": {
+      "compaction": "k1",
+      "through": "missing"
+    }
+  }
+]

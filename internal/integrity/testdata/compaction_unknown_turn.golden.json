@@ -1,0 +1,22 @@
+[
+  {
+    "code": "unknown_turn",
+    "severity": "unsafe",
+    "first": 7,
+    "last": 7,
+    "evidence": {
+      "compaction": "k1",
+      "turn": ""
+    }
+  },
+  {
+    "code": "unknown_turn",
+    "severity": "unsafe",
+    "first": 8,
+    "last": 8,
+    "evidence": {
+      "compaction": "k2",
+      "turn": "ghost"
+    }
+  }
+]

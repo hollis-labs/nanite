@@ -16,6 +16,10 @@ Mailbox delivery fixes. No breaking changes.
 - Mail always reaches the model: when the session slot has too little room
   for the mail or a trim of it, the message id and a withheld marker ship
   instead, from room the slot holds back for it (`slots.Entry.Reserve`).
+- Add `internal/integrity`, a pure validator that classifies a conversation's
+  transcript and index into typed findings, separating ordinary interruption
+  from corruption. `Store.ValidateConversation` reads its input without
+  writing. Validation does not gate recovery yet.
 
 ## 0.15.0
 

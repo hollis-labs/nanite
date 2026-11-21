@@ -1,0 +1,12 @@
+[
+  {
+    "code": "unknown_sideband",
+    "severity": "info",
+    "first": 6,
+    "last": 6,
+    "evidence": {
+      "record": "x1",
+      "subtype": "nanite.future_kind"
+    }
+  }
+]

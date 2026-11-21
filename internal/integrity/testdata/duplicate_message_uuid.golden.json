@@ -1,0 +1,11 @@
+[
+  {
+    "code": "duplicate_record_id",
+    "severity": "unsafe",
+    "first": 3,
+    "last": 4,
+    "evidence": {
+      "message": "a1"
+    }
+  }
+]

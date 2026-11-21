@@ -1,0 +1,13 @@
+[
+  {
+    "code": "message_after_outcome",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 5,
+    "evidence": {
+      "message": "a2",
+      "status": "completed",
+      "turn": "t1"
+    }
+  }
+]

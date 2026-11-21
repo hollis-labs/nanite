@@ -1,0 +1,13 @@
+[
+  {
+    "code": "compaction_splits_tool_step",
+    "severity": "unsafe",
+    "first": 3,
+    "last": 4,
+    "evidence": {
+      "compaction": "k1",
+      "through": "a1",
+      "tool_use_id": "c1"
+    }
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "code": "interrupted_turn",
+    "severity": "recoverable",
+    "first": 7,
+    "last": 10,
+    "auto_repair": true,
+    "repair": "resume_or_discard",
+    "evidence": {
+      "status": "running",
+      "turn": "t2"
+    }
+  },
+  {
+    "code": "tool_use_without_result",
+    "severity": "recoverable",
+    "first": 9,
+    "last": 10,
+    "auto_repair": true,
+    "repair": "resume_or_discard",
+    "evidence": {
+      "tool_use_id": "c2",
+      "turn": "t2"
+    }
+  }
+]

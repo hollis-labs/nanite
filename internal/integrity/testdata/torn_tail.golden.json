@@ -1,0 +1,18 @@
+[
+  {
+    "code": "interrupted_turn",
+    "severity": "recoverable",
+    "first": 1,
+    "last": 2,
+    "evidence": {
+      "status": "running",
+      "turn": "t1"
+    }
+  },
+  {
+    "code": "torn_tail",
+    "severity": "unsafe",
+    "first": -1,
+    "last": -1
+  }
+]

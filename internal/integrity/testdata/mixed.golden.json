@@ -1,0 +1,71 @@
+[
+  {
+    "code": "conflicting_turn_outcome",
+    "severity": "unsafe",
+    "first": 7,
+    "last": 13,
+    "evidence": {
+      "first_status": "completed",
+      "status": "failed",
+      "turn": "t2"
+    }
+  },
+  {
+    "code": "tool_use_without_result",
+    "severity": "unsafe",
+    "first": 9,
+    "last": 11,
+    "evidence": {
+      "message": "a2-t2",
+      "tool_use_id": "c2",
+      "turn": "t2"
+    }
+  },
+  {
+    "code": "orphan_tool_result",
+    "severity": "unsafe",
+    "first": 10,
+    "last": 10,
+    "evidence": {
+      "message": "r1-t2",
+      "tool_use_id": "ghost",
+      "turn": "t2"
+    }
+  },
+  {
+    "code": "unknown_sideband",
+    "severity": "info",
+    "first": 14,
+    "last": 14,
+    "evidence": {
+      "record": "x1",
+      "subtype": "nanite.future_kind"
+    }
+  },
+  {
+    "code": "interrupted_turn",
+    "severity": "recoverable",
+    "first": 15,
+    "last": 17,
+    "evidence": {
+      "status": "running",
+      "turn": "t3"
+    }
+  },
+  {
+    "code": "tool_use_without_result",
+    "severity": "recoverable",
+    "first": 17,
+    "last": 17,
+    "evidence": {
+      "tool_use_id": "c3",
+      "turn": "t3"
+    }
+  },
+  {
+    "code": "torn_tail",
+    "severity": "unsafe",
+    "first": -1,
+    "last": -1
+  }
+]

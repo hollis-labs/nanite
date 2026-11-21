@@ -1,0 +1,14 @@
+[
+  {
+    "code": "orphan_tool_result",
+    "severity": "unsafe",
+    "first": 9,
+    "last": 9,
+    "evidence": {
+      "call_turn": "t1",
+      "message": "r1-t2",
+      "tool_use_id": "call-t1",
+      "turn": "t2"
+    }
+  }
+]

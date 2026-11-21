@@ -1,0 +1,12 @@
+[
+  {
+    "code": "session_mismatch",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 1,
+    "evidence": {
+      "record": "t9",
+      "session": "other"
+    }
+  }
+]

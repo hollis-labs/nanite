@@ -1,0 +1,41 @@
+[
+  {
+    "code": "illegal_turn_transition",
+    "severity": "warning",
+    "first": 1,
+    "last": 3,
+    "evidence": {
+      "status": "running",
+      "turn": "t1"
+    }
+  },
+  {
+    "code": "illegal_turn_transition",
+    "severity": "warning",
+    "first": 1,
+    "last": 6,
+    "evidence": {
+      "status": "completed",
+      "turn": "t1"
+    }
+  },
+  {
+    "code": "illegal_turn_transition",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 8,
+    "evidence": {
+      "turn": "t1"
+    }
+  },
+  {
+    "code": "unknown_turn",
+    "severity": "warning",
+    "first": 7,
+    "last": 7,
+    "evidence": {
+      "subtype": "nanite.turn.finish",
+      "turn": "ghost"
+    }
+  }
+]

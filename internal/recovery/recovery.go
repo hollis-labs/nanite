@@ -37,6 +37,23 @@ type Check struct {
 	Disposition  Disposition
 }
 
+// MarkBlocked records whether a conversation failed its last integrity
+// check. It writes only when the state changes.
+func MarkBlocked(ctx context.Context, db *store.Store, conversation string, blocked bool) error {
+	current, err := db.Setting(ctx, conversation, store.SettingIntegrity)
+	if err != nil {
+		return err
+	}
+	want := ""
+	if blocked {
+		want = string(Blocked)
+	}
+	if current == want {
+		return nil
+	}
+	return db.SetSetting(ctx, conversation, store.SettingIntegrity, want)
+}
+
 // DispositionOf is the disposition a report allows.
 func DispositionOf(report integrity.Report) Disposition {
 	if report.Safe() {
@@ -46,12 +63,14 @@ func DispositionOf(report integrity.Report) Disposition {
 }
 
 // Recover reconciles what the previous process left in flight, after the
-// agent lock is held. Candidates are bounded: only conversations with a
-// running turn are validated, never the whole history. Each is checked
-// before its turns are marked interrupted; observe, if set, receives every
-// check. An unsafe conversation is still marked interrupted, so Discard can
-// close it, unless its transcript refuses writes (a torn tail): then its
-// turn stays running and Resume reports why.
+// agent lock is held. Candidates are bounded: conversations with a running
+// turn, and those whose transcript replay on open stopped at a torn tail;
+// never the whole history. Each is checked before its turns are marked
+// interrupted; observe, if set, receives every check. An unsafe conversation
+// is marked blocked (store.SettingIntegrity), which refuses every new run on
+// it until a check passes, and its turns are still marked interrupted so
+// Discard can close them, unless its transcript refuses writes (a torn
+// tail).
 func Recover(ctx context.Context, db *store.Store, observe func(Check)) error {
 	turns, err := db.RunningTurns(ctx)
 	if err != nil {
@@ -59,11 +78,19 @@ func Recover(ctx context.Context, db *store.Store, observe func(Check)) error {
 	}
 	var order []string
 	running := map[string][]string{}
+	seen := map[string]bool{}
 	for _, turn := range turns {
-		if running[turn.ConversationID] == nil {
+		if !seen[turn.ConversationID] {
+			seen[turn.ConversationID] = true
 			order = append(order, turn.ConversationID)
 		}
 		running[turn.ConversationID] = append(running[turn.ConversationID], turn.TurnID)
+	}
+	for _, id := range db.TornConversations() {
+		if !seen[id] {
+			seen[id] = true
+			order = append(order, id)
+		}
 	}
 	for _, conversation := range order {
 		report, err := db.ValidateConversation(ctx, conversation, nil)
@@ -73,6 +100,12 @@ func Recover(ctx context.Context, db *store.Store, observe func(Check)) error {
 		check := Check{Conversation: conversation, Turns: running[conversation], Report: report, Disposition: DispositionOf(report)}
 		if observe != nil {
 			observe(check)
+		}
+		if err := MarkBlocked(ctx, db, conversation, check.Disposition == Blocked); err != nil {
+			return err
+		}
+		if len(check.Turns) == 0 {
+			continue
 		}
 		journal, err := db.OpenJournal(ctx, conversation)
 		if errors.Is(err, transcript.ErrTorn) && check.Disposition == Blocked {

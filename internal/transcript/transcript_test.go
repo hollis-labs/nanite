@@ -285,3 +285,48 @@ func TestRecordEncoders(t *testing.T) {
 		t.Fatalf("assistant result reference: %v", err)
 	}
 }
+
+// Only an incomplete final line of the last segment is a torn tail. Damage
+// before it is changed history: no prefix is offered as the whole story.
+func TestDamageBeforeTheTailIsAGap(t *testing.T) {
+	write := func(t *testing.T, segments ...string) string {
+		t.Helper()
+		root := t.TempDir()
+		dir, _ := ConversationDir(root, "conversation")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for i, body := range segments {
+			if err := os.WriteFile(segmentPath(dir, uint64(i+1)), []byte(body), 0o600); err != nil { // #nosec G703 -- A fixture under the test's temporary directory.
+				t.Fatal(err)
+			}
+		}
+		return root
+	}
+	line := func(i int) string { return string(fixture(t)[i]) + "\n" }
+	for _, tc := range []struct {
+		name     string
+		segments []string
+		want     error
+	}{
+		{"torn tail", []string{line(0) + `{"type":"assi`}, ErrTorn},
+		{"invalid complete line mid-segment", []string{line(0) + "not json\n" + line(1)}, ErrGap},
+		{"invalid complete last line", []string{line(0) + "not json\n"}, ErrGap},
+		{"incomplete line in an earlier segment", []string{line(0) + `{"type":"assi`, line(1)}, ErrGap},
+		{"torn tail of the last segment", []string{line(0), line(1) + `{"ty`}, ErrTorn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := write(t, tc.segments...)
+			entries, err := Replay(root, "conversation", Cursor{})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("replay: %v, want %v", err, tc.want)
+			}
+			if errors.Is(tc.want, ErrTorn) && len(entries) == 0 {
+				t.Fatal("a torn tail returned no committed prefix")
+			}
+			if _, err := Open(root, "conversation", Options{}); !errors.Is(err, tc.want) {
+				t.Fatalf("open: %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

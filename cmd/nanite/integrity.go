@@ -35,5 +35,18 @@ func printIntegrity(w io.Writer, err error) {
 	if refused.Report.Truncated {
 		_, _ = fmt.Fprintf(w, "  ... more findings not shown\n")
 	}
-	_, _ = fmt.Fprintf(w, "Discard the turn with --discard %s, or repair the transcript and run `nanite rebuild-index`.\n", refused.Conversation)
+	for _, f := range refused.Report.Unsafe() {
+		if f.Code != "torn_tail" {
+			continue
+		}
+		// Only an incomplete final line is a torn tail: Append writes each
+		// record in one write and fsyncs it, so those bytes were never
+		// committed and removing them loses nothing.
+		c := f.Records.LastCursor
+		segment := max(c.Segment, 1)
+		_, _ = fmt.Fprintf(w, "The transcript's committed records end at segment %020d.jsonl, byte %d; the bytes after that were never committed.\n"+
+			"Remove them (truncate that segment to %d bytes and delete any later segment), then run `nanite rebuild-index`.\n", segment, c.Offset, c.Offset)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "Discard the turn with --discard %s, or start a new conversation. This conversation refuses new turns until an integrity check passes.\n", refused.Conversation)
 }

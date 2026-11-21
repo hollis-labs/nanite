@@ -131,7 +131,7 @@ func Open(root, conversationID string, options Options) (_ *Writer, err error) {
 	}
 	var last Cursor
 	for _, segment := range segments {
-		entries, scanErr := scanSegment(dir, segment, last.Hash)
+		entries, scanErr := scanSegment(dir, segment, last.Hash, segment == segments[len(segments)-1])
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -240,9 +240,10 @@ func (w *Writer) Close() error {
 }
 
 // Replay returns the exact suffix after a committed cursor. Missing segments,
-// changed records, invalid offsets and torn tails are errors, never silent EOF.
-// On ErrTorn, entries contains the verified complete suffix before the torn
-// record. The caller can reconcile that committed prefix without repairing the
+// changed or damaged records, invalid offsets and torn tails are errors, never
+// silent EOF. ErrTorn means only an incomplete final line of the last segment,
+// which was never committed; entries then contains the verified complete
+// suffix before it. Damage anywhere else is ErrGap. The caller can reconcile that committed prefix without repairing the
 // file; Open still refuses to append until the tail is handled explicitly.
 // An absent directory is an empty log only for the zero cursor.
 func Replay(root, conversationID string, after Cursor) ([]Entry, error) {
@@ -270,7 +271,7 @@ func Replay(root, conversationID string, after Cursor) ([]Entry, error) {
 	matched := after == (Cursor{})
 	var previousHash string
 	for _, segment := range segments {
-		entries, e := scanSegment(dir, segment, previousHash)
+		entries, e := scanSegment(dir, segment, previousHash, segment == segments[len(segments)-1])
 		if e != nil && !errors.Is(e, ErrTorn) {
 			return nil, e
 		}
@@ -380,7 +381,13 @@ func segmentList(dir string) ([]uint64, error) {
 	return segments, nil
 }
 
-func scanSegment(dir string, n uint64, previousHash string) ([]Entry, error) {
+// scanSegment reads one segment. Only an incomplete last line of the last
+// segment is a torn tail (ErrTorn): a crash during Append's single write
+// leaves exactly that, and those bytes were never committed. A complete line
+// that is not a valid record, or an incomplete one before the last segment,
+// is damage to committed history (ErrGap). Either way the verified prefix is
+// returned.
+func scanSegment(dir string, n uint64, previousHash string, last bool) ([]Entry, error) {
 	f, err := os.Open(segmentPath(dir, n))
 	if err != nil {
 		return nil, err
@@ -395,10 +402,16 @@ func scanSegment(dir string, n uint64, previousHash string) ([]Entry, error) {
 			break
 		}
 		if e != nil || len(line) == 0 || line[len(line)-1] != '\n' {
-			return out, ErrTorn
+			if e == io.EOF && last {
+				return out, ErrTorn
+			}
+			if e != nil && e != io.EOF {
+				return out, e
+			}
+			return out, ErrGap
 		}
 		if len(line) > maxRecord || !json.Valid(line[:len(line)-1]) {
-			return out, ErrTorn
+			return out, ErrGap
 		}
 		offset += int64(len(line))
 		sum := sha256.Sum256(append([]byte(previousHash), line...))

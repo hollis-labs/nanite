@@ -634,15 +634,27 @@ reaches its wall budget.
 
 ## Recovery and observability
 
-On open, Nanite validates each conversation that has a running turn (see
-Conversation integrity), then marks those turns interrupted and running jobs
-lost. A conversation whose transcript has a torn tail is left as it is: the
-store projects its committed prefix, so the rest of the agent opens, and the
-turn stays running until an operator repairs the tail. `Resume` validates the
-conversation again before it reads any history, and it refuses an unsafe
-finding with a typed error that carries the findings. The CLI prints them.
-`Discard` stays available. Each check emits a content-free runtime event with
-its stage, disposition (`resumable` or `blocked`), worst severity and per-code
+On open, Nanite validates the conversations recovery touches: those with a
+running turn, and those whose transcript replay stopped at a torn tail (open
+replays every transcript anyway, so finding these costs no extra scan). Then
+it marks running turns interrupted and running jobs lost. A conversation with
+an unsafe finding is marked blocked in its settings; the mark survives a
+restart. A torn tail is only an incomplete final line of the last segment.
+Append writes each record in one write and fsyncs it, so those bytes were
+never committed. The store projects the committed prefix, so the rest of the
+agent opens, and the transcript writer refuses to append until an operator
+removes the tail. Damage anywhere before the tail is changed history: the
+store refuses to open, as it always has.
+
+`Resume` always validates before it reads any history. Any other run validates
+only a conversation marked blocked, and a passing check clears the mark. An
+unsafe finding refuses the run with a typed error that carries the findings,
+and the CLI prints them, with the exact truncation for a torn tail. The checks
+hold the engine lock, so no run, `Discard` or `Record` writes meanwhile.
+`Discard` stays available and closes an interrupted turn, but the history it
+leaves stays blocked until it passes a check. Each check emits a content-free
+runtime event with its stage (`recover`, `resume`, `send` or `discard`), its
+disposition (`resumable` or `blocked`), the worst severity and per-code
 counts.
 It verifies a recorded shell process-group leader before signaling the group.
 The terminal chat asks what to do with an interrupted conversation: resume

@@ -213,7 +213,6 @@ func TestResumeRefusesUnsafeFindingAndDiscardStaysAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
 	if got := events.integrity(t); len(got) != 1 || got[0]["disposition"] != "blocked" || got[0]["severity"] != "unsafe" {
 		t.Fatalf("recover events %v", got)
 	}
@@ -247,6 +246,36 @@ func TestResumeRefusesUnsafeFindingAndDiscardStaysAvailable(t *testing.T) {
 	}
 	if c.Interrupted() != nil {
 		t.Fatal("discard left the turn interrupted")
+	}
+	// Discard closes the turn but leaves the history unsafe: a new turn
+	// would send it to the model, so it is refused too, across a restart.
+	if run, err := c.Send(t.Context(), agent.Input{Text: "next"}); run != nil || !errors.Is(err, agent.ErrIntegrity) {
+		t.Fatalf("send after discard = %v, %v", run, err)
+	}
+	if got := events.integrity(t); got[len(got)-1]["stage"] != "send" || got[len(got)-1]["disposition"] != "blocked" {
+		t.Fatalf("send events %v", got)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a, err = agent.Open(t.Context(), agent.Options{Dir: dir, Provider: provider, GlobalSkillsDir: "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if c, err = a.Conversation(t.Context(), conversation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Send(t.Context(), agent.Input{Text: "next"}); !errors.Is(err, agent.ErrIntegrity) {
+		t.Fatalf("send after a restart: %v", err)
+	}
+	// Other conversations are untouched.
+	other, err := a.NewConversation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report, err := other.CheckIntegrity(t.Context()); err != nil || len(report.Findings) != 0 {
+		t.Fatalf("a new conversation: %v, %v", report.Findings, err)
 	}
 }
 
@@ -289,10 +318,11 @@ func TestTornTailBlocksResumeUntilRepaired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run, err := c.Send(t.Context(), agent.Input{Text: "more"}); err == nil {
-		if _, err := run.Wait(); err == nil {
-			t.Fatal("a turn ran past a torn tail")
-		}
+	if _, err := c.Send(t.Context(), agent.Input{Text: "more"}); !errors.As(err, &refused) {
+		t.Fatalf("send past a torn tail: %v", err)
+	}
+	if err := c.Discard(t.Context()); !errors.As(err, &refused) {
+		t.Fatalf("discard of a torn conversation: %v", err)
 	}
 	if after, err := os.ReadFile(segment); err != nil || string(after) != string(before) { // #nosec G304 -- The fixture's own transcript segment.
 		t.Fatalf("the torn transcript changed: %v", err)
@@ -395,5 +425,110 @@ func TestIntegrityCheckRefusesWhileARunIsActive(t *testing.T) {
 	_, _ = run.Wait()
 	if report, err := c.CheckIntegrity(t.Context()); err != nil || !report.Safe() {
 		t.Fatalf("after the run: %v, %v", report.Findings, err)
+	}
+}
+
+// A crash while starting a new turn tears the tail with no turn running.
+// Recovery still finds it (open-time replay saw the torn tail), and every
+// run is refused with the findings until the tail is repaired.
+func TestTornTailWithNoRunningTurnIsFound(t *testing.T) {
+	dir, conversation, _ := crashedConversation(t, nil)
+	// Close the crashed turn first, so nothing is running.
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := a.Conversation(t.Context(), conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Discard(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	segment := segmentOf(t, dir, conversation)
+	committed, err := os.Stat(segment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(segment, os.O_WRONLY|os.O_APPEND, 0) // #nosec G304 -- The fixture's own transcript segment.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"system","subtype":"nanite.turn.start","pay`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var events eventLog
+	a, err = agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(fake.Text("after repair")), GlobalSkillsDir: "-", Events: events.sink()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := events.integrity(t); len(got) != 1 || got[0]["stage"] != "recover" || got[0]["disposition"] != "blocked" {
+		t.Fatalf("recover events %v", got)
+	}
+	if c, err = a.Conversation(t.Context(), conversation); err != nil {
+		t.Fatal(err)
+	}
+	var refused *agent.IntegrityError
+	if _, err := c.Send(t.Context(), agent.Input{Text: "next"}); !errors.As(err, &refused) || refused.Report.Unsafe()[0].Code != "torn_tail" {
+		t.Fatalf("send: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(segment, committed.Size()); err != nil {
+		t.Fatal(err)
+	}
+	a, err = agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(fake.Text("after repair")), GlobalSkillsDir: "-"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if c, err = a.Conversation(t.Context(), conversation); err != nil {
+		t.Fatal(err)
+	}
+	// The repaired conversation passes its check on the next run, which
+	// clears the mark and goes ahead.
+	run, err := c.Send(t.Context(), agent.Input{Text: "next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := run.Wait(); err != nil || result.Text != "after repair" {
+		t.Fatalf("send after repair %+v, %v", result, err)
+	}
+}
+
+// Damage before the tail is not a torn tail: nothing past it is projected
+// as if it were the whole history, and the agent refuses to open, as it
+// always has.
+func TestMidSegmentDamageStillRefusesToOpen(t *testing.T) {
+	dir, conversation, _ := crashedConversation(t, nil)
+	segment := segmentOf(t, dir, conversation)
+	raw, err := os.ReadFile(segment) // #nosec G304 -- The fixture's own transcript segment.
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.SplitAfter(string(raw), "\n")
+	lines[2] = "not a record\n"
+	if err := os.WriteFile(segment, []byte(strings.Join(lines, "")), 0o600); err != nil { // #nosec G703 -- The fixture's own transcript segment.
+		t.Fatal(err)
+	}
+	// A fresh index makes the store replay from the start.
+	if err := os.Remove(filepath.Join(dir, ".nanite", "nanite.db")); err != nil {
+		t.Fatal(err)
+	}
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-"})
+	if err == nil {
+		_ = a.Close()
+		t.Fatal("opened over damaged committed history")
+	}
+	if !strings.Contains(err.Error(), "changed history") {
+		t.Fatalf("open: %v", err)
 	}
 }

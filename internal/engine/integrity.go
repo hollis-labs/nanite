@@ -9,6 +9,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/integrity"
 	"github.com/hollis-labs/nanite/internal/recovery"
+	"github.com/hollis-labs/nanite/internal/store"
 )
 
 // ErrIntegrity is matched (errors.Is) by every IntegrityError.
@@ -45,19 +46,15 @@ func (e *Engine) CheckIntegrity(ctx context.Context, id string) (integrity.Repor
 	if _, err := e.cfg.Store.Conversation(ctx, id); err != nil {
 		return integrity.Report{}, err
 	}
-	if e.busy(id) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.active[id] != nil {
 		return integrity.Report{}, ErrBusy
 	}
 	return e.cfg.Store.ValidateConversation(ctx, id, nil)
 }
 
-func (e *Engine) busy(id string) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.active[id] != nil
-}
-
-// ObserveIntegrity reports a check recovery or Resume ran: a runtime event
+// ObserveIntegrity reports a check recovery or a run ran: a runtime event
 // (counts and severities only) and, when something is wrong, a log line.
 func (e *Engine) ObserveIntegrity(ctx context.Context, conversation, stage string, report integrity.Report) {
 	disposition := recovery.DispositionOf(report)
@@ -81,19 +78,45 @@ func (e *Engine) ObserveIntegrity(ctx context.Context, conversation, stage strin
 	})
 }
 
-// resumeGate validates a conversation before Resume reads its history or
-// assembles any context, and refuses an unsafe one.
-func (e *Engine) resumeGate(ctx context.Context, id string) error {
-	if e.busy(id) {
-		// Resume would refuse anyway; validating a transcript a run is
+// runGate decides whether a run may start on a conversation. Resume always
+// validates first, before anything reads the history or assembles context.
+// Any other run validates only a conversation an earlier check marked
+// blocked, so an unsafe history never reaches a model through Send after a
+// Discard either; a passing check clears the mark. It holds the engine lock
+// while it validates, so no run, Discard or Record writes the transcript
+// meanwhile.
+func (e *Engine) runGate(ctx context.Context, id string, resume bool) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.active[id] != nil {
+		// The run would be refused anyway; validating a transcript a run is
 		// writing could report a transient torn tail instead.
 		return ErrBusy
 	}
+	if !resume {
+		mark, err := e.cfg.Store.Setting(ctx, id, store.SettingIntegrity)
+		if err != nil || mark == "" {
+			return err
+		}
+	}
+	stage := "send"
+	if resume {
+		stage = "resume"
+	}
+	return e.validateLocked(ctx, id, stage)
+}
+
+// validateLocked validates a conversation with e.mu held, records the
+// outcome as the conversation's mark, and refuses an unsafe one.
+func (e *Engine) validateLocked(ctx context.Context, id, stage string) error {
 	report, err := e.cfg.Store.ValidateConversation(ctx, id, nil)
 	if err != nil {
 		return err
 	}
-	e.ObserveIntegrity(ctx, id, "resume", report)
+	e.ObserveIntegrity(ctx, id, stage, report)
+	if err := recovery.MarkBlocked(ctx, e.cfg.Store, id, !report.Safe()); err != nil {
+		return err
+	}
 	if !report.Safe() {
 		return &IntegrityError{Conversation: id, Report: report}
 	}

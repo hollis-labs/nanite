@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.12.1
 
+Fixes for pilots. No API changes.
+
+- Wait for concurrent registry installs with cancellation, remove abandoned staging
+  directories, and check for newly appeared packages before recording their pins.
 - Keep internal closing prompts out of compaction turn boundaries and public
   conversation history; summary transcripts label them as host notes. Persisted
   closing markers continue to support interrupted-turn recovery.
@@ -11,9 +15,6 @@
 Publish and install agent-built tool packages through a registry
 (`tool-package/1`), pinned by digest. Ships with development fakes; the live
 Registry and Caster adapter follows. No breaking changes.
-
-- Wait for concurrent registry installs with cancellation, remove abandoned staging
-  directories, and check for newly appeared packages before recording their pins.
 
 - Add draft tool-registry publishing and pinned installs through a host-supplied
   client, `nanite tools publish/install`, and the configured `tool_install` builtin.

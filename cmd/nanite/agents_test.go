@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hollis-labs/nanite/registryagent"
@@ -120,5 +123,62 @@ func TestRegistryCredentialPermissions(t *testing.T) {
 	}
 	if _, err := registryTokenFile(file)(t.Context()); err == nil || strings.Contains(err.Error(), file) {
 		t.Fatal("public credential file accepted or path leaked", err)
+	}
+}
+
+// The live path end to end: --registry-url with a private token file sends
+// the reader token as a Bearer header on every Registry read, and a folder is
+// materialized from the records the server returns.
+func TestAgentsMaterializeLiveCLI(t *testing.T) {
+	for _, name := range []string{"NANITE_REGISTRY_URL", "NANITE_REGISTRY_TOKEN_FILE", "NANITE_REGISTRY_PUBLICATION", "NANITE_CASTER_EXECUTABLE"} {
+		t.Setenv(name, "")
+	}
+	payloads := map[string]string{
+		"agent:cli-fixture":          `{"schema":"agent/1","id":"cli-fixture","name":"cli-fixture","charter":"Test live CLI materialization.","roles":["assistant"],"launch_profile":{"reference":{"authority":"registry","kind":"launch_profile","id":"cli-profile"},"revision":"r1"}}`,
+		"launch_profile:cli-profile": `{"schema":"launch_profile/1","id":"cli-profile","name":"cli-profile","source":{"reference":{"authority":"tether","kind":"launch_profile","id":"source"},"revision":"s1"},"host":"nanite-cli","runtime":{"provider":"openai","model":"test"}}`,
+	}
+	var reads, unauthorized atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads.Add(1)
+		if r.Header.Get("Authorization") != "Bearer cli-reader" {
+			unauthorized.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		id := r.URL.Query().Get("id")
+		payload, ok := payloads[id]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		kind, _, _ := strings.Cut(id, ":")
+		// Pinned revisions are read from history as drafts; the current record is published.
+		publication := "published"
+		if r.URL.Path == "/v1/revision" {
+			publication = "draft"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "kind": kind, "schema": kind + "/1", "revision_id": "r1", "publication": publication, "payload": json.RawMessage(payload)})
+	}))
+	defer server.Close()
+	token := filepath.Join(t.TempDir(), "reader")
+	if err := os.WriteFile(token, []byte("cli-reader\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "agent")
+	var output bytes.Buffer
+	cmd := agentsCommand()
+	cmd.SetOut(&output)
+	cmd.SetArgs([]string{"materialize", "agent:cli-fixture", dir, "--registry-url", server.URL, "--registry-token-file", token, "--publication", "published"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("live materialize: %v (reads=%d unauthorized=%d)", err, reads.Load(), unauthorized.Load())
+	}
+	if reads.Load() == 0 || unauthorized.Load() != 0 {
+		t.Fatalf("reads=%d unauthorized=%d", reads.Load(), unauthorized.Load())
+	}
+	if !strings.Contains(output.String(), "materialized=true") {
+		t.Fatal(output.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent.md")); err != nil {
+		t.Fatalf("no agent folder: %v", err)
 	}
 }

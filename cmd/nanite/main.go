@@ -4,13 +4,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/hollis-labs/libs/core/panics"
-	"github.com/hollis-labs/libs/security/redact"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/libs/security/redact"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	libpolicy "github.com/hollis-labs/libs/security/policy"
@@ -41,6 +42,7 @@ func guardedMain(ctx context.Context, run func(context.Context) error, stderr io
 		return 0
 	}
 	fmt.Fprintln(stderr, "nanite:", err)
+	printIntegrity(stderr, err)
 	if _, ok := panics.Ref(err); ok {
 		return panics.ExitSoftware
 	}

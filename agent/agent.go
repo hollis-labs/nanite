@@ -377,7 +377,8 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	if err := recovery.Recover(ctx, db); err != nil {
+	var checks []recovery.Check
+	if err := recovery.Recover(ctx, db, func(c recovery.Check) { checks = append(checks, c) }); err != nil {
 		_ = db.Close()
 		_ = lock.Close()
 		return nil, fmt.Errorf("recover agent: %w", err)
@@ -440,6 +441,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = db.Close()
 		_ = lock.Close()
 		return nil, err
+	}
+	for _, check := range checks {
+		a.engine.ObserveIntegrity(ctx, check.Conversation, "recover", check.Report)
 	}
 	if err = a.openTether(ctx, opts.Tether, def); err != nil {
 		a.engine.Close()

@@ -283,6 +283,18 @@ type AutoApproved struct {
 	Conversation, CallID, Tool, InputSummary string
 }
 
+// IntegrityChecked reports a conversation integrity check that recovery or
+// Resume ran. It carries no content: the stage that ran it, the disposition,
+// the worst severity, and how many findings had each code.
+type IntegrityChecked struct {
+	EventMeta
+	Conversation string
+	Stage        string // "recover" or "resume"
+	Disposition  string // "resumable" or "blocked"
+	Severity     string // worst finding severity; "info" when clean
+	Codes        map[string]int
+}
+
 // BudgetWarning reports the first crossing of 80% of a UTC-day token cap.
 type BudgetWarning struct {
 	EventMeta

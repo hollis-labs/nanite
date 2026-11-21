@@ -1,11 +1,15 @@
 package recovery
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/integrity"
 	"github.com/hollis-labs/nanite/internal/slots"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
@@ -72,7 +76,7 @@ func TestRecoverMarksVerifiedProcessJobLost(t *testing.T) {
 	if err := db.StartJob(t.Context(), job); err != nil {
 		t.Fatal(err)
 	}
-	if err := Recover(t.Context(), db); err != nil {
+	if err := Recover(t.Context(), db, nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -212,5 +216,125 @@ func TestResumePlanReusedIDRecoversToCleanHistory(t *testing.T) {
 	report, err := db.ValidateConversation(t.Context(), id, nil)
 	if err != nil || len(report.Findings) != 0 {
 		t.Fatalf("after recovery: %v, %v", report.Findings, err)
+	}
+}
+
+// crashed writes a running turn with an unanswered call, as a killed
+// process leaves it; corrupt adds records before the "crash".
+func crashed(t *testing.T, corrupt func(*store.Journal, store.Turn)) (*store.Store, string, string, store.Turn) {
+	t.Helper()
+	dir := t.TempDir()
+	db, err := store.Open(t.Context(), dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id := store.NewID(now)
+	if err := db.CreateConversation(t.Context(), store.Conversation{ID: id, Role: "chat", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	j, err := db.OpenJournal(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := store.Turn{ID: store.NewID(now), UserMessageID: store.NewID(now)}
+	for _, err := range []error{
+		j.StartTurn(turn, now),
+		j.AppendMessage(store.Message{ID: turn.UserMessageID, TurnID: turn.ID, Role: "user", CreatedAt: now, Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "q"}}}, nil),
+		j.AppendMessage(store.Message{ID: store.NewID(now), TurnID: turn.ID, Role: "assistant", CreatedAt: now,
+			Blocks: []llmtypes.ContentBlock{{Type: "tool_use", ID: "call", Name: "read", Input: &map[string]any{}}}}, nil),
+	} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if corrupt != nil {
+		corrupt(j, turn)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return db, dir, id, turn
+}
+
+func TestRecoverValidatesBeforeMarkingInterrupted(t *testing.T) {
+	orphan := func(j *store.Journal, turn store.Turn) {
+		now := time.Now().UTC()
+		if err := j.AppendMessage(store.Message{ID: store.NewID(now), TurnID: turn.ID, Role: "tool", CreatedAt: now,
+			Blocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "nobody"}}}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name        string
+		corrupt     func(*store.Journal, store.Turn)
+		disposition Disposition
+	}{
+		{"interrupted", nil, Resumable},
+		{"unsafe", orphan, Blocked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, id, turn := crashed(t, tc.corrupt)
+			defer db.Close()
+			var checks []Check
+			if err := Recover(t.Context(), db, func(c Check) { checks = append(checks, c) }); err != nil {
+				t.Fatal(err)
+			}
+			if len(checks) != 1 || checks[0].Conversation != id || checks[0].Disposition != tc.disposition || len(checks[0].Turns) != 1 {
+				t.Fatalf("checks %+v", checks)
+			}
+			// Unsafe or not, the turn is marked interrupted so Discard can close it.
+			if got, err := db.Interrupted(t.Context(), id); err != nil || got == nil || got.ID != turn.ID {
+				t.Fatalf("interrupted %+v, %v", got, err)
+			}
+			// A second boot has no running turn and validates nothing.
+			checks = nil
+			if err := Recover(t.Context(), db, func(c Check) { checks = append(checks, c) }); err != nil || len(checks) != 0 {
+				t.Fatalf("second recover %v, %v", checks, err)
+			}
+		})
+	}
+}
+
+func TestRecoverLeavesATornTranscriptUntouched(t *testing.T) {
+	db, dir, id, turn := crashed(t, nil)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	segment := filepath.Join(dir, "transcripts", id, "00000000000000000001.jsonl")
+	f, err := os.OpenFile(segment, os.O_WRONLY|os.O_APPEND, 0) // #nosec G304 -- The test's own transcript segment.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"assi`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(segment) // #nosec G304 -- The test's own transcript segment.
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.Open(t.Context(), dir, nil)
+	if err != nil {
+		t.Fatalf("a torn transcript kept the store from opening: %v", err)
+	}
+	defer db.Close()
+	var checks []Check
+	if err := Recover(t.Context(), db, func(c Check) { checks = append(checks, c) }); err != nil {
+		t.Fatalf("a torn transcript failed recovery: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Disposition != Blocked || checks[0].Report.Unsafe()[0].Code != integrity.CodeTornTail {
+		t.Fatalf("checks %+v", checks)
+	}
+	if after, err := os.ReadFile(segment); err != nil || !bytes.Equal(before, after) { // #nosec G304 -- The test's own transcript segment.
+		t.Fatalf("recovery wrote to a torn transcript: %v", err)
+	}
+	if got, err := db.TurnStatus(t.Context(), turn.ID); err != nil || got != "running" {
+		t.Fatalf("turn %s, %v", got, err)
+	}
+	if err := db.RebuildIndex(t.Context()); err != nil {
+		t.Fatalf("rebuild with a torn transcript: %v", err)
 	}
 }

@@ -81,7 +81,9 @@ type Options struct {
 	OnSteered func(chatID string, s agent.Steered)
 	// ResumeInterrupted makes RecoverTurns resume each turn the previous
 	// process left unfinished. Without it, RecoverTurns offers each one to
-	// the owner (a nanite.interrupted activity) to Resume or Discard.
+	// the owner (a nanite.interrupted activity) to Resume or Discard. A turn
+	// whose conversation fails integrity checks is never resumed: it is
+	// offered for Discard only, and RecoverTurns reports the refusal.
 	ResumeInterrupted bool
 	// InterruptedHold is how long an interrupted turn waits for the owner
 	// (or RecoverTurns) before the runner discards it (default 15 minutes;

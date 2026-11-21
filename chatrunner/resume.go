@@ -19,7 +19,9 @@ import (
 // ActivityInterrupted tells the owner about a turn the previous process left
 // unfinished. Its value names the turn and either offers the actions
 // (`actions`: resume, discard) or says what became of it (`disposition`:
-// discarded, with `reason`: new message, timeout or requested).
+// discarded, with `reason`: new message, timeout or requested). An offer
+// carrying `integrity`: blocked has only the discard action: the
+// conversation failed integrity checks and resume is refused.
 const ActivityInterrupted = "nanite.interrupted"
 
 // chatHostState is the host state on a Nanite conversation naming the chat
@@ -341,6 +343,11 @@ func (r *Runner) RecoverTurns(ctx context.Context) ([]string, error) {
 		}
 		if r.opts.ResumeInterrupted {
 			err = r.Resume(ctx, chatID)
+			if errors.Is(err, agent.ErrIntegrity) {
+				// Never resumed through an unsafe finding: the owner can
+				// still discard it, and the hold discards it in time.
+				err = errors.Join(err, r.offerActions(ctx, chatID, "blocked", "discard"))
+			}
 		} else {
 			err = r.offer(ctx, chatID)
 		}
@@ -356,6 +363,12 @@ func (r *Runner) RecoverTurns(ctx context.Context) ([]string, error) {
 // offer publishes a run that only tells the owner about the interrupted
 // turn and what they can do with it.
 func (r *Runner) offer(ctx context.Context, chatID string) error {
+	return r.offerActions(ctx, chatID, "", "resume", "discard")
+}
+
+// offerActions offers the interrupted turn with the given actions. A
+// non-empty integrity says why resume is not among them.
+func (r *Runner) offerActions(ctx context.Context, chatID, integrity string, actions ...string) error {
 	turn, err := r.Interrupted(ctx, chatID)
 	if err != nil {
 		return err
@@ -364,7 +377,11 @@ func (r *Runner) offer(ctx context.Context, chatID string) error {
 		return nil
 	}
 	r.startHold(ctx, chatID)
-	ev := activity(ActivityInterrupted, map[string]any{"turn": turn.ID, "actions": []string{"resume", "discard"}})
+	value := map[string]any{"turn": turn.ID, "actions": actions}
+	if integrity != "" {
+		value["integrity"] = integrity
+	}
+	ev := activity(ActivityInterrupted, value)
 	return r.opts.Observe(ctx, chatID, chat.Turn{ConversationID: chatID}, &announceRun{events: []chatstream.Event{ev}})
 }
 
@@ -394,6 +411,11 @@ func (r *Runner) Resume(ctx context.Context, chatID string) error {
 	turn, err := r.Interrupted(ctx, chatID)
 	if err == nil && turn == nil {
 		err = fmt.Errorf("chatrunner: %s: %w", chatID, errNoInterrupted)
+	}
+	if err == nil {
+		// The resumed run would be refused anyway; checking here returns the
+		// typed refusal to the caller instead of a failed run on the wire.
+		err = r.checkResumable(ctx, chatID)
 	}
 	if err != nil {
 		r.unclaim(chatID)
@@ -569,4 +591,21 @@ func (a *announceRun) Cancel() {}
 
 func (a *announceRun) Answer(context.Context, string, chat.Decision) error {
 	return errors.New("chatrunner: an announcement asks for no approval")
+}
+
+// checkResumable refuses a chat whose conversation has an unsafe integrity
+// finding, with the agent's *IntegrityError.
+func (r *Runner) checkResumable(ctx context.Context, chatID string) error {
+	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	if err != nil {
+		return fmt.Errorf("chatrunner: open conversation: %w", err)
+	}
+	report, err := c.CheckIntegrity(ctx)
+	if err != nil {
+		return err
+	}
+	if !report.Safe() {
+		return &agent.IntegrityError{Conversation: c.ID(), Report: report}
+	}
+	return nil
 }

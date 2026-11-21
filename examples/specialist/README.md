@@ -47,9 +47,10 @@ in the agent's own namespace.
 ## Where it runs
 
 - **Inside a host app** (for example a Surface module bound to this folder):
-  the host supplies the model, gateway and tools, including memory. The host
-  uses `agent.md`, `context/`, `skills/`, `variants/`, `steering.json` and
-  the `runtime` keys in `host.yaml`; `.mcp.json` is ignored.
+  the host supplies the model, gateway, tools (including memory) and the
+  runtime limits. The host uses `agent.md`, `context/`, `skills/`,
+  `variants/` and `steering.json`; `host.yaml`, `.mcp.json` and
+  `identity.yaml` are the host's, so keep them for standalone use only.
 - **Standalone** with the `nanite` CLI: add a `.mcp.json` registering your
   MCP gateway, so the memory tools appear as `mcp__gateway__*`:
 

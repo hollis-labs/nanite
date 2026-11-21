@@ -192,12 +192,11 @@ func (w *walker) record(i int, entry transcript.Entry) {
 // needsConversation reports, once, a record the index cannot hold because
 // no conversation record precedes it: its row references the conversation.
 // The walk goes on so the other checks still run.
-func (w *walker) needsConversation(i int, what string) bool {
+func (w *walker) needsConversation(i int, what string) {
 	if w.conversationRecords == 0 && !w.noConversation {
 		w.noConversation = true
 		w.add(CodeConversationMeta, Unsafe, w.at(i), "a "+what+" comes before any conversation record; the index cannot hold it")
 	}
-	return true
 }
 
 // sideband applies a known subtype and reports whether it knew it.
@@ -232,9 +231,7 @@ func (w *walker) sideband(i int, r record) bool {
 		if p.ThroughMessageID == "" || p.Summary == "" {
 			return true
 		}
-		if !w.needsConversation(i, "compaction") {
-			return true
-		}
+		w.needsConversation(i, "compaction")
 		if _, known := w.turns[p.TurnID]; !known {
 			// compactions.turn_id references turns: the projection refuses it.
 			w.add(CodeUnknownTurn, Unsafe, w.at(i), "the compaction names a turn that never started; the index cannot hold it",
@@ -258,9 +255,7 @@ func (w *walker) turnRecord(i int, subtype string, p turnPayload) {
 	t := w.turns[p.ID]
 	switch subtype {
 	case subtypeTurnStart:
-		if !w.needsConversation(i, "turn") {
-			return
-		}
+		w.needsConversation(i, "turn")
 		if t != nil {
 			w.add(CodeIllegalTurnTransition, Unsafe, w.span(t.start, i), "the turn started twice", "turn", p.ID)
 			return
@@ -332,9 +327,7 @@ func (w *walker) message(i int, r record) {
 		w.add(CodeInvalidRecord, Unsafe, w.at(i), "the message role or UUID does not match its record", "record", r.UUID, "type", r.Type, "role", m.role)
 		return
 	}
-	if !w.needsConversation(i, "message") {
-		return
-	}
+	w.needsConversation(i, "message")
 	if first, dup := w.messageAt[m.id]; dup {
 		w.add(CodeDuplicateRecordID, Unsafe, w.span(first, i), "two messages share one UUID; the index keeps only the first", "message", m.id)
 		return
@@ -459,7 +452,13 @@ func (w *walker) byteLayer() {
 	}
 	switch {
 	case errors.Is(err, transcript.ErrTorn):
-		w.add(CodeTornTail, Unsafe, after, "the transcript ends in an incomplete or unreadable record after the last committed one; the writer refuses to append until it is handled")
+		// Only an incomplete final line is torn, and Append writes and
+		// fsyncs each record in one write: those bytes were never committed,
+		// so cutting them back to the last committed record loses nothing.
+		c := after.LastCursor
+		w.add(CodeTornTail, Unsafe, after, "the transcript ends in an incomplete record after the last committed one; the writer refuses to append until it is removed",
+			"segment", fmt.Sprint(max(c.Segment, 1)), "committed_bytes", fmt.Sprint(c.Offset))
+		w.repairable(RepairTruncateTail)
 	case errors.Is(err, transcript.ErrGap):
 		w.add(CodeHistoryGap, Unsafe, after, "a transcript segment is missing or committed history changed")
 	case errors.Is(err, transcript.ErrInvalid):

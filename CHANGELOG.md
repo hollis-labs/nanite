@@ -34,7 +34,8 @@ ordinary interruption from a corrupt transcript. No breaking changes.
   does not unblock. Adds `Conversation.CheckIntegrity` and a content-free
   `integrity` runtime event. A torn tail (an incomplete final line, never
   committed) no longer keeps the agent from opening: its committed prefix is
-  projected and the conversation is refused until the tail is removed.
+  projected and the conversation is refused until the tail is removed; the
+  finding names the exact cut (`truncate_torn_tail`).
   Damage before the tail is now reported as changed history and still
   refuses to open. The chatrunner never resumes through an unsafe finding
   and offers such a turn for discard only.

@@ -66,6 +66,12 @@
     "code": "torn_tail",
     "severity": "unsafe",
     "first": -1,
-    "last": -1
+    "last": -1,
+    "auto_repair": true,
+    "repair": "truncate_torn_tail",
+    "evidence": {
+      "committed_bytes": "3744",
+      "segment": "1"
+    }
   }
 ]

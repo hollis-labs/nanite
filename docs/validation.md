@@ -87,6 +87,32 @@ The embedding API golden test runs as part of the suite. For an intentional
 API change, regenerate it with
 `go test ./agent -run '^TestAPIGolden$' -update-agent-api` and review the diff.
 
+## Fuzz targets
+
+Handlers that take model- or server-supplied input have Go fuzz targets. Their
+seeds run as ordinary tests in the suite above. The `nanite fuzz` workflow
+fuzzes each target for a minute every night and keeps any failing input as an
+artifact. To fuzz one locally:
+
+```sh
+go test -run '^$' -fuzz '^FuzzSearch$' -fuzztime 60s ./internal/selftools/
+```
+
+| Target | Package | Invariant |
+|---|---|---|
+| `FuzzSearch` | `internal/selftools` | No panic, under 2s, never returns content from outside the root or from a protected path. |
+| `FuzzFindGlob` | `internal/selftools` | Results stay inside the root and off protected paths; a literal glob equal to a file's base name finds it. |
+| `FuzzWorkspaceMutate` | `internal/selftools` | read, list, write and edit never touch anything outside the root and never write a protected path in any letter case. |
+| `FuzzParseBash` | `internal/selftools` | An accepted call has a non-blank command and a timeout in [1s, 600s]. |
+| `FuzzDenylist` | `internal/shell` | No panic, under 1s, a reason exactly when blocked, and still blocked after `true;`. |
+| `FuzzMCPTool` | `internal/mcpclient` | An admitted tool's model name matches `^[a-zA-Z0-9_-]{1,64}$`. |
+| `FuzzUnpack` | `toolregistry` | Only regular files and directories under the package directory; no links and no setuid, setgid or sticky bits. |
+| `FuzzValidate` | `registryagent` | An accepted payload is an object with a supported schema, decided within 3s. |
+| `FuzzMaterializeProfile` | `registryagent` | Materialize returns for any agent/1 or launch_profile/1 payload. |
+
+A failing input is written under the package's `testdata/fuzz/<Target>/`.
+Commit it with the fix so the seed keeps guarding the regression.
+
 ## Live model test
 
 The default run skips the live test. Set `NANITE_GATEWAY_URL` and

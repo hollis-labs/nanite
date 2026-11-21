@@ -3,7 +3,6 @@ package mcpclient
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,26 +16,13 @@ import (
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/provider/station"
 	"github.com/hollis-labs/nanite/internal/warden"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
 func TestWardenAuthAndCorrelationOnMCPHTTPRequests(t *testing.T) {
 	var mu sync.Mutex
-	n := 0
-	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		if r.Form.Get("audience") != "mcp-gateway" {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"error":"invalid_scope"}`)
-			return
-		}
-		n++
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"access_token":"mcp-tok-%d","expires_in":900,"refresh_token":"parent-%d"}`, n, n)
-	}))
-	t.Cleanup(ws.Close)
+	ws := wardentest.NewFake(t, "parent-0").Grant("mcp-gateway").
+		Tokens(func(n int, _ string) string { return fmt.Sprintf("mcp-tok-%d", n) })
 	file := filepath.Join(t.TempDir(), "agent.cred")
 	if err := tokenfile.Write(file, "parent-0"); err != nil {
 		t.Fatal(err)

@@ -15,83 +15,21 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/security/secrets/tokenfile"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
-// fakeWarden is a token endpoint with rotating parents and a grants list,
-// plus the request API.
-type fakeWarden struct {
-	mu        sync.Mutex
-	parent    string
-	n         int
-	ttl       int
-	allowed   map[string]bool // audience → granted
-	mints     int
-	reused    int
-	fail      string // "500" or "drop" for the next token request
-	requests  int
-	reqStatus string
-	tokens    map[string]string // access token → audience
-}
-
-func newFake(t *testing.T) (*fakeWarden, *httptest.Server) {
+// newFake is the shared fake Warden (wardentest) with this file's names:
+// parents parent-N, tokens tok-<audience>-N, grant requests filed pending
+// at the elevated tier, and llm-gateway granted.
+func newFake(t *testing.T) *wardentest.Fake {
 	t.Helper()
-	f := &fakeWarden{parent: "parent-0", ttl: 900, allowed: map[string]bool{"llm-gateway": true, "warden": true}, reqStatus: "pending", tokens: map[string]string{}}
-	srv := httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(srv.Close)
-	return f, srv
+	return wardentest.NewFake(t, "parent-0").Grant("llm-gateway").Grant("warden").
+		Tokens(func(n int, aud string) string { return fmt.Sprintf("tok-%s-%d", aud, n) }).
+		Parents(func(n int) string { return fmt.Sprintf("parent-%d", n) }).
+		FileAs("pending", "elevated").Expire(wardentest.Recorded, 900)
 }
 
-func (f *fakeWarden) serve(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	switch {
-	case r.URL.Path == "/v1/token":
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		switch f.fail {
-		case "500":
-			f.fail = ""
-			f.parent = "spent-by-lost-answer"
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		case "drop":
-			f.fail = ""
-			f.parent = "spent-by-lost-answer"
-			hj, _ := w.(http.Hijacker)
-			conn, _, _ := hj.Hijack()
-			_ = conn.Close()
-			return
-		}
-		if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != f.parent {
-			f.reused++
-			oauth(w, "invalid_grant")
-			return
-		}
-		aud := r.Form.Get("audience")
-		if !f.allowed[aud] {
-			oauth(w, "invalid_scope")
-			return
-		}
-		f.mints++
-		f.n++
-		f.parent = fmt.Sprintf("parent-%d", f.n)
-		tok := fmt.Sprintf("tok-%s-%d", aud, f.n)
-		f.tokens[tok] = aud
-		writeJSON(w, map[string]any{"access_token": tok, "expires_in": f.ttl, "refresh_token": f.parent})
-	case r.URL.Path == "/api/v1/requests" && r.Method == http.MethodPost:
-		if f.tokens[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")] != "warden" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		f.requests++
-		writeJSON(w, map[string]any{"id": "req-1", "status": "pending", "tier": "elevated"})
-	case r.URL.Path == "/api/v1/requests/req-1":
-		writeJSON(w, map[string]any{"id": "req-1", "status": f.reqStatus})
-	default:
-		w.WriteHeader(http.StatusNotFound)
-	}
-}
-
+// oauth refuses in the recorded OAuth error shape.
 func oauth(w http.ResponseWriter, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
@@ -134,7 +72,8 @@ func source(t *testing.T, url, file string, c *clock, onWaiting func(Waiting)) *
 }
 
 func TestMintRotatesTheParentAndCachesTheToken(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	file := credential(t, "parent-0")
 	s := source(t, srv.URL, file, nil, nil)
 	tok, err := s.Token(t.Context(), "llm-gateway", []string{"llm-gateway.chat"})
@@ -148,15 +87,16 @@ func TestMintRotatesTheParentAndCachesTheToken(t *testing.T) {
 		t.Fatalf("inflight marker left after a successful mint: %v", err)
 	}
 	again, err := s.Bearer("llm-gateway", []string{"llm-gateway.chat"}).Token(t.Context())
-	if err != nil || again != tok || f.mints != 1 {
-		t.Fatalf("second Token = %q, %v after %d mints; want the cached token", again, err, f.mints)
+	if err != nil || again != tok || f.Mints() != 1 {
+		t.Fatalf("second Token = %q, %v after %d mints; want the cached token", again, err, f.Mints())
 	}
 }
 
 func TestRenewsAtTwoThirdsOfTheTokensLife(t *testing.T) {
-	f, srv := newFake(t)
-	f.ttl = 90
+	f := newFake(t)
+	srv := f.Server
 	c := &clock{now: time.Unix(1_800_000_000, 0)}
+	f.Expire(wardentest.Recorded, 90).Clock(c.Now)
 	s := source(t, srv.URL, credential(t, "parent-0"), c, nil)
 	first, _ := s.Token(t.Context(), "llm-gateway", nil)
 	c.add(59 * time.Second)
@@ -164,13 +104,14 @@ func TestRenewsAtTwoThirdsOfTheTokensLife(t *testing.T) {
 		t.Fatalf("renewed before two thirds of the life: %q", tok)
 	}
 	c.add(2 * time.Second)
-	if tok, err := s.Token(t.Context(), "llm-gateway", nil); err != nil || tok == first || f.mints != 2 {
-		t.Fatalf("no renewal past two thirds: %q, %v, %d mints", tok, err, f.mints)
+	if tok, err := s.Token(t.Context(), "llm-gateway", nil); err != nil || tok == first || f.Mints() != 2 {
+		t.Fatalf("no renewal past two thirds: %q, %v, %d mints", tok, err, f.Mints())
 	}
 }
 
 func TestTwoSourcesSharingAFileNeverReuseAParent(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	file := credential(t, "parent-0")
 	a, b := source(t, srv.URL, file, nil, nil), source(t, srv.URL, file, nil, nil)
 	var wg sync.WaitGroup
@@ -192,16 +133,17 @@ func TestTwoSourcesSharingAFileNeverReuseAParent(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
-	if f.reused != 0 || f.mints == 0 {
-		t.Fatalf("%d reused parents, %d mints", f.reused, f.mints)
+	if f.Refused() != 0 || f.Mints() == 0 {
+		t.Fatalf("%d reused parents, %d mints", f.Refused(), f.Mints())
 	}
 }
 
 func TestALostAnswerBlocksAnyRetryWithTheOldParent(t *testing.T) {
 	for _, mode := range []string{"500", "drop"} {
 		t.Run(mode, func(t *testing.T) {
-			f, srv := newFake(t)
-			f.fail = mode
+			f := newFake(t)
+			srv := f.Server
+			f.LoseNextAnswer(mode)
 			file := credential(t, "parent-0")
 			s := source(t, srv.URL, file, nil, nil)
 			_, err := s.Token(t.Context(), "llm-gateway", nil)
@@ -211,15 +153,11 @@ func TestALostAnswerBlocksAnyRetryWithTheOldParent(t *testing.T) {
 			if _, err := os.Stat(file + ".inflight"); err != nil {
 				t.Fatalf("no inflight marker after a lost answer: %v", err)
 			}
-			f.mu.Lock()
-			before := f.reused + f.mints
-			f.mu.Unlock()
+			before := f.Refused() + f.Mints()
 			if _, err := s.Token(t.Context(), "llm-gateway", nil); !errors.Is(err, ErrReenroll) {
 				t.Fatalf("retry = %v, want ErrReenroll", err)
 			}
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			if f.reused+f.mints != before || f.reused != 0 {
+			if f.Refused()+f.Mints() != before || f.Refused() != 0 {
 				t.Fatal("the old parent was presented again after a lost answer")
 			}
 		})
@@ -227,7 +165,7 @@ func TestALostAnswerBlocksAnyRetryWithTheOldParent(t *testing.T) {
 }
 
 func TestARefusedParentNeedsReenrollment(t *testing.T) {
-	_, srv := newFake(t)
+	srv := newFake(t).Server
 	file := credential(t, "parent-unknown")
 	s := source(t, srv.URL, file, nil, nil)
 	if _, err := s.Token(t.Context(), "llm-gateway", nil); !errors.Is(err, ErrReenroll) {
@@ -239,8 +177,10 @@ func TestARefusedParentNeedsReenrollment(t *testing.T) {
 }
 
 func TestAMissingGrantFilesOneRequestAndMintsOnceApproved(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	c := &clock{now: time.Unix(1_800_000_000, 0)}
+	f.Clock(c.Now)
 	var seen []Waiting
 	s := source(t, srv.URL, credential(t, "parent-0"), c, func(w Waiting) { seen = append(seen, w) })
 	_, err := s.Token(t.Context(), "mcp-gateway", []string{"mcp.profile.standard"})
@@ -252,30 +192,27 @@ func TestAMissingGrantFilesOneRequestAndMintsOnceApproved(t *testing.T) {
 		t.Fatalf("OnWaiting saw %+v", seen)
 	}
 	// Within the recheck interval nothing is filed or looked up again.
-	if _, err := s.Token(t.Context(), "mcp-gateway", []string{"mcp.profile.standard"}); !errors.As(err, &missing) || f.requests != 1 {
-		t.Fatalf("second Token = %v after %d requests", err, f.requests)
+	if _, err := s.Token(t.Context(), "mcp-gateway", []string{"mcp.profile.standard"}); !errors.As(err, &missing) || len(f.Requests()) != 1 {
+		t.Fatalf("second Token = %v after %d requests", err, len(f.Requests()))
 	}
-	f.mu.Lock()
-	f.allowed["mcp-gateway"], f.reqStatus = true, "approved"
-	f.mu.Unlock()
+	f.Decide("req-1", "approved")
 	c.add(31 * time.Second)
 	tok, err := s.Token(t.Context(), "mcp-gateway", []string{"mcp.profile.standard"})
-	if err != nil || !strings.HasPrefix(tok, "tok-mcp-gateway-") || f.requests != 1 {
-		t.Fatalf("after approval Token = %q, %v (%d requests)", tok, err, f.requests)
+	if err != nil || !strings.HasPrefix(tok, "tok-mcp-gateway-") || len(f.Requests()) != 1 {
+		t.Fatalf("after approval Token = %q, %v (%d requests)", tok, err, len(f.Requests()))
 	}
 }
 
 func TestErrorsNeverCarryATokenOrParent(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	file := credential(t, "parent-0")
 	s := source(t, srv.URL, file, nil, nil)
 	tok, err := s.Token(t.Context(), "llm-gateway", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.mu.Lock()
-	f.fail = "500"
-	f.mu.Unlock()
+	f.LoseNextAnswer("500")
 	s.Invalidate("llm-gateway", nil, "")
 	_, err = s.Token(t.Context(), "llm-gateway", nil)
 	if err == nil {
@@ -320,8 +257,10 @@ func tokenServer(t *testing.T, handle func(w http.ResponseWriter, r *http.Reques
 	return srv, func() int { mu.Lock(); defer mu.Unlock(); return n }
 }
 
+// ok answers a mint in the recorded shape: token tok-N, next parent
+// parent-N.
 func ok(w http.ResponseWriter, n int) {
-	writeJSON(w, map[string]any{"access_token": fmt.Sprintf("tok-%d", n), "expires_in": 900, "refresh_token": fmt.Sprintf("parent-%d", n)})
+	writeJSON(w, wardentest.MintAnswerBody(wardentest.MintFields{Token: fmt.Sprintf("tok-%d", n), NextParent: fmt.Sprintf("parent-%d", n), Audience: "llm-gateway", TTL: 900}))
 }
 
 func noMarker(t *testing.T, file string) {
@@ -453,22 +392,15 @@ func TestAMarkerForAnotherParentIsSettled(t *testing.T) {
 }
 
 func TestGrantRequestsDoNotNamePrincipal(t *testing.T) {
-	var body map[string]any
-	f, srv := newFake(t)
-	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/requests" && r.Method == http.MethodPost {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-			_ = json.NewDecoder(r.Body).Decode(&body)
-		}
-		f.serve(w, r)
-	})
-	s := source(t, srv.URL, credential(t, "parent-0"), nil, nil)
+	f := newFake(t)
+	s := source(t, f.URL, credential(t, "parent-0"), nil, nil)
 	_, _ = s.Token(t.Context(), "mcp-gateway", nil)
-	if body == nil || body["audience"] != "mcp-gateway" {
-		t.Fatalf("no grant request: %v", body)
+	filed := f.Filed()
+	if len(filed) != 1 || filed[0]["audience"] != "mcp-gateway" {
+		t.Fatalf("no grant request: %v", filed)
 	}
-	if _, ok := body["principal"]; ok {
-		t.Fatalf("the grant request names a principal: %v", body)
+	if _, ok := filed[0]["principal"]; ok {
+		t.Fatalf("the grant request names a principal: %v", filed[0])
 	}
 }
 
@@ -494,7 +426,7 @@ func TestFailedRenewalsBackOff(t *testing.T) {
 }
 
 func TestInvalidateDropsOnlyTheTokenSent(t *testing.T) {
-	_, srv := newFake(t)
+	srv := newFake(t).Server
 	s := source(t, srv.URL, credential(t, "parent-0"), nil, nil)
 	b := s.Bearer("llm-gateway", nil)
 	first, _ := b.Token(t.Context())
@@ -515,12 +447,37 @@ func (opaqueTransport) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 // A transport that does not report connections cannot prove a request never
-// left, so its failures keep the lost-answer marker.
+// left, so its failures keep the lost-answer marker: the mint itself is
+// driven through one, and the next attempt refuses without presenting the
+// parent again. (A standard transport that never connected clears it:
+// TestARequestThatNeverLeftClearsTheMarker.)
 func TestUnknownTransportFailureKeepsTheMarker(t *testing.T) {
-	if tracesConnections(&http.Client{Transport: opaqueTransport{}}) {
-		t.Fatal("an unknown transport was trusted to report connections")
+	f := newFake(t)
+	file := credential(t, "parent-0")
+	s, err := New(Config{URL: f.URL, CredentialFile: file, Principal: "agent:test", HTTP: &http.Client{Transport: opaqueTransport{}}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !tracesConnections(nil) || !tracesConnections(&http.Client{}) || !tracesConnections(&http.Client{Transport: &http.Transport{}}) {
-		t.Fatal("the standard transport was not trusted")
+	if _, err := s.Token(t.Context(), "llm-gateway", nil); !errors.Is(err, ErrReenroll) {
+		t.Fatalf("Token = %v, want ErrReenroll", err)
+	}
+	marker, err := tokenfile.Read(file + ".inflight")
+	if err != nil || marker != "sha256:"+parentHash("parent-0") {
+		t.Fatalf("marker %q, %v", marker, err)
+	}
+	if got, _ := tokenfile.Read(file); got != "parent-0" {
+		t.Fatalf("parent = %q", got)
+	}
+	// A later attempt, even through a working transport, refuses before
+	// presenting the parent.
+	again, err := New(Config{URL: f.URL, CredentialFile: file, Principal: "agent:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.Token(t.Context(), "llm-gateway", nil); !errors.Is(err, ErrReenroll) || f.Calls("/v1/token") != 0 {
+		t.Fatalf("retry = %v after %d token requests", err, f.Calls("/v1/token"))
+	}
+	if tracesConnections(&http.Client{Transport: opaqueTransport{}}) || !tracesConnections(nil) || !tracesConnections(&http.Client{Transport: &http.Transport{}}) {
+		t.Fatal("transport trust is wrong")
 	}
 }

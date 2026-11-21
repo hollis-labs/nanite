@@ -1,43 +1,20 @@
 package authored
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/libs/security/secrets/tokenfile"
 	"github.com/hollis-labs/nanite/internal/warden"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
 func TestIdentityWiresFailFastGrants(t *testing.T) {
 	for _, auto := range []bool{false, true} {
 		t.Run(fmt.Sprint(auto), func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch r.URL.Path {
-				case "/v1/token":
-					r.Body = http.MaxBytesReader(w, r.Body, 4096)
-					if err := r.ParseForm(); err != nil {
-						t.Error(err)
-						return
-					}
-					if r.Form.Get("audience") != "warden" {
-						w.WriteHeader(http.StatusBadRequest)
-						_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_scope"})
-						return
-					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access", "refresh_token": "parent", "expires_in": 900})
-				case "/api/v1/requests":
-					_ = json.NewEncoder(w).Encode(map[string]string{"id": "request", "status": "pending"})
-				default:
-					t.Errorf("unexpected request %s", r.URL.Path)
-					w.WriteHeader(http.StatusNotFound)
-				}
-			}))
-			defer srv.Close()
+			srv := wardentest.NewFake(t, "parent")
 			file := filepath.Join(t.TempDir(), "credential")
 			if err := tokenfile.Write(file, "parent"); err != nil {
 				t.Fatal(err)

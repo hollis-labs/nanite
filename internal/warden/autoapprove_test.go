@@ -11,7 +11,8 @@ import (
 func TestFailFastGrantsFilesWithoutWaiting(t *testing.T) {
 	for _, auto := range []bool{false, true} {
 		t.Run(fmt.Sprint(auto), func(t *testing.T) {
-			f, srv := newFake(t)
+			f := newFake(t)
+			srv := f.Server
 			var logs bytes.Buffer
 			waiting := 0
 			s, err := New(Config{URL: srv.URL, CredentialFile: credential(t, "parent-0"), Principal: "agent:test", FailFastGrants: auto, Logger: slog.New(slog.NewTextHandler(&logs, nil)), OnWaiting: func(Waiting) { waiting++ }})
@@ -28,8 +29,8 @@ func TestFailFastGrantsFilesWithoutWaiting(t *testing.T) {
 					t.Fatalf("auto=%v classified waiting=%v", auto, ok)
 				}
 			}
-			if f.requests != 1 {
-				t.Fatalf("requests %d", f.requests)
+			if len(f.Requests()) != 1 {
+				t.Fatalf("requests %d", len(f.Requests()))
 			}
 			e := s.entry("mcp-gateway", nil)
 			if auto {

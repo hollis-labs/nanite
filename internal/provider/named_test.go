@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/libs/security/secrets/secretstest"
 	"github.com/hollis-labs/libs/security/secrets/tokenfile"
 	"github.com/hollis-labs/nanite/internal/warden"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
 // compatServer is a minimal OpenAI-compatible chat server that records the
@@ -156,26 +157,13 @@ func TestNamedProvidersIgnoreAmbientCredentials(t *testing.T) {
 	}
 }
 
-// wardenFake mints tok-1, tok-2, ... from rotating parents.
+// wardenFake is the shared fake Warden (wardentest) minting tok-1, tok-2,
+// ... from rotating parents.
 func wardenFake(t *testing.T) (*warden.Source, *httptest.Server) {
 	t.Helper()
-	var mu sync.Mutex
-	n := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		if r.Form.Get("refresh_token") != "parent-"+strconv.Itoa(n) || r.Form.Get("audience") != "llm-gateway" {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"error":"invalid_grant"}`)
-			return
-		}
-		n++
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"access_token":"tok-%d","expires_in":900,"refresh_token":"parent-%d"}`, n, n)
-	}))
-	t.Cleanup(srv.Close)
+	srv := wardentest.NewFake(t, "parent-0").Grant("llm-gateway").
+		Tokens(func(n int, _ string) string { return fmt.Sprintf("tok-%d", n) }).
+		Parents(func(n int) string { return "parent-" + strconv.Itoa(n) })
 	file := filepath.Join(t.TempDir(), "agent.cred")
 	if err := tokenfile.Write(file, "parent-0"); err != nil {
 		t.Fatal(err)
@@ -184,7 +172,7 @@ func wardenFake(t *testing.T) (*warden.Source, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return src, srv
+	return src, srv.Server
 }
 
 func TestNamedProviderWithWardenAuthSendsAFreshToken(t *testing.T) {

@@ -53,8 +53,10 @@ func TestCachedTokenDoesNotWaitForAnotherMint(t *testing.T) {
 // An empty, pending or unknown status is not a decision: the pending request
 // is kept, so the next token request does not file a second one.
 func TestDecidedIgnoresStatusesThatAreNotDecisions(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	c := &clock{now: time.Unix(1_800_000_000, 0)}
+	f.Clock(c.Now)
 	s := source(t, srv.URL, credential(t, "parent-0"), c, nil)
 	var missing *MissingGrantError
 	if _, err := s.Token(t.Context(), "mcp-gateway", nil); !errors.As(err, &missing) {
@@ -66,9 +68,7 @@ func TestDecidedIgnoresStatusesThatAreNotDecisions(t *testing.T) {
 	if _, err := s.Token(t.Context(), "mcp-gateway", nil); !errors.As(err, &missing) {
 		t.Fatalf("second Token = %v", err)
 	}
-	f.mu.Lock()
-	requests := f.requests
-	f.mu.Unlock()
+	requests := len(f.Requests())
 	if requests != 1 {
 		t.Fatalf("%d grant requests filed, want 1 (a non-decision dropped the pending request)", requests)
 	}
@@ -76,9 +76,7 @@ func TestDecidedIgnoresStatusesThatAreNotDecisions(t *testing.T) {
 	if _, err := s.Token(t.Context(), "mcp-gateway", nil); !errors.As(err, &missing) {
 		t.Fatalf("Token after denial = %v", err)
 	}
-	f.mu.Lock()
-	requests = f.requests
-	f.mu.Unlock()
+	requests = len(f.Requests())
 	if requests != 2 {
 		t.Fatalf("%d grant requests after a denial, want 2", requests)
 	}

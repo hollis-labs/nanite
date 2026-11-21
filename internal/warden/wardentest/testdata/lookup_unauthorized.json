@@ -1,0 +1,15 @@
+{
+  "source": "recorded",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/requests/req_nanite_fixture_missing"
+  },
+  "response": {
+    "status": 401,
+    "content_type": "application/json",
+    "body": {
+      "code": "unauthorized",
+      "message": "verified caller identity required"
+    }
+  }
+}

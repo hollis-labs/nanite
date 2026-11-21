@@ -1,0 +1,21 @@
+{
+  "source": "recorded",
+  "request": {
+    "method": "POST",
+    "path": "/v1/token",
+    "form": {
+      "audience": "llm-gateway",
+      "grant_type": "refresh_token",
+      "refresh_token": "<parent>",
+      "scope": "llm-gateway.chat"
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "error": "invalid_grant",
+      "error_description": "not a parent credential"
+    }
+  }
+}

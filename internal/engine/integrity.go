@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/nanite/internal/events"
 	"github.com/hollis-labs/nanite/internal/integrity"
 	"github.com/hollis-labs/nanite/internal/recovery"
@@ -41,16 +42,23 @@ func (e *IntegrityError) Unwrap() error { return ErrIntegrity }
 
 // CheckIntegrity validates a conversation's transcript and index without
 // writing or emitting anything. It refuses with ErrBusy while the
-// conversation has a run or another check: a transcript being written can
-// look torn.
+// conversation has a run or a gate is checking it. A short Discard or Record
+// writing at the same moment can make its report show a torn tail that is
+// not there; it changes nothing, and Resume and Send check again under a
+// claim.
 func (e *Engine) CheckIntegrity(ctx context.Context, id string) (integrity.Report, error) {
 	if _, err := e.cfg.Store.Conversation(ctx, id); err != nil {
 		return integrity.Report{}, err
 	}
-	if err := e.claimCheck(id); err != nil {
-		return integrity.Report{}, err
+	// Read-only: it takes no claim, so a host polling it never makes the
+	// conversation look busy. It refuses only while a run (which writes
+	// throughout) or a gate's check has the conversation.
+	e.mu.Lock()
+	busy := e.busyLocked(id)
+	e.mu.Unlock()
+	if busy {
+		return integrity.Report{}, ErrBusy
 	}
-	defer e.releaseCheck(id)
 	return e.cfg.Store.ValidateConversation(ctx, id, nil)
 }
 
@@ -72,10 +80,23 @@ func (e *Engine) ObserveIntegrity(ctx context.Context, conversation, stage strin
 			"disposition", string(disposition), "severity", worst.String(), "findings", len(report.Findings))
 	}
 	event := events.IntegrityChecked{Conversation: conversation, Stage: stage, Disposition: string(disposition), Severity: worst.String(), Codes: codes}
-	_ = e.panics.Call("integrity event sink", func() error {
+	// Emit on a goroutine of its own. The runtime holds the conversation's
+	// session lock while it calls the host's sink, and a check runs on the
+	// caller's goroutine (Send, Resume, Discard, Record, Dispatch): a sink
+	// that reacted to an event for this conversation by calling one of them
+	// would otherwise wait on a lock its own goroutine holds.
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return
+	}
+	e.integrityEvents.Add(1)
+	e.mu.Unlock()
+	ctx = context.WithoutCancel(ctx)
+	e.panics.Go("integrity event sink", func() {
+		defer e.integrityEvents.Done()
 		e.runtime.Observe(ctx, conversation, "", event)
-		return nil
-	})
+	}, func(*panics.Error) {}) // the deferred Done runs on a panic too
 }
 
 // busyLocked reports, with e.mu held, whether a run or an integrity check
@@ -115,11 +136,13 @@ func (e *Engine) runGate(ctx context.Context, id string, resume bool) error {
 			return err
 		}
 	}
-	if err := e.claimCheck(id); err != nil {
-		return err
-	}
-	report, err := e.validate(ctx, id)
-	e.releaseCheck(id)
+	report, err := func() (integrity.Report, error) {
+		if err := e.claimCheck(id); err != nil {
+			return integrity.Report{}, err
+		}
+		defer e.releaseCheck(id)
+		return e.validate(ctx, id)
+	}()
 	stage := "send"
 	if resume {
 		stage = "resume"

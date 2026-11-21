@@ -109,8 +109,22 @@ func (l *eventLog) sink() agent.EventSink {
 }
 
 // integrity returns the integrity events, which must carry no content.
+// They are emitted asynchronously: it waits until no new event has arrived
+// for a short while.
 func (l *eventLog) integrity(t *testing.T) []map[string]any {
 	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	last := -1
+	for time.Now().Before(deadline) {
+		l.mu.Lock()
+		n := len(l.events)
+		l.mu.Unlock()
+		if n == last {
+			break
+		}
+		last = n
+		time.Sleep(150 * time.Millisecond)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var out []map[string]any
@@ -547,12 +561,18 @@ func TestIntegrityEventSinkMayCallBack(t *testing.T) {
 		mu.Unlock()
 		if conv != nil && strings.Contains(string(raw), `"integrity"`) {
 			_, err := conv.CheckIntegrity(ctx)
-			calledBack <- err
+			// Calls that run a check of their own and emit for the same
+			// conversation, from inside its event.
+			_ = conv.Discard(ctx)
+			_, _ = conv.Send(ctx, agent.Input{Text: "from the sink"})
+			select {
+			case calledBack <- err:
+			default:
+			}
 		}
 		return nil
 	})
-	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-", Events: sink,
-		Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks}})
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-", Events: sink})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,18 +594,35 @@ func TestIntegrityEventSinkMayCallBack(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("resume deadlocked with a sink that calls back")
 	}
-	if err := <-calledBack; err != nil {
+	// Callbacks run concurrently with other checks of this conversation, so
+	// ErrBusy is a fair answer; what must not happen is a hang.
+	if err := <-calledBack; err != nil && !errors.Is(err, agent.ErrBusy) {
 		t.Fatalf("the sink's call back: %v", err)
 	}
 
-	// Dispatch and Record would also put a blocked history to use.
-	if err := conv.Discard(t.Context()); err != nil {
+}
+
+// Dispatch (whose subtasks may copy the parent's history) and Record
+// (which appends to it) are refused on a blocked conversation too.
+func TestDispatchAndRecordRefusedWhenBlocked(t *testing.T) {
+	dir, conversation, _ := crashedConversation(t, orphanResult)
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-",
+		Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conv.Dispatch(t.Context(), []agent.DispatchStart{{Goal: "look"}}); !errors.Is(err, agent.ErrIntegrity) {
+	defer a.Close()
+	c, err := a.Conversation(t.Context(), conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Discard(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Dispatch(t.Context(), []agent.DispatchStart{{Goal: "look"}}); !errors.Is(err, agent.ErrIntegrity) {
 		t.Fatalf("dispatch on a blocked conversation: %v", err)
 	}
-	if err := conv.Record(t.Context(), "asked", "answered"); !errors.Is(err, agent.ErrIntegrity) {
+	if err := c.Record(t.Context(), "asked", "answered"); !errors.Is(err, agent.ErrIntegrity) {
 		t.Fatalf("record on a blocked conversation: %v", err)
 	}
 }

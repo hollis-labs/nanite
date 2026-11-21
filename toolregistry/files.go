@@ -1,12 +1,15 @@
 package toolregistry
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"syscall"
+	"time"
 )
 
 func readFile(root *os.Root, name string, limit int64) ([]byte, error) {
@@ -57,7 +60,7 @@ func atomicWrite(root *os.Root, name string, data []byte) error {
 	return d.Sync()
 }
 
-func lockRoot(root *os.Root) (*os.File, error) {
+func lockRoot(ctx context.Context, root *os.Root) (*os.File, error) {
 	f, err := root.OpenFile(".registry.lock", os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
@@ -66,12 +69,29 @@ func lockRoot(root *os.Root) (*os.File, error) {
 	if err == nil && !info.Mode().IsRegular() {
 		err = fmt.Errorf("registry lock must be a regular file")
 	}
-	if err == nil {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	} // #nosec G115 -- Fd is a Unix file descriptor.
+	for err == nil {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) // #nosec G115 -- Fd is a Unix file descriptor.
+		if err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			break
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+		case <-timer.C:
+			err = nil
+		}
+		timer.Stop()
+	}
 	if err != nil {
 		_ = f.Close()
-		return nil, fmt.Errorf("registry operation busy or lock unavailable: %w", err)
+		return nil, fmt.Errorf("registry lock unavailable: %w", err)
 	}
 	return f, nil
 }

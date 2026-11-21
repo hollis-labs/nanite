@@ -6,6 +6,9 @@ Publish and install agent-built tool packages through a registry
 (`tool-package/1`), pinned by digest. Ships with development fakes; the live
 Registry and Caster adapter follows. No breaking changes.
 
+- Wait for concurrent registry installs with cancellation, remove abandoned staging
+  directories, and check for newly appeared packages before recording their pins.
+
 - Add draft tool-registry publishing and pinned installs through a host-supplied
   client, `nanite tools publish/install`, and the configured `tool_install` builtin.
   Installs verify package bytes and record immutable digests in `tools.lock.json`;

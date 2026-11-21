@@ -10,6 +10,8 @@
   own one area, with charter conventions and a memory skill. CI validates it.
 - Add `agents/nanite-setup-expert`, a specialist agent for setting up Nanite
   and Surface ADE agents. CI validates every folder under `agents/`.
+- Add an opt-in live front desk pilot with Warden gateway authentication,
+  background planning, close/reopen recovery, delivery checks and usage reporting.
 
 ## 0.12.1
 

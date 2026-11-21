@@ -1,0 +1,2 @@
+Cedar: red, blue, red, green, red
+Maple: north, south, north, east

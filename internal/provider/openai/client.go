@@ -30,6 +30,9 @@ type Client struct {
 	// gw is set for a Station gateway provider (SetGateway). It is part of
 	// every SDK rebuild so a key set never drops the base URL or headers.
 	gw *station.Settings
+	// httpClient is the client New was given, or nil for the SDK default.
+	// Every SDK rebuild keeps it.
+	httpClient *http.Client
 	// panics contains a panic in a stream goroutine (SetPanicGuard).
 	panics *panics.Guard
 	// api pins the endpoint: "" chooses per request, APIChat or APIResponses
@@ -88,7 +91,7 @@ func New(apiKey string, httpClient *http.Client, opts ...option.RequestOption) *
 		base = append(base, option.WithHTTPClient(httpClient))
 	}
 	base = append(base, opts...)
-	return &Client{sdk: sdk.NewClient(base...), apiKey: apiKey}
+	return &Client{sdk: sdk.NewClient(base...), apiKey: apiKey, httpClient: httpClient}
 }
 
 // SetAPIKey rebuilds the underlying SDK client with the new API key. Kept

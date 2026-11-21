@@ -1,0 +1,28 @@
+{
+  "source": "recorded",
+  "request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "body": {
+      "messages": [
+        {
+          "content": "Reply with exactly: pong",
+          "role": "user"
+        }
+      ],
+      "model": "recorded-model",
+      "max_completion_tokens": 400,
+      "stream_options": {
+        "include_usage": true
+      },
+      "stream": true
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "text/event-stream; charset=utf-8"
+    },
+    "body": "data: {\"id\":\"chatcmpl-EmcoEGROiAFpGXMczmXOAzFEPMtkr\",\"object\":\"chat.completion.chunk\",\"created\":1795257634,\"model\":\"gpt-5-mini-2025-08-07\",\"service_tier\":\"default\",\"system_fingerprint\":null,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"refusal\":null},\"finish_reason\":null}],\"usage\":null,\"obfuscation\":\"Ycdlr\"}\n\ndata: {\"id\":\"chatcmpl-EmcoEGROiAFpGXMczmXOAzFEPMtkr\",\"object\":\"chat.completion.chunk\",\"created\":1795257634,\"model\":\"gpt-5-mini-2025-08-07\",\"service_tier\":\"default\",\"system_fingerprint\":null,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\"},\"finish_reason\":null}],\"usage\":null,\"obfuscation\":\"tiZ\"}\n\ndata: {\"id\":\"chatcmpl-EmcoEGROiAFpGXMczmXOAzFEPMtkr\",\"object\":\"chat.completion.chunk\",\"created\":1795257634,\"model\":\"gpt-5-mini-2025-08-07\",\"service_tier\":\"default\",\"system_fingerprint\":null,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":null,\"obfuscation\":\"M\"}\n\ndata: {\"id\":\"chatcmpl-EmcoEGROiAFpGXMczmXOAzFEPMtkr\",\"object\":\"chat.completion.chunk\",\"created\":1795257634,\"model\":\"gpt-5-mini-2025-08-07\",\"service_tier\":\"default\",\"system_fingerprint\":null,\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":10,\"total_tokens\":21,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}},\"obfuscation\":\"3QHwmE\"}\n\ndata: [DONE]\n\n"
+  }
+}

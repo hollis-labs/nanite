@@ -112,6 +112,17 @@ func (c *Client) StreamChat(ctx context.Context, req llmtypes.ChatRequest) (<-ch
 			return
 		}
 
+		if stopReason == "" && lastUsage == nil {
+			// The stream ended with neither a finish_reason nor the usage
+			// chunk that follows it: the connection dropped before the
+			// response finished. Report nothing more, and no Done, so the
+			// caller sees a truncated turn rather than a complete one with
+			// half-received tool arguments (the Anthropic adapter behaves
+			// the same without message_stop). A server that omits
+			// finish_reason still ends with usage, which counts as complete.
+			return
+		}
+
 		// Emit any completed tool_use events in deterministic order (the
 		// order in which the model first surfaced the call's index).
 		for _, idx := range toolOrder {

@@ -365,3 +365,57 @@ func (l lockedLog) Write(p []byte) (int, error) {
 	defer l.mu.Unlock()
 	return l.b.Write(p)
 }
+
+// A message that opened the chat's conversation just before a reset, and
+// registers its run only after the reset has switched conversations, is
+// refused at registration and runs on the new conversation instead: never
+// on the old one. The hook is a package variable: chatrunner tests do not
+// run in parallel.
+func TestResetLandingBetweenOpenAndRegister(t *testing.T) {
+	dir := t.TempDir()
+	w := newWiredIn(t, dir, false, nil)
+	opened, release := make(chan struct{}), make(chan struct{})
+	var once, released sync.Once
+	letGo := func() { released.Do(func() { close(release) }) }
+	// A failure before the release below must not leave the message held.
+	t.Cleanup(letGo)
+	chatrunner.HoldBeforeRegister(t, func(chatID string) {
+		if chatID == w.conv {
+			once.Do(func() {
+				close(opened)
+				<-release
+			})
+		}
+	})
+	submitted := make(chan error, 1)
+	go func() {
+		_, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "long"})
+		submitted <- err
+	}()
+	<-opened // the message holds the conversation the chat used, unregistered
+	previous := w.runner.ConversationOf(w.conv)
+	next, err := w.runner.ResetChat(t.Context(), w.conv)
+	if err != nil {
+		t.Fatalf("reset while a message was opening: %v", err)
+	}
+	letGo()
+	if err := <-submitted; err != nil {
+		t.Fatal(err)
+	}
+	// Refused at registration as busy, the message is taken again and runs
+	// on the conversation that now serves the chat: not lost, not stranded.
+	waitFor(t, "the message to run", func() bool { return w.brain.answers("long") == 1 })
+	read := func(id string) string {
+		raw, _ := os.ReadFile(filepath.Join(dir, ".nanite", "transcripts", id, "00000000000000000001.jsonl")) // #nosec G304 -- A transcript under the test's temporary directory.
+		return string(raw)
+	}
+	if strings.Contains(read(previous), `"long"`) {
+		t.Fatal("the message was written to the old conversation")
+	}
+	if !strings.Contains(read(next), `"long"`) {
+		t.Fatal("the message did not run on the new conversation")
+	}
+	if w.runner.ConversationOf(w.conv) != next {
+		t.Fatalf("serving %s, want %s", w.runner.ConversationOf(w.conv), next)
+	}
+}

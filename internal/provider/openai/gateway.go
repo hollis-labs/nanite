@@ -25,6 +25,9 @@ func (c *Client) SetGateway(g station.Settings) {
 // caller holds keyMu (or owns the Client during construction).
 func (c *Client) newSDK(key string) sdk.Client {
 	opts := []option.RequestOption{option.WithAPIKey(key), option.WithMaxRetries(0)}
+	if c.httpClient != nil {
+		opts = append(opts, option.WithHTTPClient(c.httpClient))
+	}
 	if c.gw != nil {
 		opts = append(opts, option.WithBaseURL(c.gw.BaseURL))
 		opts = append(opts, withoutAmbientIdentity()...)

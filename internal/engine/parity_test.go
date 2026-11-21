@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/hollis-labs/nanite/internal/recovery"
-	"github.com/hollis-labs/nanite/internal/store"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hollis-labs/nanite/internal/recovery"
+	"github.com/hollis-labs/nanite/internal/store"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 	"github.com/hollis-labs/nanite/internal/events"
@@ -40,7 +41,8 @@ func TestClosingReplyAtLimits(t *testing.T) {
 			if result.StopReason != limit || result.Steps != 1 || !strings.HasSuffix(result.Text, "Work remains.") {
 				t.Fatalf("result: %+v", result)
 			}
-			if len(p.requests) != 2 || !p.toolChoiceNone[1] || !reflect.DeepEqual(p.requests[0].Tools, p.requests[1].Tools) || !reflect.DeepEqual(p.requests[0].CacheHints, p.requests[1].CacheHints) {
+			if len(p.requests) != 2 || !p.toolChoiceNone[1] || len(p.requests[0].Tools) == 0 || len(p.requests[1].CacheHints) == 0 ||
+				!reflect.DeepEqual(p.requests[0].Tools, p.requests[1].Tools) || !reflect.DeepEqual(p.requests[0].CacheHints, p.requests[1].CacheHints) {
 				t.Fatalf("closing request: %+v", p.requests)
 			}
 			history, err := db.History(t.Context(), id)

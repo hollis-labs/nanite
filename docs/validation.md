@@ -148,3 +148,33 @@ To check interruption recovery, start a live turn and terminate that smoke-test
 process before it completes. Restart the CLI in the same directory and accept
 the resume prompt, or pass `--resume <conversation-id>`. Confirm the resumed
 turn can finish and incomplete tool calls receive error results in the journal.
+
+## Provider fixtures
+
+`internal/provider/anthropic/testdata/replay` and
+`internal/provider/openai/testdata/replay` hold real HTTP exchanges recorded
+from the providers: text, a tool call, `max_tokens` during a tool call, a
+prompt-cache write then read, and a closing reply sent with `tool_choice`
+none. Each file keeps the request's method, API path and body and the
+response's status, `Content-Type`, `Retry-After` and raw SSE bytes. Request
+headers are never kept, the model alias is replaced with `recorded-model`,
+and a guard refuses a recording that carries a credential-shaped string or a
+hostname.
+
+The replay tests serve these files from a local server to the real adapters,
+and run whole turns through the engine with them. Failures a live provider
+does not produce on demand are derived from the recordings in test code:
+a stream cut mid-way, Anthropic's `overloaded_error` mid-stream, a 429 with
+`Retry-After`, and `max_tokens` inside the tool arguments. A derived exchange
+says so in its `source`. Replay needs no network and runs in CI.
+
+To record again, run each package's `TestRecordFixtures` with
+`NANITE_RECORD_FIXTURES=1` and a Warden identity granted `llm-gateway.chat`:
+`NANITE_RECORD_WARDEN_URL`, `NANITE_RECORD_CREDENTIAL` (the parent
+credential file; one process at a time, since it rotates on each mint),
+`NANITE_RECORD_PRINCIPAL`, and `NANITE_RECORD_GATEWAY_URL` with
+`NANITE_RECORD_MODEL` (Anthropic wire, without `/v1`) or
+`NANITE_RECORD_OPENAI_URL` with `NANITE_RECORD_OPENAI_MODEL` (OpenAI wire,
+with `/v1`). `NANITE_RECORD_ONLY` limits a run to named scenarios; record
+`cache_write` and `cache_read` together, on a cold cache. Review the new
+files before committing them.

@@ -151,7 +151,7 @@ func NewRecordingProxy(t testing.TB, upstream string) *RecordingProxy {
 }
 
 func (p *RecordingProxy) forward(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, "proxy: read request", http.StatusBadGateway)
 		return

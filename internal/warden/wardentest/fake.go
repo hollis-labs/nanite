@@ -354,6 +354,7 @@ func (f *Fake) recorded(w http.ResponseWriter, name string) {
 }
 
 func (f *Fake) token(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	if err := r.ParseForm(); err != nil || r.PostForm.Get("grant_type") != "refresh_token" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request", "error_description": "unreadable token request"})
 		return
@@ -436,6 +437,7 @@ func (f *Fake) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in map[string]any
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "invalid_request", "message": "invalid JSON body"})
 		return

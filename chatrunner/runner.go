@@ -21,6 +21,9 @@ import (
 
 // Options configures a Runner.
 type Options struct {
+	// Mailbox enables slow polling of the agent’s Tether mailbox.
+	Mailbox *MailboxOptions
+
 	// TurnProfile selects a composed profile and non-credential request headers
 	// before a turn starts. Nil retains the agent defaults. Recovery uses the
 	// interrupted turn's persisted profile, without calling this hook.
@@ -103,6 +106,8 @@ type Options struct {
 
 // Runner is a chat.Runner backed by one Nanite agent.
 type Runner struct {
+	mailboxDone chan struct{}
+
 	agent    *agent.Agent
 	opts     Options
 	replaced chan string
@@ -202,6 +207,10 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		}
 	}
 	r.holdInterrupted(ctx)
+	if err := r.startMailbox(); err != nil {
+		_ = r.Close()
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -241,6 +250,9 @@ func (r *Runner) Close() error {
 	}
 	r.mu.Unlock()
 	r.stopNotices()
+	if r.mailboxDone != nil {
+		<-r.mailboxDone
+	}
 	<-r.noticesDone
 	r.auth.wg.Wait()
 	if r.desk != nil {

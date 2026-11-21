@@ -8,3 +8,4 @@ tools. Built from `examples/specialist`; CI validates every folder here.
 | Agent | Owns |
 |---|---|
 | `nanite-setup-expert` | Setting up Nanite agents and Surface ADE agents |
+| `workflow-designer` | Designing user/agent workflows and taking them to Surface Modules |

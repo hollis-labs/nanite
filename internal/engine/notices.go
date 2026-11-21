@@ -207,14 +207,18 @@ func deliveredNoticeIDs(report slots.Report, pending []store.Notice) []string {
 		return nil
 	}
 	shipped := make(map[string]bool)
+	trimmed := make(map[string]bool)
 	for _, d := range report[slots.Session].Decisions {
+		if d.Owner == "engine" && d.Disposition == slots.Trim {
+			trimmed[d.Key] = true
+		}
 		if d.Owner == "engine" && d.Disposition == slots.Ship {
 			shipped[d.Key] = true
 		}
 	}
 	var delivered []string
 	for _, n := range pending {
-		if shipped["notice-"+n.ID] {
+		if shipped["notice-"+n.ID] || (n.Kind == "tether_mail" && trimmed["notice-"+n.ID]) {
 			delivered = append(delivered, n.ID)
 		}
 	}
@@ -229,3 +233,13 @@ func (e *Engine) QueueNotice(ctx context.Context, conversation, id, kind, body s
 
 // ProtectSecret registers host transport credentials with the agent's redactor.
 func (e *Engine) ProtectSecret(name, value string) { e.cfg.ProviderConfig.Redactor.Add(name, value) }
+
+// WithdrawQueuedNotice removes an undelivered notice while no turn is active.
+func (e *Engine) WithdrawQueuedNotice(ctx context.Context, conversation, id string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.active[conversation] != nil {
+		return ErrBusy
+	}
+	return e.cfg.Store.WithdrawNotice(ctx, conversation, id)
+}

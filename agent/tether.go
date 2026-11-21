@@ -25,15 +25,15 @@ func (a *Agent) openTether(ctx context.Context, cfg *TetherConfig, snap agentdir
 	if cfg == nil {
 		return errors.New("nanite: identity.tether requires Options.Tether")
 	}
-	a.engine.ProtectSecret("tether", cfg.Credential)
 	client, err := tether.New(*cfg)
 	if err != nil {
 		return err
 	}
+	client.ProtectSecret(a.engine.ProtectSecret)
 	urn := snap.Profile.Identity.Tether
 	var p tether.Profile
 	if urn == "auto" {
-		key := "tether.registration." + cfg.Endpoint
+		key := "tether.registration." + client.Endpoint()
 		var externalID string
 		externalID, err = a.HostState(ctx, key)
 		if err != nil {

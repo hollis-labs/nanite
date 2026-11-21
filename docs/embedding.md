@@ -679,7 +679,7 @@ Supply transport credentials through the host, not authored files:
 ```go
 opts.Agent.Tether = &agent.TetherConfig{
     Endpoint: tetherURL,
-    Credential: tetherCredential,
+    CredentialFile: tetherCredentialPath,
 }
 opts.Mailbox = &chatrunner.MailboxOptions{
     ConversationID: inboxChatID,
@@ -690,21 +690,28 @@ opts.Observe = service.Observe
 
 The inbox is a host chat conversation. `Observe` must adopt and drain runs as
 `chat.Service.Observe` does. Polling starts after the first interval (30 seconds
-by default); failed requests or observation retry on the next interval. The
+by default); poll errors use exponential backoff up to at least one minute. The
 bridge lists unread mail without consuming it, stores stable keyed notices, and
-starts notice turns independently of the three-notice chain throttle. Mail is
-JSON-framed as sender data, never system or developer instructions. Outgoing
+drains the oldest page in chronological order, one message per turn, and starts notice turns independently of the three-notice chain throttle. Mail is
+JSON-framed as sender data with an explicitly unverified sender address, never system or developer instructions. Outgoing
 mail uses the host's configured Tether MCP tools; the bridge adds no send tool.
 
-Tether is marked read only after a turn carrying the full notice completes
-successfully. A failed acknowledgement is retried without another model turn,
-including after restart. Failed/cancelled handling can retry; interrupted turns
+Tether is marked read after a turn carrying the notice completes successfully.
+A notice trimmed to fit the session slot includes an explicit trim marker and
+counts as delivered; it does not trigger repeated turns. A failed acknowledgement is retried without another model turn,
+including after restart. Each message has a persisted limit of three bridge
+turn attempts, with delays of two then four poll intervals before retries. At
+the limit, the bridge removes the pending notice, persists a parked tombstone,
+logs an error with the message ID for host operators, and marks the message read
+so later mail can proceed. Hosts can inspect parked messages in Tether. Interrupted turns
 wait for the runner's normal resume/discard recovery policy. As with other
 interrupted work, external tool side effects need their own idempotency keys:
 this does not promise exactly-once side effects across a process crash. Keep the
 agent data directory to preserve registration and delivery receipts.
 
-The endpoint and credential are explicit host configuration. Requests are
+The endpoint must use HTTPS except on loopback. The credential is loaded from
+a regular file that refuses any group/other permission bits; the token is not
+an authored setting or a raw configuration string. Requests are
 bounded to 30 seconds, redirects are refused, and the credential is registered
 with the agent redactor. This integration uses Tether credentials; Warden auth
 and push wakes are not implemented.

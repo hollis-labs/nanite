@@ -91,6 +91,7 @@ type Conversation struct
   (*Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error)
   (*Conversation) SteerEvent(ctx context.Context, topic string) (HostFired, error)
   (*Conversation) SteerFocus(ctx context.Context, view string) (HostFired, error)
+  (*Conversation) WithdrawQueuedNotice(ctx context.Context, key string) error
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
   field ID string
   field ParentID string
@@ -446,7 +447,7 @@ type SubtaskProgress = github.com/hollis-labs/nanite/internal/events.SubtaskProg
   field Status string
 type TetherConfig = github.com/hollis-labs/nanite/internal/tether.Config struct
   field Endpoint string
-  field Credential string
+  field CredentialFile string
   field HTTPClient *net/http.Client
 type TextDelta = github.com/hollis-labs/nanite/internal/events.TextDelta struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta

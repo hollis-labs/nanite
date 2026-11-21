@@ -18,3 +18,10 @@ func (c *Conversation) QueueNotice(ctx context.Context, key, kind, body string) 
 	sum := sha256.Sum256([]byte(c.id + "\x00" + key))
 	return c.agent.engine.QueueNotice(ctx, c.id, "keyed-"+hex.EncodeToString(sum[:]), kind, body)
 }
+
+// WithdrawQueuedNotice removes a queued notice if no turn is active. Completed
+// receipts are retained. A bridge must retain its own tombstone to avoid requeueing.
+func (c *Conversation) WithdrawQueuedNotice(ctx context.Context, key string) error {
+	sum := sha256.Sum256([]byte(c.id + "\x00" + key))
+	return c.agent.engine.WithdrawQueuedNotice(ctx, c.id, "keyed-"+hex.EncodeToString(sum[:]))
+}

@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
+
+Publish and install agent-built tool packages through a registry
+(`tool-package/1`), pinned by digest. Ships with development fakes; the live
+Registry and Caster adapter follows. No breaking changes.
 
 - Add draft tool-registry publishing and pinned installs through a host-supplied
   client, `nanite tools publish/install`, and the configured `tool_install` builtin.

@@ -497,6 +497,13 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if err != nil {
 		return nil, err
 	}
+	if resume {
+		// Before anything reads the history or assembles context: never
+		// resume through an unsafe finding.
+		if err := e.resumeGate(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	interrupted, err := e.cfg.Store.Interrupted(ctx, id)
 	if err != nil {
 		return nil, err

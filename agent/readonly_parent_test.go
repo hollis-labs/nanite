@@ -21,10 +21,10 @@ func TestOpenWithReadOnlyParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeAgent(t, dir)
-	if err := os.Chmod(parent, 0o500); err != nil {
+	if err := os.Chmod(parent, 0o500); err != nil { // #nosec G302 -- the test makes a directory read-only on purpose.
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) }) // #nosec G302 -- restore the temp dir so it can be removed.
 	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: fake.New()})
 	if err != nil {
 		t.Fatalf("Open with a read-only parent: %v", err)

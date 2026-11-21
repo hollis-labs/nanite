@@ -81,7 +81,18 @@ func TestLiveMaterialize(t *testing.T) {
 
 func TestLiveRejectsResponses(t *testing.T) {
 	records, ref := fixture(t)
-	for _, mode := range []string{"id", "kind", "schema", "revision", "publication", "payload-id", "payload-schema", "duplicate", "trailing", "large", "status", "invalid", "pin-unpublished"} {
+	// Each mode must fail at its own check: a response that is wrong in two
+	// ways would keep failing after the check under test were removed.
+	want := map[string]string{
+		"id": "identity or revision mismatch", "kind": "kind mismatch", "schema": "kind mismatch",
+		"revision": "identity or revision mismatch", "publication": "publication mismatch",
+		"payload-id": "payload identity mismatch", "payload-schema": "unsupported schema",
+		"duplicate": "duplicate JSON key", "trailing": "trailing Registry JSON",
+		"large": "Registry response exceeds size limit", "status": "HTTP 403",
+		"status-401": "HTTP 401", "status-500": "HTTP 500", "invalid": "invalid JSON",
+		"pin-unpublished": "not currently published", "pin-payload": "not currently published",
+	}
+	for _, mode := range []string{"id", "kind", "schema", "revision", "publication", "payload-id", "payload-schema", "duplicate", "trailing", "large", "status", "status-401", "status-500", "invalid", "pin-unpublished", "pin-payload"} {
 		t.Run(mode, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				record := wireRecord(records[0], "draft")
@@ -101,7 +112,10 @@ func TestLiveRejectsResponses(t *testing.T) {
 				case "payload-schema":
 					record.Payload = []byte(strings.Replace(string(record.Payload), `"schema":"agent/1"`, `"schema":"agent/2"`, 1))
 				case "duplicate":
-					_, _ = fmt.Fprint(w, `{"id":"agent:fixture","id":"agent:fixture"}`)
+					// A valid envelope under last-wins decoding: only the
+					// duplicate-key check can refuse it.
+					raw, _ := json.Marshal(record)
+					_, _ = w.Write(append([]byte(`{"revision_id":"decoy",`), raw[1:]...))
 					return
 				case "trailing":
 					_, _ = fmt.Fprint(w, `{} {}`)
@@ -116,6 +130,11 @@ func TestLiveRejectsResponses(t *testing.T) {
 					w.WriteHeader(403)
 					_, _ = fmt.Fprint(w, "remote-sensitive-diagnostic")
 					return
+				case "status-401", "status-500":
+					// A valid record envelope: only the status check refuses it.
+					w.WriteHeader(map[string]int{"status-401": 401, "status-500": 500}[mode])
+					_ = json.NewEncoder(w).Encode(record)
+					return
 				case "invalid":
 					_, _ = fmt.Fprint(w, "remote-sensitive-diagnostic")
 					return
@@ -124,12 +143,19 @@ func TestLiveRejectsResponses(t *testing.T) {
 						record.Revision = "r2"
 						record.Publication = "published"
 					}
+				case "pin-payload":
+					// Same revision id, but the published payload differs from
+					// the pinned revision's (and is itself valid).
+					if r.URL.Path == "/v1/record" {
+						record.Publication = "published"
+						record.Payload = []byte(strings.Replace(string(record.Payload), `"name":"fixture"`, `"name":"changed"`, 1))
+					}
 				}
 				_ = json.NewEncoder(w).Encode(record)
 			}))
 			defer server.Close()
 			publication := "draft"
-			if mode == "pin-unpublished" {
+			if mode == "pin-unpublished" || mode == "pin-payload" {
 				publication = "published"
 			}
 			live, err := NewLive(LiveConfig{URL: server.URL, Authority: "registry", Publication: publication})
@@ -140,8 +166,8 @@ func TestLiveRejectsResponses(t *testing.T) {
 			if err == nil || strings.Contains(err.Error(), "remote-sensitive-diagnostic") {
 				t.Fatal("unsafe or successful response", err)
 			}
-			if mode == "large" && !strings.Contains(err.Error(), "Registry response exceeds size limit") {
-				t.Fatal("size gate did not reject response", err)
+			if !strings.Contains(err.Error(), want[mode]) {
+				t.Fatalf("rejected for the wrong reason: want %q, got %v", want[mode], err)
 			}
 		})
 	}

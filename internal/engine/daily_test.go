@@ -132,6 +132,37 @@ func TestStopAllLatchesAdmission(t *testing.T) {
 	}
 }
 
+// StopAll refuses every way new work can start, not only Send: host
+// dispatch, background jobs and one-shot completions. Each would otherwise
+// run on a context StopAll does not cancel, or race the shutdown.
+func TestStopAllRefusesEveryEntryPoint(t *testing.T) {
+	e, _, id := setupEngine(t, fake.New(fake.Text("unexpected"), fake.Text("unexpected")), "")
+	if err := e.StopAll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if run, err := e.Dispatch(t.Context(), id, []subagent.Request{{Goal: "child", Variant: "worker", ReturnSpec: json.RawMessage(`"a note"`)}}); !errors.Is(err, ErrStopped) || run != nil {
+		t.Fatalf("dispatch after StopAll: run=%v err=%v", run, err)
+	}
+	if all, err := e.cfg.Store.Conversations(t.Context()); err != nil || len(all) != 1 {
+		t.Fatalf("dispatch after StopAll created subtasks: %d conversations, %v", len(all), err)
+	}
+	ran := make(chan struct{}, 1)
+	if _, err := e.jobs.Start(t.Context(), store.Job{ID: store.NewID(time.Now()), ConversationID: id, Kind: "shell"}, func(ctx context.Context, w io.Writer) (background.Task, error) {
+		ran <- struct{}{}
+		return waitingJob(ctx, w)
+	}); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("background job after StopAll: %v", err)
+	}
+	select {
+	case <-ran:
+		t.Fatal("background job ran after StopAll")
+	default:
+	}
+	if text, err := e.Complete(t.Context(), "chat", "", "go", 100); !errors.Is(err, ErrStopped) {
+		t.Fatalf("complete after StopAll: %q %v", text, err)
+	}
+}
+
 func waitingJob(ctx context.Context, _ io.Writer) (background.Task, error) {
 	return background.Task{Wait: func() background.Outcome { <-ctx.Done(); return background.Outcome{Err: ctx.Err()} }}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hollis-labs/nanite/internal/agentlock"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -213,8 +214,16 @@ func TestMaterializeOwnershipAndForce(t *testing.T) {
 }
 
 func TestRejectDuplicateJSON(t *testing.T) {
-	if _, err := validate(t.Context(), []byte(`{"schema":"agent/1","schema":"document/1"}`)); err == nil {
-		t.Fatal("duplicate accepted")
+	records, _ := fixture(t)
+	valid := records[0].Payload
+	if _, err := validate(t.Context(), valid); err != nil {
+		t.Fatal(err)
+	}
+	// Under last-wins decoding this payload is the valid one above, so only
+	// the duplicate-key check can refuse it.
+	duplicate := append([]byte(`{"id":"decoy",`), valid[1:]...)
+	if _, err := validate(t.Context(), duplicate); err == nil || !strings.Contains(err.Error(), "duplicate JSON key") {
+		t.Fatalf("duplicate key not refused by its own check: %v", err)
 	}
 }
 
@@ -416,6 +425,41 @@ func TestToolPackagePins(t *testing.T) {
 		}
 		if err := live.Publish(t.Context(), pkg); err == nil {
 			t.Fatal("read-only adapter published")
+		}
+		// The record's publisher must own the package id and match its
+		// provenance; each mismatch alone is refused.
+		for name, mutate := range map[string]func(map[string]any){
+			// Publisher and provenance agree with each other but do not own the id.
+			"publisher": func(p map[string]any) {
+				prov := pkg.Provenance
+				prov.Publisher = "msg://agent/test/agt_other"
+				p["publisher"], p["provenance"] = "agt_other", prov
+			},
+			"provenance-publisher": func(p map[string]any) {
+				prov := pkg.Provenance
+				prov.Publisher = "msg://agent/test/agt_other"
+				p["provenance"] = prov
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				bad := maps.Clone(payload)
+				mutate(bad)
+				raw, err := json.Marshal(bad)
+				if err != nil {
+					t.Fatal(err)
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(liveRecord{ID: pkg.ID, Kind: "tool-package", Schema: "tool-package/1", Revision: "package-r1", Publication: "draft", Payload: raw})
+				}))
+				defer server.Close()
+				live, err := NewLive(LiveConfig{URL: server.URL, Authority: "registry", Publication: "draft"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := live.Resolve(t.Context(), pkg.ID); err == nil || !strings.Contains(err.Error(), "package publisher mismatch") {
+					t.Fatalf("publisher mismatch not refused: %v", err)
+				}
+			})
 		}
 	})
 	t.Run("tool authority", func(t *testing.T) {
@@ -648,5 +692,41 @@ func TestFetchRejectsResolverRevision(t *testing.T) {
 				t.Fatal("wrong resolver revision accepted", err)
 			}
 		})
+	}
+}
+
+// fetch distrusts the resolver's payload as well as its envelope: a payload
+// for another record, or credential-like reference metadata, is refused even
+// when the envelope identity and revision are right.
+func TestFetchRejectsResolverPayloadAndMetadata(t *testing.T) {
+	records, ref := fixture(t)
+	// Built at runtime so the source carries no literal token pattern.
+	token := "ghp_" + strings.Repeat("A1b2", 9)
+	for _, tc := range []struct{ name, requested, want string }{
+		{"payload-id", "r1", "payload identity mismatch"},
+		{"credential-revision", "", "credential-like reference metadata"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := records[0]
+			switch tc.name {
+			case "payload-id":
+				record.Payload = []byte(strings.Replace(string(record.Payload), `"id":"fixture"`, `"id":"other"`, 1))
+			case "credential-revision":
+				record.Revision = token
+			}
+			resolver := resolverFunc(func(context.Context, Reference, string) (Record, error) { return record, nil })
+			_, _, _, err := fetch(t.Context(), resolver, ref, tc.requested)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+			if strings.Contains(err.Error(), token) {
+				t.Fatal("error leaks the credential-like value")
+			}
+		})
+	}
+	// Control: the unmodified record passes the same boundary.
+	resolver := resolverFunc(func(context.Context, Reference, string) (Record, error) { return records[0], nil })
+	if _, _, _, err := fetch(t.Context(), resolver, ref, "r1"); err != nil {
+		t.Fatal(err)
 	}
 }

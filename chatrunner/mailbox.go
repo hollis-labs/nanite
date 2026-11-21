@@ -112,7 +112,10 @@ func (r *Runner) pollMailbox(ctx context.Context, client *tether.Client, chatID 
 	if state.Parked {
 		return client.MarkRead(ctx, m.ID, urn)
 	}
-	handled, err := c.QueueNotice(ctx, key, "tether_mail", mailBody(m))
+	// Check without queueing: the notice is in the store only while a mailbox
+	// turn is about to carry it, so a user turn during backoff, or after the
+	// last attempt, cannot deliver it uncounted.
+	handled, err := c.NoticeHandled(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -120,7 +123,7 @@ func (r *Runner) pollMailbox(ctx context.Context, client *tether.Client, chatID 
 		return client.MarkRead(ctx, m.ID, urn)
 	}
 	if state.Attempts >= mailboxMaxAttempts {
-		if err = c.WithdrawQueuedNotice(ctx, key); err != nil {
+		if err = withdrawMail(ctx, c, key); err != nil {
 			return err
 		}
 		// Persist the tombstone before acknowledging, so an ack failure or restart
@@ -133,7 +136,14 @@ func (r *Runner) pollMailbox(ctx context.Context, client *tether.Client, chatID 
 		return client.MarkRead(ctx, m.ID, urn)
 	}
 	if time.Now().Before(state.Next) {
-		return nil
+		return withdrawMail(ctx, c, key)
+	}
+	// QueueNotice requeues a notice whose earlier turn failed.
+	if handled, err = c.QueueNotice(ctx, key, "tether_mail", mailBody(m)); err != nil {
+		return err
+	}
+	if handled {
+		return client.MarkRead(ctx, m.ID, urn)
 	}
 	turn := chat.Turn{ConversationID: chatID, Text: agent.NoticeTurnText}
 	delivery := &mailRun{runner: r, turn: turn, done: make(chan struct{}), before: func() error {
@@ -143,7 +153,7 @@ func (r *Runner) pollMailbox(ctx context.Context, client *tether.Client, chatID 
 	}}
 	if err = r.opts.Observe(ctx, chatID, turn, delivery); err != nil {
 		delivery.Cancel()
-		return fmt.Errorf("mailbox observation: %w", err)
+		return errors.Join(fmt.Errorf("mailbox observation: %w", err), withdrawMail(ctx, c, key))
 	}
 	select {
 	case <-ctx.Done():
@@ -151,12 +161,22 @@ func (r *Runner) pollMailbox(ctx context.Context, client *tether.Client, chatID 
 		return ctx.Err()
 	case <-delivery.done:
 	}
-	handled, err = c.QueueNotice(ctx, key, "tether_mail", mailBody(m))
-	if err != nil {
+	if handled, err = c.NoticeHandled(ctx, key); err != nil {
 		return err
 	}
 	if handled {
 		return client.MarkRead(ctx, m.ID, urn)
+	}
+	// A turn that never started left the notice queued; take it back until
+	// the next counted attempt. A failed turn keeps it bound and out of view.
+	return withdrawMail(ctx, c, key)
+}
+
+// withdrawMail removes a queued mail notice. A turn that is already running
+// holds it; that turn's outcome is read on the next poll.
+func withdrawMail(ctx context.Context, c *agent.Conversation, key string) error {
+	if err := c.WithdrawQueuedNotice(ctx, key); err != nil && !errors.Is(err, agent.ErrBusy) {
+		return err
 	}
 	return nil
 }

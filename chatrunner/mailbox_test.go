@@ -170,7 +170,11 @@ func waitMailbox(t *testing.T, ready func() bool) {
 }
 func openMailbox(t *testing.T, dir, url string, p *mailProvider, reject bool) *chatrunner.Runner {
 	t.Helper()
-	r, err := chatrunner.Open(t.Context(), chatrunner.Options{Agent: agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: p, Tether: &agent.TetherConfig{Endpoint: url, CredentialFile: credentialFile(t)}}, Mailbox: &chatrunner.MailboxOptions{ConversationID: "inbox", PollInterval: 10 * time.Millisecond}, Observe: func(_ context.Context, _ string, _ chat.Turn, run chat.Run) error {
+	return openMailboxEvery(t, dir, url, p, reject, 10*time.Millisecond)
+}
+func openMailboxEvery(t *testing.T, dir, url string, p *mailProvider, reject bool, interval time.Duration) *chatrunner.Runner {
+	t.Helper()
+	r, err := chatrunner.Open(t.Context(), chatrunner.Options{Agent: agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: p, Tether: &agent.TetherConfig{Endpoint: url, CredentialFile: credentialFile(t)}}, Mailbox: &chatrunner.MailboxOptions{ConversationID: "inbox", PollInterval: interval}, Observe: func(_ context.Context, _ string, _ chat.Turn, run chat.Run) error {
 		if reject {
 			return errors.New("host not ready")
 		}
@@ -421,4 +425,41 @@ func TestMailboxPoisonCapSurvivesRestartAndUnblocksLaterMail(t *testing.T) {
 	if !strings.Contains(p.prompts[0], `"id":"old"`) {
 		t.Fatal("newest mail ran first")
 	}
+}
+
+// A user turn during backoff must not carry mail whose counted attempt
+// failed: the notice leaves the store until the next mailbox attempt.
+func TestMailboxUserTurnDuringBackoffDoesNotCarryMail(t *testing.T) {
+	server := &testMailbox{read: map[string]bool{}}
+	server.add("held")
+	hs := httptest.NewServer(http.HandlerFunc(server.handler))
+	defer hs.Close()
+	p := &mailProvider{Provider: fake.New()}
+	p.failAfter.Store(true)
+	r := openMailboxEvery(t, mailboxDir(t, mailboxURN), hs.URL, p, false, time.Second)
+	defer r.Close()
+	waitMailbox(t, func() bool { return p.calls.Load() == 1 })
+	p.failAfter.Store(false)
+	var run chat.Run
+	waitMailbox(t, func() bool {
+		var err error
+		run, err = r.Start(t.Context(), chat.Turn{ConversationID: "inbox", Text: "hello"})
+		return err == nil
+	})
+	for range run.Events() {
+	}
+	if p.calls.Load() != 2 {
+		t.Fatalf("calls=%d, want the failed mail turn and the user turn", p.calls.Load())
+	}
+	p.mu.Lock()
+	user := p.prompts[1]
+	p.mu.Unlock()
+	if strings.Contains(user, `"id":"held"`) {
+		t.Fatal("user turn carried mail during backoff")
+	}
+	if server.readCount() != 0 {
+		t.Fatal("mail acknowledged without a counted, completed attempt")
+	}
+	// The next counted attempt delivers it.
+	waitMailbox(t, func() bool { return server.readCount() == 1 })
 }

@@ -139,33 +139,52 @@ func (c *Client) Resolve(ctx context.Context, externalID, name string) (Profile,
 	return result.Agent, err
 }
 
-// List fetches the oldest page, then orders it chronologically. Tether lists
+// listPage is how many unread messages one List call returns.
+const listPage = 50
+
+// List fetches the oldest page of unread mail, oldest first. Tether lists
 // newest first; its total lets us reach the tail without loading the backlog.
+// Mail arriving or being read between two fetches shifts the tail, so the
+// fetch repeats until the total it reports puts the tail at the offset used.
 func (c *Client) List(ctx context.Context, urn string) ([]Message, error) {
 	var result struct {
 		Messages []Message `json:"messages"`
 		Total    int       `json:"total"`
 	}
-	q := url.Values{"to": {urn}, "as": {urn}, "unread_only": {"true"}, "limit": {"50"}}
-	if err := c.request(ctx, "GET", "/messages/list?"+q.Encode(), nil, &result); err != nil {
-		return nil, err
-	}
-	if result.Total > 50 {
-		q.Set("offset", strconv.Itoa(result.Total-50))
-		result.Messages = nil
+	q := url.Values{"to": {urn}, "as": {urn}, "unread_only": {"true"}, "limit": {strconv.Itoa(listPage)}}
+	for offset, attempt := 0, 0; ; attempt++ {
+		if offset > 0 {
+			q.Set("offset", strconv.Itoa(offset))
+		} else {
+			q.Del("offset")
+		}
+		result.Messages, result.Total = nil, 0
 		if err := c.request(ctx, "GET", "/messages/list?"+q.Encode(), nil, &result); err != nil {
 			return nil, err
 		}
+		want := max(result.Total-listPage, 0)
+		if want == offset {
+			break
+		}
+		if attempt == listAttempts {
+			return nil, errors.New("tether: unread total kept changing")
+		}
+		offset = want
 	}
 	out := make([]Message, 0, len(result.Messages))
-	for _, m := range result.Messages {
-		if m.ID != "" && m.To == urn {
+	// Walk the newest-first page backwards, so a stable sort keeps the wire
+	// order for messages with equal timestamps.
+	for i := len(result.Messages) - 1; i >= 0; i-- {
+		if m := result.Messages[i]; m.ID != "" && m.To == urn {
 			out = append(out, m)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
 }
+
+// listAttempts bounds how often List refetches the tail while mail arrives.
+const listAttempts = 3
 
 // Endpoint returns the canonical endpoint used for durable registration keys.
 func (c *Client) Endpoint() string { return c.endpoint }

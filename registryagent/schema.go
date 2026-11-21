@@ -19,6 +19,7 @@ var schemas embed.FS
 const maxRecordBytes = 1 << 20
 
 var schemaFiles = map[string]string{
+	"tool-package/1":   "tool-package-1.json",
 	"agent/1":          "agent-1-registry.json",
 	"launch_profile/1": "launch-profile-1-registry.json",
 	"skill/1":          "skill-1.json",

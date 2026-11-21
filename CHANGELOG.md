@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.16.1
+
+OpenAI adapter fixes found by replaying recorded provider exchanges, plus
+standing fuzz targets and recorded test fixtures. No API changes.
 
 - The OpenAI adapter no longer reports a stream cut before its
   `finish_reason` as a complete response: it ends without Done, so the turn

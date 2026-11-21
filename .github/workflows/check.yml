@@ -46,5 +46,7 @@ jobs:
       - run: go test -race -count=1 ./...
       - run: go run ./examples/embed-host --offline
       - run: go run ./cmd/nanite validate ./examples/specialist
+      - name: agent folders are valid
+        run: for d in agents/*/; do go run ./cmd/nanite validate "$d"; done
       - name: public hygiene (tree and history)
         run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --ref HEAD

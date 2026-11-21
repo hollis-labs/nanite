@@ -1,0 +1,13 @@
+kind: embedded
+lifetime: application
+application_id: nanite-setup-expert
+runtime:
+  # A host app supplies the model and gateway. These apply standalone.
+  provider: anthropic
+  max_steps: 40
+  cache_ttl: 1h
+  compact_at: 110000
+  compact_keep_tokens: 22000
+  daily_token_budget: 2000000
+permissions:
+  mode: default

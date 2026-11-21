@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.15.0
+
+Agents get their own Tether identity and mailbox: mail arrives as turns,
+oldest first, and is marked read only after it is handled. Requires libs
+agent/agentdir v0.6.0 (Substrate BOM b123217). No breaking changes.
 
 - Bind agents to Tether with `identity.tether` and host-supplied credentials.
   The chatrunner mailbox polls unread mail into notice turns, persists keyed

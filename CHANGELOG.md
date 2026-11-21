@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Wait for concurrent registry installs with cancellation, remove abandoned staging
+  directories, and check for newly appeared packages before recording their pins.
+
 - Add draft tool-registry publishing and pinned installs through a host-supplied
   client, `nanite tools publish/install`, and the configured `tool_install` builtin.
   Installs verify package bytes and record immutable digests in `tools.lock.json`;

@@ -207,12 +207,17 @@ func TestBundlePathsAndLinks(t *testing.T) {
 		} else {
 			err = root.Symlink("run.sh", "tools/echo/linked")
 		}
-		_ = root.Close()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Publish(t.Context(), LocalClient(t.TempDir()), dir, "echo", "msg://agent/agent-mux/agt_fixture"); err == nil {
-			t.Fatalf("link accepted hard=%v", hard)
+		_, err = capture(root, "echo")
+		_ = root.Close()
+		want := "links or special files"
+		if hard {
+			want = "hard links"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("capture link hard=%v: %v", hard, err)
 		}
 	}
 }
@@ -246,13 +251,33 @@ func TestInstallLockSerializesWriters(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = root.Close() }()
-	guard, err := lockRoot(root)
+	guard, err := lockRoot(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = guard.Close() }()
-	if _, err := Install(t.Context(), local, target, r.Ref()); err == nil || !strings.Contains(err.Error(), "busy") {
-		t.Fatalf("concurrent install: %v", err)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := Install(ctx, local, target, r.Ref()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting install cancellation: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := Install(t.Context(), local, target, r.Ref()); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("install did not wait: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	if err := guard.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("install did not resume")
 	}
 }
 

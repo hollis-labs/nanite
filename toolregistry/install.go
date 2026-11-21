@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/hollis-labs/nanite/internal/authored"
 )
@@ -65,11 +66,14 @@ func Install(ctx context.Context, client Client, dir, ref string, allowEnv ...st
 		return r, err
 	}
 	defer func() { _ = root.Close() }()
-	guard, err := lockRoot(root)
+	guard, err := lockRoot(ctx, root)
 	if err != nil {
 		return r, err
 	}
 	defer func() { _ = guard.Close() }()
+	if err := cleanStages(root); err != nil {
+		return r, err
+	}
 	lock, err := readLock(root)
 	if err != nil {
 		return r, err
@@ -144,13 +148,13 @@ func Install(ctx context.Context, client Client, dir, ref string, allowEnv ...st
 	if err := ctx.Err(); err != nil {
 		return r, err
 	}
-	lock.Packages[ref] = r
-	if err := writeLock(root, lock); err != nil {
-		return r, err
-	}
 	if _, err := root.Lstat("tools/" + r.Name); err == nil {
 		return r, fmt.Errorf("package appeared during install")
 	} else if !os.IsNotExist(err) {
+		return r, err
+	}
+	lock.Packages[ref] = r
+	if err := writeLock(root, lock); err != nil {
 		return r, err
 	}
 	if err := root.Rename(stage+"/tools/"+r.Name, "tools/"+r.Name); err != nil {
@@ -173,4 +177,26 @@ func writeLock(root *os.Root, lock packageLock) error {
 		return fmt.Errorf("tools lock file too large")
 	}
 	return atomicWrite(root, lockFile, append(data, '\n'))
+}
+
+// The install lock excludes active stages. Only reserved directories are removed;
+// symlinks and similarly named files are left alone.
+func cleanStages(root *os.Root) error {
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".nanite-install-") {
+			if err := root.RemoveAll(entry.Name()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

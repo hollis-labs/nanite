@@ -97,8 +97,11 @@ package (including the root directory), hash directory paths and file paths,
 lengths, permission bits and bytes. Directory permissions and timestamps do not
 contribute. The executable is never run during verification. A private staging
 directory is validated before exposing the complete package under `tools/`.
-Install operations take a separate file lock. The pin is committed first so a
-lock-only interrupted install can be retried without accepting a new digest.
+Install operations wait for a separate file lock, honoring context cancellation.
+Once locked, an install removes abandoned `.nanite-install-*` staging directories.
+It checks for an unexpectedly appeared package before recording the pin. The pin
+is committed before exposing the staged package, so a lock-only interrupted
+install can be retried without accepting a new digest.
 
 ## Deferred work
 

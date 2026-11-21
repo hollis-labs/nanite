@@ -49,7 +49,7 @@ func (l Local) Publish(ctx context.Context, r Record) error {
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	lock, err := lockRoot(root)
+	lock, err := lockRoot(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (l Local) Put(ctx context.Context, data []byte) (string, error) {
 		return "", err
 	}
 	defer func() { _ = root.Close() }()
-	lock, err := lockRoot(root)
+	lock, err := lockRoot(ctx, root)
 	if err != nil {
 		return "", err
 	}

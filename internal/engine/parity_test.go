@@ -250,8 +250,9 @@ func TestLengthStopDoesNotClose(t *testing.T) {
 }
 
 func TestResumeAtStepLimitDoesNotRunMoreTools(t *testing.T) {
-	for _, savedClosing := range []bool{false, true} {
-		t.Run(map[bool]string{false: "before closing", true: "closing already journaled"}[savedClosing], func(t *testing.T) {
+	for _, state := range []string{"before closing", "closing prompt only", "closing already journaled"} {
+		t.Run(state, func(t *testing.T) {
+			savedClosing := state != "before closing"
 			p := &watchedProvider{Provider: fake.New(fake.Text("closing"))}
 			e, db, id := setupEngine(t, p, "runtime:\n  max_steps: 1\n")
 			now := time.Now().UTC()
@@ -266,6 +267,9 @@ func TestResumeAtStepLimitDoesNotRunMoreTools(t *testing.T) {
 			messages := []store.Message{{ID: turn.UserMessageID, Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "go"}}}, {Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "tool_use", ID: "call", Name: "unknown"}}}}
 			if savedClosing {
 				messages = append(messages, store.Message{Role: "tool", Blocks: []llmtypes.ContentBlock{{Type: "tool_result", ToolUseID: "call", Content: "done"}}}, store.Message{Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Name: recovery.ClosingPromptPrefix + "max_steps", Text: "Close now"}}}, store.Message{Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "saved closing"}}})
+				if state == "closing prompt only" {
+					messages = messages[:len(messages)-1]
+				}
 			}
 			for _, m := range messages {
 				if m.ID == "" {
@@ -295,7 +299,11 @@ func TestResumeAtStepLimitDoesNotRunMoreTools(t *testing.T) {
 				t.Fatalf("result %+v", result)
 			}
 			if savedClosing {
-				if len(p.requests) != 0 || result.Text != "saved closing" {
+				want := "saved closing"
+				if state == "closing prompt only" {
+					want = ""
+				}
+				if len(p.requests) != 0 || result.Text != want {
 					t.Fatalf("replayed closing: %+v requests=%d", result, len(p.requests))
 				}
 			} else if len(p.requests) != 1 || !p.toolChoiceNone[0] {

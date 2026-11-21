@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Keep internal closing prompts out of compaction turn boundaries and public
+  conversation history; summary transcripts label them as host notes. Persisted
+  closing markers continue to support interrupted-turn recovery.
+
 ## 0.12.0
 
 Publish and install agent-built tool packages through a registry

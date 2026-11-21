@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/engine"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 )
@@ -124,9 +126,17 @@ func (c *Conversation) Record(ctx context.Context, userText, answer string) erro
 	return c.agent.engine.Record(ctx, c.id, userText, answer)
 }
 
-// History reads the persisted messages in order.
+// History reads the persisted messages in order, excluding internal closing
+// prompts. User messages and the agent's closing replies remain visible; stored
+// sequence numbers are preserved and may have gaps.
 func (c *Conversation) History(ctx context.Context) ([]Message, error) {
-	return c.agent.store.History(ctx, c.id)
+	history, err := c.agent.store.History(ctx, c.id)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(history, func(m Message) bool {
+		return recovery.IsClosingPrompt(m.Role, m.Blocks)
+	}), nil
 }
 
 // SourceNotice is the Input.Source of a turn a host starts because a notice

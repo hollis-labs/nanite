@@ -1,0 +1,15 @@
+kind: embedded
+lifetime: application
+application_id: specialist-template
+runtime:
+  # A host such as Surface supplies the model and gateway; these apply when
+  # the agent runs standalone with the nanite CLI.
+  provider: anthropic
+  max_steps: 40
+  cache_ttl: 1h
+  compact_at: 110000
+  compact_keep_tokens: 22000
+  # Safety net for pilots: a per-agent token cap per UTC day.
+  daily_token_budget: 2000000
+permissions:
+  mode: default

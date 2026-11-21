@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `examples/specialist`, a starter agent folder for specialist agents that
+  own one area, with charter conventions and a memory skill. CI validates it.
+
 ## 0.12.1
 
 Fixes for pilots. No API changes.

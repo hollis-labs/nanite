@@ -45,5 +45,6 @@ jobs:
           GOOS=freebsd GOARCH=amd64 CGO_ENABLED=0 go build ./...
       - run: go test -race -count=1 ./...
       - run: go run ./examples/embed-host --offline
+      - run: go run ./cmd/nanite validate ./examples/specialist
       - name: public hygiene (tree and history)
         run: go run github.com/hollis-labs/substrate/cmd/substrate scan-public --ref HEAD

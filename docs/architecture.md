@@ -660,9 +660,7 @@ configure its own global tracer provider.
 File tools are confined to the workspace roots. Approved Bash commands run with
 the user's privileges and can access paths outside those roots. The shell
 denylist is a backstop against obvious accidents and applies in every permission
-mode. It parses the command into simple commands and argv tokens and matches
-each command by name and arguments (`rm -rf /` is refused; `rm -rf /tmp/build`
-and `git log --grep reboot` are not). It is not a security boundary. Bash starts in the workspace root, limits execution time and output, and
+mode. Bash starts in the workspace root, limits execution time and output, and
 receives a small set of environment variables plus literal values declared in
 `host.yaml` under `runtime.env`.
 

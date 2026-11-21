@@ -151,6 +151,51 @@ func TestARenewalFailureKeepsTheTokenOnlyUntilItExpires(t *testing.T) {
 	}
 }
 
+// Inside the backoff after a failed renewal, the cached token is used while
+// it lives and refused once it has expired, without another request.
+func TestTheBackoffWindowHonoursTheTokensExpiry(t *testing.T) {
+	c := &clock{now: time.Unix(1_800_000_000, 0)}
+	f := newFake(t).Expire(wardentest.Recorded, 90).Clock(c.Now)
+	s := source(t, f.URL, credential(t, "parent-0"), c, nil)
+	first, err := s.Token(t.Context(), "llm-gateway", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refuse := `{"error":"invalid_request","error_description":"temporarily refused"}`
+	// Renewal fails at 89.5s; the 1s backoff runs past the 90s expiry.
+	f.FailNext("/v1/token", http.StatusBadRequest, refuse)
+	c.add(89500 * time.Millisecond)
+	if tok, err := s.Token(t.Context(), "llm-gateway", nil); err != nil || tok != first {
+		t.Fatalf("renewal failure while alive: %q, %v", tok, err)
+	}
+	requests := f.Calls("/v1/token")
+	c.add(200 * time.Millisecond) // in the backoff, still alive
+	if tok, err := s.Token(t.Context(), "llm-gateway", nil); err != nil || tok != first {
+		t.Fatalf("in the backoff while alive: %q, %v", tok, err)
+	}
+	c.add(400 * time.Millisecond) // in the backoff, expired
+	if tok, err := s.Token(t.Context(), "llm-gateway", nil); err == nil || tok != "" {
+		t.Fatalf("in the backoff after expiry: %q, %v", tok, err)
+	}
+	if f.Calls("/v1/token") != requests {
+		t.Fatal("a token request was made inside the backoff")
+	}
+}
+
+// A grant request Warden grants at once is followed by a mint, not a wait.
+func TestAGrantRequestGrantedAtOnceMints(t *testing.T) {
+	f := newFake(t).FileAs("granted", "ground")
+	var waited []Waiting
+	s := source(t, f.URL, credential(t, "parent-0"), nil, func(w Waiting) { waited = append(waited, w) })
+	tok, err := s.Token(t.Context(), "mcp-gateway", []string{"mcp.profile.standard"})
+	if err != nil || !strings.HasPrefix(tok, "tok-mcp-gateway-") {
+		t.Fatalf("Token = %q, %v", tok, err)
+	}
+	if len(f.Requests()) != 1 || len(waited) != 0 {
+		t.Fatalf("%d requests filed, %d waits", len(f.Requests()), len(waited))
+	}
+}
+
 // Each recorded refusal: what it does to the marker and the parent.
 func TestRecordedErrorCodes(t *testing.T) {
 	t.Run("invalid_grant: re-enroll, parent unspent", func(t *testing.T) {

@@ -100,8 +100,8 @@ func TestWardenTokenStaysOnTheWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	mu.Lock()
-	if auth != "Bearer "+minted || ws.Mints() != 1 {
-		t.Fatalf("Authorization %q after %d mints", auth, ws.Mints())
+	if auth != "Bearer "+minted || ws.Calls("/v1/token") != 1 {
+		t.Fatalf("Authorization %q after %d token requests", auth, ws.Calls("/v1/token"))
 	}
 	mu.Unlock()
 	if got, err := tokenfile.Read(cred); err != nil || got != nextParent {

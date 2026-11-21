@@ -144,7 +144,8 @@ func TestToolPackageGetsItsTokensAndNothingElse(t *testing.T) {
 	const minted = "tool-token-fixture-7f3a"
 	// Only queue.read is granted: any other need is refused.
 	ws := wardentest.NewFake(t, "parent-fixture-0").Grant("queue", "queue.read").
-		Tokens(func(int, string) string { return minted })
+		Tokens(func(int, string) string { return minted }).
+		Parents(func(n int) string { return fmt.Sprintf("parent-fixture-next-%d", n) })
 
 	e, db, id := setupEngine(t, fake.New(callWith("tool__peek", map[string]any{}), fake.Text("done")), "")
 	e.cfg.WorkspaceRoots = []string{e.cfg.Dir}
@@ -168,6 +169,10 @@ func TestToolPackageGetsItsTokensAndNothingElse(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("the tool's environment lacks %q", want)
 		}
+	}
+	// The token was minted for exactly the declared need.
+	if forms := ws.Forms(); len(forms) != 1 || forms[0].Get("audience") != "queue" || forms[0].Get("scope") != "queue.read" {
+		t.Fatalf("token requests %v, want one for queue with queue.read", forms)
 	}
 	for _, leak := range []string{"parent-fixture", "hidden-setting", "agent.cred"} {
 		if strings.Contains(env, leak) {

@@ -98,17 +98,33 @@ var jwtLike = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_
 // scrubBody replaces the secrets in a Warden answer with placeholders and
 // keeps everything else (field names, types, expiry values, error codes).
 func scrubBody(raw []byte) json.RawMessage {
-	var doc map[string]any
+	var doc any
 	if json.Unmarshal(raw, &doc) != nil {
 		return json.RawMessage(jwtLike.ReplaceAllString(string(raw), "<jwt>"))
 	}
-	for key, placeholder := range scrubbed {
-		if v, ok := doc[key].(string); ok && v != "" {
-			doc[key] = placeholder
-		}
-	}
+	scrubValue(doc)
 	out, _ := json.Marshal(doc)
 	return json.RawMessage(jwtLike.ReplaceAll(out, []byte("<jwt>")))
+}
+
+// scrubValue replaces scrubbed fields at any depth.
+func scrubValue(v any) {
+	switch v := v.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if placeholder, ok := scrubbed[key]; ok {
+				if str, ok := child.(string); ok && str != "" {
+					v[key] = placeholder
+					continue
+				}
+			}
+			scrubValue(child)
+		}
+	case []any:
+		for _, child := range v {
+			scrubValue(child)
+		}
+	}
 }
 
 // RecordingProxy forwards each request to upstream unchanged and keeps a
@@ -196,7 +212,9 @@ func (p *RecordingProxy) Take() []Fixture {
 }
 
 // forbidden are strings no committed fixture may carry.
-var forbidden = regexp.MustCompile(`(?i)https?://|\b[a-z0-9-]+\.(?:cloud|com|net|org|io|dev|ai|internal|local)\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|eyJ[a-z0-9_-]{10,}|\bbearer\s+\S`)
+// Scopes look like hostnames (llm-gateway.chat), so a hostname is matched by
+// its top-level domain.
+var forbidden = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://|\b[a-z0-9-]+\.(?:cloud|com|net|org|io|dev|ai|co|sh|app|lan|xyz|arpa|internal|local|localhost|home)\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b|[0-9a-f]{1,4}::|::[0-9a-f]{1,4}\b|\b[a-z][a-z0-9-]*:\d{2,5}\b|eyJ[a-z0-9_-]{10,}|\bbearer\s+\S`)
 
 // CheckClean fails when a fixture carries a hostname, an address, a JWT or
 // a bearer token. It runs on each recording and over the committed files.
@@ -218,5 +236,21 @@ func CheckClean(t testing.TB, name string, f Fixture) {
 	}
 	if v, ok := f.Request.Form["refresh_token"]; ok && v != PresentedParent {
 		t.Fatalf("%s carries a presented parent", name)
+	}
+}
+
+// CheckAbsent fails when a fixture carries any of the given values, which
+// the recorder knows are private: the principal, the Warden host, and every
+// parent credential it held.
+func CheckAbsent(t testing.TB, name string, f Fixture, values ...string) {
+	t.Helper()
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range values {
+		if len(v) >= 6 && strings.Contains(string(raw), v) {
+			t.Fatalf("%s carries a private value (%d bytes)", name, len(v))
+		}
 	}
 }

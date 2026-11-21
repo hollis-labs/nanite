@@ -43,7 +43,7 @@ func newFakeWarden(t *testing.T) *fakeWarden {
 // removes it (its lookups answer 404); "error" makes lookups fail (502)
 // until another status; "pending" leaves it waiting.
 func (f *fakeWarden) set(status string) {
-	f.Mend("/api/v1/requests")
+	f.Mend("/api/v1/requests/")
 	ids := f.Requests()
 	latest := ""
 	if len(ids) > 0 {
@@ -62,7 +62,7 @@ func (f *fakeWarden) set(status string) {
 			f.Remove(latest)
 		}
 	case "error":
-		f.Break("/api/v1/requests", http.StatusBadGateway)
+		f.Break("/api/v1/requests/", http.StatusBadGateway)
 	}
 }
 

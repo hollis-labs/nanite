@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +39,22 @@ func TestRecordFixtures(t *testing.T) {
 		}
 		return v
 	}
-	proxy := wardentest.NewRecordingProxy(t, env("NANITE_RECORD_WARDEN_URL"))
-	src, err := New(Config{URL: proxy.URL, CredentialFile: env("NANITE_RECORD_CREDENTIAL"), Principal: env("NANITE_RECORD_PRINCIPAL"),
+	wardenURL, credFile, principal := env("NANITE_RECORD_WARDEN_URL"), env("NANITE_RECORD_CREDENTIAL"), env("NANITE_RECORD_PRINCIPAL")
+	u, err := url.Parse(wardenURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every value a recording must not carry: the identity, the host, and
+	// each parent credential the file holds along the way.
+	private := []string{principal, strings.TrimPrefix(principal, "agent:"), u.Host, u.Hostname()}
+	held := func() {
+		if p, err := tokenfile.Read(credFile); err == nil {
+			private = append(private, p)
+		}
+	}
+	held()
+	proxy := wardentest.NewRecordingProxy(t, wardenURL)
+	src, err := New(Config{URL: proxy.URL, CredentialFile: credFile, Principal: principal,
 		Purpose: "Record Nanite Warden test fixtures", FailFastGrants: true})
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +63,7 @@ func TestRecordFixtures(t *testing.T) {
 	defer cancel()
 	save := func(name string, want int) {
 		t.Helper()
+		held()
 		taken := proxy.Take()
 		if len(taken) != want {
 			t.Fatalf("%s: %d exchanges, want %d", name, len(taken), want)
@@ -57,6 +74,7 @@ func TestRecordFixtures(t *testing.T) {
 				n = name + "_" + string(rune('a'+i))
 			}
 			wardentest.CheckClean(t, n, f)
+			wardentest.CheckAbsent(t, n, f, private...)
 			if err := wardentest.Save(n, f); err != nil {
 				t.Fatal(err)
 			}

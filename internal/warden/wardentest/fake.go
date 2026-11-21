@@ -42,16 +42,21 @@ type Fake struct {
 	*httptest.Server
 	t testing.TB
 
-	mu      sync.Mutex
-	parent  string
-	mints   int
-	grants  map[string]map[string]bool // audience -> granted scopes; "*" grants any
-	expiry  Expiry
-	ttl     int
-	now     func() time.Time
-	noNext  bool
-	tokens  func(n int, audience string) string
-	parents func(n int) string
+	mu     sync.Mutex
+	parent string
+	mints  int
+	// issued maps each minted token to its audience.
+	issued map[string]string
+	// fixtures are the recordings, loaded once so handlers never fail a test
+	// from their own goroutine.
+	fixtures map[string]Fixture
+	grants   map[string]map[string]bool // audience -> granted scopes; "*" grants any
+	expiry   Expiry
+	ttl      int
+	now      func() time.Time
+	noNext   bool
+	tokens   func(n int, audience string) string
+	parents  func(n int) string
 	// fileStatus and fileTier are what a new grant request gets.
 	fileStatus, fileTier string
 	// lose is how the next mint's answer is lost after Warden rotated the
@@ -90,6 +95,10 @@ func NewFake(t testing.TB, parent string) *Fake {
 		requests: map[string]*grantRequest{}, forbidden: map[string]bool{}, failures: map[string][]failure{}, broken: map[string]int{}, calls: map[string]int{},
 		tokens:  func(n int, audience string) string { return fmt.Sprintf("fixture-token-%s-%d", audience, n) },
 		parents: func(n int) string { return fmt.Sprintf("fixture-parent-%d", n) },
+	}
+	f.issued, f.fixtures = map[string]string{}, map[string]Fixture{}
+	for _, name := range []string{"mint_ok", "mint_invalid_grant", "mint_invalid_scope", "lookup_missing", "lookup_unauthorized"} {
+		f.fixtures[name] = Load(t, name)
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Close)
@@ -214,8 +223,9 @@ func (f *Fake) Remove(id string) {
 	delete(f.requests, id)
 }
 
-// Break makes every request to path ("/v1/token" or "/api/v1/requests")
-// answer status with no body, until Mend.
+// Break makes every request to path answer status with no body, until
+// Mend. A path ending in "/" breaks every path under it: "/api/v1/requests/"
+// breaks lookups but not filing.
 func (f *Fake) Break(path string, status int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -297,7 +307,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.calls[r.URL.Path]++
-	if status := f.broken[path]; status != 0 {
+	if status := f.brokenLocked(r.URL.Path); status != 0 {
 		f.mu.Unlock()
 		w.WriteHeader(status)
 		return
@@ -319,13 +329,25 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/api/v1/requests/") && r.Method == http.MethodGet:
 		f.lookup(w, r, strings.TrimPrefix(r.URL.Path, "/api/v1/requests/"))
 	default:
+		f.t.Errorf("wardentest: unexpected request %s %s", r.Method, r.URL.Path)
 		f.recorded(w, "lookup_missing")
 	}
 }
 
+func (f *Fake) brokenLocked(path string) int {
+	for p, status := range f.broken {
+		if path == p || (strings.HasSuffix(p, "/") && strings.HasPrefix(path, p)) {
+			return status
+		}
+	}
+	return 0
+}
+
+const wardenAudience = "warden"
+
 // recorded answers with a recorded fixture's status and body.
 func (f *Fake) recorded(w http.ResponseWriter, name string) {
-	fx := Load(f.t, name)
+	fx := f.fixtures[name]
 	w.Header().Set("Content-Type", fx.Response.ContentType)
 	w.WriteHeader(fx.Response.Status)
 	_, _ = w.Write(fx.Response.Body)
@@ -350,7 +372,7 @@ func (f *Fake) token(w http.ResponseWriter, r *http.Request) {
 	for _, s := range scopes {
 		if !granted[s] && !granted["*"] {
 			f.mu.Unlock()
-			fx := Load(f.t, "mint_invalid_scope")
+			fx := f.fixtures["mint_invalid_scope"]
 			var body map[string]any
 			_ = json.Unmarshal(fx.Response.Body, &body)
 			body["error_description"] = "no live grant covers audience " + audience + " with those scopes"
@@ -382,12 +404,19 @@ func (f *Fake) token(w http.ResponseWriter, r *http.Request) {
 	f.mints++
 	n := f.mints
 	token, next := f.tokens(n, audience), f.parents(n)
+	f.issued[token] = audience
 	f.parent = next
 	expiry, ttl, now, noNext := f.expiry, f.ttl, f.now(), f.noNext
 	f.mu.Unlock()
 
-	writeJSON(w, http.StatusOK, MintAnswer(f.t, MintFields{Token: token, NextParent: next, Audience: audience, Scopes: scopes,
-		Expiry: expiry, TTL: ttl, Now: now, OmitNextParent: noNext}))
+	body, err := mintAnswer(MintFields{Token: token, NextParent: next, Audience: audience, Scopes: scopes,
+		Expiry: expiry, TTL: ttl, Now: now, OmitNextParent: noNext})
+	if err != nil {
+		f.t.Errorf("wardentest: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // bearer reports whether a request carries a token minted for Warden.
@@ -398,12 +427,7 @@ func (f *Fake) bearer(r *http.Request) bool {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for n := 1; n <= f.mints; n++ {
-		if f.tokens(n, "warden") == tok {
-			return true
-		}
-	}
-	return false
+	return f.issued[tok] == wardenAudience
 }
 
 func (f *Fake) file(w http.ResponseWriter, r *http.Request) {

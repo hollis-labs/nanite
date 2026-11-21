@@ -318,7 +318,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	keepPublication := false
 	defer func() {
-		if !keepPublication {
+		if !keepPublication && publication != nil {
 			_ = publication.Close()
 		}
 	}()
@@ -453,7 +453,11 @@ func (a *Agent) Close() error {
 	a.closeOnce.Do(func() {
 		controlErr := a.control.Close()
 		a.engine.Close()
-		a.closeErr = errors.Join(controlErr, a.store.Close(), a.lock.Close(), a.publication.Close())
+		var publicationErr error
+		if a.publication != nil {
+			publicationErr = a.publication.Close()
+		}
+		a.closeErr = errors.Join(controlErr, a.store.Close(), a.lock.Close(), publicationErr)
 	})
 	return a.closeErr
 }

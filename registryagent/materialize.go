@@ -419,11 +419,26 @@ func cleanStages(root *os.Root, prefix string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
+		if entry.IsDir() && isStage(entry.Name(), prefix) {
 			if err := root.RemoveAll(entry.Name()); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// isStage matches exactly prefix + a rand.Text token (26 base32 characters),
+// so a sibling destination whose name extends this one's is never matched.
+func isStage(name, prefix string) bool {
+	token, ok := strings.CutPrefix(name, prefix)
+	if !ok || len(token) != 26 {
+		return false
+	}
+	for _, c := range token {
+		if (c < 'A' || c > 'Z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
 }

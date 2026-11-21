@@ -137,19 +137,12 @@ func recursive(args []string, letters string) bool {
 	return false
 }
 
-// anyTarget reports whether an operand (a non-flag argument, or anything
-// after "--") satisfies match.
+// anyTarget reports whether a non-flag argument satisfies match. Flags (and
+// "--") are skipped; no path match accepts begins with "-", so an operand
+// after "--" that looks like a flag cannot change the answer.
 func anyTarget(args []string, match func(string) bool) bool {
-	operands := false
 	for _, a := range args {
-		if !operands && a == "--" {
-			operands = true
-			continue
-		}
-		if !operands && strings.HasPrefix(a, "-") && a != "-" {
-			continue
-		}
-		if match(a) {
+		if !strings.HasPrefix(a, "-") && match(a) {
 			return true
 		}
 	}

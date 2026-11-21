@@ -47,8 +47,6 @@
     "severity": "recoverable",
     "first": 15,
     "last": 17,
-    "auto_repair": true,
-    "repair": "resume_or_discard",
     "evidence": {
       "status": "running",
       "turn": "t3"
@@ -59,8 +57,6 @@
     "severity": "recoverable",
     "first": 17,
     "last": 17,
-    "auto_repair": true,
-    "repair": "resume_or_discard",
     "evidence": {
       "tool_use_id": "c3",
       "turn": "t3"

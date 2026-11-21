@@ -15,8 +15,6 @@
     "severity": "recoverable",
     "first": 1,
     "last": 6,
-    "auto_repair": true,
-    "repair": "resume_or_discard",
     "evidence": {
       "status": "running",
       "turn": "t1"

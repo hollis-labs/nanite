@@ -26,6 +26,10 @@ type turn struct {
 	stepCalls  map[string]int  // ID -> call of the current step
 	answered   map[string]bool // IDs of the current step already answered
 	superseded map[string]bool // IDs earlier steps left unanswered
+	// answeredBefore holds IDs answered in an earlier step of this turn.
+	// recovery.ResumePlan pairs by ID across the whole turn, so it cannot
+	// answer a reused ID left pending at an interruption.
+	answeredBefore map[string]bool
 }
 
 func (t *turn) unfinished() bool { return t.outcome == "" }
@@ -80,6 +84,11 @@ func Validate(in Input) Report {
 	}
 	w.finish()
 	sound := w.highest < Unsafe
+	if !sound {
+		// Resume and Discard open the journal and replay it; on a transcript
+		// with an unsafe finding of its own they fail or write onto it.
+		w.unmark(RepairResume)
+	}
 	w.compare(sound)
 	if replayed(in.ReplayErr) {
 		w.notices()
@@ -147,6 +156,15 @@ func (w *walker) repairable(repair Repair) {
 	}
 	f := &w.findings[len(w.findings)-1]
 	f.AutoRepair, f.Repair = true, repair
+}
+
+// unmark withdraws a repair from every finding that offered it.
+func (w *walker) unmark(repair Repair) {
+	for i := range w.findings {
+		if w.findings[i].Repair == repair {
+			w.findings[i].AutoRepair, w.findings[i].Repair = false, ""
+		}
+	}
 }
 
 // record follows projectEntry: a known sideband subtype is applied whatever
@@ -257,7 +275,7 @@ func (w *walker) turnRecord(i int, subtype string, p turnPayload) {
 				"turn", p.ID, "unfinished_turn", other.id, "unfinished_status", other.status)
 		}
 		w.turns[p.ID] = &turn{id: p.ID, start: i, status: statusRunning, userMessageID: p.UserMessageID,
-			stepCalls: map[string]int{}, answered: map[string]bool{}, superseded: map[string]bool{}}
+			stepCalls: map[string]int{}, answered: map[string]bool{}, superseded: map[string]bool{}, answeredBefore: map[string]bool{}}
 		w.turnOrder = append(w.turnOrder, p.ID)
 		w.open = append(w.open, p.ID)
 		return
@@ -387,6 +405,9 @@ func (w *walker) step(i, position int, t *turn, m message) {
 			"turn", t.id, "tool_use_id", w.calls[c].id, "message", m.id)
 	}
 	t.pending = nil
+	for id := range t.answered {
+		t.answeredBefore[id] = true
+	}
 	clear(t.stepCalls)
 	clear(t.answered)
 	for _, b := range m.blocks {
@@ -475,8 +496,15 @@ func (w *walker) finish() {
 			w.repairable(RepairResume)
 		}
 		for _, c := range t.pending {
+			id := w.calls[c].id
+			if t.answeredBefore[id] {
+				w.add(CodeToolUseWithoutResult, Unsafe, w.span(w.calls[c].record, last),
+					"the turn stopped before this tool call returned, and an earlier step of the turn already answered its ID; recovery pairs by ID and would leave it unanswered",
+					"turn", t.id, "tool_use_id", id)
+				continue
+			}
 			w.add(CodeToolUseWithoutResult, Recoverable, w.span(w.calls[c].record, last), "the turn stopped before this tool call returned; recovery answers it with an interrupted result",
-				"turn", t.id, "tool_use_id", w.calls[c].id)
+				"turn", t.id, "tool_use_id", id)
 			w.repairable(RepairResume)
 		}
 	}

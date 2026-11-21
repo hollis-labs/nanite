@@ -298,6 +298,13 @@ var fixtures = []struct {
 			message("user", "r1", "t1", map[string]any{"type": "tool_result", "tool_use_id": "c1", "content": []any{"x"}}).
 			say("a2", "t1").finish("t1", "completed")
 	}},
+	{"interrupted_reused_tool_id", func() *fixture {
+		// ResumePlan pairs by ID across the turn: it would take this call as
+		// answered and never write its result.
+		return newFixture().start("t1").owner("t1").
+			calls("a1", "t1", "call_0").results("r1", "t1", "call_0").
+			calls("a2", "t1", "call_0").interrupt("t1")
+	}},
 	{"mixed", func() *fixture {
 		return newFixture().toolTurn("t1").
 			start("t2").owner("t2").calls("a1-t2", "t2", "c1", "c2").results("r1-t2", "t2", "c1", "ghost").

@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-Mailbox delivery fixes, and conversation integrity checks that tell an
-ordinary interruption from a corrupt transcript. No breaking changes.
+Mailbox delivery fixes, conversation integrity checks that tell an ordinary
+interruption from a corrupt transcript, and workspace and tool-input fixes
+from the test-suite audit. No breaking changes.
 
 - Mail polling no longer skips the oldest unread message when mail arrives
   during a poll of more than 50 unread messages; the tail fetch repeats until
@@ -25,6 +26,15 @@ ordinary interruption from a corrupt transcript. No breaking changes.
   number calls per response reuse an ID in later steps; a reused call left
   unanswered at a crash was taken as answered, so Resume and Discard sent
   the model a call with no result. It now gets its interrupted result.
+- Protected workspace names are refused in any letter case, so `.GIT` or
+  `.Ssh` cannot reach a protected directory on a case-insensitive filesystem
+  (the macOS default). `list_dir` errors name the workspace-relative path,
+  not the host path.
+- `find_files` and `search_files` globs match non-ASCII names (`é.md`,
+  `日本/*`).
+- MCP tool model names stay within 64 characters: a longer name is
+  shortened to a stable prefix plus a hash, and still calls the original
+  tool. Nil content in an MCP tool result is skipped instead of panicking.
 
 ## 0.15.0
 

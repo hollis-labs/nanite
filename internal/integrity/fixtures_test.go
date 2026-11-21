@@ -299,8 +299,8 @@ var fixtures = []struct {
 			say("a2", "t1").finish("t1", "completed")
 	}},
 	{"interrupted_reused_tool_id", func() *fixture {
-		// ResumePlan pairs by ID across the turn: it would take this call as
-		// answered and never write its result.
+		// A reused ID left pending is an ordinary interruption: recovery
+		// pairs per step and answers it.
 		return newFixture().start("t1").owner("t1").
 			calls("a1", "t1", "call_0").results("r1", "t1", "call_0").
 			calls("a2", "t1", "call_0").interrupt("t1")

@@ -145,7 +145,7 @@ func TestFixtureClassification(t *testing.T) {
 		"payload_wrong_type":                {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
 		"bad_timestamp":                     {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
 		"unreadable_block":                  {integrity.Unsafe, []integrity.Code{integrity.CodeInvalidRecord}},
-		"interrupted_reused_tool_id":        {integrity.Unsafe, []integrity.Code{integrity.CodeToolUseWithoutResult, integrity.CodeInterruptedTurn}},
+		"interrupted_reused_tool_id":        {integrity.Recoverable, []integrity.Code{integrity.CodeToolUseWithoutResult, integrity.CodeInterruptedTurn}},
 		"mixed": {integrity.Unsafe, []integrity.Code{integrity.CodeOrphanToolResult, integrity.CodeConflictingTurnOutcome,
 			integrity.CodeToolUseWithoutResult, integrity.CodeUnknownSideband, integrity.CodeInterruptedTurn, integrity.CodeTornTail}},
 	}
@@ -183,7 +183,7 @@ func TestFixtureClassification(t *testing.T) {
 }
 
 func TestInterruptionIsRecoverableNotCorrupt(t *testing.T) {
-	for _, name := range []string{"interrupted_running", "interrupted_marked", "interrupted_before_user_message"} {
+	for _, name := range []string{"interrupted_running", "interrupted_marked", "interrupted_before_user_message", "interrupted_reused_tool_id"} {
 		report := validateFixture(t, build(t, name).bytes())
 		if !report.Safe() || len(report.Unsafe()) != 0 {
 			t.Fatalf("%s: interruption reported unsafe: %v", name, report.Findings)
@@ -364,7 +364,7 @@ func TestSeverityJSON(t *testing.T) {
 // Resume and Discard are not offered as automatic repairs on a transcript
 // with an unsafe finding of its own: they would fail or write onto it.
 func TestResumeRepairOnlyForASoundTranscript(t *testing.T) {
-	for _, name := range []string{"mixed", "interrupted_reused_tool_id", "torn_tail"} {
+	for _, name := range []string{"mixed", "torn_tail"} {
 		for _, f := range validateFixture(t, build(t, name).bytes()).Findings {
 			if f.AutoRepair || f.Repair != "" {
 				t.Fatalf("%s: %+v offers a repair on an unsound transcript", name, f)

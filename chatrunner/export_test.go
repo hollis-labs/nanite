@@ -51,3 +51,11 @@ func (c *AuthClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 	c.mu <- struct{}{}
 }
+
+// HoldBeforeRegister makes beginRun call hold after it opens a chat's
+// conversation and before it registers the run, until the test ends.
+func HoldBeforeRegister(t interface{ Cleanup(func()) }, hold func(chatID string)) {
+	old := beforeRegister
+	beforeRegister = hold
+	t.Cleanup(func() { beforeRegister = old })
+}

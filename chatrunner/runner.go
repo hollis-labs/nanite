@@ -272,6 +272,11 @@ func (r *Runner) Close() error {
 	return r.agent.Close()
 }
 
+// beforeRegister, when set (tests only), runs in beginRun after the chat's
+// conversation is opened and before the run is registered: the window a
+// ResetChat can land in.
+var beforeRegister func(chatID string)
+
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
 // ConversationID is the Nanite conversation that first serves a chat
@@ -489,6 +494,9 @@ func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool
 	c, err := r.conversation(ctx, turn.ConversationID)
 	if err != nil {
 		return nil, err
+	}
+	if beforeRegister != nil {
+		beforeRegister(turn.ConversationID)
 	}
 	if hostDispatch {
 		if held := c.Interrupted(); held != nil {

@@ -10,7 +10,10 @@ Supply an enrolled pilot identity YAML **path**, a gateway endpoint, its wire
 (`openai-chat` or `anthropic`) and a model name. The identity's Warden parent
 credential must live outside the agent folder. Use a dedicated credential; do
 not share it with the Warden CLI while Nanite rotates it. No provider-key fallback
-is used. A missing grant fails the test and prints the grant request metadata.
+is used. The harness writes `identity.yaml` and `providers.yaml` (`auth: warden`)
+only into the temporary agent folder, using these local inputs. It loads and
+validates both files before wrapping the selected provider for measurement.
+A missing grant fails the test and prints the grant request metadata.
 
 ```sh
 NANITE_DESK_LIVE=1 \

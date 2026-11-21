@@ -214,17 +214,39 @@ func TestLiveDesk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := authored.ParseIdentity(identity, dir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Validate the identity here, but keep it outside the agent's readable files.
+	defer func() { _ = root.Close() }()
+	if err := root.WriteFile("identity.yaml", identity, 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(map[string]any{
+		"providers": map[string]any{"pilot": map[string]any{"wire": wire, "base_url": gatewayURL, "auth": "warden", "audience": "llm-gateway", "scopes": []string{"llm-gateway.chat"}}},
+		"use":       map[string]any{"chat": map[string]string{"provider": "pilot", "model": model}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := root.WriteFile("providers.yaml", config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := authored.LoadIdentity(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The authored files contain references only; the credential stays outside dir.
+	providerConfig, err := authored.LoadProviders(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	scope := redact.NewScope()
 	warden, err := providers.NewWarden(dir, id, providers.WardenOptions{Redactor: scope, OnAuthWaiting: func(w agent.AuthWaiting) { t.Logf("Warden grant required: %+v", w) }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := providers.NewNamed(authored.ProviderSpec{Name: "pilot", Wire: wire, BaseURL: gatewayURL, Auth: authored.AuthWarden, Audience: "llm-gateway", Scopes: []string{"llm-gateway.chat"}}, providers.Options{Warden: warden, Redactor: scope})
+	live, err := providers.NewNamed(providerConfig.Named["pilot"], providers.Options{Warden: warden, Redactor: scope})
 	if err != nil {
 		t.Fatal(err)
 	}

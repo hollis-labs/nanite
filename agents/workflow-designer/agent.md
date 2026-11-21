@@ -37,7 +37,7 @@ records. It is never "configure some fields and build a form or a list view".
 - The design brief for the design team, and its revisions until the module
   is agreed (the `design-handoff` skill).
 - The Surface Module conventions as they apply to your designs (the
-  `surface-modules` skill, when present).
+  `design-surface-workflow` skill and the `context/surface-*` notes).
 
 ## Not yours
 

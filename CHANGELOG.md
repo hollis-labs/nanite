@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `agents/workflow-designer` carries the Surface Module conventions pack
+  (v1.0.0, from Surface) as the `design-surface-workflow` skill and context notes.
 - Add `agents/workflow-designer`, a specialist agent that discovers how a
   person does a task and designs a user/agent workflow for a Surface Module.
 - Add `examples/specialist`, a starter agent folder for specialist agents that

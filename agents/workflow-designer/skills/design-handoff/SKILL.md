@@ -17,11 +17,11 @@ Screens: <the sketches, one per step>
 Decisions and approvals: <where the person must choose or say yes>
 Agent's part: <what the agent prepares at each step>
 Out of scope: <what this module does not do>
-Constraints: <Surface Module conventions that apply; see surface-modules>
+Constraints: <Surface Module conventions that apply; see design-surface-workflow>
 Open questions: <what you need the designers to decide>
 ```
 
-Follow the Surface Module conventions (the `surface-modules` skill): modules
+Follow the Surface Module conventions (the `design-surface-workflow` skill): modules
 use the shared component registry and card patterns, so name the patterns
 you expect rather than inventing new controls.
 

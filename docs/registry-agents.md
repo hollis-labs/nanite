@@ -17,11 +17,15 @@ nanite agents materialize agent:assistant ./assistant \
 
 The flags also accept defaults from `NANITE_REGISTRY_URL`,
 `NANITE_REGISTRY_TOKEN_FILE`, `NANITE_REGISTRY_PUBLICATION`, and
-`NANITE_CASTER_EXECUTABLE`. Flags override environment values. Published is the
+`NANITE_CASTER_EXECUTABLE`. Flags override environment values. An explicit
+`--registry-dir` also overrides live environment defaults; explicitly selecting
+both transports is refused. Published is the
 default; draft reads require explicit selection and never happen as a fallback.
 Each live source records `publication` in `.nanite/materialized.json`.
 The credential file contains only a bearer token and is read lazily. Protect it
-with host filesystem permissions. HTTP redirects are refused, requests have a
+with private host filesystem permissions: group/other permission bits are
+refused. HTTPS is required except for loopback endpoints. HTTP redirects are
+refused, requests have a
 30-second deadline, and record envelopes are bounded to 2 MiB.
 
 The adapter uses Registry's `GET /v1/record` and `GET /v1/revision` APIs. Native
@@ -30,7 +34,10 @@ IDs remain opaque query values. References accept Registry canonical IDs
 payload IDs remain unprefixed. Pinned revisions are checked exactly. Registry
 revision history contains authored drafts; in published mode a pinned revision
 must also match the current published record. Older published revisions cannot
-be proven by this API and are refused rather than treated as published.
+be proven by this API and are refused rather than treated as published. Object
+key order and whitespace do not affect pinned payload comparisons. Missing
+records or revisions return errors matching `registryagent.ErrNotFound` with
+`errors.Is`.
 
 Tool-package bytes come from an explicitly configured absolute path to an
 already paired Caster CLI, invoked only as `get <cas://sha256/...>`. Caster owns

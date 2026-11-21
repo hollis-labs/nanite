@@ -107,7 +107,10 @@ func TestLiveRejectsResponses(t *testing.T) {
 					_, _ = fmt.Fprint(w, `{} {}`)
 					return
 				case "large":
-					_, _ = fmt.Fprint(w, strings.Repeat(" ", 2*maxRecordBytes+1))
+					raw, _ := json.Marshal(record)
+					// A valid envelope if the size gate were removed, not just invalid whitespace.
+					raw = append(raw[:len(raw)-1], []byte(",\"padding\":\""+strings.Repeat("x", 2*maxRecordBytes)+"\"}")...)
+					_, _ = w.Write(raw)
 					return
 				case "status":
 					w.WriteHeader(403)
@@ -136,6 +139,9 @@ func TestLiveRejectsResponses(t *testing.T) {
 			_, err = live.Get(t.Context(), ref, "r1")
 			if err == nil || strings.Contains(err.Error(), "remote-sensitive-diagnostic") {
 				t.Fatal("unsafe or successful response", err)
+			}
+			if mode == "large" && !strings.Contains(err.Error(), "Registry response exceeds size limit") {
+				t.Fatal("size gate did not reject response", err)
 			}
 		})
 	}
@@ -276,5 +282,70 @@ func TestCanonicalReferences(t *testing.T) {
 	}
 	if _, err := Materialize(t.Context(), live, ref, filepath.Join(t.TempDir(), "live")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLiveHTTPSAndNotFound(t *testing.T) {
+	for _, endpoint := range []string{"http://example.invalid", "http://192.0.2.1", "http://localhost.example.invalid"} {
+		if _, err := NewLive(LiveConfig{URL: endpoint, Authority: "registry"}); err == nil {
+			t.Fatal("insecure remote endpoint accepted")
+		}
+	}
+	for _, endpoint := range []string{"https://example.invalid", "http://localhost:1234", "http://127.0.0.2:1234", "http://[::1]:1234"} {
+		if _, err := NewLive(LiveConfig{URL: endpoint, Authority: "registry"}); err != nil {
+			t.Fatal("secure/loopback endpoint refused", err)
+		}
+	}
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	live, err := NewLive(LiveConfig{URL: server.URL, Authority: "registry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = live.Get(t.Context(), Reference{Authority: "registry", Kind: "agent", ID: "missing"}, "")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatal("not-found identity lost", err)
+	}
+}
+
+func TestLiveEscapedIdentityAndCanonicalPinnedPayload(t *testing.T) {
+	records, ref := fixture(t)
+	ref.ID = "fixture&x=y#tail"
+	var payload map[string]any
+	if err := json.Unmarshal(records[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["id"] = ref.ID
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := wireRecord(Record{Reference: ref, Revision: "r1", Payload: raw}, "draft")
+	reordered := []byte(`{"schema":"agent/1",` + strings.TrimPrefix(strings.Replace(string(raw), `"schema":"agent/1",`, "", 1), "{"))
+	if !json.Valid(reordered) || string(raw) == string(reordered) {
+		t.Fatal("bad reorder fixture")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("id") != "agent:"+ref.ID || len(r.URL.Query()) != 2 || r.URL.Fragment != "" {
+			t.Error("ID was not preserved as one query value")
+		}
+		wire := record
+		if r.URL.Path == "/v1/record" {
+			wire.Publication = "published"
+			wire.Payload = reordered
+		}
+		_ = json.NewEncoder(w).Encode(wire)
+	}))
+	defer server.Close()
+	live, err := NewLive(LiveConfig{URL: server.URL, Authority: "registry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := live.Get(t.Context(), ref, "r1")
+	if err != nil || result.Revision != "r1" || result.Publication != "published" {
+		t.Fatal("equivalent pinned JSON refused", err)
+	}
+	if equalJSON([]byte(`{"n":9007199254740992}`), []byte(`{"n":9007199254740993}`)) {
+		t.Fatal("comparison rounded numbers")
 	}
 }

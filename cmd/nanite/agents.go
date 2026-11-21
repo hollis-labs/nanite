@@ -17,6 +17,19 @@ func agentsCommand() *cobra.Command {
 	var force bool
 	command := &cobra.Command{Use: "agents", Short: "Materialize Registry definitions into local agent folders"}
 	materialize := &cobra.Command{Use: "materialize <agent:ref> <dir>", Short: "Stage and validate a local folder; never fetch Registry records at runtime", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		// Explicit local transport selection overrides live environment defaults.
+		if cmd.Flags().Changed("registry-dir") && !cmd.Flags().Changed("registry-url") {
+			registryURL = ""
+			if !cmd.Flags().Changed("registry-token-file") {
+				tokenFile = ""
+			}
+			if !cmd.Flags().Changed("caster-executable") {
+				casterExecutable = ""
+			}
+			if !cmd.Flags().Changed("publication") {
+				publication = "published"
+			}
+		}
 		if (registryDir == "") == (registryURL == "") {
 			return fmt.Errorf("configure exactly one of --registry-dir or --registry-url")
 		}
@@ -80,6 +93,9 @@ func registryTokenFile(path string) func(context.Context) (string, error) {
 		info, err := f.Stat()
 		if err != nil || !info.Mode().IsRegular() {
 			return "", fmt.Errorf("registry credential must be a regular file")
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			return "", fmt.Errorf("registry credential file must be private")
 		}
 		b, err := io.ReadAll(io.LimitReader(f, 16385))
 		if err != nil || len(b) > 16384 {

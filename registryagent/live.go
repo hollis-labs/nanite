@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,6 +39,13 @@ func NewLive(c LiveConfig) (*Live, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || c.Authority == "" {
 		return nil, fmt.Errorf("registryagent: invalid Registry endpoint or authority")
 	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+			return nil, fmt.Errorf("registryagent: HTTPS required outside loopback")
+		}
+	}
 	if c.Publication == "" {
 		c.Publication = "published"
 	}
@@ -52,6 +61,9 @@ func NewLive(c LiveConfig) (*Live, error) {
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Live{config: c, client: client}, nil
 }
+
+// ErrNotFound identifies an absent record or pinned revision.
+var ErrNotFound = errors.New("registryagent: not found")
 
 type liveRecord struct {
 	ID          string          `json:"id"`
@@ -97,6 +109,9 @@ func (l *Live) read(ctx context.Context, id, revision string) (liveRecord, error
 		return liveRecord{}, fmt.Errorf("registryagent: Registry read failed")
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusNotFound {
+		return liveRecord{}, fmt.Errorf("%w: Registry read returned HTTP 404", ErrNotFound)
+	}
 	if response.StatusCode != http.StatusOK {
 		return liveRecord{}, fmt.Errorf("registryagent: Registry read returned HTTP %d", response.StatusCode)
 	}
@@ -139,7 +154,7 @@ func (l *Live) resolve(ctx context.Context, kind, id, revision string) (liveReco
 		if err != nil {
 			return liveRecord{}, err
 		}
-		if published.Revision != revision || !bytes.Equal(published.Payload, record.Payload) {
+		if published.Revision != revision || !equalJSON(published.Payload, record.Payload) {
 			return liveRecord{}, fmt.Errorf("registryagent: pinned revision is not currently published")
 		}
 		record.Publication = published.Publication
@@ -222,4 +237,26 @@ func nonempty(values []string) []string {
 		return nil
 	}
 	return values
+}
+
+// Normalize object key order and whitespace without rounding numeric values.
+func equalJSON(a, b []byte) bool {
+	canonical := func(raw []byte) ([]byte, error) {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("invalid JSON tail")
+		}
+		return json.Marshal(value)
+	}
+	left, err := canonical(a)
+	if err != nil {
+		return false
+	}
+	right, err := canonical(b)
+	return err == nil && bytes.Equal(left, right)
 }

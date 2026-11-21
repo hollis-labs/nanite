@@ -108,9 +108,19 @@ func (c *Conversation) Interrupted() *InterruptedTurn {
 	return turn
 }
 
-// Resume continues an interrupted turn.
+// Resume continues an interrupted turn. It first validates the
+// conversation's transcript and index, before reading its history; an unsafe
+// finding refuses with an *IntegrityError (errors.Is ErrIntegrity) carrying
+// the findings. Discard remains available.
 func (c *Conversation) Resume(ctx context.Context) (*Run, error) {
 	return c.agent.engine.Resume(ctx, c.id)
+}
+
+// CheckIntegrity validates the conversation's transcript and its index
+// without writing anything, and returns every finding in order. Resume runs
+// the same check and refuses when the report is not Safe.
+func (c *Conversation) CheckIntegrity(ctx context.Context) (IntegrityReport, error) {
+	return c.agent.engine.CheckIntegrity(ctx, c.id)
 }
 
 // Discard abandons an interrupted turn instead of resuming it. The

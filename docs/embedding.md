@@ -466,6 +466,19 @@ on its first turn. Its ID is `chatrunner.ConversationID(chatID)` and is the
 each Nanite conversation serves (host state `chat`), so a restarted runner can
 find its interrupted turns.
 
+**Conversation integrity.** `Conversation.Resume` checks the conversation's
+transcript and its index before it reads the history. It refuses an unsafe
+finding with an `*agent.IntegrityError` (`errors.Is(err, agent.ErrIntegrity)`),
+whose `Report` lists every finding. Each finding has a stable `Code`, a
+`Severity`, the transcript records it concerns, and identifier-only
+`Evidence`. `Discard` stays available unless the transcript has a torn tail,
+which refuses every write until an operator repairs it.
+`Conversation.CheckIntegrity` returns the same report without writing. It
+refuses with `ErrBusy` while the conversation has a run. On open, the agent
+checks only the conversations with a running turn. A runtime event
+(`phase: integrity`) records each check's stage, disposition, worst severity
+and per-code counts, and never message content.
+
 **Interrupted turns.** A turn the previous process left unfinished (it was
 killed mid-turn) is kept until the owner decides. **Hosts upgrading should
 call `Runner.RecoverTurns(ctx)` once the chat Service starts**; without it
@@ -484,6 +497,10 @@ the owner is not offered the turn, and it waits out its hold.
   ends fails with "no interrupted turn" and publishes nothing. `Resume`
   returns once `Observe` accepts the run, which waits while another run holds
   the chat.
+- **Integrity.** A conversation that fails integrity checks is never resumed.
+  `Runner.Resume` returns the agent's `*IntegrityError` before publishing
+  anything. With `Options.ResumeInterrupted`, `RecoverTurns` reports that error
+  and offers the turn with `integrity: blocked` and only the `discard` action.
 - `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
   `Record`, also discards it: the owner has moved on.
 - `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report

@@ -634,7 +634,16 @@ reaches its wall budget.
 
 ## Recovery and observability
 
-On open, Nanite marks running turns as interrupted and running jobs as lost.
+On open, Nanite validates each conversation that has a running turn (see
+Conversation integrity), then marks those turns interrupted and running jobs
+lost. A conversation whose transcript has a torn tail is left as it is: the
+store projects its committed prefix, so the rest of the agent opens, and the
+turn stays running until an operator repairs the tail. `Resume` validates the
+conversation again before it reads any history, and it refuses an unsafe
+finding with a typed error that carries the findings. The CLI prints them.
+`Discard` stays available. Each check emits a content-free runtime event with
+its stage, disposition (`resumable` or `blocked`), worst severity and per-code
+counts.
 It verifies a recorded shell process-group leader before signaling the group.
 The terminal chat asks what to do with an interrupted conversation: resume
 it, discard the turn, or leave it and start a new conversation. Use

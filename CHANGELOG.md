@@ -19,7 +19,16 @@ Mailbox delivery fixes. No breaking changes.
 - Add `internal/integrity`, a pure validator that classifies a conversation's
   transcript and index into typed findings, separating ordinary interruption
   from corruption. `Store.ValidateConversation` reads its input without
-  writing. Validation does not gate recovery yet.
+  writing.
+- Recovery validates each conversation with a running turn before marking
+  it interrupted, and `Resume` validates before it reads history. An unsafe
+  finding refuses resume with `*agent.IntegrityError` (`agent.ErrIntegrity`)
+  carrying the findings; `nanite --resume` prints them. `Discard` stays
+  available. New `Conversation.CheckIntegrity`. Each check emits a
+  content-free `integrity` runtime event. A torn transcript tail no longer
+  keeps the agent from opening: its committed prefix is projected and resume
+  is refused until the tail is repaired. The chatrunner never resumes through
+  an unsafe finding and offers such a turn for discard only.
 
 ## 0.15.0
 

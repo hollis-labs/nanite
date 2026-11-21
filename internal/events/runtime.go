@@ -58,6 +58,13 @@ func (r *Runtime) Observe(ctx context.Context, conversation, turn string, event 
 	switch e := event.(type) {
 	case BudgetWarning:
 		emit(runtimeevents.KindAgentDelta, map[string]any{"phase": "budget_warning", "day": e.Day, "tokens": e.Tokens, "limit": e.Limit, "text": "Daily token budget reached 80%."})
+	case IntegrityChecked:
+		codes := make(map[string]any, len(e.Codes))
+		for code, n := range e.Codes {
+			codes[code] = n
+		}
+		emit(runtimeevents.KindAgentDelta, map[string]any{"phase": "integrity", "stage": e.Stage, "disposition": e.Disposition,
+			"severity": e.Severity, "codes": codes})
 	case RunStarted:
 		if !session.ready {
 			emit(runtimeevents.KindSessionReady, nil)

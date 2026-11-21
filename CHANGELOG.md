@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add draft tool-registry publishing and pinned installs through a host-supplied
+  client, `nanite tools publish/install`, and the configured `tool_install` builtin.
+  Installs verify package bytes and record immutable digests in `tools.lock.json`;
+  execution still uses package approvals or AutoApprove. The filesystem registry
+  is development-only; shared-service transport and promotion are deferred.
+
 ## 0.11.0
 
 A daily token cap per agent and a stop-everything switch. Requires libs

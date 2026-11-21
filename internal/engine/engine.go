@@ -16,6 +16,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/warden"
+	"github.com/hollis-labs/nanite/toolregistry"
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/agent/core/toolresult"
@@ -54,6 +55,10 @@ type Config struct {
 	// ToolPackageEnv names credential-like host variables tool packages may
 	// pass through (authored.CheckToolEnv).
 	ToolPackageEnv []string
+
+	// ToolRegistry enables the tool_install builtin through a host-supplied registry adapter.
+	// Nil disables registry installation. Local filesystem adapters are development-only.
+	ToolRegistry *toolregistry.Client
 	// ToolApprovalDir is host-owned storage outside Dir; empty uses user config.
 	ToolApprovalDir string
 	// Builtins limits which of Nanite's own tool groups are offered. Nil offers all.

@@ -190,6 +190,7 @@ type Options struct
   field WorkDir string
   field GlobalSkillsDir string
   field ToolPackageEnv []string
+  field ToolRegistry *github.com/hollis-labs/nanite/toolregistry.Client
   field Provider github.com/hollis-labs/libs/llm/core/llmcontracts.Provider
   field Gateway Gateway
   field Providers []ProviderSpec

@@ -653,3 +653,10 @@ agent, without opening its database or acquiring its agent lock. With a custom
 Close; no network listener is opened. If the local socket cannot start (for
 example, the temporary directory is unavailable), Open logs a warning and
 continues without CLI control; the embedding `StopAll` API remains available.
+
+## Registry tool installation
+
+`Options.ToolRegistry` accepts a host-supplied `toolregistry.Client`. When set,
+`BuiltinTools` includes `tool_install`; installation pins and verifies content
+without granting execution approval. See [tool registry](tool-registry.md) for
+the draft contract, development CLI and deferred shared-service integration.

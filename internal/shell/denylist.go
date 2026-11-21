@@ -7,7 +7,7 @@ import (
 
 // CheckDenylist blocks obvious shell accidents before tool authorization. It
 // is a convenience, not a security boundary: it parses the command into
-// simple commands and argv tokens (honouring quotes, escapes, pipes and
+// simple commands and argv tokens (honoring quotes, escapes, pipes and
 // separators) and matches each command by name and arguments, so an
 // argument that merely mentions "reboot" is not refused. It provides no
 // filesystem isolation, and a determined command can always evade it.
@@ -200,7 +200,9 @@ func isAssignment(token string) bool {
 		return false
 	}
 	for i, r := range name {
-		if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
+		letter := r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		digit := i > 0 && r >= '0' && r <= '9'
+		if !letter && !digit {
 			return false
 		}
 	}

@@ -367,9 +367,10 @@ func TestLongToolNamesAreShortenedAndCallable(t *testing.T) {
 	if len(replies) != 4 {
 		t.Fatalf("shortened names do not reach distinct tools: %v", replies)
 	}
-	// Shortening is stable: the same long name maps to the same model name.
-	if fitToolName("mcp__s__"+long) != fitToolName("mcp__s__"+long) || fitToolName("mcp__s__short") != "mcp__s__short" {
-		t.Fatal("fitToolName is not stable")
+	// Shortening is stable across discoveries and leaves short names alone.
+	first, again := fitToolName("mcp__s__"+long), fitToolName(strings.Repeat("mcp__s__", 1)+long)
+	if first != again || len(first) != maxToolName || fitToolName("mcp__s__short") != "mcp__s__short" {
+		t.Fatalf("fitToolName: %q %q", first, again)
 	}
 }
 

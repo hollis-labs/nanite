@@ -3,6 +3,7 @@ package mcpclient
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -293,6 +294,7 @@ func (l *Lease) tool(reg *registration, spec *sdk.Tool) (tools.Tool, error) {
 		name = tools.ToolPackagePrefix + modelName(pkg) + "__" + modelName(spec.Name)
 		readonly, destructive = false, true
 	}
+	name = fitToolName(name)
 	return tools.Tool{
 		Name: name, Description: spec.Description, InputSchema: schema, ReadOnly: readonly, Destructive: destructive,
 		Handler: func(ctx context.Context, call tools.Call) (tools.Result, error) {
@@ -336,6 +338,22 @@ func isUnknownTool(err error) bool {
 		(wire.Code == jsonrpc.CodeInvalidParams && strings.HasPrefix(message, "tool ") && strings.HasSuffix(message, " not found"))
 }
 
+// maxToolName is the longest function name providers accept (OpenAI's limit;
+// a longer name fails the whole request, not just that tool).
+const maxToolName = 64
+
+// fitToolName shortens a model name over maxToolName to a prefix plus a hash
+// of the full name, so distinct long names stay distinct and stable across
+// discoveries. A collision is still caught by the duplicate check.
+func fitToolName(name string) string {
+	if len(name) <= maxToolName {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := "_" + hex.EncodeToString(sum[:4])
+	return name[:maxToolName-len(suffix)] + suffix
+}
+
 func modelName(name string) string {
 	return strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
@@ -352,14 +370,21 @@ func toolResult(result *sdk.CallToolResult) (tools.Result, error) {
 	var parts []string
 	for _, content := range result.Content {
 		if text, ok := content.(*sdk.TextContent); ok {
-			parts = append(parts, text.Text)
+			if text != nil {
+				parts = append(parts, text.Text)
+			}
+			continue
+		}
+		if content == nil {
 			continue
 		}
 		raw, err := json.Marshal(content)
 		if err != nil {
 			return tools.Result{}, err
 		}
-		parts = append(parts, string(raw))
+		if string(raw) != "null" { // a typed nil of another content kind
+			parts = append(parts, string(raw))
+		}
 	}
 	if len(parts) == 0 && result.StructuredContent != nil {
 		raw, err := json.Marshal(result.StructuredContent)

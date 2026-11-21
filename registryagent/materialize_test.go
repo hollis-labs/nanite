@@ -350,6 +350,37 @@ func TestToolPackagePins(t *testing.T) {
 	if err != nil || second.Changed {
 		t.Fatal("same pins changed", err)
 	}
+	t.Run("carry forward pins on update", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "agent")
+		if _, err := Materialize(t.Context(), records, ref, target, Options{Tools: &client}); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.ReadFile(filepath.Join(target, "tools.lock.json")) // #nosec G304 -- target is created under t.TempDir.
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated := append(Fake(nil), records...)
+		var body map[string]any
+		if err := json.Unmarshal(updated[0].Payload, &body); err != nil {
+			t.Fatal(err)
+		}
+		// Removed tool refs must not erase the previously established pins.
+		// No install occurs on this update, so it cannot recreate a missing lock.
+		delete(body, "tools")
+		updated[0].Payload, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated[0].Revision = "r2"
+		result, err := Materialize(t.Context(), updated, ref, target)
+		if err != nil || !result.Changed {
+			t.Fatal("update did not publish", err)
+		}
+		after, err := os.ReadFile(filepath.Join(target, "tools.lock.json")) // #nosec G304 -- target is created under t.TempDir.
+		if err != nil || string(after) != string(before) {
+			t.Fatal("update lost prior tool pins", err)
+		}
+	})
 	// A provenance-only mutation still verifies against the same archive. It
 	// must be refused by the lock carried into the staging directory.
 	changedProvenance := pkg
@@ -393,10 +424,10 @@ func TestToolPackagePins(t *testing.T) {
 		if err := json.Unmarshal(foreign[0].Payload, &body); err != nil {
 			t.Fatal(err)
 		}
-		body["tools"] = []Reference{{Authority: "other", Kind: "tool-package", ID: pkg.ID}}
+		body["tools"] = []Reference{{Authority: "tether", Kind: "tool-package", ID: pkg.ID}}
 		foreign[0].Payload, _ = json.Marshal(body)
-		if _, err := Materialize(t.Context(), foreign, ref, filepath.Join(t.TempDir(), "agent"), Options{Tools: &client}); err == nil {
-			t.Fatal("foreign tool authority accepted")
+		if _, err := Materialize(t.Context(), foreign, ref, filepath.Join(t.TempDir(), "agent"), Options{Tools: &client}); err == nil || !strings.Contains(err.Error(), "tool package authority does not match") {
+			t.Fatal("foreign tool authority was not rejected by the authority guard", err)
 		}
 	})
 	changed := pkg
@@ -536,5 +567,86 @@ func TestPublicationLockAndStageCleanup(t *testing.T) {
 	if opened, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-"}); err == nil {
 		_ = opened.Close()
 		t.Fatal("runtime opened during publication")
+	}
+}
+
+func TestSymlinkDestinationRejectedBeforeResolution(t *testing.T) {
+	records, ref := fixture(t)
+	parent := t.TempDir()
+	target := filepath.Join(parent, "real")
+	if _, err := Materialize(t.Context(), records, ref, target); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(target, "agent.md")) // #nosec G304 -- target is created under t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "alias")
+	// Keep the target inside os.Root: its traversal protection must not mask
+	// removal of the materializer's destination guard.
+	if err := os.Symlink("real", link); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	resolver := resolverFunc(func(ctx context.Context, ref Reference, revision string) (Record, error) {
+		calls++
+		return records.Get(ctx, ref, revision)
+	})
+	_, err = Materialize(t.Context(), resolver, ref, link, Options{Force: true})
+	if err == nil || !strings.Contains(err.Error(), "destination must be a real directory") {
+		t.Fatal("symlink not rejected at destination guard", err)
+	}
+	if calls != 0 {
+		t.Fatal("resolved inputs through a symlink destination")
+	}
+	if destination, err := os.Readlink(link); err != nil || destination != "real" {
+		t.Fatal("destination link changed", err)
+	}
+	after, err := os.ReadFile(filepath.Join(target, "agent.md")) // #nosec G304 -- target is created under t.TempDir.
+	if err != nil || string(after) != string(before) {
+		t.Fatal("symlink target changed", err)
+	}
+}
+
+func TestFetchRejectsResolverIdentity(t *testing.T) {
+	records, ref := fixture(t)
+	for _, field := range []string{"authority", "kind", "id"} {
+		t.Run(field, func(t *testing.T) {
+			record := records[0]
+			// Payload and revision still match the requested record. Only the returned
+			// envelope is wrong, so payload/schema validation cannot catch the mutation.
+			switch field {
+			case "authority":
+				record.Reference.Authority = "tether"
+			case "kind":
+				record.Reference.Kind = "skill"
+			case "id":
+				record.Reference.ID = "another"
+			}
+			resolver := resolverFunc(func(context.Context, Reference, string) (Record, error) { return record, nil })
+			if _, _, _, err := fetch(t.Context(), resolver, ref, "r1"); err == nil || !strings.Contains(err.Error(), "resolver returned a different identity or revision") {
+				t.Fatal("wrong resolver identity accepted", err)
+			}
+		})
+	}
+}
+
+func TestFetchRejectsResolverRevision(t *testing.T) {
+	records, ref := fixture(t)
+	for _, revision := range []string{"", "r2"} {
+		t.Run("returned="+revision, func(t *testing.T) {
+			record := records[0]
+			record.Revision = revision
+			requested := "r1"
+			if revision == "" {
+				requested = "" // A latest lookup still requires a returned revision.
+			}
+			// Do not delegate to Fake.Get: it would reject the requested pin before
+			// the fetch boundary could check the resolver's returned revision.
+			resolver := resolverFunc(func(context.Context, Reference, string) (Record, error) { return record, nil })
+			if _, _, _, err := fetch(t.Context(), resolver, ref, requested); err == nil || !strings.Contains(err.Error(), "resolver returned a different identity or revision") {
+				t.Fatal("wrong resolver revision accepted", err)
+			}
+		})
 	}
 }

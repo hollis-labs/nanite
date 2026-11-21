@@ -1,0 +1,3 @@
+{"parentUuid":null,"payload":{"ID":"conv-1","Role":"","Status":"active","Title":""},"sessionId":"conv-1","subtype":"nanite.conversation","timestamp":"2026-11-21T08:00:01Z","type":"system","uuid":"conv-1"}
+{"message":{"content":[{"text":"done","type":"text"}],"nanite_turn_id":"ghost","role":"assistant"},"parentUuid":null,"sessionId":"conv-1","timestamp":"2026-11-21T08:00:02Z","type":"assistant","uuid":"a1"}
+{"message":{"content":[{"text":"x","type":"text"}],"nanite_turn_id":"","role":"assistant"},"parentUuid":null,"sessionId":"conv-1","timestamp":"2026-11-21T08:00:03Z","type":"assistant","uuid":"a2"}

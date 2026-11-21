@@ -1,0 +1,14 @@
+[
+  {
+    "code": "turn_missing_user_message",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 2,
+    "evidence": {
+      "expected": "u-t1",
+      "found": "a1",
+      "role": "assistant",
+      "turn": "t1"
+    }
+  }
+]

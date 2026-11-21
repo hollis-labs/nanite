@@ -1,0 +1,6 @@
+{"parentUuid":null,"payload":{"ID":"conv-1","Role":"","Status":"active","Title":""},"sessionId":"conv-1","subtype":"nanite.conversation","timestamp":"2026-11-21T08:00:01Z","type":"system","uuid":"conv-1"}
+{"parentUuid":null,"payload":{"ID":"t1","UserMessageID":"u-t1"},"sessionId":"conv-1","subtype":"nanite.turn.start","timestamp":"2026-11-21T08:00:02Z","type":"system","uuid":"t1"}
+{"message":{"content":[{"text":"hello","type":"text"}],"nanite_turn_id":"t1","role":"user"},"parentUuid":null,"sessionId":"conv-1","timestamp":"2026-11-21T08:00:03Z","type":"user","uuid":"u-t1"}
+{"message":{"content":[{"content":"ok","tool_use_id":"nope","type":"tool_result"}],"nanite_turn_id":"t1","role":"user"},"parentUuid":null,"sessionId":"conv-1","timestamp":"2026-11-21T08:00:04Z","type":"user","uuid":"r1"}
+{"message":{"content":[{"text":"done","type":"text"}],"nanite_turn_id":"t1","role":"assistant"},"parentUuid":null,"sessionId":"conv-1","timestamp":"2026-11-21T08:00:05Z","type":"assistant","uuid":"a1"}
+{"parentUuid":null,"payload":{"ID":"t1","Status":"completed","UserMessageID":"u-t1"},"sessionId":"conv-1","subtype":"nanite.turn.finish","timestamp":"2026-11-21T08:00:06Z","type":"system","uuid":"t1"}

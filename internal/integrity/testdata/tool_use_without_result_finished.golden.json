@@ -1,0 +1,12 @@
+[
+  {
+    "code": "tool_use_without_result",
+    "severity": "unsafe",
+    "first": 3,
+    "last": 5,
+    "evidence": {
+      "tool_use_id": "c2",
+      "turn": "t1"
+    }
+  }
+]

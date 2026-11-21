@@ -1,0 +1,21 @@
+[
+  {
+    "code": "unknown_turn",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 1,
+    "evidence": {
+      "message": "a1",
+      "turn": "ghost"
+    }
+  },
+  {
+    "code": "message_without_turn",
+    "severity": "warning",
+    "first": 2,
+    "last": 2,
+    "evidence": {
+      "message": "a2"
+    }
+  }
+]

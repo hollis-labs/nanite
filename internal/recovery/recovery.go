@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/integrity"
 	"github.com/hollis-labs/nanite/internal/shell"
 	"github.com/hollis-labs/nanite/internal/slots"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -48,11 +49,12 @@ func Recover(ctx context.Context, db *store.Store) error {
 	return nil
 }
 
-const SyntheticResult = "interrupted before completion; not retried"
+// SyntheticResult answers a tool call an interrupted turn never answered.
+const SyntheticResult = integrity.SyntheticResult
 
 // ClosingPromptPrefix marks a persisted closing prompt. It records the limit
 // reason and separates the closing reply from counted tool-capable steps.
-const ClosingPromptPrefix = "nanite_closing_reply:"
+const ClosingPromptPrefix = integrity.ClosingPromptPrefix
 
 // IsClosingPrompt identifies the engine's persisted host note. It uses block
 // metadata, never text matching, so a person quoting the prompt stays visible.

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "invalid_record",
+    "severity": "unsafe",
+    "first": 3,
+    "last": 3,
+    "evidence": {
+      "record": "a1"
+    }
+  }
+]

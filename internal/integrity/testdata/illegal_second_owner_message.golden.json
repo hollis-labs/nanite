@@ -1,0 +1,12 @@
+[
+  {
+    "code": "illegal_role_ordering",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 3,
+    "evidence": {
+      "message": "u2",
+      "turn": "t1"
+    }
+  }
+]

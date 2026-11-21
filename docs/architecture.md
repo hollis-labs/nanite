@@ -147,6 +147,37 @@ it covers. Provider requests use that summary and the messages that follow it.
 Host history retains the full transcript. New schema changes use numbered
 migrations.
 
+### Conversation integrity
+
+`internal/integrity` checks what a conversation's records say, above the
+byte layer `internal/transcript` verifies (hash chain, contiguous segments,
+complete lines). `integrity.Validate` is pure: given the replayed entries,
+the replay error, and optionally the index rows and a saved interrupted-turn
+hold, it returns ordered findings with a stable code, a severity, the record
+range and cursors, identifier-only evidence and whether automatic repair is
+allowed. `Store.ValidateConversation` gathers that input without writing.
+
+It checks turn lifecycle (start, interrupt, resume, finish, and turns that
+overlap or finish twice), that each turn opens with its own user message,
+tool call and result pairing inside a turn, closing-reply host notes,
+compactions that cover an unknown message or split a tool step, the index
+against the transcript, notices delivered to unknown turns, and stale holds.
+
+Severity is `info`, `warning`, `recoverable` or `unsafe`. An ordinary
+interruption, meaning an unfinished last turn whose missing tool results
+recovery fills, is `recoverable` and never `unsafe`. Automatic repair is allowed
+only where it is deterministic and loses nothing committed: resuming or
+discarding an interrupted turn, replaying an index that is behind,
+rebuilding an index that disagrees with a sound transcript, and clearing a
+stale hold. A torn tail, a gap and every contradiction inside the transcript
+need an operator.
+
+Unknown record kinds: a `system` or `summary` record with an unknown subtype is
+skipped and reported as `info`, matching the index projection, which ignores
+it. A record whose type is not `user`, `assistant`, `system` or `summary` is
+`unsafe`: no Nanite writer emits one, and it may carry history this version
+cannot read.
+
 ### When compaction runs
 
 After each step, the engine checks whether the next request still fits.

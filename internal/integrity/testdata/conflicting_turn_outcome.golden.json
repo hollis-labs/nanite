@@ -1,0 +1,13 @@
+[
+  {
+    "code": "conflicting_turn_outcome",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 5,
+    "evidence": {
+      "first_status": "completed",
+      "status": "failed",
+      "turn": "t1"
+    }
+  }
+]

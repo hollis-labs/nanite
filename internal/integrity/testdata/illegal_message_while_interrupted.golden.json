@@ -1,0 +1,25 @@
+[
+  {
+    "code": "illegal_role_ordering",
+    "severity": "unsafe",
+    "first": 1,
+    "last": 4,
+    "evidence": {
+      "message": "a1",
+      "role": "assistant",
+      "turn": "t1"
+    }
+  },
+  {
+    "code": "interrupted_turn",
+    "severity": "recoverable",
+    "first": 1,
+    "last": 4,
+    "auto_repair": true,
+    "repair": "resume_or_discard",
+    "evidence": {
+      "status": "interrupted",
+      "turn": "t1"
+    }
+  }
+]

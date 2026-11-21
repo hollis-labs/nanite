@@ -1,0 +1,13 @@
+[
+  {
+    "code": "duplicate_tool_result",
+    "severity": "unsafe",
+    "first": 3,
+    "last": 5,
+    "evidence": {
+      "message": "r2",
+      "tool_use_id": "c1",
+      "turn": "t1"
+    }
+  }
+]

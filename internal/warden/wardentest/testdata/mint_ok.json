@@ -1,0 +1,33 @@
+{
+  "source": "recorded",
+  "request": {
+    "method": "POST",
+    "path": "/v1/token",
+    "form": {
+      "audience": "llm-gateway",
+      "grant_type": "refresh_token",
+      "refresh_token": "<parent>",
+      "scope": "llm-gateway.chat"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "access_token": "<access-token>",
+      "aud": "llm-gateway",
+      "expires_at": "2026-11-21T11:36:13Z",
+      "expires_in": 899,
+      "grant": "grt_fixture",
+      "jti": "00000000-0000-4000-8000-000000000000",
+      "kind": "agent",
+      "refresh_expires_at": "2026-12-21T11:21:13.772960948Z",
+      "refresh_token": "<next-parent>",
+      "scope": "llm-gateway.chat",
+      "sub": "agent:nanite-fixture",
+      "token": "<access-token>",
+      "token_type": "Bearer",
+      "ttl_seconds": 899
+    }
+  }
+}

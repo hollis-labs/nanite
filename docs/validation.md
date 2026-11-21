@@ -204,3 +204,32 @@ credential file; one process at a time, since it rotates on each mint),
 with `/v1`). `NANITE_RECORD_ONLY` limits a run to named scenarios; record
 `cache_write` and `cache_read` together, on a cold cache. Review the new
 files before committing them.
+
+## Warden fixtures
+
+`internal/warden/wardentest/testdata` holds real exchanges recorded from
+Warden: a mint for `llm-gateway` and one for Warden itself, a lookup of a
+grant request that does not exist (404), a lookup without a valid token
+(401), a parent Warden does not hold (`invalid_grant`) and a scope with no
+grant (`invalid_scope`). The presented parent, the minted token, the next
+parent, the identity and grant IDs, and any JWT are replaced with
+placeholders, request headers are never kept, and a test refuses a
+committed fixture that carries a hostname, an address, a JWT or a bearer
+token.
+
+`wardentest.Fake` is the one fake Warden every package's tests use. It
+answers in the recorded shapes: mints rotate the parent and carry
+`expires_at`, `expires_in` and `ttl_seconds` (or any one of them, or none),
+a wrong parent gets the recorded `invalid_grant`, an ungranted scope the
+recorded `invalid_scope`, and grant requests are filed, decided, looked up,
+forbidden (403) or removed (404). Lost answers, server errors and other
+failures are injected per path.
+
+To record again, run `TestRecordFixtures` in `internal/warden` with
+`NANITE_RECORD_FIXTURES=1`, `NANITE_RECORD_WARDEN_URL`,
+`NANITE_RECORD_CREDENTIAL` and `NANITE_RECORD_PRINCIPAL`, for an identity
+granted `llm-gateway.chat`. The parent credential rotates on every mint:
+run one process at a time. Error answers come only from requests that
+cannot spend the parent. If the run stops with a re-enrollment error, the
+parent may be spent: do not run it again; the identity needs re-enrollment.
+Review the new files before committing them.

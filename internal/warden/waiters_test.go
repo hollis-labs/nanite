@@ -29,7 +29,8 @@ func (m *waiterMemory) SetSetting(_ context.Context, _, _ string, value string) 
 }
 
 func TestWaitersSurviveRestartAndClearIndividually(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	file := credential(t, "parent-0")
 	state := &waiterMemory{}
 	open := func() *Source {
@@ -49,10 +50,8 @@ func TestWaitersSurviveRestartAndClearIndividually(t *testing.T) {
 	second := open()
 	var granted []Waiting
 	second.cfg.OnGranted = func(w Waiting) { granted = append(granted, w) }
-	f.mu.Lock()
-	f.allowed["mcp-gateway"] = true
-	f.reqStatus = "approved"
-	f.mu.Unlock()
+	f.Grant("mcp-gateway")
+	f.Decide("req-1", "approved")
 	// The canonical audience/scope key must match despite order/duplicates.
 	if _, err := second.Token(WithConversation(t.Context(), "chat-a"), "mcp-gateway", []string{"write", "read", "read"}); err != nil {
 		t.Fatal(err)
@@ -86,7 +85,7 @@ func TestWaitersSurviveRestartAndClearIndividually(t *testing.T) {
 }
 
 func TestWaiterRefusalPersistsAcrossRestart(t *testing.T) {
-	_, srv := newFake(t)
+	srv := newFake(t).Server
 	file := credential(t, "parent-0")
 	state := &waiterMemory{}
 	s := source(t, srv.URL, file, nil, nil)
@@ -109,7 +108,7 @@ func TestWaiterRefusalPersistsAcrossRestart(t *testing.T) {
 func TestBadWaiterStateDoesNotPreventStartup(t *testing.T) {
 	for i, raw := range []string{`{"version":2,"entries":{}}`, `broken`} {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			_, srv := newFake(t)
+			srv := newFake(t).Server
 			s := source(t, srv.URL, credential(t, "parent-0"), nil, nil)
 			var logs bytes.Buffer
 			s.cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
@@ -131,7 +130,8 @@ func TestBadWaiterStateDoesNotPreventStartup(t *testing.T) {
 }
 
 func TestPendingRequestSurvivesSourceRestart(t *testing.T) {
-	f, srv := newFake(t)
+	f := newFake(t)
+	srv := f.Server
 	file := credential(t, "parent-0")
 	state := &waiterMemory{}
 	first := source(t, srv.URL, file, nil, nil)
@@ -149,9 +149,7 @@ func TestPendingRequestSurvivesSourceRestart(t *testing.T) {
 	if _, err := second.Token(ctx, "mcp-gateway", nil); err == nil {
 		t.Fatal("pending request succeeded")
 	}
-	f.mu.Lock()
-	filed := f.requests
-	f.mu.Unlock()
+	filed := len(f.Requests())
 	if filed != 1 {
 		t.Fatalf("restart filed %d requests, want 1", filed)
 	}
@@ -160,8 +158,10 @@ func TestPendingRequestSurvivesSourceRestart(t *testing.T) {
 func TestApprovedWaitersAgeOutOnLoadAndSave(t *testing.T) {
 	for _, reload := range []bool{false, true} {
 		t.Run(fmt.Sprint(reload), func(t *testing.T) {
-			f, srv := newFake(t)
+			f := newFake(t)
+			srv := f.Server
 			clock := &clock{now: time.Unix(1800000000, 0)}
+			f.Clock(clock.Now)
 			file := credential(t, "parent-0")
 			state := &waiterMemory{}
 			s := source(t, srv.URL, file, clock, nil)
@@ -193,9 +193,7 @@ func TestApprovedWaitersAgeOutOnLoadAndSave(t *testing.T) {
 			if len(s.entry("mcp-gateway", nil).waiters) != 0 {
 				t.Fatal("save retained old in-memory waiter")
 			}
-			f.mu.Lock()
-			f.allowed["mcp-gateway"] = true
-			f.mu.Unlock()
+			f.Grant("mcp-gateway")
 			granted := false
 			s.cfg.OnGranted = func(Waiting) { granted = true }
 			if _, err := s.Token(WithConversation(t.Context(), "abandoned-chat"), "mcp-gateway", nil); err != nil {

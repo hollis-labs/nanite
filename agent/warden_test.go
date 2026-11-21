@@ -19,6 +19,7 @@ import (
 	"github.com/hollis-labs/libs/harness/core/adapters/runtimeevents"
 	"github.com/hollis-labs/libs/security/secrets/tokenfile"
 	"github.com/hollis-labs/nanite/agent"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
 // A turn through a provider with Warden auth carries the token on the wire
@@ -28,22 +29,8 @@ func TestWardenTokenStaysOnTheWire(t *testing.T) {
 	minted := fixtureValue("access")
 	nextParent := fixtureValue("next-parent")
 	var mu sync.Mutex
-	var mints int
-	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		mu.Lock()
-		mints++
-		mu.Unlock()
-		if r.Form.Get("refresh_token") != "warden-parent-fixture-0" || r.Form.Get("audience") != "llm-gateway" {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"error":"invalid_grant"}`)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"access_token":%q,"expires_in":900,"refresh_token":%q}`, minted, nextParent)
-	}))
-	t.Cleanup(ws.Close)
+	ws := wardentest.NewFake(t, "warden-parent-fixture-0").Grant("llm-gateway").
+		Tokens(func(int, string) string { return minted }).Parents(func(int) string { return nextParent })
 	var auth string
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -113,8 +100,8 @@ func TestWardenTokenStaysOnTheWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	mu.Lock()
-	if auth != "Bearer "+minted || mints != 1 {
-		t.Fatalf("Authorization %q after %d mints", auth, mints)
+	if auth != "Bearer "+minted || ws.Calls("/v1/token") != 1 {
+		t.Fatalf("Authorization %q after %d token requests", auth, ws.Calls("/v1/token"))
 	}
 	mu.Unlock()
 	if got, err := tokenfile.Read(cred); err != nil || got != nextParent {

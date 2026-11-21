@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider/fake"
 	"github.com/hollis-labs/nanite/internal/warden"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -144,21 +142,10 @@ func TestToolPackageAsksByDefault(t *testing.T) {
 // transcript.
 func TestToolPackageGetsItsTokensAndNothingElse(t *testing.T) {
 	const minted = "tool-token-fixture-7f3a"
-	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		if r.URL.Path != "/v1/token" || r.Form.Get("audience") != "queue" || r.Form.Get("scope") != "queue.read" {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprint(w, `{"error":"invalid_request"}`)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		// The answer is built, not written out, so it never reads like a
-		// credential to the public-hygiene scan.
-		next := "parent-fixture-next"
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": minted, "expires_in": 900, "refresh" + "_token": next})
-	}))
-	t.Cleanup(ws.Close)
+	// Only queue.read is granted: any other need is refused.
+	ws := wardentest.NewFake(t, "parent-fixture-0").Grant("queue", "queue.read").
+		Tokens(func(int, string) string { return minted }).
+		Parents(func(n int) string { return fmt.Sprintf("parent-fixture-next-%d", n) })
 
 	e, db, id := setupEngine(t, fake.New(callWith("tool__peek", map[string]any{}), fake.Text("done")), "")
 	e.cfg.WorkspaceRoots = []string{e.cfg.Dir}
@@ -182,6 +169,10 @@ func TestToolPackageGetsItsTokensAndNothingElse(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("the tool's environment lacks %q", want)
 		}
+	}
+	// The token was minted for exactly the declared need.
+	if forms := ws.Forms(); len(forms) != 1 || forms[0].Get("audience") != "queue" || forms[0].Get("scope") != "queue.read" {
+		t.Fatalf("token requests %v, want one for queue with queue.read", forms)
 	}
 	for _, leak := range []string{"parent-fixture", "hidden-setting", "agent.cred"} {
 		if strings.Contains(env, leak) {
@@ -314,28 +305,13 @@ func TestToolPackageMCPServerHelper(t *testing.T) {
 	os.Exit(0)
 }
 
-// countingWarden is a fake Warden that mints one token and counts every
-// request it gets (mints and grant requests alike).
+// countingWarden is the shared fake Warden (wardentest), granting the
+// fixture and queue audiences, and counting every request it gets (mints
+// and grant requests alike).
 func countingWarden(t *testing.T) (url string, requests func() int) {
 	t.Helper()
-	var mu sync.Mutex
-	n := 0
-	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		n++
-		mu.Unlock()
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		next := "parent-fixture-next"
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "pkg-" + "fixture", "expires_in": 900, "refresh" + "_token": next})
-	}))
-	t.Cleanup(ws.Close)
-	return ws.URL, func() int {
-		mu.Lock()
-		defer mu.Unlock()
-		return n
-	}
+	ws := wardentest.NewFake(t, "parent-fixture-0").Grant("fixture").Grant("queue")
+	return ws.URL, ws.Hits
 }
 
 // An mcp-kind package does nothing until a person approves that exact

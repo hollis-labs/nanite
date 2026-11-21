@@ -1,0 +1,14 @@
+kind: embedded
+lifetime: application
+application_id: nanite-setup-expert
+runtime:
+  # Standalone only: a host app (e.g. a Surface binding) supplies the model,
+  # gateway and runtime limits and does not read this file.
+  provider: anthropic
+  max_steps: 40
+  cache_ttl: 1h
+  compact_at: 110000
+  compact_keep_tokens: 22000
+  daily_token_budget: 2000000
+permissions:
+  mode: default

@@ -4,6 +4,8 @@
 
 - Add `examples/specialist`, a starter agent folder for specialist agents that
   own one area, with charter conventions and a memory skill. CI validates it.
+- Add `agents/nanite-setup-expert`, a specialist agent for setting up Nanite
+  and Surface ADE agents. CI validates every folder under `agents/`.
 
 ## 0.12.1
 

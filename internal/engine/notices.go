@@ -273,7 +273,7 @@ func (e *Engine) ProtectSecret(name, value string) { e.cfg.ProviderConfig.Redact
 func (e *Engine) WithdrawQueuedNotice(ctx context.Context, conversation, id string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.active[conversation] != nil {
+	if e.busyLocked(conversation) {
 		return ErrBusy
 	}
 	return e.cfg.Store.WithdrawNotice(ctx, conversation, id)

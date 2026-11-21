@@ -41,16 +41,16 @@ func (e *IntegrityError) Unwrap() error { return ErrIntegrity }
 
 // CheckIntegrity validates a conversation's transcript and index without
 // writing or emitting anything. It refuses with ErrBusy while the
-// conversation has a run: a transcript being written can look torn.
+// conversation has a run or another check: a transcript being written can
+// look torn.
 func (e *Engine) CheckIntegrity(ctx context.Context, id string) (integrity.Report, error) {
 	if _, err := e.cfg.Store.Conversation(ctx, id); err != nil {
 		return integrity.Report{}, err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.active[id] != nil {
-		return integrity.Report{}, ErrBusy
+	if err := e.claimCheck(id); err != nil {
+		return integrity.Report{}, err
 	}
+	defer e.releaseCheck(id)
 	return e.cfg.Store.ValidateConversation(ctx, id, nil)
 }
 
@@ -78,47 +78,79 @@ func (e *Engine) ObserveIntegrity(ctx context.Context, conversation, stage strin
 	})
 }
 
-// runGate decides whether a run may start on a conversation. Resume always
-// validates first, before anything reads the history or assembles context.
-// Any other run validates only a conversation an earlier check marked
-// blocked, so an unsafe history never reaches a model through Send after a
-// Discard either; a passing check clears the mark. It holds the engine lock
-// while it validates, so no run, Discard or Record writes the transcript
-// meanwhile.
-func (e *Engine) runGate(ctx context.Context, id string, resume bool) error {
+// busyLocked reports, with e.mu held, whether a run or an integrity check
+// has the conversation. Every writer of a transcript checks it.
+func (e *Engine) busyLocked(id string) bool { return e.active[id] != nil || e.checking[id] }
+
+// claimCheck reserves a conversation for an integrity check, so no run,
+// Discard or Record writes its transcript while the check reads it without
+// holding e.mu (a check replays the whole transcript; other conversations
+// must not wait for it).
+func (e *Engine) claimCheck(id string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.active[id] != nil {
-		// The run would be refused anyway; validating a transcript a run is
-		// writing could report a transient torn tail instead.
+	if e.busyLocked(id) {
 		return ErrBusy
 	}
+	e.checking[id] = true
+	return nil
+}
+
+func (e *Engine) releaseCheck(id string) {
+	e.mu.Lock()
+	delete(e.checking, id)
+	e.mu.Unlock()
+}
+
+// runGate decides whether a run may start on a conversation. Resume always
+// validates first, before anything reads the history or assembles context.
+// Any other run (Send, Dispatch, Record) validates only a conversation an
+// earlier check marked blocked, so an unsafe history never reaches a model
+// after a Discard either; a passing check clears the mark. The event is
+// emitted with no lock held: a host's sink may call back into the engine.
+func (e *Engine) runGate(ctx context.Context, id string, resume bool) error {
 	if !resume {
 		mark, err := e.cfg.Store.Setting(ctx, id, store.SettingIntegrity)
 		if err != nil || mark == "" {
 			return err
 		}
 	}
+	if err := e.claimCheck(id); err != nil {
+		return err
+	}
+	report, err := e.validate(ctx, id)
+	e.releaseCheck(id)
 	stage := "send"
 	if resume {
 		stage = "resume"
 	}
-	return e.validateLocked(ctx, id, stage)
+	if checkRan(err) {
+		e.ObserveIntegrity(ctx, id, stage, report)
+	}
+	return err
 }
 
-// validateLocked validates a conversation with e.mu held, records the
-// outcome as the conversation's mark, and refuses an unsafe one.
-func (e *Engine) validateLocked(ctx context.Context, id, stage string) error {
+// validate checks a conversation whose transcript nothing is writing (the
+// caller holds a check claim, e.mu, or the conversation's run), records the
+// outcome as the conversation's mark, and refuses an unsafe one. It emits
+// nothing; the caller reports the check once no lock is held.
+func (e *Engine) validate(ctx context.Context, id string) (integrity.Report, error) {
 	report, err := e.cfg.Store.ValidateConversation(ctx, id, nil)
 	if err != nil {
-		return err
+		return report, err
 	}
-	e.ObserveIntegrity(ctx, id, stage, report)
 	if err := recovery.MarkBlocked(ctx, e.cfg.Store, id, !report.Safe()); err != nil {
-		return err
+		return report, err
 	}
 	if !report.Safe() {
-		return &IntegrityError{Conversation: id, Report: report}
+		return report, &IntegrityError{Conversation: id, Report: report}
 	}
-	return nil
+	return report, nil
+}
+
+// checkRan reports whether validate completed: a pass or a typed refusal,
+// not a store error, so only checks that ran are reported.
+func checkRan(err error) bool {
+	var refused *IntegrityError
+	return err == nil || errors.As(err, &refused)
 }

@@ -48,6 +48,9 @@ func printIntegrity(w io.Writer, err error) {
 			"Remove them (truncate that segment to %d bytes and delete any later segment), then run `nanite rebuild-index`.\n", segment, c.Offset, c.Offset)
 		return
 	}
-	_, _ = fmt.Fprintf(w, "This conversation refuses new turns until an integrity check passes; continue in a new conversation.\n"+
-		"--discard %s closes its interrupted turn but does not unblock it.\n", refused.Conversation)
+	if refused.Interrupted {
+		_, _ = fmt.Fprintf(w, "--discard %s closes its interrupted turn; the conversation still takes no new turns, so continue in a new one.\n", refused.Conversation)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "This conversation takes no new turns until an integrity check passes; continue in a new conversation.\n")
 }

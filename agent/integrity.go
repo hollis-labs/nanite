@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+
 	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/integrity"
 )
@@ -43,3 +45,10 @@ type IntegrityError = engine.IntegrityError
 
 // ErrIntegrity is matched by every IntegrityError.
 var ErrIntegrity = engine.ErrIntegrity
+
+// BlockedConversations lists the conversations an integrity check marked
+// blocked: they take no new turns until a check passes. It reads the marks
+// only.
+func (a *Agent) BlockedConversations(ctx context.Context) ([]string, error) {
+	return a.engine.BlockedConversations(ctx)
+}

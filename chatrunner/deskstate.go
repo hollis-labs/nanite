@@ -134,7 +134,7 @@ func (d *Desk) persist(chatID string) {
 }
 
 func (d *Desk) write(ctx context.Context, chatID, raw string) error {
-	conv, err := d.r.agent.Conversation(ctx, ConversationID(chatID))
+	conv, err := d.r.agent.Conversation(ctx, d.r.naniteID(chatID))
 	if errors.Is(err, agent.ErrNoConversation) && raw == "" {
 		return nil
 	}
@@ -236,7 +236,7 @@ func (d *Desk) load(ctx context.Context) error {
 			Version int    `json:"version"`
 			ChatID  string `json:"chat_id"`
 		}
-		if json.Unmarshal([]byte(raw), &head) == nil && head.Version > deskStateV1 && head.ChatID != "" && ConversationID(head.ChatID) == naniteID {
+		if json.Unmarshal([]byte(raw), &head) == nil && head.Version > deskStateV1 && head.ChatID != "" && d.r.naniteID(head.ChatID) == naniteID {
 			d.mu.Lock()
 			d.chat(head.ChatID).frozen = true
 			d.mu.Unlock()
@@ -244,7 +244,10 @@ func (d *Desk) load(ctx context.Context) error {
 			continue
 		}
 		var s savedChat
-		if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Version != deskStateV1 || s.ChatID == "" || ConversationID(s.ChatID) != naniteID {
+		if err := json.Unmarshal([]byte(raw), &s); err == nil && s.ChatID != "" && d.r.naniteID(s.ChatID) != naniteID && d.r.olderGeneration(s.ChatID, naniteID) {
+			continue // the conversation that served the chat before a ResetChat
+		}
+		if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Version != deskStateV1 || s.ChatID == "" || d.r.naniteID(s.ChatID) != naniteID {
 			d.logger.Warn("chatrunner: saved desk state unreadable; dropped", "conversation", naniteID)
 			continue
 		}
@@ -386,7 +389,7 @@ func (d *Desk) Recover(ctx context.Context) error {
 			plans = append(plans, p)
 			for ref, item := range p.refs {
 				if ref.Kind == "job" && p.state[item] == desk.WorkRunning {
-					jobs = append(jobs, inflight{p, chatID, ConversationID(chatID), ref.ID})
+					jobs = append(jobs, inflight{p, chatID, d.r.naniteID(chatID), ref.ID})
 				}
 			}
 		}

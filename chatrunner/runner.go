@@ -142,6 +142,9 @@ type Runner struct {
 	// resuming is the chats whose turn a Resume has claimed.
 	holds    map[string]*hold
 	resuming map[string]bool
+	// generations counts how many times each chat was reset (ResetChat):
+	// it picks the Nanite conversation that serves the chat now.
+	generations map[string]int
 	// serving is set once the chat Service is known to run.
 	serving bool
 	// auth is the Warden grant requests turns wait on.
@@ -185,6 +188,10 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		return nil, err
 	}
 	r.agent = a
+	if err := r.loadGenerations(ctx); err != nil {
+		_ = a.Close()
+		return nil, err
+	}
 	if err := r.SetTools(opts.Tools...); err != nil {
 		_ = a.Close()
 		return nil, err
@@ -220,7 +227,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 // yet: the desk's default Mode when steering is on.
 func (r *Runner) mode(chatID string) string {
 	ctx := context.Background()
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if err != nil {
 		return ""
 	}
@@ -265,8 +272,9 @@ func (r *Runner) Close() error {
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
-// ConversationID is the Nanite conversation that serves a chat conversation.
-// It is the RunnerRef on the chat conversation record.
+// ConversationID is the Nanite conversation that first serves a chat
+// conversation. After Runner.ResetChat a chat is served by a newer one; use
+// Runner.ConversationOf for the current one.
 func ConversationID(chatID string) string {
 	if safeID.MatchString(chatID) {
 		return "chat-" + chatID
@@ -281,7 +289,7 @@ func ConversationID(chatID string) string {
 // previous process left unfinished is kept: see Interrupted, Resume and
 // Discard.
 func (r *Runner) conversation(ctx context.Context, chatID string) (*agent.Conversation, error) {
-	id := ConversationID(chatID)
+	id := r.naniteID(chatID)
 	c, err := r.agent.EnsureConversation(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("chatrunner: open conversation: %w", err)
@@ -594,7 +602,7 @@ func contextText(raw json.RawMessage) string {
 // Info reports what the runner does and the Nanite conversation that serves
 // a chat conversation.
 func (r *Runner) Info(_ context.Context, conversationID string) (chat.Info, error) {
-	return chat.Info{Deltas: true, Approvals: true, RunnerRef: ConversationID(conversationID)}, nil
+	return chat.Info{Deltas: true, Approvals: true, RunnerRef: r.naniteID(conversationID)}, nil
 }
 
 // Record adds an exchange the host answered itself to the agent's history.
@@ -686,7 +694,7 @@ func (r *Runner) beginAfterDesk(ctx context.Context, turn chat.Turn, start func(
 		if err == nil || !errors.Is(err, agent.ErrBusy) {
 			return x, err
 		}
-		held := r.activeRun(ConversationID(turn.ConversationID))
+		held := r.activeRun(r.naniteID(turn.ConversationID))
 		if held == nil {
 			continue // it was released meanwhile: try again
 		}

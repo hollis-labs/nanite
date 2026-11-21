@@ -477,7 +477,11 @@ and identifier-only `Evidence`. `Discard` still closes an interrupted turn, but
 the conversation stays blocked: start a new conversation, or repair the
 transcript. A torn tail is never committed data and is safe to remove.
 `Conversation.CheckIntegrity` returns the same report without writing; it
-refuses with `ErrBusy` while the conversation has a run. A runtime event
+refuses with `ErrBusy` while the conversation has a run.
+`Conversation.Verify` runs the check `Resume` runs, without a turn, and
+records the outcome (blocked or cleared). `Agent.BlockedConversations` lists
+the conversations marked blocked. `IntegrityError.Interrupted` says whether an
+interrupted turn is left to discard. A runtime event
 (`phase: integrity`) records each check's stage, disposition, worst severity
 and per-code counts, and never message content.
 
@@ -500,11 +504,25 @@ the owner is not offered the turn, and it waits out its hold.
   returns once `Observe` accepts the run, which waits while another run holds
   the chat.
 - **Integrity.** A conversation that fails integrity checks is never resumed.
-  `Runner.Resume` returns the agent's `*IntegrityError` before publishing
-  anything. With `Options.ResumeInterrupted`, `RecoverTurns` reports that error
-  and offers the turn with `integrity: blocked` and only the `discard` action.
-  After a discard, the owner's next message on that chat is refused with the
-  same error until the conversation passes a check.
+  `Runner.Resume` checks it under the same claim `Resume` uses and returns the
+  agent's `*IntegrityError` before publishing anything. Both `RecoverTurns`
+  modes then offer the turn with `integrity: blocked` and no `resume` action:
+  `discard` while there is a turn the transcript can still close, and `reset`.
+  `RecoverTurns` also offers `reset` alone for a blocked chat that has no turn
+  left to discard (a torn tail leaves its turn running), and so does a discard
+  that leaves the chat blocked. When the hold runs out on a turn that cannot
+  be discarded, the hold stops and `reset` is offered instead of retrying.
+- **Reset.** A blocked chat takes no new messages; the refusal says so.
+  `Runner.ResetChat(ctx, chatID)` moves the chat to a new, empty Nanite
+  conversation and returns its ID. It refuses while a run holds the chat
+  (`agent.ErrBusy`) or while the chat has an interrupted turn
+  (`ErrResetInterrupted`): discard it first. The move is saved in agent host
+  state, so a restart keeps it; `Runner.ConversationOf(chatID)` names the
+  conversation serving a chat now (`ConversationID` is only the first). The
+  previous conversation stays on disk untouched, for inspection and
+  `nanite rebuild-index`. The chat is told with a `nanite.chat_reset` activity
+  (`previous_conversation`, `conversation`, `reason`: `integrity` or
+  `requested`).
 - `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
   `Record`, also discards it: the owner has moved on.
 - `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report

@@ -124,6 +124,16 @@ func (c *Conversation) CheckIntegrity(ctx context.Context) (IntegrityReport, err
 	return c.agent.engine.CheckIntegrity(ctx, c.id)
 }
 
+// Verify checks the conversation as Resume does before a turn, without
+// starting one, and records the outcome: an unsafe conversation is marked
+// blocked (refusing new turns), a safe one is cleared. It returns an
+// *IntegrityError while the conversation is unsafe, nil when it is safe,
+// and ErrBusy while a run or another check has it. It replays the whole
+// transcript; use it for conversations recovery or a refusal pointed at.
+func (c *Conversation) Verify(ctx context.Context) error {
+	return c.agent.engine.Verify(ctx, c.id)
+}
+
 // Discard abandons an interrupted turn instead of resuming it. The
 // conversation keeps what the turn already stored and accepts new messages.
 func (c *Conversation) Discard(ctx context.Context) error {

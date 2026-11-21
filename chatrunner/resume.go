@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -20,8 +21,10 @@ import (
 // unfinished. Its value names the turn and either offers the actions
 // (`actions`: resume, discard) or says what became of it (`disposition`:
 // discarded, with `reason`: new message, timeout or requested). An offer
-// carrying `integrity`: blocked has only the discard action: the
-// conversation failed integrity checks and resume is refused.
+// carrying `integrity`: blocked never offers resume: the conversation
+// failed integrity checks. It offers `discard` while there is a turn to
+// close, and `reset` (Runner.ResetChat) to continue in a new conversation;
+// with no turn left it names no turn.
 const ActivityInterrupted = "nanite.interrupted"
 
 // chatHostState is the host state on a Nanite conversation naming the chat
@@ -93,7 +96,7 @@ func (r *Runner) holdInterrupted(ctx context.Context) {
 }
 
 func (r *Runner) startHold(ctx context.Context, chatID string) {
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if err != nil {
 		return
 	}
@@ -150,7 +153,7 @@ func (r *Runner) endHold(chatID string) {
 		h.noticeMu.Unlock()
 	}
 	ctx := context.Background()
-	if c, err := r.agent.Conversation(ctx, ConversationID(chatID)); err == nil {
+	if c, err := r.agent.Conversation(ctx, r.naniteID(chatID)); err == nil {
 		if err := c.SetHostState(ctx, holdHostState, ""); err != nil {
 			r.logger().Warn("chatrunner: clear interrupted hold", "conversation", chatID, "error", err.Error())
 		}
@@ -174,7 +177,7 @@ func (r *Runner) expireHold(chatID, turnID string) {
 		return // a successful resume ends the hold; unclaim re-arms failures
 	}
 	ctx := context.Background()
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if err != nil {
 		r.rearmHold(chatID, err)
 		return
@@ -184,9 +187,21 @@ func (r *Runner) expireHold(chatID, turnID string) {
 		return
 	}
 	if err := c.Discard(ctx); err != nil {
-		if errors.Is(err, agent.ErrNoInterrupted) {
+		refused := err
+		switch {
+		case errors.Is(err, agent.ErrNoInterrupted):
 			r.endHold(chatID)
-		} else {
+		case errors.Is(err, agent.ErrIntegrity):
+			// The transcript refuses the discard itself (a torn tail):
+			// retrying cannot succeed. Park the hold and offer a reset.
+			r.endHold(chatID)
+			r.logger().Warn("chatrunner: interrupted turn cannot be discarded; the chat needs a reset", "conversation", chatID, "turn", turnID)
+			if r.opts.Observe != nil {
+				if err := r.offerBlocked(ctx, chatID, refused); err != nil {
+					r.logger().Warn("chatrunner: offer reset", "conversation", chatID, "error", err.Error())
+				}
+			}
+		default:
 			r.rearmHold(chatID, err)
 		}
 		return
@@ -194,6 +209,7 @@ func (r *Runner) expireHold(chatID, turnID string) {
 	r.endHold(chatID)
 	r.logger().Info("chatrunner: interrupted turn discarded after its hold", "conversation", chatID, "turn", turnID)
 	r.announce(chatID, discardedActivity(turnID, "timeout"))
+	r.offerResetIfBlocked(ctx, chatID)
 	if r.desk != nil {
 		r.desk.idle(chatID)
 	}
@@ -276,7 +292,7 @@ func (r *Runner) serve() {
 // Interrupted reports the turn the previous process left unfinished on a
 // chat conversation, or nil.
 func (r *Runner) Interrupted(ctx context.Context, chatID string) (*agent.InterruptedTurn, error) {
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if errors.Is(err, agent.ErrNoConversation) {
 		return nil, nil
 	}
@@ -303,6 +319,9 @@ func (r *Runner) InterruptedChats(ctx context.Context) ([]string, error) {
 	r.mu.Unlock()
 	var out []string
 	for naniteID, chatID := range chats {
+		if r.naniteID(chatID) != naniteID {
+			continue // served the chat before a ResetChat
+		}
 		c, err := r.agent.Conversation(ctx, naniteID)
 		if err != nil {
 			continue
@@ -332,6 +351,17 @@ func (r *Runner) RecoverTurns(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A chat whose conversation failed integrity checks with no turn left
+	// to resume (a torn tail leaves its turn running) is offered a reset;
+	// the owner must hear of it rather than find a failed send.
+	blocked, err := r.blockedChats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	interrupted := map[string]bool{}
+	for _, chatID := range chats {
+		interrupted[chatID] = true
+	}
 	var handled []string
 	var errs []error
 	for _, chatID := range chats {
@@ -345,8 +375,8 @@ func (r *Runner) RecoverTurns(ctx context.Context) ([]string, error) {
 			err = r.Resume(ctx, chatID)
 			if errors.Is(err, agent.ErrIntegrity) {
 				// Never resumed through an unsafe finding: the owner can
-				// still discard it, and the hold discards it in time.
-				err = errors.Join(err, r.offerActions(ctx, chatID, "blocked", "discard"))
+				// still discard it, then reset the chat.
+				err = errors.Join(err, r.offerBlocked(ctx, chatID, err))
 			}
 		} else {
 			err = r.offer(ctx, chatID)
@@ -357,13 +387,50 @@ func (r *Runner) RecoverTurns(ctx context.Context) ([]string, error) {
 		}
 		handled = append(handled, chatID)
 	}
+	for _, chatID := range blocked {
+		if interrupted[chatID] {
+			continue
+		}
+		if err := r.offer(ctx, chatID); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", chatID, err))
+			continue
+		}
+		handled = append(handled, chatID)
+	}
+	slices.Sort(handled)
 	return handled, errors.Join(errs...)
 }
 
 // offer publishes a run that only tells the owner about the interrupted
 // turn and what they can do with it.
 func (r *Runner) offer(ctx context.Context, chatID string) error {
+	switch err := r.checkResumable(ctx, chatID); {
+	case errors.Is(err, agent.ErrIntegrity):
+		return r.offerBlocked(ctx, chatID, err)
+	case err != nil && !errors.Is(err, agent.ErrNoConversation):
+		return err
+	}
 	return r.offerActions(ctx, chatID, "", "resume", "discard")
+}
+
+// offerBlocked offers what is left for a chat whose conversation failed
+// integrity checks (refused, when known, is that refusal): discarding its
+// interrupted turn, if it has one and the transcript still takes writes,
+// and resetting the chat to a new conversation.
+func (r *Runner) offerBlocked(ctx context.Context, chatID string, refused error) error {
+	turn, err := r.Interrupted(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	var integrityErr *agent.IntegrityError
+	torn := errors.As(refused, &integrityErr) && slices.ContainsFunc(integrityErr.Report.Unsafe(), func(f agent.IntegrityFinding) bool {
+		return f.Code == "torn_tail"
+	})
+	if turn != nil && !torn {
+		return r.offerActions(ctx, chatID, "blocked", "discard", "reset")
+	}
+	ev := activity(ActivityInterrupted, map[string]any{"actions": []string{"reset"}, "integrity": "blocked"})
+	return r.opts.Observe(ctx, chatID, chat.Turn{ConversationID: chatID}, &announceRun{events: []chatstream.Event{ev}})
 }
 
 // offerActions offers the interrupted turn with the given actions. A
@@ -473,7 +540,7 @@ func (r *Runner) rearmHold(chatID string, cause error) {
 // conversation. The conversation then takes new turns, and the front desk's
 // waiting work starts.
 func (r *Runner) Discard(ctx context.Context, chatID string) error {
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if err != nil {
 		return fmt.Errorf("chatrunner: open conversation: %w", err)
 	}
@@ -488,6 +555,7 @@ func (r *Runner) Discard(ctx context.Context, chatID string) error {
 	r.endHold(chatID)
 	if turn != nil {
 		r.announce(chatID, discardedActivity(turn.ID, "requested"))
+		r.offerResetIfBlocked(ctx, chatID)
 	}
 	if r.desk != nil {
 		go r.desk.idle(chatID) //nolint:gosec // G118: the desk's work outlives this call
@@ -594,18 +662,55 @@ func (a *announceRun) Answer(context.Context, string, chat.Decision) error {
 }
 
 // checkResumable refuses a chat whose conversation has an unsafe integrity
-// finding, with the agent's *IntegrityError.
+// finding, with the agent's *IntegrityError. It checks under the same claim
+// Resume uses, so a transcript another writer is appending to is never
+// taken for a torn one.
 func (r *Runner) checkResumable(ctx context.Context, chatID string) error {
-	c, err := r.agent.Conversation(ctx, ConversationID(chatID))
-	if err != nil {
-		return fmt.Errorf("chatrunner: open conversation: %w", err)
-	}
-	report, err := c.CheckIntegrity(ctx)
+	c, err := r.agent.Conversation(ctx, r.naniteID(chatID))
 	if err != nil {
 		return err
 	}
-	if !report.Safe() {
-		return &agent.IntegrityError{Conversation: c.ID(), Report: report}
+	return c.Verify(ctx)
+}
+
+// blockedChats lists the chats whose current conversation is marked
+// blocked by an integrity check.
+func (r *Runner) blockedChats(ctx context.Context) ([]string, error) {
+	ids, err := r.agent.BlockedConversations(ctx)
+	if err != nil || len(ids) == 0 {
+		return nil, err
 	}
-	return nil
+	chats, err := r.agent.ConversationHostStates(ctx, chatHostState)
+	if err != nil {
+		return nil, fmt.Errorf("chatrunner: list chats: %w", err)
+	}
+	r.mu.Lock()
+	for naniteID, chatID := range r.chats {
+		chats[naniteID] = chatID
+	}
+	r.mu.Unlock()
+	var out []string
+	for _, id := range ids {
+		if chatID, ok := chats[id]; ok && r.naniteID(chatID) == id {
+			out = append(out, chatID)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// offerResetIfBlocked offers a reset after a discard leaves the chat's
+// conversation blocked: the turn is closed, but the history still takes no
+// new turns.
+func (r *Runner) offerResetIfBlocked(ctx context.Context, chatID string) {
+	if r.opts.Observe == nil {
+		return
+	}
+	ids, err := r.agent.BlockedConversations(ctx)
+	if err != nil || !slices.Contains(ids, r.naniteID(chatID)) {
+		return
+	}
+	if err := r.offerBlocked(ctx, chatID, nil); err != nil {
+		r.logger().Warn("chatrunner: offer reset", "conversation", chatID, "error", err.Error())
+	}
 }

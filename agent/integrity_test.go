@@ -246,8 +246,9 @@ func TestResumeRefusesUnsafeFindingAndDiscardStaysAvailable(t *testing.T) {
 	if refused.Conversation != conversation || len(unsafe) != 1 || unsafe[0].Code != "orphan_tool_result" || unsafe[0].Evidence["tool_use_id"] != "never-called" {
 		t.Fatalf("refusal %+v", refused)
 	}
-	if !strings.Contains(err.Error(), "orphan_tool_result") || strings.Contains(err.Error(), "secret") {
-		t.Fatalf("error text %q", err)
+	if !strings.Contains(err.Error(), "orphan_tool_result") || strings.Contains(err.Error(), "secret") ||
+		!refused.Interrupted || !strings.Contains(err.Error(), "can still be discarded") {
+		t.Fatalf("error text %q (interrupted %v)", err, refused.Interrupted)
 	}
 	if got := events.integrity(t); len(got) != 2 || got[1]["stage"] != "resume" || got[1]["disposition"] != "blocked" {
 		t.Fatalf("resume events %v", got)
@@ -263,7 +264,8 @@ func TestResumeRefusesUnsafeFindingAndDiscardStaysAvailable(t *testing.T) {
 	}
 	// Discard closes the turn but leaves the history unsafe: a new turn
 	// would send it to the model, so it is refused too, across a restart.
-	if run, err := c.Send(t.Context(), agent.Input{Text: "next"}); run != nil || !errors.Is(err, agent.ErrIntegrity) {
+	if run, err := c.Send(t.Context(), agent.Input{Text: "next"}); run != nil || !errors.As(err, &refused) ||
+		refused.Interrupted || !strings.Contains(err.Error(), "closed to new turns") {
 		t.Fatalf("send after discard = %v, %v", run, err)
 	}
 	if got := events.integrity(t); got[len(got)-1]["stage"] != "send" || got[len(got)-1]["disposition"] != "blocked" {

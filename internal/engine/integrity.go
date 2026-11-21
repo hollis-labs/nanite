@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hollis-labs/libs/core/panics"
@@ -16,12 +17,16 @@ import (
 // ErrIntegrity is matched (errors.Is) by every IntegrityError.
 var ErrIntegrity = errors.New("conversation failed integrity checks")
 
-// IntegrityError refuses Resume through an unsafe integrity finding. Report
-// holds every finding, in order; Report.Unsafe() lists the blocking ones.
-// Discard remains available unless the transcript refuses writes.
+// IntegrityError refuses a run on a conversation an integrity check found
+// unsafe. Report holds every finding, in order; Report.Unsafe() lists the
+// blocking ones. Interrupted says whether the conversation still has an
+// interrupted turn, which Discard can close (unless the transcript refuses
+// writes). Either way the conversation takes no new turns until a check
+// passes: continue in a new conversation.
 type IntegrityError struct {
 	Conversation string
 	Report       integrity.Report
+	Interrupted  bool
 }
 
 func (e *IntegrityError) Error() string {
@@ -34,8 +39,12 @@ func (e *IntegrityError) Error() string {
 			codes = append(codes, string(f.Code))
 		}
 	}
-	return fmt.Sprintf("conversation %s failed integrity checks (%d unsafe finding(s): %s); resume refused, discard is still available",
-		e.Conversation, len(unsafe), strings.Join(codes, ", "))
+	next := "it is closed to new turns; continue in a new conversation"
+	if e.Interrupted {
+		next = "it takes no new turns; its interrupted turn can still be discarded, then continue in a new conversation"
+	}
+	return fmt.Sprintf("conversation %s failed integrity checks (%d unsafe finding(s): %s); %s",
+		e.Conversation, len(unsafe), strings.Join(codes, ", "), next)
 }
 
 func (e *IntegrityError) Unwrap() error { return ErrIntegrity }
@@ -130,7 +139,17 @@ func (e *Engine) releaseCheck(id string) {
 // after a Discard either; a passing check clears the mark. The event is
 // emitted with no lock held: a host's sink may call back into the engine.
 func (e *Engine) runGate(ctx context.Context, id string, resume bool) error {
-	if !resume {
+	stage := "send"
+	if resume {
+		stage = "resume"
+	}
+	return e.gate(ctx, id, resume, stage)
+}
+
+// gate validates under a claim when always is set or the conversation is
+// marked blocked, and reports the check as stage.
+func (e *Engine) gate(ctx context.Context, id string, always bool, stage string) error {
+	if !always {
 		mark, err := e.cfg.Store.Setting(ctx, id, store.SettingIntegrity)
 		if err != nil || mark == "" {
 			return err
@@ -143,10 +162,6 @@ func (e *Engine) runGate(ctx context.Context, id string, resume bool) error {
 		defer e.releaseCheck(id)
 		return e.validate(ctx, id)
 	}()
-	stage := "send"
-	if resume {
-		stage = "resume"
-	}
 	if checkRan(err) {
 		e.ObserveIntegrity(ctx, id, stage, report)
 	}
@@ -166,9 +181,41 @@ func (e *Engine) validate(ctx context.Context, id string) (integrity.Report, err
 		return report, err
 	}
 	if !report.Safe() {
-		return report, &IntegrityError{Conversation: id, Report: report}
+		refused := &IntegrityError{Conversation: id, Report: report}
+		if turn, err := e.cfg.Store.Interrupted(ctx, id); err == nil && turn != nil {
+			refused.Interrupted = true
+		}
+		return report, refused
 	}
 	return report, nil
+}
+
+// Verify checks a conversation under a claim, as Resume does before a turn,
+// without starting one: it updates the conversation's blocked mark, emits
+// the check, and returns *IntegrityError while the conversation is unsafe,
+// nil when it is safe, and ErrBusy while a run or another check has it.
+func (e *Engine) Verify(ctx context.Context, id string) error {
+	if _, err := e.cfg.Store.Conversation(ctx, id); err != nil {
+		return err
+	}
+	return e.gate(ctx, id, true, "check")
+}
+
+// BlockedConversations lists the conversations an integrity check marked
+// blocked, in order. It reads the marks only; it validates nothing.
+func (e *Engine) BlockedConversations(ctx context.Context) ([]string, error) {
+	marks, err := e.cfg.Store.SettingsByKey(ctx, store.SettingIntegrity)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(marks))
+	for id, mark := range marks {
+		if id != "" && mark != "" {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // checkRan reports whether validate completed: a pass or a typed refusal,

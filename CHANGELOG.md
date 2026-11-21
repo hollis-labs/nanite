@@ -47,8 +47,11 @@ from the test-suite audit. No breaking changes.
   projected and the conversation is refused until the tail is removed; the
   finding names the exact cut (`truncate_torn_tail`).
   Damage before the tail is now reported as changed history and still
-  refuses to open. The chatrunner never resumes through an unsafe finding
-  and offers such a turn for discard only.
+  refuses to open. The chatrunner never resumes through an unsafe finding:
+  its offers drop `resume` for a blocked chat and add `reset`, and the new
+  `Runner.ResetChat` moves a blocked chat to a new conversation, kept across
+  restarts, leaving the old one on disk. Adds `Conversation.Verify` and
+  `Agent.BlockedConversations`.
 
 ## 0.15.0
 

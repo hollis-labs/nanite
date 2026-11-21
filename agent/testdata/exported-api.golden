@@ -2,6 +2,7 @@ const ActivityAuthWaiting untyped string
 type Agent struct
   (*Agent) AuthDecided(id string, status string)
   (*Agent) AuthRequest(ctx context.Context, id string) (AuthWaiting, error)
+  (*Agent) BlockedConversations(ctx context.Context) ([]string, error)
   (*Agent) Close() error
   (*Agent) Complete(ctx context.Context, use string, system string, prompt string, maxTokens int) (string, error)
   (*Agent) Conversation(ctx context.Context, id string) (*Conversation, error)
@@ -93,6 +94,7 @@ type Conversation struct
   (*Conversation) Steer(ctx context.Context, in Input) (*PreparedSteer, error)
   (*Conversation) SteerEvent(ctx context.Context, topic string) (HostFired, error)
   (*Conversation) SteerFocus(ctx context.Context, view string) (HostFired, error)
+  (*Conversation) Verify(ctx context.Context) error
   (*Conversation) WithdrawQueuedNotice(ctx context.Context, key string) error
 type ConversationInfo = github.com/hollis-labs/nanite/internal/store.Conversation struct
   field ID string
@@ -166,6 +168,7 @@ type IntegrityCode = github.com/hollis-labs/nanite/internal/integrity.Code strin
 type IntegrityError = github.com/hollis-labs/nanite/internal/engine.IntegrityError struct
   field Conversation string
   field Report github.com/hollis-labs/nanite/internal/integrity.Report
+  field Interrupted bool
   (*IntegrityError) Error() string
   (*IntegrityError) Unwrap() error
 type IntegrityFinding = github.com/hollis-labs/nanite/internal/integrity.Finding struct

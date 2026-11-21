@@ -514,15 +514,20 @@ the owner is not offered the turn, and it waits out its hold.
   be discarded, the hold stops and `reset` is offered instead of retrying.
 - **Reset.** A blocked chat takes no new messages; the refusal says so.
   `Runner.ResetChat(ctx, chatID)` moves the chat to a new, empty Nanite
-  conversation and returns its ID. It refuses while a run holds the chat
-  (`agent.ErrBusy`) or while the chat has an interrupted turn
-  (`ErrResetInterrupted`): discard it first. The move is saved in agent host
+  conversation and returns its ID. It refuses while a run, a `Resume` or
+  another reset holds the chat (`agent.ErrBusy`), and while the chat has an
+  interrupted turn that `Discard` can still close (`ErrResetInterrupted`):
+  discard it first. A turn whose transcript refuses the discard (a torn tail)
+  stays behind with the old conversation. A message arriving during a reset
+  is refused rather than run on the old conversation. The move is saved in agent host
   state, so a restart keeps it; `Runner.ConversationOf(chatID)` names the
   conversation serving a chat now (`ConversationID` is only the first). The
   previous conversation stays on disk untouched, for inspection and
   `nanite rebuild-index`. The chat is told with a `nanite.chat_reset` activity
   (`previous_conversation`, `conversation`, `reason`: `integrity` or
-  `requested`).
+  `requested`). The front desk's state belongs to the chat, so its plans and
+  ledger carry over to the new conversation. Grant waits a turn of the old
+  conversation left behind are dropped: nothing resumes that turn.
 - `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
   `Record`, also discards it: the owner has moved on.
 - `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report

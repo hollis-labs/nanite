@@ -2,9 +2,13 @@ package chatrunner_test
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -256,4 +260,108 @@ func TestHoldParksWhenTheDiscardCannotBeWritten(t *testing.T) {
 	if turn, err := w.runner.Interrupted(t.Context(), w.conv); err != nil || turn == nil {
 		t.Fatalf("the turn was discarded through a torn tail: %+v, %v", turn, err)
 	}
+	// The discard cannot be written, and the refusal says so.
+	var refused *agent.IntegrityError
+	if err := w.runner.Discard(t.Context(), w.conv); !errors.As(err, &refused) || refused.Interrupted ||
+		strings.Contains(err.Error(), "can still be discarded") {
+		t.Fatalf("discard through a torn tail: %v", err)
+	}
+	// The reset is the way on: the turn stays with the old conversation.
+	next, err := w.runner.ResetChat(t.Context(), w.conv)
+	if err != nil {
+		t.Fatalf("reset with an interrupted turn the transcript cannot close: %v", err)
+	}
+	if chats, err := w.runner.InterruptedChats(t.Context()); err != nil || len(chats) != 0 {
+		t.Fatalf("the old conversation's turn is still listed: %v, %v", chats, err)
+	}
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "after the reset"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "an answer in the new conversation", func() bool { return w.brain.answers("after the reset") == 1 })
+	if w.runner.ConversationOf(w.conv) != next {
+		t.Fatalf("serving %s, want %s", w.runner.ConversationOf(w.conv), next)
+	}
+}
+
+// A message arriving while a chat is reset either runs before the reset
+// (which then refuses as busy) or is refused: no run is ever left on the
+// conversation the chat no longer uses.
+func TestResetNeverStrandsARunOnTheOldConversation(t *testing.T) {
+	dir := t.TempDir()
+	w := newWiredIn(t, dir, false, nil)
+	for i := range 150 {
+		view, err := w.svc.EnsureConversation(t.Context(), fmt.Sprintf("c%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		chatID := view.ConversationID
+		var wg sync.WaitGroup
+		var resetErr error
+		wg.Add(2)
+		go func() { defer wg.Done(); _, _ = w.svc.Submit(t.Context(), chatID, chat.Turn{Text: "long"}) }()
+		go func() { defer wg.Done(); _, resetErr = w.runner.ResetChat(t.Context(), chatID) }()
+		wg.Wait()
+		if resetErr != nil {
+			if !errors.Is(resetErr, agent.ErrBusy) {
+				t.Fatalf("reset %d: %v", i, resetErr)
+			}
+			continue
+		}
+		matches, _ := filepath.Glob(filepath.Join(dir, ".nanite", "transcripts", chatrunner.ConversationID(chatID), "*.jsonl"))
+		for _, m := range matches {
+			raw, _ := os.ReadFile(m) // #nosec G304 -- A transcript under the test's temporary directory.
+			if strings.Contains(string(raw), `"long"`) {
+				t.Fatalf("try %d: a turn ran on the old conversation after the reset succeeded", i)
+			}
+		}
+	}
+}
+
+// A reset refuses while a run holds the chat.
+func TestResetRefusesWhileARunHoldsTheChat(t *testing.T) {
+	w := newWiredIn(t, t.TempDir(), false, nil)
+	if _, err := w.svc.Submit(t.Context(), w.conv, chat.Turn{Text: "long"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to reach the model", func() bool { return w.brain.answers("long") == 1 })
+	if _, err := w.runner.ResetChat(t.Context(), w.conv); !errors.Is(err, agent.ErrBusy) {
+		t.Fatalf("reset during a run: %v", err)
+	}
+}
+
+// The desk's saved state on the conversation a chat used before a reset is
+// skipped quietly on restart, not reported as unreadable.
+func TestDeskStateOfTheOldConversationIsSkipped(t *testing.T) {
+	dir := crashedDeskDir(t)
+	planner := &messagePlanner{}
+	w := newWiredIn(t, dir, false, withDesk(planner, nil))
+	if err := w.runner.Discard(t.Context(), w.conv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.runner.ResetChat(t.Context(), w.conv); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.runner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(lockedLog{&logs, &mu}, nil))
+	newWiredIn(t, dir, false, withDesk(planner, func(o *chatrunner.Options) { o.Agent.Logger = logger }))
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Contains(logs.String(), "saved desk state unreadable") {
+		t.Fatalf("the old conversation's desk state was reported:\n%s", logs.String())
+	}
+}
+
+type lockedLog struct {
+	b  *strings.Builder
+	mu *sync.Mutex
+}
+
+func (l lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
 }

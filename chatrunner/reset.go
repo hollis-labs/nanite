@@ -66,33 +66,48 @@ func (r *Runner) ConversationOf(chatID string) string { return r.naniteID(chatID
 // previous conversation is kept as it is on disk, for inspection and
 // `nanite rebuild-index`; it no longer serves the chat. The move is saved,
 // so a restart keeps it, and it is announced on the chat as a
-// nanite.chat_reset activity. It refuses while a run holds the chat
-// (agent.ErrBusy) or while the chat has an interrupted turn
-// (ErrResetInterrupted). It returns the new conversation's ID.
+// nanite.chat_reset activity. It refuses while a run, a Resume or another
+// reset holds the chat (agent.ErrBusy), and while the chat has an
+// interrupted turn Discard can still close (ErrResetInterrupted); a turn
+// whose transcript refuses the discard (a torn tail) stays with the old
+// conversation. It returns the new conversation's ID.
 func (r *Runner) ResetChat(ctx context.Context, chatID string) (string, error) {
+	// Claim the chat in the same step that finds it idle: a message arriving
+	// meanwhile is refused (beginRun checks the claim and that its
+	// conversation is still the chat's), so no run is left on the old one.
 	r.mu.Lock()
-	if r.closed {
+	switch previous := generationID(chatID, r.generations[chatID]); {
+	case r.closed:
 		r.mu.Unlock()
 		return "", errors.New("chatrunner: closed")
-	}
-	if r.resuming[chatID] {
+	case r.resuming[chatID] || r.resetting[chatID] || r.active[previous] != nil:
 		r.mu.Unlock()
 		return "", agent.ErrBusy
 	}
+	r.resetting[chatID] = true
 	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		delete(r.resetting, chatID)
+		r.mu.Unlock()
+	}()
 	previous := r.naniteID(chatID)
-	if r.activeRun(previous) != nil {
-		return "", agent.ErrBusy
-	}
 	reason := "requested"
 	if c, err := r.agent.Conversation(ctx, previous); err == nil {
-		if c.Interrupted() != nil {
-			return "", ErrResetInterrupted
-		}
-		if err := c.Verify(ctx); errors.Is(err, agent.ErrIntegrity) {
+		err := c.Verify(ctx)
+		var refused *agent.IntegrityError
+		switch {
+		case errors.As(err, &refused):
 			reason = "integrity"
-		} else if errors.Is(err, agent.ErrBusy) {
+			// An interrupted turn the transcript will not let Discard close
+			// (a torn tail) is left behind with the old conversation.
+			if refused.Interrupted {
+				return "", ErrResetInterrupted
+			}
+		case err != nil:
 			return "", err
+		case c.Interrupted() != nil:
+			return "", ErrResetInterrupted
 		}
 	} else if !errors.Is(err, agent.ErrNoConversation) {
 		return "", err

@@ -142,6 +142,8 @@ type Runner struct {
 	// resuming is the chats whose turn a Resume has claimed.
 	holds    map[string]*hold
 	resuming map[string]bool
+	// resetting is the chats a ResetChat has claimed: no run starts on them.
+	resetting map[string]bool
 	// generations counts how many times each chat was reset (ResetChat):
 	// it picks the Nanite conversation that serves the chat now.
 	generations map[string]int
@@ -166,7 +168,7 @@ func Open(ctx context.Context, opts Options) (*Runner, error) {
 		return nil, errors.New("chatrunner: Options.Desk needs Options.Observe")
 	}
 	r := &Runner{opts: opts, replaced: make(chan string), active: map[string]*run{}, chats: map[string]string{}, noticeTurns: map[string]int{}, publishers: map[string]*publisher{},
-		recorded: map[string]bool{}, holds: map[string]*hold{}, resuming: map[string]bool{}}
+		recorded: map[string]bool{}, holds: map[string]*hold{}, resuming: map[string]bool{}, resetting: map[string]bool{}}
 	if opts.Desk != nil {
 		desk := *opts.Desk
 		if desk.Mode == nil && opts.Agent.Steering != nil {
@@ -508,7 +510,10 @@ func (r *Runner) beginRun(ctx context.Context, turn chat.Turn, hostDispatch bool
 	out.ctx, out.stop = runCtx, cancel
 
 	r.mu.Lock()
-	if r.active[out.nanite] != nil {
+	// A reset in progress, or one that finished since c was opened, means c
+	// no longer serves the chat: start nothing on it.
+	stale := r.resetting[turn.ConversationID] || out.nanite != generationID(turn.ConversationID, r.generations[turn.ConversationID])
+	if r.active[out.nanite] != nil || stale {
 		r.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("chatrunner: %w", agent.ErrBusy)

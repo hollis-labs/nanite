@@ -469,6 +469,10 @@ func (r *Runner) Resume(ctx context.Context, chatID string) error {
 		return errors.New("chatrunner: Resume needs Options.Observe")
 	}
 	r.mu.Lock()
+	if r.resetting[chatID] {
+		r.mu.Unlock()
+		return fmt.Errorf("chatrunner: %s: %w", chatID, agent.ErrBusy)
+	}
 	if r.resuming[chatID] {
 		r.mu.Unlock()
 		return fmt.Errorf("chatrunner: %s: %w", chatID, errNoInterrupted)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,9 +21,9 @@ var ErrIntegrity = errors.New("conversation failed integrity checks")
 // IntegrityError refuses a run on a conversation an integrity check found
 // unsafe. Report holds every finding, in order; Report.Unsafe() lists the
 // blocking ones. Interrupted says whether the conversation still has an
-// interrupted turn, which Discard can close (unless the transcript refuses
-// writes). Either way the conversation takes no new turns until a check
-// passes: continue in a new conversation.
+// interrupted turn that Discard can close: false too when the transcript
+// refuses writes (a torn tail). Either way the conversation takes no new
+// turns until a check passes: continue in a new conversation.
 type IntegrityError struct {
 	Conversation string
 	Report       integrity.Report
@@ -183,7 +184,7 @@ func (e *Engine) validate(ctx context.Context, id string) (integrity.Report, err
 	if !report.Safe() {
 		refused := &IntegrityError{Conversation: id, Report: report}
 		if turn, err := e.cfg.Store.Interrupted(ctx, id); err == nil && turn != nil {
-			refused.Interrupted = true
+			refused.Interrupted = !slices.ContainsFunc(report.Unsafe(), func(f integrity.Finding) bool { return f.Code == integrity.CodeTornTail })
 		}
 		return report, refused
 	}

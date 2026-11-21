@@ -532,3 +532,105 @@ func TestMidSegmentDamageStillRefusesToOpen(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 }
+
+// A host's event sink may call back into the agent from an integrity event:
+// the check emits with no lock held, so this cannot deadlock.
+func TestIntegrityEventSinkMayCallBack(t *testing.T) {
+	dir, conversation, _ := crashedConversation(t, orphanResult)
+	var mu sync.Mutex
+	var c *agent.Conversation
+	calledBack := make(chan error, 8)
+	sink := runtimeevents.SinkFunc(func(ctx context.Context, ev runtimeevents.Event) error {
+		raw, _ := json.Marshal(ev)
+		mu.Lock()
+		conv := c
+		mu.Unlock()
+		if conv != nil && strings.Contains(string(raw), `"integrity"`) {
+			_, err := conv.CheckIntegrity(ctx)
+			calledBack <- err
+		}
+		return nil
+	})
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-", Events: sink,
+		Builtins: []agent.BuiltinGroup{agent.BuiltinSubtasks}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	conv, err := a.Conversation(t.Context(), conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	c = conv
+	mu.Unlock()
+	done := make(chan error, 1)
+	go func() { _, err := conv.Resume(t.Context()); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, agent.ErrIntegrity) {
+			t.Fatalf("resume: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("resume deadlocked with a sink that calls back")
+	}
+	if err := <-calledBack; err != nil {
+		t.Fatalf("the sink's call back: %v", err)
+	}
+
+	// Dispatch and Record would also put a blocked history to use.
+	if err := conv.Discard(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conv.Dispatch(t.Context(), []agent.DispatchStart{{Goal: "look"}}); !errors.Is(err, agent.ErrIntegrity) {
+		t.Fatalf("dispatch on a blocked conversation: %v", err)
+	}
+	if err := conv.Record(t.Context(), "asked", "answered"); !errors.Is(err, agent.ErrIntegrity) {
+		t.Fatalf("record on a blocked conversation: %v", err)
+	}
+}
+
+// A tail torn while the agent runs (a short write, a full disk) is found by
+// the next run that opens the journal: it fails with the findings and marks
+// the conversation, so later runs are refused before any work.
+func TestTornTailWhileRunningIsTyped(t *testing.T) {
+	dir := t.TempDir()
+	writeAgent(t, dir)
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: fake.New(fake.Text("one"), fake.Text("two"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	c, err := a.NewConversation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := c.Send(t.Context(), agent.Input{Text: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(segmentOf(t, dir, c.ID()), os.O_WRONLY|os.O_APPEND, 0) // #nosec G304 -- The test's own transcript segment.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"sys`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	run, err = c.Send(t.Context(), agent.Input{Text: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refused *agent.IntegrityError
+	if _, err := run.Wait(); !errors.As(err, &refused) || refused.Report.Unsafe()[0].Code != "torn_tail" {
+		t.Fatalf("run over a tail torn in-process: %v", err)
+	}
+	if _, err := c.Send(t.Context(), agent.Input{Text: "third"}); !errors.As(err, &refused) {
+		t.Fatalf("the next send: %v", err)
+	}
+}

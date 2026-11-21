@@ -2,6 +2,7 @@ package registryagent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"github.com/hollis-labs/nanite/internal/agentlock"
@@ -460,7 +461,7 @@ func TestPublicationLockAndStageCleanup(t *testing.T) {
 	records, ref := fixture(t)
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "agent")
-	abandoned := filepath.Join(parent, ".nanite-stage-agent-crashed")
+	abandoned := filepath.Join(parent, ".nanite-stage-agent-"+rand.Text())
 	backup := filepath.Join(parent, ".nanite-backup-retained")
 	for _, path := range []string{abandoned, backup} {
 		if err := os.Mkdir(path, 0700); err != nil {

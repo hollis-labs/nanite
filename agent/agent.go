@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/tools"
+	"github.com/hollis-labs/nanite/toolregistry"
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/libs/core/store"
@@ -76,6 +77,10 @@ type Options struct {
 	// package that lists one does not load; it should ask for a Warden token
 	// with needs instead.
 	ToolPackageEnv []string
+
+	// ToolRegistry enables the tool_install builtin through a host-supplied registry adapter.
+	// Nil disables registry installation. Local filesystem adapters are development-only.
+	ToolRegistry *toolregistry.Client
 	// Provider defaults to the adapter selected by host.yaml and Gateway.
 	// When set, it serves every use except one that providers.yaml points at
 	// a provider in Providers.
@@ -406,7 +411,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		providers[spec.Name] = spec
 	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AutoApprove: opts.AutoApprove, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
+		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolRegistry: opts.ToolRegistry, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AutoApprove: opts.AutoApprove, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,

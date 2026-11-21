@@ -55,7 +55,7 @@ const (
 	BuiltinSkills     = tools.BuiltinSkills     // skill_list, skill_get
 	BuiltinNotes      = tools.BuiltinNotes      // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  = tools.BuiltinQuestions  // ask_user
-	BuiltinTools      = tools.BuiltinTools      // tool packages (tool__*) and tool_validate
+	BuiltinTools      = tools.BuiltinTools      // tool packages (tool__*) and tool_validate/tool_install
 	BuiltinHistory    = tools.BuiltinHistory    // history_search, history_get (a root conversation's own transcript)
 )
 

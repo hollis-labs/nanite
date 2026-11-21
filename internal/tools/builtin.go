@@ -21,7 +21,7 @@ const (
 	BuiltinNotes      BuiltinGroup = "notes"       // todo_list, todo_write, scratchpad_read, scratchpad_write
 	BuiltinQuestions  BuiltinGroup = "questions"   // ask_user
 	// BuiltinTools offers the agent's tool packages (tools/<name>/, as
-	// tool__<name> and tool__<name>__<tool>) and tool_validate.
+	// tool__<name> and tool__<name>__<tool>) and tool_validate/tool_install (when a registry is configured).
 	BuiltinTools BuiltinGroup = "tools"
 	// BuiltinHistory offers history_search and history_get to root
 	// conversations: their own full transcript, including what compaction
@@ -40,8 +40,8 @@ var builtinGroups = map[string]BuiltinGroup{
 	"subtask": BuiltinSubtasks, "parent_history_search": BuiltinSubtasks, "parent_history_get": BuiltinSubtasks,
 	"skill_list": BuiltinSkills, "skill_get": BuiltinSkills,
 	"todo_list": BuiltinNotes, "todo_write": BuiltinNotes, "scratchpad_read": BuiltinNotes, "scratchpad_write": BuiltinNotes,
-	"ask_user":       BuiltinQuestions,
-	"tool_validate":  BuiltinTools,
+	"ask_user":      BuiltinQuestions,
+	"tool_validate": BuiltinTools, "tool_install": BuiltinTools,
 	"history_search": BuiltinHistory, "history_get": BuiltinHistory,
 }
 

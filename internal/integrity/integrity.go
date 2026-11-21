@@ -25,10 +25,11 @@
 //
 // AutoRepair marks a finding whose fix is deterministic and loses nothing
 // that was committed, and Repair names that fix: resuming or discarding an
-// interruption, clearing a stale hold, and replaying or rebuilding the index.
-// Every repair but clearing a hold reads or writes the transcript, so it is
-// offered only for a sound transcript (one with no unsafe finding of its
-// own). Every other Unsafe finding needs an operator.
+// interruption, clearing a stale hold, replaying or rebuilding the index,
+// and truncating a torn tail. Resuming and the index repairs read or write
+// the transcript, so they are offered only for a sound transcript (one with
+// no unsafe finding of its own). Every other Unsafe finding needs an
+// operator.
 //
 // A record the store's projection would refuse (a wrong field type, a turn
 // or message that references a row the index does not have) is Unsafe: the
@@ -153,6 +154,10 @@ const (
 	RepairRebuildIndex Repair = "rebuild_index"
 	// RepairClearHold: clear the stale interrupted-turn hold.
 	RepairClearHold Repair = "clear_hold"
+	// RepairTruncateTail: cut the transcript back to its last committed
+	// record (Evidence "segment" and "committed_bytes"; delete any later
+	// segment). The torn bytes were never committed.
+	RepairTruncateTail Repair = "truncate_torn_tail"
 )
 
 // Range locates the records a finding is about. First and Last are indexes

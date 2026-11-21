@@ -87,3 +87,24 @@ func TestRecoverMarksVerifiedProcessJobLost(t *testing.T) {
 		t.Fatalf("notices %+v, %v", notices, err)
 	}
 }
+
+func TestClosingMarkerPreservesInterruptedPlan(t *testing.T) {
+	turn := store.InterruptedTurn{ID: "turn", UserMessageID: "request"}
+	base := []store.Message{
+		{ID: "request", TurnID: "turn", Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "original request"}}},
+		{ID: "work", TurnID: "turn", Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "work"}}},
+		{ID: "closing", TurnID: "turn", Role: "user", Blocks: []llmtypes.ContentBlock{{Type: "text", Name: ClosingPromptPrefix + "turn_limit", Text: "Close now"}}},
+	}
+	for _, partial := range []bool{false, true} {
+		history := append([]store.Message(nil), base...)
+		want := "work"
+		if partial {
+			history = append(history, store.Message{ID: "partial", TurnID: "turn", Role: "assistant", Blocks: []llmtypes.ContentBlock{{Type: "text", Text: "partial closing"}}})
+			want += "partial closing"
+		}
+		plan, err := ResumePlan(history, turn)
+		if err != nil || plan.ClosingReason != "turn_limit" || plan.UserText != "original request" || plan.Steps != 1 || plan.AssistantText != want || plan.Generate {
+			t.Fatalf("partial=%v plan=%+v err=%v", partial, plan, err)
+		}
+	}
+}

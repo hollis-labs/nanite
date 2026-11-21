@@ -62,3 +62,61 @@ func TestEmbeddingRuntimeLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryHidesClosingPromptAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	writeAgent(t, dir)
+	provider := fake.New(fake.Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "unknown", Name: "unknown"}}, {Type: llmtypes.EventDone}}}, fake.Text("Work remains."))
+	a, err := agent.Open(t.Context(), agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: provider, MaxSteps: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close() }()
+	c, err := a.NewConversation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The prefix in user text is not a metadata marker and must stay visible.
+	const request = "Explain nanite_closing_reply:max_steps"
+	run, err := c.Send(t.Context(), agent.Input{Text: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	check := func(c *agent.Conversation) {
+		t.Helper()
+		messages, err := c.History(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) != 4 {
+			t.Fatalf("history has %d messages, want request/call/result/reply: %+v", len(messages), messages)
+		}
+		if messages[0].Role != "user" || messages[0].Blocks[len(messages[0].Blocks)-1].Text != request {
+			t.Fatalf("lost user message: %+v", messages[0])
+		}
+		last := messages[len(messages)-1]
+		if last.Role != "assistant" || last.Blocks[0].Text != "Work remains." {
+			t.Fatalf("lost closing reply: %+v", last)
+		}
+		if last.Seq-messages[len(messages)-2].Seq != 2 {
+			t.Fatal("history renumbered stored sequence numbers")
+		}
+	}
+	check(c)
+	id := c.ID()
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a, err = agent.Open(t.Context(), agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: fake.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = a.Conversation(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(c)
+}

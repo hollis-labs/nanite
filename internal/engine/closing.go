@@ -23,6 +23,8 @@ func (x *execution) closingReply(ctx context.Context, req llmtypes.ChatRequest, 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Persist the recovery marker even though this is a host note, not a new
+	// user turn. History and compaction classify it by that marker.
 	if err := x.message("user", []llmtypes.ContentBlock{{Type: "text", Name: recovery.ClosingPromptPrefix + reason,
 		Text: "The turn reached its limit. Give a concise final reply using only the information already available. State any unfinished work. Do not call tools."}}); err != nil {
 		return err

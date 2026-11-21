@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,15 @@ const SyntheticResult = "interrupted before completion; not retried"
 // ClosingPromptPrefix marks a persisted closing prompt. It records the limit
 // reason and separates the closing reply from counted tool-capable steps.
 const ClosingPromptPrefix = "nanite_closing_reply:"
+
+// IsClosingPrompt identifies the engine's persisted host note. It uses block
+// metadata, never text matching, so a person quoting the prompt stays visible.
+// The user role is retained in storage for provider and recovery compatibility.
+func IsClosingPrompt(role string, blocks []llmtypes.ContentBlock) bool {
+	return role == "user" && slices.ContainsFunc(blocks, func(b llmtypes.ContentBlock) bool {
+		return b.Type == "text" && strings.HasPrefix(b.Name, ClosingPromptPrefix)
+	})
+}
 
 type Plan struct {
 	ClosingReason string

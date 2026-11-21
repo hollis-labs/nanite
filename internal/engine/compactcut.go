@@ -9,6 +9,7 @@ import (
 
 	ctxpkg "github.com/hollis-labs/libs/agent/core/context"
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/recovery"
 	"github.com/hollis-labs/nanite/internal/slots"
 )
 
@@ -29,9 +30,10 @@ Leave out pleasantries and anything that was superseded. Do not address anyone a
 const DefaultCompactionInputTokens = 100_000
 
 // ownerMessage reports whether a message starts a turn: the person's own
-// message, as against tool results, which are also sent as the user's.
+// message, as against tool results and host closing notes, which also use
+// the user role on the provider wire.
 func ownerMessage(m llmtypes.ChatMessage) bool {
-	if m.Role != "user" {
+	if m.Role != "user" || recovery.IsClosingPrompt(m.Role, m.ContentBlocks) {
 		return false
 	}
 	return !slices.ContainsFunc(m.ContentBlocks, func(b llmtypes.ContentBlock) bool { return b.Type == "tool_result" })
@@ -104,6 +106,9 @@ func transcript(msgs []llmtypes.ChatMessage, maxChars int) string {
 		who := "Agent"
 		if m.Role == "user" {
 			who = "Person"
+		}
+		if recovery.IsClosingPrompt(m.Role, m.ContentBlocks) {
+			who = "Host note"
 		}
 		if m.Content != "" {
 			b.WriteString(who + ": " + clip(m.Content, 6000) + "\n\n")

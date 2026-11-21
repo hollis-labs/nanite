@@ -282,6 +282,11 @@ when that boundary is needed.
 
 Leaving `Builtins` nil gives the default for the agent's kind, as above.
 
+`Conversation.History` returns stored messages in order but hides the engine's
+internal closing prompts. The original user request and the agent's closing
+reply remain visible. Message sequence numbers retain their stored values and
+may have gaps; the recovery journal still contains the internal prompts.
+
 A host can read a root conversation's own transcript itself with
 `Conversation.SearchHistory` and `Conversation.HistoryMessages`; results are
 redacted. Neither reaches another conversation: searching across

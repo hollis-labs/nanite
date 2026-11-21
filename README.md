@@ -32,4 +32,4 @@ func ask(ctx context.Context, dir, prompt string) (string, error) {
 }
 ```
 
-[Embedding walkthrough](docs/embedding.md) · [Architecture](docs/architecture.md) · [Validation](docs/validation.md)
+[Registry agent materialization](docs/registry-agents.md) · [Embedding walkthrough](docs/embedding.md) · [Architecture](docs/architecture.md) · [Validation](docs/validation.md)

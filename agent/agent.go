@@ -15,6 +15,7 @@ import (
 
 	"github.com/hollis-labs/libs/agent/trace"
 	"github.com/hollis-labs/libs/core/panics"
+	"github.com/hollis-labs/nanite/internal/agentlock"
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/tools"
 	"github.com/hollis-labs/nanite/toolregistry"
@@ -238,16 +239,17 @@ type ProviderSpec = provider.Spec
 
 // Agent owns one authored agent directory and its mutable host contributions.
 type Agent struct {
-	control   *control.Server
-	engine    *engine.Engine
-	dir       string
-	lock      *os.File
-	closeOnce sync.Once
-	store     *nanitestore.Store
-	closeErr  error
-	slots     Slots
-	tools     ToolSet
-	skills    SkillSet
+	publication *os.File
+	control     *control.Server
+	engine      *engine.Engine
+	dir         string
+	lock        *os.File
+	closeOnce   sync.Once
+	store       *nanitestore.Store
+	closeErr    error
+	slots       Slots
+	tools       ToolSet
+	skills      SkillSet
 	// ensureMu serializes EnsureConversation's check-then-create.
 	ensureMu sync.Mutex
 }
@@ -310,6 +312,16 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.TurnTokenBudget < 0 {
 		return nil, fmt.Errorf("nanite: TurnTokenBudget must not be negative")
 	}
+	publication, err := agentlock.Publication(opts.Dir, true)
+	if err != nil {
+		return nil, err
+	}
+	keepPublication := false
+	defer func() {
+		if !keepPublication && publication != nil {
+			_ = publication.Close()
+		}
+	}()
 	def, err := agentdir.Load(opts.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("load agent: %w", err)
@@ -365,7 +377,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		_ = lock.Close()
 		return nil, fmt.Errorf("recover agent: %w", err)
 	}
-	a := &Agent{dir: def.Directory, lock: lock, store: db, slots: Slots{store: slots.NewStore()}}
+	a := &Agent{dir: def.Directory, publication: publication, lock: lock, store: db, slots: Slots{store: slots.NewStore()}}
 	roots := []string{def.Directory}
 	work := opts.WorkDir
 	if work == "" {
@@ -432,6 +444,7 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		}
 		logger.Warn("agent CLI control unavailable; embedding StopAll remains available", "error", err)
 	}
+	keepPublication = true
 	return a, nil
 }
 
@@ -440,7 +453,11 @@ func (a *Agent) Close() error {
 	a.closeOnce.Do(func() {
 		controlErr := a.control.Close()
 		a.engine.Close()
-		a.closeErr = errors.Join(controlErr, a.store.Close(), a.lock.Close())
+		var publicationErr error
+		if a.publication != nil {
+			publicationErr = a.publication.Close()
+		}
+		a.closeErr = errors.Join(controlErr, a.store.Close(), a.lock.Close(), publicationErr)
 	})
 	return a.closeErr
 }

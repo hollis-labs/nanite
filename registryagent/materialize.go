@@ -336,7 +336,14 @@ func build(ctx context.Context, resolver Resolver, ref Reference, dir string, ro
 		if err != nil {
 			return m, err
 		}
-		m.Sources = append(m.Sources, Source{Reference: tool, Revision: installed.Version, Digest: installed.Digest})
+		source := Source{Reference: tool, Revision: installed.Version, Digest: installed.Digest}
+		if reader, ok := opts.Tools.Records.(interface{ Publication() string }); ok {
+			source.Publication = reader.Publication()
+			if source.Publication != "draft" && source.Publication != "published" {
+				return m, fmt.Errorf("registryagent: invalid tool publication state")
+			}
+		}
+		m.Sources = append(m.Sources, source)
 	}
 	if _, err := agentdir.Load(dir); err != nil {
 		return m, err

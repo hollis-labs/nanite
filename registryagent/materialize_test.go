@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hollis-labs/nanite/internal/agentlock"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +33,7 @@ func fixture(t *testing.T) (Fake, Reference) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return Record{ref, "r1", raw}
+		return Record{Reference: ref, Revision: "r1", Payload: raw}
 	}
 	return Fake{
 		makeRecord(ref, map[string]any{"name": "fixture", "summary": "Fixture purpose.", "charter": "Help with the fixture.", "roles": []string{"assistant"}, "launch_profile": versioned{profile, "r1"}, "skills": []Reference{skill}, "context": []Reference{doc}, "variants": []Reference{variant}}),
@@ -348,6 +350,55 @@ func TestToolPackagePins(t *testing.T) {
 	if err != nil || second.Changed {
 		t.Fatal("same pins changed", err)
 	}
+	// A provenance-only mutation still verifies against the same archive. It
+	// must be refused by the lock carried into the staging directory.
+	changedProvenance := pkg
+	changedProvenance.Provenance.SourceRef = "different-source"
+	mutated := toolregistry.Client{Records: replacedPackage{client.Records, changedProvenance}, Blobs: client.Blobs}
+	if _, err := Materialize(t.Context(), records, ref, dir, Options{Tools: &mutated}); err == nil {
+		t.Fatal("carried-forward pin did not protect provenance")
+	}
+	t.Run("live package contract", func(t *testing.T) {
+		payload := map[string]any{"schema": "tool-package/1", "id": strings.TrimPrefix(pkg.ID, "tool-package:"), "publisher": "agt_fixture", "name": pkg.Name, "version": pkg.Version, "digest": pkg.Digest, "artifact": pkg.Artifact, "entry": pkg.Entry, "execution": map[string]string{"kind": pkg.Execution}, "needs": []any{}, "env": []string{}, "provenance": pkg.Provenance}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("id") != pkg.ID {
+				t.Error("wrong package identity")
+			}
+			_ = json.NewEncoder(w).Encode(liveRecord{ID: pkg.ID, Kind: "tool-package", Schema: "tool-package/1", Revision: "package-r1", Publication: "draft", Payload: raw})
+		}))
+		defer server.Close()
+		live, err := NewLive(LiveConfig{URL: server.URL, Authority: "registry", Publication: "draft"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		remote := live.ToolClient(client.Blobs)
+		result, err := Materialize(t.Context(), records, ref, filepath.Join(t.TempDir(), "agent"), Options{Tools: &remote})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Manifest.Sources[5].Publication != "draft" {
+			t.Fatal("tool publication absent")
+		}
+		if err := live.Publish(t.Context(), pkg); err == nil {
+			t.Fatal("read-only adapter published")
+		}
+	})
+	t.Run("tool authority", func(t *testing.T) {
+		foreign := append(Fake(nil), records...)
+		var body map[string]any
+		if err := json.Unmarshal(foreign[0].Payload, &body); err != nil {
+			t.Fatal(err)
+		}
+		body["tools"] = []Reference{{Authority: "other", Kind: "tool-package", ID: pkg.ID}}
+		foreign[0].Payload, _ = json.Marshal(body)
+		if _, err := Materialize(t.Context(), foreign, ref, filepath.Join(t.TempDir(), "agent"), Options{Tools: &client}); err == nil {
+			t.Fatal("foreign tool authority accepted")
+		}
+	})
 	changed := pkg
 	changed.Digest = "sha256:" + strings.Repeat("0", 64)
 	bad := toolregistry.Client{Records: replacedPackage{client.Records, changed}, Blobs: client.Blobs}

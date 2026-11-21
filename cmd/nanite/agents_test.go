@@ -12,6 +12,10 @@ import (
 )
 
 func TestAgentsMaterializeCLI(t *testing.T) {
+	t.Setenv("NANITE_REGISTRY_URL", "https://example.invalid")
+	t.Setenv("NANITE_REGISTRY_TOKEN_FILE", "/unused-reader")
+	t.Setenv("NANITE_REGISTRY_PUBLICATION", "draft")
+	t.Setenv("NANITE_CASTER_EXECUTABLE", "/unused-caster")
 	registry := t.TempDir()
 	dir := filepath.Join(t.TempDir(), "agent")
 	ref := registryagent.Reference{Authority: "registry", Kind: "agent", ID: "cli-fixture"}
@@ -52,9 +56,69 @@ func TestAgentsMaterializeCLI(t *testing.T) {
 	if !configIndependent(args) || requiresAgent(args) {
 		t.Fatal("materializer requires runtime configuration")
 	}
+	t.Setenv("NANITE_REGISTRY_URL", "")
 	missing := agentsCommand()
 	missing.SetArgs(args[1:])
 	if err := missing.ExecuteContext(t.Context()); err == nil {
 		t.Fatal("missing registry accepted")
+	}
+}
+
+func TestRegistryCredentialFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "reader")
+	for _, value := range []string{"", strings.Repeat("x", 16385)} {
+		if err := os.WriteFile(file, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := registryTokenFile(file)(t.Context()); err == nil {
+			t.Fatal("invalid credential file accepted")
+		}
+	}
+	if err := os.WriteFile(file, []byte(" test-reader\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := registryTokenFile(file)(t.Context()); err != nil || got != "test-reader" {
+		t.Fatal("credential resolution failed", err)
+	}
+	if _, err := registryTokenFile(t.TempDir())(t.Context()); err == nil {
+		t.Fatal("directory accepted")
+	}
+	if _, err := registryTokenFile(file + "-missing")(t.Context()); err == nil || strings.Contains(err.Error(), file) {
+		t.Fatal("credential path leaked", err)
+	}
+}
+
+func TestLiveCLIConfiguration(t *testing.T) {
+	t.Setenv("NANITE_REGISTRY_URL", "http://example.invalid")
+	t.Setenv("NANITE_REGISTRY_PUBLICATION", "draft")
+	t.Setenv("NANITE_REGISTRY_TOKEN_FILE", "/unused-reader")
+	t.Setenv("NANITE_CASTER_EXECUTABLE", "/unused-caster")
+	cmd := agentsCommand()
+	materialize, _, err := cmd.Find([]string{"materialize"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for flag, want := range map[string]string{"registry-url": "http://example.invalid", "publication": "draft", "registry-token-file": "/unused-reader", "caster-executable": "/unused-caster"} {
+		got, err := materialize.Flags().GetString(flag)
+		if err != nil || got != want {
+			t.Fatalf("%s env binding missing", flag)
+		}
+	}
+	cmd.SetArgs([]string{"materialize", "agent:fixture", filepath.Join(t.TempDir(), "agent"), "--registry-dir", t.TempDir(), "--registry-url", "https://example.invalid"})
+	if err := cmd.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("ambiguous transport accepted")
+	}
+}
+
+func TestRegistryCredentialPermissions(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "reader")
+	if err := os.WriteFile(file, []byte("test-reader"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(file, 0644); err != nil { // #nosec G302 -- intentionally insecure permissions must be rejected.
+		t.Fatal(err)
+	}
+	if _, err := registryTokenFile(file)(t.Context()); err == nil || strings.Contains(err.Error(), file) {
+		t.Fatal("public credential file accepted or path leaked", err)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
+	"strings"
 
 	"github.com/hollis-labs/libs/security/redact"
 )
@@ -26,9 +26,10 @@ type Reference struct {
 
 // Record is a resolved immutable revision and its authored Registry payload.
 type Record struct {
-	Reference Reference       `json:"reference"`
-	Revision  string          `json:"revision"`
-	Payload   json.RawMessage `json:"payload"`
+	Publication string          `json:"publication,omitempty"`
+	Reference   Reference       `json:"reference"`
+	Revision    string          `json:"revision"`
+	Payload     json.RawMessage `json:"payload"`
 }
 
 // Resolver returns an exact reference and, when supplied, exact revision.
@@ -98,9 +99,10 @@ type versioned struct {
 
 // Source identifies one materialized input and its content digest.
 type Source struct {
-	Reference Reference `json:"reference"`
-	Revision  string    `json:"revision"`
-	Digest    string    `json:"digest"`
+	Publication string    `json:"publication,omitempty"`
+	Reference   Reference `json:"reference"`
+	Revision    string    `json:"revision"`
+	Digest      string    `json:"digest"`
 }
 
 func fetch(ctx context.Context, r Resolver, ref Reference, revision string) (Record, map[string]any, Source, error) {
@@ -114,6 +116,9 @@ func fetch(ctx context.Context, r Resolver, ref Reference, revision string) (Rec
 	if !sameRef(record.Reference, ref) || record.Revision == "" || (revision != "" && record.Revision != revision) {
 		return Record{}, nil, Source{}, fmt.Errorf("registryagent: resolver returned a different identity or revision")
 	}
+	if record.Publication != "" && record.Publication != "draft" && record.Publication != "published" {
+		return Record{}, nil, Source{}, fmt.Errorf("registryagent: invalid publication state")
+	}
 	for _, text := range []string{ref.Authority, ref.Kind, ref.ID, ref.URI, record.Revision} {
 		if len(text) > 4096 || len(redact.Default().Scan(text)) > 0 {
 			return Record{}, nil, Source{}, fmt.Errorf("registryagent: invalid or credential-like reference metadata")
@@ -123,7 +128,7 @@ func fetch(ctx context.Context, r Resolver, ref Reference, revision string) (Rec
 	if err != nil {
 		return Record{}, nil, Source{}, err
 	}
-	if !reflect.DeepEqual(payload["id"], ref.ID) || payload["schema"] != ref.Kind+"/1" {
+	if payload["id"] != strings.TrimPrefix(ref.ID, ref.Kind+":") || payload["schema"] != ref.Kind+"/1" {
 		return Record{}, nil, Source{}, fmt.Errorf("registryagent: payload identity mismatch")
 	}
 	canonical, err := json.Marshal(payload)
@@ -131,5 +136,5 @@ func fetch(ctx context.Context, r Resolver, ref Reference, revision string) (Rec
 		return Record{}, nil, Source{}, err
 	}
 	sum := sha256.Sum256(canonical)
-	return record, payload, Source{ref, record.Revision, hex.EncodeToString(sum[:])}, nil
+	return record, payload, Source{Reference: ref, Revision: record.Revision, Digest: hex.EncodeToString(sum[:]), Publication: record.Publication}, nil
 }

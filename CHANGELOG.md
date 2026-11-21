@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Materialize live Registry records with explicit publication selection, reader
+  credential files, exact revision checks and publication provenance. Fetch
+  tool-package bytes through a host-configured paired Caster CLI, preserving
+  existing digest and immutable pin checks without granting execution.
+
 ## 0.13.0
 
 Specialist agents and Registry-defined agents. A starter template and two

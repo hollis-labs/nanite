@@ -1,8 +1,11 @@
 package engine
 
 import (
-	"github.com/hollis-labs/nanite/internal/provider/fake"
+	"reflect"
 	"testing"
+
+	"github.com/hollis-labs/libs/llm/core/llmtypes"
+	"github.com/hollis-labs/nanite/internal/provider/fake"
 )
 
 func TestRuntimeCacheTTLHints(t *testing.T) {
@@ -20,14 +23,12 @@ func TestRuntimeCacheTTLHints(t *testing.T) {
 			if len(p.requests) != 1 {
 				t.Fatalf("requests=%d", len(p.requests))
 			}
-			for _, hint := range p.requests[0].CacheHints {
-				want := ""
-				if hint.Position == "system" || hint.Position == "tools" {
-					want = ttl
-				}
-				if hint.TTL != want {
-					t.Fatalf("hint %+v want TTL %q", hint, want)
-				}
+			// The whole hint list, not just whatever hints arrived: no hints
+			// at all must fail too.
+			want := []llmtypes.CacheHint{{Position: "system", TTL: ttl}, {Position: "tools", TTL: ttl},
+				{Position: "recent_message", Index: 0}, {Position: "recent_message", Index: 1}}
+			if !reflect.DeepEqual(p.requests[0].CacheHints, want) {
+				t.Fatalf("hints %+v, want %+v", p.requests[0].CacheHints, want)
 			}
 		})
 	}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/nanite/internal/provider/failure"
+
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
@@ -55,5 +57,42 @@ func TestToolCallAndStallCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stream stayed open after cancellation")
+	}
+}
+
+func TestScriptedFailures(t *testing.T) {
+	p := New(Retryable(3*time.Second), FailAfter(failure.Retryable, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: "par"}), Truncated("cut"))
+
+	_, err := p.StreamChat(t.Context(), llmtypes.ChatRequest{})
+	var classified *failure.Error
+	if !errors.As(err, &classified) || classified.Class != failure.Retryable || classified.RetryAfter != 3*time.Second {
+		t.Fatalf("Retryable: %v", err)
+	}
+
+	stream, err := p.StreamChat(t.Context(), llmtypes.ChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []llmtypes.StreamEvent
+	for ev := range stream {
+		events = append(events, ev)
+	}
+	if len(events) != 2 || events[0].Content != "par" || events[1].Type != llmtypes.EventError {
+		t.Fatalf("FailAfter: %+v", events)
+	}
+	if err := failure.FromEvent(events[1]); !errors.As(err, &classified) || classified.Class != failure.Retryable {
+		t.Fatalf("FailAfter error: %v", err)
+	}
+
+	stream, err = p.StreamChat(t.Context(), llmtypes.ChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events = nil
+	for ev := range stream {
+		events = append(events, ev)
+	}
+	if len(events) != 1 || events[0].Content != "cut" {
+		t.Fatalf("Truncated: %+v", events)
 	}
 }

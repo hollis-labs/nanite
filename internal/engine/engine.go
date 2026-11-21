@@ -155,6 +155,9 @@ type Engine struct {
 	// checking holds conversations an integrity check is reading, outside
 	// e.mu; nothing may write their transcript meanwhile (see busyLocked).
 	checking map[string]bool
+	// retryWait waits out a retry's delay, or returns ctx's error. Tests
+	// replace it to observe the delay without sleeping.
+	retryWait func(ctx context.Context, d time.Duration) error
 	// integrityEvents tracks integrity events still being emitted; Close
 	// waits for them.
 	integrityEvents sync.WaitGroup
@@ -878,4 +881,19 @@ func (e *Engine) idleTimeout() time.Duration {
 		return e.cfg.IdleTimeout
 	}
 	return DefaultIdleTimeout
+}
+
+// wait waits d before a retry, unless ctx ends first.
+func (e *Engine) wait(ctx context.Context, d time.Duration) error {
+	if e.retryWait != nil {
+		return e.retryWait(ctx, d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

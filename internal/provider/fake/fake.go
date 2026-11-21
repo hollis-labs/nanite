@@ -3,10 +3,12 @@ package fake
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/provider/failure"
 
@@ -14,6 +16,10 @@ import (
 	"github.com/hollis-labs/libs/llm/core/llmtypes"
 )
 
+// Response is one scripted model response. Err fails the request itself;
+// Events are streamed in order. A stream ends at its first terminal event
+// (Done or Error); Events with none end in an EOF without Done, as a dropped
+// connection does (see Truncated).
 type Response struct {
 	Events []llmtypes.StreamEvent
 	Err    error
@@ -43,6 +49,25 @@ func Text(text string) Response {
 		{Type: llmtypes.EventDelta, Content: text},
 		{Type: llmtypes.EventDone},
 	}}
+}
+
+// Retryable fails the request the way a provider's 429 or 5xx does: a
+// retryable error, with Retry-After when retryAfter is set.
+func Retryable(retryAfter time.Duration) Response {
+	return Response{Err: &failure.Error{Class: failure.Retryable, RetryAfter: retryAfter, Cause: errors.New("fake provider: rate limited")}}
+}
+
+// FailAfter streams events, then a classified error event, as a provider
+// does when it fails mid-stream (Anthropic's overloaded_error).
+func FailAfter(class failure.Class, events ...llmtypes.StreamEvent) Response {
+	err := &failure.Error{Class: class, Cause: errors.New("fake provider: failed mid-stream")}
+	return Response{Events: append(slices.Clone(events), failure.Event(err))}
+}
+
+// Truncated streams text and then ends with no terminal event: the EOF a
+// dropped connection leaves.
+func Truncated(text string) Response {
+	return Response{Events: []llmtypes.StreamEvent{{Type: llmtypes.EventDelta, Content: text}}}
 }
 
 func (p *Provider) StreamChat(ctx context.Context, _ llmtypes.ChatRequest) (<-chan llmtypes.StreamEvent, error) {

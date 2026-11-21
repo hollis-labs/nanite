@@ -736,12 +736,11 @@ func (x *execution) retry(ctx context.Context, err error, retries *int, runErr *
 		case failure.Retryable:
 			base := time.Second << (*retries - 1)
 			delay := max(classified.RetryAfter, base+rand.N(base/4)) // #nosec G404 -- Retry jitter does not need unpredictability.
-			select {
-			case <-time.After(delay):
-				return runloop.Retry
-			case <-ctx.Done():
-				err = ctx.Err()
+			if waitErr := x.engine.wait(ctx, delay); waitErr != nil {
+				err = waitErr
+				break
 			}
+			return runloop.Retry
 		case failure.Auth, failure.Fatal:
 			// These failures terminate without retrying.
 		}

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The OpenAI adapter no longer reports a stream cut before its
+  `finish_reason` as a complete response: it ends without Done, so the turn
+  fails as a truncated one instead of finishing with half-received tool
+  arguments (the Anthropic adapter already did this without `message_stop`).
+- The OpenAI adapter keeps the `http.Client` it was given when a gateway or
+  a new key rebuilds its SDK client.
+
 ## 0.16.0
 
 Mailbox delivery fixes, conversation integrity checks that tell an ordinary

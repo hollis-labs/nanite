@@ -111,7 +111,8 @@ func (c *Conversation) Interrupted() *InterruptedTurn {
 // Resume continues an interrupted turn. It first validates the
 // conversation's transcript and index, before reading its history; an unsafe
 // finding refuses with an *IntegrityError (errors.Is ErrIntegrity) carrying
-// the findings. Discard remains available.
+// the findings, and marks the conversation blocked, which refuses Send too
+// until a check passes. Discard remains available.
 func (c *Conversation) Resume(ctx context.Context) (*Run, error) {
 	return c.agent.engine.Resume(ctx, c.id)
 }

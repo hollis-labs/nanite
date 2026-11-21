@@ -467,15 +467,17 @@ each Nanite conversation serves (host state `chat`), so a restarted runner can
 find its interrupted turns.
 
 **Conversation integrity.** `Conversation.Resume` checks the conversation's
-transcript and its index before it reads the history. It refuses an unsafe
-finding with an `*agent.IntegrityError` (`errors.Is(err, agent.ErrIntegrity)`),
-whose `Report` lists every finding. Each finding has a stable `Code`, a
-`Severity`, the transcript records it concerns, and identifier-only
-`Evidence`. `Discard` stays available unless the transcript has a torn tail,
-which refuses every write until an operator repairs it.
-`Conversation.CheckIntegrity` returns the same report without writing. It
-refuses with `ErrBusy` while the conversation has a run. On open, the agent
-checks only the conversations with a running turn. A runtime event
+transcript and its index before it reads the history. A conversation found
+unsafe there, or by recovery on open, is marked blocked. Every later run on it
+(`Resume`, `Send`, notice and host turns) checks again first and is refused
+until a check passes. The refusal is an `*agent.IntegrityError`
+(`errors.Is(err, agent.ErrIntegrity)`) whose `Report` lists every finding,
+each with a stable `Code`, a `Severity`, the transcript records it concerns,
+and identifier-only `Evidence`. `Discard` still closes an interrupted turn, but
+the conversation stays blocked: start a new conversation, or repair the
+transcript. A torn tail is never committed data and is safe to remove.
+`Conversation.CheckIntegrity` returns the same report without writing; it
+refuses with `ErrBusy` while the conversation has a run. A runtime event
 (`phase: integrity`) records each check's stage, disposition, worst severity
 and per-code counts, and never message content.
 
@@ -501,6 +503,8 @@ the owner is not offered the turn, and it waits out its hold.
   `Runner.Resume` returns the agent's `*IntegrityError` before publishing
   anything. With `Options.ResumeInterrupted`, `RecoverTurns` reports that error
   and offers the turn with `integrity: blocked` and only the `discard` action.
+  After a discard, the owner's next message on that chat is refused with the
+  same error until the conversation passes a check.
 - `Runner.Discard(ctx, chatID)` abandons it. A new message from the owner, or
   `Record`, also discards it: the owner has moved on.
 - `Runner.Interrupted(ctx, chatID)` and `Runner.InterruptedChats(ctx)` report

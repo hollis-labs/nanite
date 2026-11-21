@@ -41,8 +41,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF2
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
-github.com/hollis-labs/libs/agent/agentdir v0.5.0 h1:JV/2Ek+goQDUaSTsdIAw340MLWhZPPmTqcDU/g5Uzoc=
-github.com/hollis-labs/libs/agent/agentdir v0.5.0/go.mod h1:MCikgc+Fc49QRuVXXA/QbPNEKNCOV2a7JoEJAgcHbRs=
+github.com/hollis-labs/libs/agent/agentdir v0.6.0 h1:FXK8E9IVcQ85njmyfjNVERw6EzfoFo2VSVyLKE70GrE=
+github.com/hollis-labs/libs/agent/agentdir v0.6.0/go.mod h1:MCikgc+Fc49QRuVXXA/QbPNEKNCOV2a7JoEJAgcHbRs=
 github.com/hollis-labs/libs/agent/chat v0.1.0 h1:NHored2kzzCXwgaX96joqO4ZJejKyLm/4G5IEvRE8Rc=
 github.com/hollis-labs/libs/agent/chat v0.1.0/go.mod h1:rDzqOwUmC6Gu2wN5XjG59lcRcJPXKhbj/77U63w0Gr8=
 github.com/hollis-labs/libs/agent/core v0.5.0 h1:bk2GAHef+lH5ihYKBnQpir5SZoeRNTp7AyY8iYCLkr0=
@@ -75,8 +75,8 @@ github.com/hollis-labs/libs/security/secrets v0.1.0 h1:/wrYAM5viUnYMpDhvbQmPlTMe
 github.com/hollis-labs/libs/security/secrets v0.1.0/go.mod h1:Krd1kgmisOVmeN1G/ltaLMva58tIBki9xShsySqd86Y=
 github.com/hollis-labs/libs/ui/ui-go v0.4.0 h1:3TydDJElqD1ilgfY1FY+ei+joAuRcwMyuorGTDD1qIw=
 github.com/hollis-labs/libs/ui/ui-go v0.4.0/go.mod h1:MBO41Mrbgo6YfRbm8MI50qQXjDfwhkvA/WxRdtOiL38=
-github.com/hollis-labs/substrate v0.1.1-0.20261120230950-f70a16348138 h1:g4wiYP0kuzzcInlfsptOH0LwBwkVwVNM5nFAO9uWHxQ=
-github.com/hollis-labs/substrate v0.1.1-0.20261120230950-f70a16348138/go.mod h1:LNK7DIqGyVnvvKGYJIhnVKIdF1yIfNP9MtE252Y8G80=
+github.com/hollis-labs/substrate v0.1.1-0.20261121043943-b123217072c4 h1:OtVNcZqpoMiusTcv9S0R9o9KaXwphwd7eDSPvRJV0F8=
+github.com/hollis-labs/substrate v0.1.1-0.20261121043943-b123217072c4/go.mod h1:LNK7DIqGyVnvvKGYJIhnVKIdF1yIfNP9MtE252Y8G80=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/invopop/jsonschema v0.14.0 h1:MHQqLhvpNUZfw+hM3AZDYK7jxO8FZoQeQM77g8iyZjg=

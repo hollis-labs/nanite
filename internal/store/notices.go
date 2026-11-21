@@ -58,3 +58,26 @@ func (s *Store) WithdrawNotice(ctx context.Context, conversation, id string) err
 		return err
 	})
 }
+
+// QueueNotice inserts a stable notice once. Completed delivery survives both
+// acknowledgement failure and process restart. Failed turns may retry delivery;
+// interrupted turns retain it until their recovery decision is made.
+func (s *Store) QueueNotice(ctx context.Context, n Notice) (bool, error) {
+	var handled bool
+	err := s.db.WriteTx(ctx, func(ctx context.Context, tx core.Tx) error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO notices(id,conversation_id,kind,body,created_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, n.ID, n.ConversationID, n.Kind, n.Body, format(time.Now())); err != nil {
+			return err
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(t.status,'') FROM notices n LEFT JOIN turns t ON t.id=n.delivered_turn_id WHERE n.id=? AND n.conversation_id=?`, n.ID, n.ConversationID).Scan(&status); err != nil {
+			return err
+		}
+		handled = status == "completed"
+		if status == "failed" || status == "cancelled" {
+			_, err := tx.ExecContext(ctx, `UPDATE notices SET delivered_turn_id=NULL WHERE id=?`, n.ID)
+			return err
+		}
+		return nil
+	})
+	return handled, err
+}

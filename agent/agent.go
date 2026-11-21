@@ -46,6 +46,9 @@ var (
 
 // Options configures an embedded agent.
 type Options struct {
+	// Tether configures messaging identity when host.yaml sets identity.tether.
+	Tether *TetherConfig
+
 	// DailyTokenBudget caps total agent tokens per UTC day. Zero uses host.yaml.
 	DailyTokenBudget int
 	// MaxOutputTokens overrides runtime.max_output_tokens when positive.
@@ -239,6 +242,8 @@ type ProviderSpec = provider.Spec
 
 // Agent owns one authored agent directory and its mutable host contributions.
 type Agent struct {
+	tetherURN string
+
 	publication *os.File
 	control     *control.Server
 	engine      *engine.Engine
@@ -432,6 +437,12 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		SlotBudgets: maps.Clone(opts.SlotBudgets), SlotPlacement: maps.Clone(opts.SlotPlacement),
 	})
 	if err != nil {
+		_ = db.Close()
+		_ = lock.Close()
+		return nil, err
+	}
+	if err = a.openTether(ctx, opts.Tether, def); err != nil {
+		a.engine.Close()
 		_ = db.Close()
 		_ = lock.Close()
 		return nil, err

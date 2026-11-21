@@ -665,3 +665,46 @@ continues without CLI control; the embedding `StopAll` API remains available.
 `BuiltinTools` includes `tool_install`; installation pins and verifies content
 without granting execution approval. See [tool registry](tool-registry.md) for
 the draft contract, development CLI and deferred shared-service integration.
+
+## Tether mailbox
+
+Set `identity.tether` in `host.yaml` to an existing `msg://agent/<instance>/<id>`
+address, or `auto` to register one. Registration uses a locally persisted external
+ID; reopening the same data directory reuses it, including after a lost HTTP
+response. `Agent.TetherURN()` reports the address, which also appears in the
+agent's system context. Disabling the setting disables the integration.
+
+Supply transport credentials through the host, not authored files:
+
+```go
+opts.Agent.Tether = &agent.TetherConfig{
+    Endpoint: tetherURL,
+    Credential: tetherCredential,
+}
+opts.Mailbox = &chatrunner.MailboxOptions{
+    ConversationID: inboxChatID,
+    PollInterval: 30 * time.Second,
+}
+opts.Observe = service.Observe
+```
+
+The inbox is a host chat conversation. `Observe` must adopt and drain runs as
+`chat.Service.Observe` does. Polling starts after the first interval (30 seconds
+by default); failed requests or observation retry on the next interval. The
+bridge lists unread mail without consuming it, stores stable keyed notices, and
+starts notice turns independently of the three-notice chain throttle. Mail is
+JSON-framed as sender data, never system or developer instructions. Outgoing
+mail uses the host's configured Tether MCP tools; the bridge adds no send tool.
+
+Tether is marked read only after a turn carrying the full notice completes
+successfully. A failed acknowledgement is retried without another model turn,
+including after restart. Failed/cancelled handling can retry; interrupted turns
+wait for the runner's normal resume/discard recovery policy. As with other
+interrupted work, external tool side effects need their own idempotency keys:
+this does not promise exactly-once side effects across a process crash. Keep the
+agent data directory to preserve registration and delivery receipts.
+
+The endpoint and credential are explicit host configuration. Requests are
+bounded to 30 seconds, redirects are refused, and the credential is registered
+with the agent redactor. This integration uses Tether credentials; Warden auth
+and push wakes are not implemented.

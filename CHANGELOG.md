@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Bind agents to Tether with `identity.tether` and host-supplied credentials.
+  The chatrunner mailbox polls unread mail into notice turns, persists keyed
+  deliveries across restarts, and marks mail read only after successful handling.
+
+
 ## 0.14.0
 
 Agents materialize from the live Registry: `nanite agents materialize` reads

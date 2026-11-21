@@ -220,3 +220,12 @@ func deliveredNoticeIDs(report slots.Report, pending []store.Notice) []string {
 	}
 	return delivered
 }
+
+// QueueNotice stores a keyed notice without announcing it. The durable source
+// owns wake scheduling and acknowledges only completed handling turns.
+func (e *Engine) QueueNotice(ctx context.Context, conversation, id, kind, body string) (bool, error) {
+	return e.cfg.Store.QueueNotice(ctx, store.Notice{ID: id, ConversationID: conversation, Kind: kind, Body: e.scrub.Text(body)})
+}
+
+// ProtectSecret registers host transport credentials with the agent's redactor.
+func (e *Engine) ProtectSecret(name, value string) { e.cfg.ProviderConfig.Redactor.Add(name, value) }

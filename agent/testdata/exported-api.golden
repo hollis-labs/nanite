@@ -19,6 +19,7 @@ type Agent struct
   (*Agent) Slots() *Slots
   (*Agent) StopAll(ctx context.Context) error
   (*Agent) SubscribeNotices(ctx context.Context) <-chan NoticePosted
+  (*Agent) TetherURN() string
   (*Agent) Tools() *ToolSet
   (*Agent) TurnContext(ctx context.Context, in Input) (context.Context, error)
 func AllBuiltins() []BuiltinGroup
@@ -80,6 +81,7 @@ type Conversation struct
   (*Conversation) Job(ctx context.Context, id string) (string, error)
   (*Conversation) Mode(ctx context.Context) (string, error)
   (*Conversation) PostNotice(ctx context.Context, kind string, body string) error
+  (*Conversation) QueueNotice(ctx context.Context, key string, kind string, body string) (bool, error)
   (*Conversation) Record(ctx context.Context, userText string, answer string) error
   (*Conversation) Resume(ctx context.Context) (*Run, error)
   (*Conversation) SearchHistory(ctx context.Context, query string, k int) ([]HistoryHit, error)
@@ -182,6 +184,7 @@ type NoticePosted = github.com/hollis-labs/nanite/internal/events.NoticePosted s
 const NoticeTurnText untyped string
 func Open(ctx context.Context, opts Options) (*Agent, error)
 type Options struct
+  field Tether *TetherConfig
   field DailyTokenBudget int
   field MaxOutputTokens int
   field MaxSteps int
@@ -441,6 +444,10 @@ type SubtaskProgress = github.com/hollis-labs/nanite/internal/events.SubtaskProg
   field StatusLine string
   field Background bool
   field Status string
+type TetherConfig = github.com/hollis-labs/nanite/internal/tether.Config struct
+  field Endpoint string
+  field Credential string
+  field HTTPClient *net/http.Client
 type TextDelta = github.com/hollis-labs/nanite/internal/events.TextDelta struct
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field Text string

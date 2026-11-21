@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `agents/workflow-designer`, a specialist agent that discovers how a
+  person does a task and designs a user/agent workflow for a Surface Module.
 - Add `examples/specialist`, a starter agent folder for specialist agents that
   own one area, with charter conventions and a memory skill. CI validates it.
 - Add `agents/nanite-setup-expert`, a specialist agent for setting up Nanite

@@ -1,0 +1,45 @@
+name: nanite fuzz
+# Nightly fuzzing of the edge-input handlers. The f.Add seeds of every target
+# already run as ordinary tests in `nanite check`; this job explores beyond
+# them for a minute per target and keeps any failing input as an artifact.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nanite-fuzz
+  cancel-in-progress: true
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: FuzzSearch, pkg: ./internal/selftools/ }
+          - { name: FuzzFindGlob, pkg: ./internal/selftools/ }
+          - { name: FuzzWorkspaceMutate, pkg: ./internal/selftools/ }
+          - { name: FuzzParseBash, pkg: ./internal/selftools/ }
+          - { name: FuzzDenylist, pkg: ./internal/shell/ }
+          - { name: FuzzMCPTool, pkg: ./internal/mcpclient/ }
+          - { name: FuzzUnpack, pkg: ./toolregistry/ }
+          - { name: FuzzValidate, pkg: ./registryagent/ }
+          - { name: FuzzMaterializeProfile, pkg: ./registryagent/ }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: fuzz ${{ matrix.target.name }}
+        run: go test -run '^$' -fuzz '^${{ matrix.target.name }}$' -fuzztime 60s ${{ matrix.target.pkg }}
+      - name: keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target.name }}
+          path: "**/testdata/fuzz/${{ matrix.target.name }}/"
+          if-no-files-found: ignore

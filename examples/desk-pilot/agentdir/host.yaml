@@ -1,0 +1,10 @@
+kind: embedded
+lifetime: application
+application_id: desk-pilot
+runtime:
+  provider: openai
+  model: configured-by-live-test
+  max_steps: 8
+  max_output_tokens: 1024
+  daily_token_budget: 100000
+  subtask_limit: 4

@@ -155,8 +155,11 @@ type Engine struct {
 	// checking holds conversations an integrity check is reading, outside
 	// e.mu; nothing may write their transcript meanwhile (see busyLocked).
 	checking map[string]bool
-	previous map[string]map[string]string
-	grants   map[string]map[string]bool
+	// integrityEvents tracks integrity events still being emitted; Close
+	// waits for them.
+	integrityEvents sync.WaitGroup
+	previous        map[string]map[string]string
+	grants          map[string]map[string]bool
 	// changed is closed and replaced each time a run starts or ends, so a
 	// subtask waiting to relay an ask to its root conversation can wait for
 	// the root's next run.
@@ -649,6 +652,7 @@ func (e *Engine) Close() {
 	for _, r := range runs {
 		<-r.done
 	}
+	e.integrityEvents.Wait()
 	if err := e.mcp.Close(); err != nil {
 		e.cfg.Logger.Warn("MCP connections did not close cleanly")
 	}

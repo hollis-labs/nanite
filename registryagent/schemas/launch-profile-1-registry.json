@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "launch_profile/1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": "object",
+          "properties": {
+            "authority": {
+              "const": "tether"
+            },
+            "kind": {
+              "const": "launch_profile"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "authority",
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "reference",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "authority": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uri": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "authority",
+          "kind",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 256
+    },
+    "launcher": {
+      "type": "string",
+      "enum": [
+        "tether",
+        "torque-unit",
+        "nanite"
+      ]
+    },
+    "host": {
+      "type": "string",
+      "pattern": "^(surface-module:[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*|nanite-cli|nanite-service)$"
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "openai"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_steps": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "context_window": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "compact_at": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "compact_keep_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "compact_input_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "turn_token_budget": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "daily_token_budget": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "subtask_limit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "cache_ttl": {
+              "type": "string",
+              "enum": [
+                "",
+                "5m",
+                "1h"
+              ]
+            },
+            "idle_timeout": {
+              "type": "string",
+              "pattern": "^[0-9]+(ms|s|m|h)$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "name",
+    "source"
+  ],
+  "additionalProperties": false
+}

@@ -4,6 +4,10 @@
 
 - `agents/workflow-designer` carries the Surface Module conventions pack
   (v1.0.0, from Surface) as the `design-surface-workflow` skill and context notes.
+- Materialize Registry agent records into validated local folders with provenance,
+  atomic replacement, retained backups and pinned tool packages. Add the
+  development-only `nanite agents materialize --registry-dir` command.
+
 - Add `agents/workflow-designer`, a specialist agent that discovers how a
   person does a task and designs a user/agent workflow for a Surface Module.
 - Add `examples/specialist`, a starter agent folder for specialist agents that

@@ -103,7 +103,7 @@ func configIndependent(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "version", "init", "validate", "help", "completion", "stop", "tools":
+	case "version", "init", "validate", "help", "completion", "stop", "tools", "agents":
 		return true
 	default:
 		return false

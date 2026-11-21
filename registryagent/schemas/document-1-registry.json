@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "document/1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "subtype": {
+      "enum": [
+        "sop",
+        "workflow",
+        "procedure",
+        "engineering_bible",
+        "document",
+        "architecture",
+        "template",
+        "communication"
+      ]
+    },
+    "format": {
+      "enum": [
+        "markdown",
+        "plain_text"
+      ]
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "applicability": {
+      "type": "string",
+      "minLength": 1
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "authority": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uri": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "authority",
+          "kind",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 0,
+      "maxItems": 256
+    },
+    "architecture": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "current",
+            "target"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "state",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "template": {
+      "type": "object",
+      "properties": {
+        "templates": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "templates"
+      ],
+      "additionalProperties": false
+    },
+    "communication": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "channel",
+        "audience"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "name",
+    "subtype",
+    "format",
+    "body"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "subtype": {
+            "const": "architecture"
+          }
+        },
+        "required": [
+          "subtype"
+        ]
+      },
+      "then": {
+        "required": [
+          "architecture"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "architecture"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subtype": {
+            "const": "template"
+          }
+        },
+        "required": [
+          "subtype"
+        ]
+      },
+      "then": {
+        "required": [
+          "template"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "template"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subtype": {
+            "const": "communication"
+          }
+        },
+        "required": [
+          "subtype"
+        ]
+      },
+      "then": {
+        "required": [
+          "communication"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "communication"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -38,6 +38,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/subagent"
 	"github.com/hollis-labs/nanite/internal/tools"
+	transcriptlog "github.com/hollis-labs/nanite/internal/transcript"
 )
 
 var ErrBusy = errors.New("nanite: conversation is busy")
@@ -383,6 +384,15 @@ func (e *Engine) Discard(ctx context.Context, id string) error {
 		return err
 	}
 	if turn == nil {
+		// A torn transcript can leave its turn running, not interrupted:
+		// say why nothing can be discarded rather than that nothing is there.
+		if mark, err := e.cfg.Store.Setting(ctx, id, store.SettingIntegrity); err != nil {
+			return err
+		} else if mark != "" {
+			if err := e.validateLocked(ctx, id, "discard"); err != nil {
+				return err
+			}
+		}
 		return ErrNoInterrupted
 	}
 	history, err := e.cfg.Store.History(ctx, id)
@@ -392,6 +402,13 @@ func (e *Engine) Discard(ctx context.Context, id string) error {
 	// A turn whose user message was never stored has nothing to repair and is still discarded.
 	plan, _ := recovery.ResumePlan(history, *turn)
 	journal, err := e.cfg.Store.OpenJournal(ctx, id)
+	if errors.Is(err, transcriptlog.ErrTorn) {
+		// The transcript refuses writes until its tail is repaired: say why
+		// with the findings, not the bare byte-layer error.
+		if gateErr := e.validateLocked(ctx, id, "discard"); gateErr != nil {
+			return gateErr
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -497,12 +514,10 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if err != nil {
 		return nil, err
 	}
-	if resume {
-		// Before anything reads the history or assembles context: never
-		// resume through an unsafe finding.
-		if err := e.resumeGate(ctx, id); err != nil {
-			return nil, err
-		}
+	// Before anything reads the history or assembles context: never run on
+	// a history an integrity check found unsafe.
+	if err := e.runGate(ctx, id, resume); err != nil {
+		return nil, err
 	}
 	interrupted, err := e.cfg.Store.Interrupted(ctx, id)
 	if err != nil {

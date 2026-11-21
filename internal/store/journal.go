@@ -149,6 +149,7 @@ func (s *Store) replayConversation(ctx context.Context, id string) error {
 	if err != nil && !errors.Is(err, transcript.ErrTorn) {
 		return err
 	}
+	s.markTorn(id, err != nil)
 	for _, entry := range entries {
 		if err := s.project(ctx, id, entry); err != nil {
 			return err

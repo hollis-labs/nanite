@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"math/big"
 	"path/filepath"
+	"sort"
+	"sync"
 	"time"
 
 	core "github.com/hollis-labs/libs/core/store"
@@ -26,6 +28,41 @@ type Store struct {
 	db          *core.Store
 	owned       bool
 	transcripts string
+
+	tornMu sync.Mutex
+	torn   map[string]bool // conversations whose last replay stopped at a torn tail
+}
+
+// SettingIntegrity is the conversation setting that marks a conversation an
+// integrity check found unsafe ("blocked"). It outlives a restart, so a
+// conversation stays refused until a check passes again.
+const SettingIntegrity = "integrity"
+
+// TornConversations lists, in order, the conversations whose transcript
+// ended in a torn tail when they were last replayed. Replay on open reads
+// every transcript, so this costs no extra scan.
+func (s *Store) TornConversations() []string {
+	s.tornMu.Lock()
+	defer s.tornMu.Unlock()
+	out := make([]string, 0, len(s.torn))
+	for id := range s.torn {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Store) markTorn(id string, torn bool) {
+	s.tornMu.Lock()
+	defer s.tornMu.Unlock()
+	if s.torn == nil {
+		s.torn = map[string]bool{}
+	}
+	if torn {
+		s.torn[id] = true
+	} else {
+		delete(s.torn, id)
+	}
 }
 
 func Open(ctx context.Context, dataDir string, db *core.Store) (*Store, error) {

@@ -71,7 +71,7 @@ func TestCLIResumeRefusesUnsafeConversation(t *testing.T) {
 	}
 	var printed bytes.Buffer
 	printIntegrity(&printed, err)
-	for _, want := range []string{"unsafe orphan_tool_result", "tool_use_id=nobody", "--discard " + id, "rebuild-index"} {
+	for _, want := range []string{"unsafe orphan_tool_result", "tool_use_id=nobody", "--discard " + id, "refuses new turns"} {
 		if !strings.Contains(printed.String(), want) {
 			t.Fatalf("printed findings lack %q:\n%s", want, printed.String())
 		}

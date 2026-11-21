@@ -730,3 +730,20 @@ func TestFetchRejectsResolverPayloadAndMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// runtime.settings must be an object. The schema enforces it today; the
+// flattening refuses other shapes itself instead of panicking.
+func TestHostRuntimeSettings(t *testing.T) {
+	got, err := hostRuntime(map[string]any{"runtime": map[string]any{"provider": "openai", "settings": map[string]any{"max_steps": 4}}})
+	if err != nil || got["provider"] != "openai" || got["max_steps"] != 4 || got["settings"] != nil {
+		t.Fatalf("flattened %v, %v", got, err)
+	}
+	for _, settings := range []any{"x", []any{1}, 3.0, nil} {
+		if _, err := hostRuntime(map[string]any{"runtime": map[string]any{"settings": settings}}); err == nil {
+			t.Errorf("settings %#v accepted", settings)
+		}
+	}
+	if got, err := hostRuntime(map[string]any{}); err != nil || len(got) != 0 {
+		t.Fatalf("no runtime: %v, %v", got, err)
+	}
+}

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,88 +19,73 @@ import (
 	chatstream "github.com/hollis-labs/libs/ui/ui-go/chatstream"
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/chatrunner"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
-// fakeWarden refuses llm-gateway tokens until its request is approved.
+// fakeWarden is the shared fake Warden (wardentest) with no llm-gateway
+// grant: a token for it files a critical grant request, which set decides.
 type fakeWarden struct {
-	srv      *httptest.Server
-	mu       sync.Mutex
-	status   string // the grant request's status
-	filed    int
-	lookups  atomic.Int32
-	purposes []string
+	*wardentest.Fake
+	srv *httptest.Server
 }
 
 func newFakeWarden(t *testing.T) *fakeWarden {
 	t.Helper()
-	f := &fakeWarden{status: "pending"}
-	next := atomic.Int64{}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/v1/token":
-			_ = r.ParseForm()
-			f.mu.Lock()
-			granted := f.status == "approved"
-			f.mu.Unlock()
-			if r.Form.Get("audience") == "llm-gateway" && !granted {
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = io.WriteString(w, `{"error":"invalid_scope"}`)
-				return
-			}
-			n := next.Add(1)
-			// Values built at run time, so the source holds no
-			// credential-shaped literal.
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"access" + "_token": fmt.Sprint("fixture-a-", n), "expires_in": 900,
-				"refresh" + "_token": fmt.Sprint("fixture-p-", n),
-			})
-		case r.URL.Path == "/api/v1/requests" && r.Method == http.MethodPost:
-			body, _ := io.ReadAll(r.Body)
-			f.mu.Lock()
-			f.filed++
-			f.purposes = append(f.purposes, string(body))
-			f.mu.Unlock()
-			_, _ = io.WriteString(w, `{"id":"req-1","status":"pending","tier":"critical"}`)
-		case strings.HasPrefix(r.URL.Path, "/api/v1/requests/"):
-			f.lookups.Add(1)
-			f.mu.Lock()
-			status := f.status
-			f.mu.Unlock()
-			switch status {
-			case "gone":
-				w.WriteHeader(http.StatusNotFound)
-				_, _ = io.WriteString(w, `{"error":"not_found"}`)
-			case "error":
-				w.WriteHeader(http.StatusBadGateway)
-			default:
-				_, _ = fmt.Fprintf(w, `{"id":"req-1","status":%q}`, status)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
+	f := wardentest.NewFake(t, "fixture-parent-0").FileAs("pending", "critical").
+		// Values built at run time, so the source holds no credential-shaped
+		// literal.
+		Tokens(func(n int, aud string) string { return fmt.Sprint("fixture-a-", aud, "-", n) }).
+		Parents(func(n int) string { return fmt.Sprint("fixture-p-", n) })
+	return &fakeWarden{Fake: f, srv: f.Server}
 }
 
+// set decides the latest grant request: "approved" or "denied"; "gone"
+// removes it (its lookups answer 404); "error" makes lookups fail (502)
+// until another status; "pending" leaves it waiting.
 func (f *fakeWarden) set(status string) {
-	f.mu.Lock()
-	f.status = status
-	f.mu.Unlock()
+	f.Mend("/api/v1/requests")
+	ids := f.Requests()
+	latest := ""
+	if len(ids) > 0 {
+		latest = ids[len(ids)-1]
+	}
+	switch status {
+	case "approved", "denied":
+		if latest != "" {
+			f.Decide(latest, status)
+		}
+		if status == "approved" {
+			f.Grant("llm-gateway")
+		}
+	case "gone":
+		if latest != "" {
+			f.Remove(latest)
+		}
+	case "error":
+		f.Break("/api/v1/requests", http.StatusBadGateway)
+	}
 }
 
-func (f *fakeWarden) requests() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.filed
-}
+// requests is how many grant requests were filed.
+func (f *fakeWarden) requests() int { return len(f.Requests()) }
 
+// requestBodies are the filed grant requests' bodies.
 func (f *fakeWarden) requestBodies() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return strings.Join(f.purposes, "\n")
+	var out []string
+	for _, body := range f.Filed() {
+		raw, _ := json.Marshal(body)
+		out = append(out, string(raw))
+	}
+	return strings.Join(out, "\n")
+}
+
+// lookups counts grant-request lookups.
+func (f *fakeWarden) lookups() int {
+	n := 0
+	for _, id := range f.Requests() {
+		n += f.Calls("/api/v1/requests/" + id)
+	}
+	return n
 }
 
 // gatewayLLM answers every chat request with one line of text.
@@ -283,7 +267,7 @@ func TestAuthWaitingSurvivesARestart(t *testing.T) {
 	_ = first.svc.Close(t.Context())
 
 	ws.set("approved")
-	before := ws.lookups.Load()
+	before := ws.lookups()
 	second := wardenRunner(t, dir, ws, llm, nil)
 	if second.conv != first.conv {
 		t.Fatalf("restarted chat is %s, want %s", second.conv, first.conv)
@@ -292,7 +276,7 @@ func TestAuthWaitingSurvivesARestart(t *testing.T) {
 		t.Fatal("the restarted runner does not watch the request")
 	}
 	second.until(t, "the retried answer after the restart", answered)
-	if ws.lookups.Load() == before {
+	if ws.lookups() == before {
 		t.Fatal("the restarted runner never looked the request up")
 	}
 }
@@ -345,12 +329,12 @@ func TestAuthWaitingRidesOutLookupErrors(t *testing.T) {
 	w.waitForGrant(t)
 	ws.set("error")
 	for range 3 {
-		before := ws.lookups.Load()
+		before := ws.lookups()
 		if !clock.Tick() {
 			t.Fatal("the watcher stopped on a lookup error")
 		}
 		// Let the lookup finish before the next change.
-		waitFor(t, "the lookup", func() bool { return ws.lookups.Load() > before })
+		waitFor(t, "the lookup", func() bool { return ws.lookups() > before })
 	}
 	ws.set("approved")
 	if !clock.Tick() {

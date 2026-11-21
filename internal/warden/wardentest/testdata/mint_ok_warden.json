@@ -1,0 +1,33 @@
+{
+  "source": "recorded",
+  "request": {
+    "method": "POST",
+    "path": "/v1/token",
+    "form": {
+      "audience": "warden",
+      "grant_type": "refresh_token",
+      "refresh_token": "<parent>",
+      "scope": "warden.request warden.read"
+    }
+  },
+  "response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "access_token": "<access-token>",
+      "aud": "warden",
+      "expires_at": "2026-11-21T11:36:13Z",
+      "expires_in": 899,
+      "grant": "grt_fixture",
+      "jti": "00000000-0000-4000-8000-000000000000",
+      "kind": "agent",
+      "refresh_expires_at": "2026-12-21T11:21:13.777077897Z",
+      "refresh_token": "<next-parent>",
+      "scope": "warden.read warden.request",
+      "sub": "agent:nanite-fixture",
+      "token": "<access-token>",
+      "token_type": "Bearer",
+      "ttl_seconds": 899
+    }
+  }
+}

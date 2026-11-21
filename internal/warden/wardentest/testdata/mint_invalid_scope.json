@@ -1,0 +1,21 @@
+{
+  "source": "recorded",
+  "request": {
+    "method": "POST",
+    "path": "/v1/token",
+    "form": {
+      "audience": "llm-gateway",
+      "grant_type": "refresh_token",
+      "refresh_token": "<parent>",
+      "scope": "llm-gateway.nanite-fixture-ungranted"
+    }
+  },
+  "response": {
+    "status": 400,
+    "content_type": "application/json",
+    "body": {
+      "error": "invalid_scope",
+      "error_description": "no live grant covers audience llm-gateway with those scopes"
+    }
+  }
+}

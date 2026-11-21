@@ -1,9 +1,7 @@
 package providers_test
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -16,55 +14,18 @@ import (
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/agent/authored"
 	"github.com/hollis-labs/nanite/agent/providers"
+	"github.com/hollis-labs/nanite/internal/warden/wardentest"
 )
 
-// fakeWarden is Warden's token endpoint with a rotating parent, grants for
-// llm-gateway and warden, and the grant-request API.
-type fakeWarden struct {
-	mu       sync.Mutex
-	parent   string
-	n        int
-	mints    int
-	requests int
-}
-
-func newFakeWarden(t *testing.T, parent string) (*fakeWarden, *httptest.Server) {
+// newFakeWarden is the shared fake Warden (wardentest) with grants for
+// llm-gateway and warden, and grant requests filed pending at the elevated
+// tier.
+func newFakeWarden(t *testing.T, parent string) (*wardentest.Fake, *httptest.Server) {
 	t.Helper()
-	f := &fakeWarden{parent: parent}
-	srv := httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(srv.Close)
-	return f, srv
-}
-
-func (f *fakeWarden) serve(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	switch r.URL.Path {
-	case "/v1/token":
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
-		_ = r.ParseForm()
-		if r.Form.Get("refresh_token") != f.parent {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
-			return
-		}
-		aud := r.Form.Get("audience")
-		if aud != "llm-gateway" && aud != "warden" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_scope"})
-			return
-		}
-		f.mints++
-		f.n++
-		f.parent = fixtureValue(fmt.Sprintf("parent-%d", f.n))
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": fixtureValue(fmt.Sprintf("access-%s-%d", aud, f.n)), "expires_in": 900, "refresh_token": f.parent})
-	case "/api/v1/requests":
-		f.requests++
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "req-1", "status": "pending", "tier": "elevated"})
-	default:
-		w.WriteHeader(http.StatusNotFound)
-	}
+	f := wardentest.NewFake(t, parent).Grant("llm-gateway").Grant("warden").FileAs("pending", "elevated").
+		Tokens(func(n int, aud string) string { return fixtureValue(fmt.Sprintf("access-%s-%d", aud, n)) }).
+		Parents(func(n int) string { return fixtureValue(fmt.Sprintf("parent-%d", n)) })
+	return f, f.Server
 }
 
 // identity returns an agent directory and its identity, whose credential
@@ -116,9 +77,7 @@ func TestNewNamedWithWarden(t *testing.T) {
 			t.Fatalf("provider %d: server saw %+v", i, s)
 		}
 	}
-	fw.mu.Lock()
-	mints := fw.mints
-	fw.mu.Unlock()
+	mints := fw.Mints()
 	if mints != 1 {
 		t.Fatalf("%d mints for two providers sharing a Warden; want 1", mints)
 	}
@@ -222,9 +181,7 @@ func TestNewNamedWardenReportsAWaitingGrant(t *testing.T) {
 	if len(seen) != 1 || seen[0].RequestID != "req-1" || seen[0].Audience != "other-gateway" || seen[0].Status != "pending" {
 		t.Fatalf("OnAuthWaiting saw %+v", seen)
 	}
-	fw.mu.Lock()
-	defer fw.mu.Unlock()
-	if fw.requests != 1 {
-		t.Fatalf("%d grant requests filed; want 1", fw.requests)
+	if len(fw.Requests()) != 1 {
+		t.Fatalf("%d grant requests filed; want 1", len(fw.Requests()))
 	}
 }

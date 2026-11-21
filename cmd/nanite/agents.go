@@ -31,7 +31,7 @@ func agentsCommand() *cobra.Command {
 	}}
 	materialize.Flags().StringVar(&registryDir, "registry-dir", "", "Development-only filesystem fake registry (records.json; no authentication)")
 	materialize.Flags().StringVar(&authority, "authority", "registry", "Authority of the native agent reference")
-	materialize.Flags().BoolVar(&force, "force", false, "Replace an unmanaged/offline folder, retaining its previous contents as a backup; stop its runtime first")
+	materialize.Flags().BoolVar(&force, "force", false, "Permit replacing an unmanaged folder; preserve runtime state and refuse open runtimes")
 	command.AddCommand(materialize)
 	return command
 }

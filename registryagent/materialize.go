@@ -17,12 +17,12 @@ import (
 
 	"github.com/hollis-labs/libs/agent/agentdir"
 	"github.com/hollis-labs/nanite/agent/authored"
+	"github.com/hollis-labs/nanite/internal/agentlock"
 	"github.com/hollis-labs/nanite/toolregistry"
 )
 
-// Options controls explicit replacement and package transport. Force also
-// permits replacement of a folder containing runtime state: stop its runtime
-// first. The previous folder is retained as Result.Backup, never deleted.
+// Options controls unmanaged-folder replacement and package transport. Force
+// never bypasses staleness checks or runtime locks. Existing state is preserved.
 type Options struct {
 	Force bool
 	Tools *toolregistry.Client
@@ -84,6 +84,7 @@ func Materialize(ctx context.Context, resolver Resolver, agentRef Reference, dir
 	}
 	defer func() { _ = guard.Close() }()
 	exists := false
+	managed := false
 	var before os.FileInfo
 	var previous Manifest
 	if before, err = root.Lstat(base); err == nil {
@@ -92,28 +93,19 @@ func Materialize(ctx context.Context, resolver Resolver, agentRef Reference, dir
 			return result, fmt.Errorf("registryagent: destination must be a real directory")
 		}
 		raw, e := readBounded(root, filepath.Join(base, manifestPath))
-		managed := e == nil && len(raw) <= maxRecordBytes && json.Unmarshal(raw, &previous) == nil && previous.Version == 1 && sameRef(previous.Agent, agentRef)
+		managed = e == nil && len(raw) <= maxRecordBytes && json.Unmarshal(raw, &previous) == nil && previous.Version == 1 && sameRef(previous.Agent, agentRef)
 		if !managed && !opts.Force {
 			return result, fmt.Errorf("registryagent: destination was not materialized for this agent; use force explicitly")
 		}
-		// A folder opened by a runtime is not a safe offline replacement target.
-		state, e := root.Open(filepath.Join(base, ".nanite"))
-		if e == nil {
-			entries, e := state.ReadDir(-1)
-			_ = state.Close()
-			if e != nil {
-				return result, e
-			}
-			for _, entry := range entries {
-				if entry.Name() != "materialized.json" && !opts.Force {
-					return result, fmt.Errorf("registryagent: runtime state present; stop runtime and use force, or choose a fresh directory")
-				}
-			}
-		}
+
 	} else if !os.IsNotExist(err) {
 		return result, err
 	}
-	stage := ".nanite-materialize-" + rand.Text()
+	stagePrefix := ".nanite-stage-" + base + "-"
+	if err := cleanStages(root, stagePrefix); err != nil {
+		return result, err
+	}
+	stage := stagePrefix + rand.Text()
 	if err := root.Mkdir(stage, 0700); err != nil {
 		return result, err
 	}
@@ -145,8 +137,24 @@ func Materialize(ctx context.Context, resolver Resolver, agentRef Reference, dir
 	if err != nil {
 		return result, err
 	}
-	if exists && reflect.DeepEqual(previous.Sources, manifest.Sources) && reflect.DeepEqual(previous.Tools, manifest.Tools) && !opts.Force {
+	if managed && reflect.DeepEqual(previous.Sources, manifest.Sources) && reflect.DeepEqual(previous.Tools, manifest.Tools) {
 		return Result{Manifest: previous}, nil
+	}
+	publication, err := agentlock.Publication(abs, false)
+	if err != nil {
+		return result, err
+	}
+	defer func() { _ = publication.Close() }()
+	if exists {
+		current, err := root.Lstat(base)
+		if err != nil || !os.SameFile(before, current) {
+			return result, fmt.Errorf("registryagent: destination changed during materialization")
+		}
+		stateLock, err := preserveState(ctx, root, base, staged)
+		if err != nil {
+			return result, err
+		}
+		defer func() { _ = stateLock.Close() }()
 	}
 	manifest.MaterializedAt = time.Now().UTC()
 	raw, err := json.MarshalIndent(manifest, "", "  ")
@@ -185,7 +193,12 @@ func Materialize(ctx context.Context, resolver Resolver, agentRef Reference, dir
 	result = Result{Manifest: manifest, Changed: true}
 	if exists {
 		keep = true
+		backup := ".nanite-backup-" + rand.Text()
 		result.Backup = filepath.Join(parent, stage)
+		if err := root.Rename(stage, backup); err != nil {
+			return result, err
+		}
+		result.Backup = filepath.Join(parent, backup)
 	}
 	if err := parentFile.Sync(); err != nil {
 		return result, err
@@ -313,6 +326,9 @@ func build(ctx context.Context, resolver Resolver, ref Reference, dir string, ro
 		if tool.Kind != "tool-package" {
 			continue
 		}
+		if tool.Authority != ref.Authority {
+			return m, fmt.Errorf("registryagent: tool package authority does not match configured registry")
+		}
 		if opts.Tools == nil {
 			return m, fmt.Errorf("registryagent: tool package transport required")
 		}
@@ -388,4 +404,26 @@ func readBounded(root *os.Root, path string) ([]byte, error) {
 		return nil, fmt.Errorf("registryagent: metadata exceeds size limit")
 	}
 	return data, nil
+}
+
+// Only this destination's reserved staging directories are cleaned under its
+// materializer lock. Backups use a different prefix and are never removed.
+func cleanStages(root *os.Root, prefix string) error {
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
+			if err := root.RemoveAll(entry.Name()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

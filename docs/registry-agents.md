@@ -86,13 +86,25 @@ for the same destination serialize using a sibling lock file.
 
 An existing folder must have a matching materialization manifest. Unchanged
 source revisions and digests return `Changed: false`; this is source staleness
-detection, not a local edit repair check. `--force` regenerates from sources.
+detection, not a local edit repair check. Unchanged inputs return unchanged even
+with `--force` and even while the runtime is open.
 Changed inputs atomically replace the folder and retain the entire previous
 folder at the returned `Backup` path, printed by the CLI. Backups are never
 automatically deleted. Existing tool pins prevent a package version from
 silently changing digest.
 
-A folder containing runtime state requires explicit `--force`; stop its runtime
-first, or choose a fresh destination. Replacement generates fresh runtime state
-and leaves prior state in the backup. Force also permits replacing an unmanaged
-folder, retaining it as a backup. Symlink destinations are always refused.
+Updates acquire a stable sibling publication lock shared with `agent.Open` and
+the existing `.nanite/agent.lock`. An open runtime blocks replacement, including
+with `--force`. Close it and retry. The complete `.nanite` tree is copied into
+the staged folder while locked, except for the regenerated materialization
+manifest. Conversations, transcripts, host state and other runtime files survive
+definition updates. Links and special files in runtime state are refused.
+Explicit external `DataDir` state stays in place; its open runtime still blocks
+publication through the shared directory lock.
+
+`--force` only permits replacing a folder without a matching materialization
+manifest; it never bypasses locks or the unchanged check. Symlink destinations
+are always refused. Backups use `.nanite-backup-*`; abandoned stages for the same
+destination use `.nanite-stage-<name>-*` and are cleaned on the next attempt.
+Runtimes and materializers need write access to the agent folder's parent for
+the stable sibling publication lock.

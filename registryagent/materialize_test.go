@@ -3,6 +3,8 @@ package registryagent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/hollis-labs/nanite/internal/agentlock"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,11 +80,49 @@ func TestMaterializeRoundTripAndStaleness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	conversation, err := a.NewConversation(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conversation.Record(t.Context(), "remember this", "stored answer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := conversation.SetHostState(t.Context(), "fixture", "retained"); err != nil {
+		t.Fatal(err)
+	}
+	for _, force := range []bool{false, true} {
+		same, err := Materialize(t.Context(), records, ref, dir, Options{Force: force})
+		if err != nil || same.Changed {
+			t.Fatal("unchanged running agent rejected or replaced", err)
+		}
+	}
+	records[0].Revision = "r3"
+	if _, err := Materialize(t.Context(), records, ref, dir, Options{Force: true}); err == nil {
+		t.Fatal("open runtime replaced")
+	}
 	if err := a.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Materialize(t.Context(), records, ref, dir); err == nil {
-		t.Fatal("silently replaced runtime state")
+	updated, err := Materialize(t.Context(), records, ref, dir)
+	if err != nil || !updated.Changed {
+		t.Fatal("closed runtime update failed", err)
+	}
+	reopened, err := agent.Open(t.Context(), agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: fake.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	restored, err := reopened.Conversation(t.Context(), conversation.ID())
+	if err != nil {
+		t.Fatal("conversation lost", err)
+	}
+	history, err := restored.History(t.Context())
+	if err != nil || len(history) != 2 {
+		t.Fatal("history lost", history, err)
+	}
+	value, err := restored.HostState(t.Context(), "fixture")
+	if err != nil || value != "retained" {
+		t.Fatal("host state lost", value, err)
 	}
 }
 
@@ -321,5 +361,128 @@ func TestToolPackagePins(t *testing.T) {
 	after, err := current.ReadFile("tools.lock.json")
 	if err != nil || string(after) != string(pins) {
 		t.Fatal("failure changed destination pins", err)
+	}
+}
+
+func TestRuntimeOpeningDuringResolutionPreventsSwap(t *testing.T) {
+	records, ref := fixture(t)
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Materialize(t.Context(), records, ref, dir); err != nil {
+		t.Fatal(err)
+	}
+	records[0].Revision = "r2"
+	var running *agent.Agent
+	resolver := resolverFunc(func(ctx context.Context, requested Reference, revision string) (Record, error) {
+		if requested.Kind == "agent" {
+			var err error
+			running, err = agent.Open(ctx, agent.Options{Dir: dir, GlobalSkillsDir: "-", Provider: fake.New()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = running.Close() })
+		}
+		return records.Get(ctx, requested, revision)
+	})
+	if _, err := Materialize(t.Context(), resolver, ref, dir); err == nil || !strings.Contains(err.Error(), "open") {
+		t.Fatal("runtime opened during build was replaced", err)
+	}
+	snap, err := agentdir.Load(dir)
+	if err != nil || snap.Definition.Revision != "r1" {
+		t.Fatal("destination changed", err)
+	}
+	if err := running.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Materialize(t.Context(), records, ref, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRejectAuthoredEdgeCases(t *testing.T) {
+	for _, mode := range []string{"agent name", "child name", "duplicate", "document kind", "variant", "secret", "identity", "total size", "authority"} {
+		t.Run(mode, func(t *testing.T) {
+			records, ref := fixture(t)
+			edit := func(index int, fn func(map[string]any)) {
+				var value map[string]any
+				if err := json.Unmarshal(records[index].Payload, &value); err != nil {
+					t.Fatal(err)
+				}
+				fn(value)
+				var err error
+				records[index].Payload, err = json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch mode {
+			case "agent name":
+				edit(0, func(v map[string]any) { v["name"] = "Upper" })
+			case "child name":
+				edit(2, func(v map[string]any) { v["name"] = "Upper" })
+			case "duplicate":
+				edit(0, func(v map[string]any) { v["context"] = []Reference{records[3].Reference, records[3].Reference} })
+			case "document kind":
+				edit(0, func(v map[string]any) { v["context"] = []Reference{records[2].Reference} })
+			case "variant":
+				edit(4, func(v map[string]any) { v["body"] = "---\nread_only: not-a-bool\n---\nInvalid variant." })
+			case "secret":
+				edit(0, func(v map[string]any) { v["charter"] = "ghp_" + strings.Repeat("aB9x", 10) })
+			case "identity":
+				records[0].Reference.ID = "different"
+			case "authority":
+				edit(0, func(v map[string]any) {
+					v["tools"] = []Reference{{Authority: "other", Kind: "tool-package", ID: "tool-package:agt_fixture/echo@1.0.0"}}
+				})
+			case "total size":
+				refs := []Reference{}
+				for i := range 10 {
+					child := records[3]
+					child.Reference.ID = fmt.Sprintf("context-%d", i)
+					payload := map[string]any{"schema": "document/1", "id": child.Reference.ID, "name": child.Reference.ID, "subtype": "document", "format": "markdown", "body": strings.Repeat("x", 900000)}
+					child.Payload, _ = json.Marshal(payload)
+					records = append(records, child)
+					refs = append(refs, child.Reference)
+				}
+				edit(0, func(v map[string]any) { v["context"] = refs })
+			}
+			resolver := Resolver(records)
+			if mode == "identity" {
+				resolver = resolverFunc(func(context.Context, Reference, string) (Record, error) { return records[0], nil })
+			}
+			if _, err := Materialize(t.Context(), resolver, ref, filepath.Join(t.TempDir(), "agent")); err == nil {
+				t.Fatal("invalid input accepted")
+			}
+		})
+	}
+}
+
+func TestPublicationLockAndStageCleanup(t *testing.T) {
+	records, ref := fixture(t)
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "agent")
+	abandoned := filepath.Join(parent, ".nanite-stage-agent-crashed")
+	backup := filepath.Join(parent, ".nanite-backup-retained")
+	for _, path := range []string{abandoned, backup} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Materialize(t.Context(), records, ref, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Fatal("abandoned stage remains", err)
+	}
+	if _, err := os.Stat(backup); err != nil {
+		t.Fatal("backup removed", err)
+	}
+	guard, err := agentlock.Publication(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = guard.Close() }()
+	if opened, err := agent.Open(t.Context(), agent.Options{Dir: dir, Provider: fake.New(), GlobalSkillsDir: "-"}); err == nil {
+		_ = opened.Close()
+		t.Fatal("runtime opened during publication")
 	}
 }

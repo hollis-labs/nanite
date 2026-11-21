@@ -315,3 +315,72 @@ func TestTrimEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+// A reserved entry always ships at least its Pointer: higher-priority entries
+// that would fill the slot are trimmed to leave room for it.
+func TestReservedPointerAlwaysShips(t *testing.T) {
+	est := ctxpkg.DefaultEstimator{}
+	budgets := map[Name]int{Session: 240}
+	assemble := func(t *testing.T, entries ...Entry) (Assembled, string) {
+		t.Helper()
+		var updates []Update
+		for _, e := range entries {
+			updates = append(updates, Update{Slot: Session, Entry: e})
+		}
+		snap, err := NewStore().Snapshot().With(updates...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := DefaultSelector(est).Select(context.Background(), TurnInfo{}, snap, budgets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Assemble(context.Background(), snap, plan, nil, 0, est, budgets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range got.Blocks {
+			if b.SlotName == string(Session) {
+				return got, b.Content
+			}
+		}
+		return got, ""
+	}
+	mail := Entry{Owner: "engine", Key: "mail", Content: "MAIL " + strings.Repeat("body ", 400), Pointer: "[mail m1 withheld]", Reserve: true}
+	filler := Entry{Owner: "host", Key: "filler", Priority: 10, Content: strings.Repeat("filler ", 300)}
+
+	t.Run("crowded to under the trim minimum", func(t *testing.T) {
+		got, content := assemble(t, filler, mail)
+		d := got.Report[Session].Decisions
+		if len(d) != 2 || d[0].Disposition != Trim || d[1].Disposition != Pointer {
+			t.Fatalf("decisions %+v", d)
+		}
+		if !strings.Contains(content, "[mail m1 withheld]") || est.Estimate(content) > 240 {
+			t.Fatalf("content (%d tokens) lacks pointer: %q", est.Estimate(content), content[max(0, len(content)-120):])
+		}
+	})
+	t.Run("room for a trim prefers the trim", func(t *testing.T) {
+		got, content := assemble(t, mail)
+		d := got.Report[Session].Decisions
+		if len(d) != 1 || d[0].Disposition != Trim || !strings.HasPrefix(content, "MAIL ") {
+			t.Fatalf("decisions %+v content %.40q", d, content)
+		}
+	})
+	t.Run("fits whole", func(t *testing.T) {
+		small := mail
+		small.Content = "MAIL short"
+		got, content := assemble(t, filler, small)
+		d := got.Report[Session].Decisions
+		if d[1].Disposition != Ship || !strings.Contains(content, "MAIL short") {
+			t.Fatalf("decisions %+v", d)
+		}
+	})
+	t.Run("without reserve the mail is skipped", func(t *testing.T) {
+		plain := mail
+		plain.Reserve, plain.Pointer = false, ""
+		got, _ := assemble(t, filler, plain)
+		if d := got.Report[Session].Decisions; d[1].Disposition != Skip {
+			t.Fatalf("decisions %+v", d)
+		}
+	})
+}

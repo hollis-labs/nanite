@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Mailbox delivery fixes. No breaking changes.
+
+- Mail polling no longer skips the oldest unread message when mail arrives
+  during a poll of more than 50 unread messages; the tail fetch repeats until
+  the unread total is stable. Messages with equal timestamps keep their
+  arrival order.
+- The attempt cap and backoff are checked before mail is queued, and mail is
+  withdrawn between attempts, so a user turn during backoff cannot deliver
+  mail uncounted and a capped message gets no fourth delivery. New
+  `Conversation.NoticeHandled` reads a keyed notice's outcome without
+  queueing it.
+- Mail always reaches the model: when the session slot has too little room
+  for the mail or a trim of it, the message id and a withheld marker ship
+  instead, from room the slot holds back for it (`slots.Entry.Reserve`).
+
 ## 0.15.0
 
 Agents get their own Tether identity and mailbox: mail arrives as turns,

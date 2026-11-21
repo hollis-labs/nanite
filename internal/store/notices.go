@@ -59,6 +59,15 @@ func (s *Store) WithdrawNotice(ctx context.Context, conversation, id string) err
 	})
 }
 
+// NoticeHandled reports whether a turn that completed carried the notice. It
+// reads only: unlike QueueNotice it neither inserts nor requeues.
+func (s *Store) NoticeHandled(ctx context.Context, conversation, id string) (bool, error) {
+	var completed int
+	err := s.db.Reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM notices n JOIN turns t ON t.id=n.delivered_turn_id
+  WHERE n.id=? AND n.conversation_id=? AND t.status='completed'`, id, conversation).Scan(&completed)
+	return completed > 0, err
+}
+
 // QueueNotice inserts a stable notice once. Completed delivery survives both
 // acknowledgement failure and process restart. Failed turns may retry delivery;
 // interrupted turns retain it until their recovery decision is made.

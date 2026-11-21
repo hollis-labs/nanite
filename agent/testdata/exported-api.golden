@@ -80,6 +80,7 @@ type Conversation struct
   (*Conversation) Interrupted() *InterruptedTurn
   (*Conversation) Job(ctx context.Context, id string) (string, error)
   (*Conversation) Mode(ctx context.Context) (string, error)
+  (*Conversation) NoticeHandled(ctx context.Context, key string) (bool, error)
   (*Conversation) PostNotice(ctx context.Context, kind string, body string) error
   (*Conversation) QueueNotice(ctx context.Context, key string, kind string, body string) (bool, error)
   (*Conversation) Record(ctx context.Context, userText string, answer string) error
@@ -328,6 +329,7 @@ type SlotEntry = github.com/hollis-labs/nanite/internal/slots.Entry struct
   field Pointer string
   field Priority int
   field Labels map[string]string
+  field Reserve bool
 const SlotHandoff github.com/hollis-labs/nanite/internal/slots.Name
 const SlotInSystem github.com/hollis-labs/nanite/internal/slots.Placement
 const SlotInTurn github.com/hollis-labs/nanite/internal/slots.Placement

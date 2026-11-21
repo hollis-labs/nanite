@@ -680,7 +680,13 @@ func (e *Engine) assemble(ctx context.Context, input Input, info slots.TurnInfo,
 	}
 
 	for _, notice := range pending {
-		updates = append(updates, slots.Update{Slot: slots.Session, Entry: slots.Entry{Owner: "engine", Key: "notice-" + notice.ID, Priority: 1, Content: notice.Kind + ": " + notice.Body}})
+		entry := slots.Entry{Owner: "engine", Key: "notice-" + notice.ID, Priority: 1, Content: notice.Kind + ": " + notice.Body}
+		if notice.Kind == mailNoticeKind {
+			// A mail turn that showed nothing would spend a delivery attempt
+			// unseen; its pointer always has room.
+			entry.Pointer, entry.Reserve = mailPointer(notice.Body), true
+		}
+		updates = append(updates, slots.Update{Slot: slots.Session, Entry: entry})
 	}
 
 	for i, warning := range warnings {

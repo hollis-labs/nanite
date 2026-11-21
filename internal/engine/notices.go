@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,33 +204,66 @@ func (q *noticeQueue) pump() {
 	}
 }
 
+// mailNoticeKind is the kind the chatrunner mailbox bridge queues mail as.
+// A mail notice counts as delivered when any part of it shipped: the bridge
+// bounds its attempts, and must not lose one to a turn that hid it.
+const mailNoticeKind = "tether_mail"
+
 func deliveredNoticeIDs(report slots.Report, pending []store.Notice) []string {
 	if len(pending) == 0 {
 		return nil
 	}
 	shipped := make(map[string]bool)
-	trimmed := make(map[string]bool)
+	partial := make(map[string]bool)
 	for _, d := range report[slots.Session].Decisions {
-		if d.Owner == "engine" && d.Disposition == slots.Trim {
-			trimmed[d.Key] = true
+		if d.Owner != "engine" {
+			continue
 		}
-		if d.Owner == "engine" && d.Disposition == slots.Ship {
+		switch d.Disposition {
+		case slots.Ship:
 			shipped[d.Key] = true
+		case slots.Trim, slots.Pointer:
+			partial[d.Key] = true
+		case slots.Skip:
 		}
 	}
 	var delivered []string
 	for _, n := range pending {
-		if shipped["notice-"+n.ID] || (n.Kind == "tether_mail" && trimmed["notice-"+n.ID]) {
+		if shipped["notice-"+n.ID] || (n.Kind == mailNoticeKind && partial["notice-"+n.ID]) {
 			delivered = append(delivered, n.ID)
 		}
 	}
 	return delivered
 }
 
+// mailPointer is the least of a mail notice that ships: the message id, so
+// the agent can fetch the mail itself, and a marker saying it was withheld.
+func mailPointer(body string) string {
+	var m struct {
+		ID string `json:"id"`
+	}
+	if _, raw, ok := strings.Cut(body, "\n"); ok {
+		_ = json.Unmarshal([]byte(raw), &m)
+	}
+	id := m.ID
+	if len(id) > 128 || strings.ContainsAny(id, "\n\r") {
+		id = ""
+	}
+	if id == "" {
+		return mailNoticeKind + ": [mail withheld: no room in the session slot; read your Tether inbox]"
+	}
+	return mailNoticeKind + ": [mail " + id + " withheld: no room in the session slot; fetch it with the Tether MCP tools]"
+}
+
 // QueueNotice stores a keyed notice without announcing it. The durable source
 // owns wake scheduling and acknowledges only completed handling turns.
 func (e *Engine) QueueNotice(ctx context.Context, conversation, id, kind, body string) (bool, error) {
 	return e.cfg.Store.QueueNotice(ctx, store.Notice{ID: id, ConversationID: conversation, Kind: kind, Body: e.scrub.Text(body)})
+}
+
+// NoticeHandled reports whether a completed turn carried a keyed notice.
+func (e *Engine) NoticeHandled(ctx context.Context, conversation, id string) (bool, error) {
+	return e.cfg.Store.NoticeHandled(ctx, conversation, id)
 }
 
 // ProtectSecret registers host transport credentials with the agent's redactor.

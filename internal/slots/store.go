@@ -46,6 +46,10 @@ type Entry struct {
 	Owner, Key, Content, Pointer string
 	Priority                     int
 	Labels                       map[string]string
+	// Reserve holds room for Pointer ahead of the slot's other entries, so the
+	// entry always ships at least its Pointer. It prefers its content, then a
+	// trim of it, and falls back to Pointer only when neither fits.
+	Reserve bool
 }
 
 type ownerKey struct{ owner, key string }

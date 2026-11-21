@@ -61,22 +61,32 @@ func (s defaultSelector) Select(ctx context.Context, _ TurnInfo, in Snapshot, bu
 		}
 		entries := in.entries[slot]
 		budget := budgets[slot]
+		header := len(entries) > 1
+		held := reserved(s.est, entries, header)
 		text := ""
 		for _, e := range entries {
+			if e.Reserve {
+				held -= reserveCost(s.est, e, header)
+			}
+			room := budget - held
 			pick := Decision{Owner: e.Owner, Key: e.Key, Disposition: Ship}
-			candidate := appendEntry(text, e, e.Content, len(entries) > 1)
-			if slot != Agent && budget > 0 && s.est.Estimate(candidate) > budget {
-				candidate = appendEntry(text, e, e.Pointer, len(entries) > 1)
-				pick.Disposition, pick.Reason = Pointer, "content exceeds slot budget"
-				if e.Pointer == "" || s.est.Estimate(candidate) > budget {
-					// Never drop an entry silently: ship as much as fits, marked.
-					trimmed, ok := trimToFit(s.est, text, e, slot, len(entries) > 1, budget)
-					if ok {
-						candidate = appendEntry(text, e, trimmed, len(entries) > 1)
-						pick.Disposition, pick.Reason = Trim, "content cut to fit slot budget"
-					} else {
-						candidate = text
-						pick.Disposition, pick.Reason = Skip, "no room left in slot budget"
+			candidate := appendEntry(text, e, e.Content, header)
+			if slot != Agent && budget > 0 && s.est.Estimate(candidate) > room {
+				if e.Reserve {
+					candidate, pick = s.selectReserved(text, e, slot, header, room, pick)
+				} else {
+					candidate = appendEntry(text, e, e.Pointer, header)
+					pick.Disposition, pick.Reason = Pointer, "content exceeds slot budget"
+					if e.Pointer == "" || s.est.Estimate(candidate) > room {
+						// Never drop an entry silently: ship as much as fits, marked.
+						trimmed, ok := trimToFit(s.est, text, e, slot, header, room)
+						if ok {
+							candidate = appendEntry(text, e, trimmed, header)
+							pick.Disposition, pick.Reason = Trim, "content cut to fit slot budget"
+						} else {
+							candidate = text
+							pick.Disposition, pick.Reason = Skip, "no room left in slot budget"
+						}
 					}
 				}
 			}
@@ -85,6 +95,39 @@ func (s defaultSelector) Select(ctx context.Context, _ TurnInfo, in Snapshot, bu
 		}
 	}
 	return out, nil
+}
+
+// selectReserved picks for an entry whose Pointer has room held: a trim of
+// its content when one fits, else the Pointer.
+func (s defaultSelector) selectReserved(text string, e Entry, slot Name, header bool, room int, pick Decision) (string, Decision) {
+	if trimmed, ok := trimToFit(s.est, text, e, slot, header, room); ok {
+		pick.Disposition, pick.Reason = Trim, "content cut to fit slot budget"
+		return appendEntry(text, e, trimmed, header), pick
+	}
+	if candidate := appendEntry(text, e, e.Pointer, header); e.Pointer != "" && s.est.Estimate(candidate) <= room {
+		pick.Disposition, pick.Reason = Pointer, "content exceeds slot budget; reserved pointer shipped"
+		return candidate, pick
+	}
+	pick.Disposition, pick.Reason = Skip, "no room left in slot budget"
+	return text, pick
+}
+
+// reserveCost is the room held for a reserved entry's Pointer, with slack for
+// an estimator that does not add up exactly across joined entries.
+func reserveCost(est ctxpkg.TokenEstimator, e Entry, header bool) int {
+	if !e.Reserve || e.Pointer == "" {
+		return 0
+	}
+	return est.Estimate(appendEntry("", e, e.Pointer, header)) + est.Estimate("\n\n") + 1
+}
+
+// reserved is the room held for every reserved entry's Pointer.
+func reserved(est ctxpkg.TokenEstimator, entries []Entry, header bool) int {
+	total := 0
+	for _, e := range entries {
+		total += reserveCost(est, e, header)
+	}
+	return total
 }
 
 // trimToFit returns the longest leading part of e's content, plus a marker,
@@ -171,9 +214,14 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 			decisions[ownerKey{d.Owner, d.Key}] = d
 		}
 		entries := in.entries[slot]
+		header := len(entries) > 1
+		held := reserved(est, entries, header)
 		var text strings.Builder
 		var applied []Decision
 		for _, e := range entries {
+			if e.Reserve {
+				held -= reserveCost(est, e, header)
+			}
 			d, ok := decisions[ownerKey{e.Owner, e.Key}]
 			if !ok {
 				d = Decision{Owner: e.Owner, Key: e.Key, Disposition: Skip, Reason: "omitted by selector"}
@@ -189,12 +237,16 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 				body = e.Pointer
 			case Trim:
 				limit := window.Slot(string(slot)).MaxTokens
-				if limit <= 0 || est.Estimate(appendEntry(text.String(), e, e.Content, len(entries) > 1)) <= limit {
+				if limit <= 0 || est.Estimate(appendEntry(text.String(), e, e.Content, header)) <= limit-held {
 					body = e.Content // it fits; nothing to cut
 					break
 				}
-				trimmed, ok := trimToFit(est, text.String(), e, slot, len(entries) > 1, limit)
+				trimmed, ok := trimToFit(est, text.String(), e, slot, header, limit-held)
 				if !ok {
+					if e.Reserve && e.Pointer != "" {
+						d.Disposition, d.Reason, body = Pointer, "content exceeds slot budget; reserved pointer shipped", e.Pointer
+						break
+					}
 					d.Disposition, d.Reason = Skip, "no room left in slot budget"
 					break
 				}
@@ -207,7 +259,7 @@ func Assemble(ctx context.Context, in Snapshot, plan Plan, prev map[string]strin
 				if text.Len() > 0 {
 					text.WriteString("\n\n")
 				}
-				text.WriteString(appendEntry("", e, body, len(entries) > 1))
+				text.WriteString(appendEntry("", e, body, header))
 			}
 			applied = append(applied, d)
 		}

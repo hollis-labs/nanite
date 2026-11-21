@@ -29,6 +29,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/background"
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/events"
+	"github.com/hollis-labs/nanite/internal/integrity"
 	"github.com/hollis-labs/nanite/internal/mcpclient"
 	"github.com/hollis-labs/nanite/internal/permission"
 	"github.com/hollis-labs/nanite/internal/provider"
@@ -151,8 +152,11 @@ type Engine struct {
 	cfg         Config
 	mu          sync.Mutex
 	active      map[string]*Run
-	previous    map[string]map[string]string
-	grants      map[string]map[string]bool
+	// checking holds conversations an integrity check is reading, outside
+	// e.mu; nothing may write their transcript meanwhile (see busyLocked).
+	checking map[string]bool
+	previous map[string]map[string]string
+	grants   map[string]map[string]bool
 	// changed is closed and replaced each time a run starts or ends, so a
 	// subtask waiting to relay an ask to its root conversation can wait for
 	// the root's next run.
@@ -258,7 +262,7 @@ func New(cfg Config) (*Engine, error) {
 		// A subtask result is already held under the budget (result.go); a
 		// preview would break its JSON.
 		Exempt: func(tool string) bool { return tool == subagent.ToolName }}),
-		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run),
+		subtaskResults: toolresult.New(cfg.Store.Results(), toolresult.Config{TTL: subtaskResultTTL}), active: make(map[string]*Run), checking: make(map[string]bool),
 		previous: make(map[string]map[string]string), grants: make(map[string]map[string]bool), children: subagent.NewLimit(cfg.SubtaskLimit), leads: subagent.NewLimit(cfg.SubtaskLimit),
 		changed: make(chan struct{}), askSlots: make(map[string]chan struct{}), denials: make(map[string][]denial), subtaskCalls: make(map[string]string),
 		subtaskLinks: make(map[string]subtaskLink), progressEvery: defaultProgressInterval, backgroundProgressEvery: defaultBackgroundProgressInterval,
@@ -370,13 +374,21 @@ func (e *Engine) Resume(ctx context.Context, id string) (*Run, error) {
 // Discard abandons the conversation's interrupted turn. Tool calls the turn
 // left unanswered get a result saying so, the turn is recorded as cancelled,
 // and the conversation accepts new messages again.
-func (e *Engine) Discard(ctx context.Context, id string) error {
+func (e *Engine) Discard(ctx context.Context, id string) (err error) {
+	// A check reported here is emitted once e.mu is released: a host's
+	// event sink may call back into the engine.
+	var checked *integrity.Report
+	defer func() {
+		if checked != nil {
+			e.ObserveIntegrity(ctx, id, "discard", *checked)
+		}
+	}()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
 		return fmt.Errorf("nanite: agent is closed")
 	}
-	if e.active[id] != nil {
+	if e.busyLocked(id) {
 		return ErrBusy
 	}
 	turn, err := e.cfg.Store.Interrupted(ctx, id)
@@ -389,7 +401,11 @@ func (e *Engine) Discard(ctx context.Context, id string) error {
 		if mark, err := e.cfg.Store.Setting(ctx, id, store.SettingIntegrity); err != nil {
 			return err
 		} else if mark != "" {
-			if err := e.validateLocked(ctx, id, "discard"); err != nil {
+			report, err := e.validate(ctx, id)
+			if checkRan(err) {
+				checked = &report
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -405,7 +421,11 @@ func (e *Engine) Discard(ctx context.Context, id string) error {
 	if errors.Is(err, transcriptlog.ErrTorn) {
 		// The transcript refuses writes until its tail is repaired: say why
 		// with the findings, not the bare byte-layer error.
-		if gateErr := e.validateLocked(ctx, id, "discard"); gateErr != nil {
+		report, gateErr := e.validate(ctx, id)
+		if checkRan(gateErr) {
+			checked = &report
+		}
+		if gateErr != nil {
 			return gateErr
 		}
 	}
@@ -433,12 +453,16 @@ func (e *Engine) Record(ctx context.Context, id, userText, answer string) error 
 	if strings.TrimSpace(userText) == "" || strings.TrimSpace(answer) == "" {
 		return fmt.Errorf("nanite: a recorded exchange needs both the user text and the answer")
 	}
+	// A blocked history takes no new exchanges either.
+	if err := e.runGate(ctx, id, false); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
 		return fmt.Errorf("nanite: agent is closed")
 	}
-	if e.active[id] != nil {
+	if e.busyLocked(id) {
 		return ErrBusy
 	}
 	if _, err := e.cfg.Store.Conversation(ctx, id); err != nil {
@@ -551,7 +575,7 @@ func (e *Engine) startRun(ctx context.Context, id string, input Input, resume bo
 	if err := e.checkDaily(); err != nil {
 		return nil, err
 	}
-	if e.active[id] != nil {
+	if e.busyLocked(id) {
 		return nil, ErrBusy
 	}
 	// Validation performs filesystem I/O without the engine lock. Confirm

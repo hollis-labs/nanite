@@ -470,7 +470,7 @@ find its interrupted turns.
 transcript and its index before it reads the history. A conversation found
 unsafe there, or by recovery on open, is marked blocked. Every later run on it
 (`Resume`, `Send`, notice and host turns) checks again first and is refused
-until a check passes. The refusal is an `*agent.IntegrityError`
+until a check passes, and so are `Dispatch` and `Record`. The refusal is an `*agent.IntegrityError`
 (`errors.Is(err, agent.ErrIntegrity)`) whose `Report` lists every finding,
 each with a stable `Code`, a `Severity`, the transcript records it concerns,
 and identifier-only `Evidence`. `Discard` still closes an interrupted turn, but

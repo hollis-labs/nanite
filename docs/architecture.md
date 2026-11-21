@@ -646,11 +646,15 @@ agent opens, and the transcript writer refuses to append until an operator
 removes the tail. Damage anywhere before the tail is changed history: the
 store refuses to open, as it always has.
 
-`Resume` always validates before it reads any history. Any other run validates
-only a conversation marked blocked, and a passing check clears the mark. An
-unsafe finding refuses the run with a typed error that carries the findings,
-and the CLI prints them, with the exact truncation for a torn tail. The checks
-hold the engine lock, so no run, `Discard` or `Record` writes meanwhile.
+`Resume` always validates before it reads any history. Any other run that
+could use the history (`Send`, `Dispatch`, `Record`) validates only a
+conversation marked blocked, and a passing check clears the mark. An unsafe
+finding refuses the run with a typed error that carries the findings, and the
+CLI prints them, with the exact truncation for a torn tail. A check claims its
+conversation, so no run, `Discard` or `Record` writes the transcript while it
+reads; other conversations do not wait. Events are emitted with no engine lock
+held. A tail torn while the process runs is found by the next run that opens
+the journal, which marks the conversation blocked.
 `Discard` stays available and closes an interrupted turn, but the history it
 leaves stays blocked until it passes a check. Each check emits a content-free
 runtime event with its stage (`recover`, `resume`, `send` or `discard`), its

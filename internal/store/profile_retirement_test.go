@@ -296,8 +296,8 @@ func TestAuditedRetirementSuppressesFreshHostAdmissionAfterReopen(t *testing.T) 
 		t.Fatal(err)
 	}
 	historical := &store.AgentProfile{Name: "Private protected fixture", Slug: "protected-prior", Source: "internal", SystemPrompt: "Original historical body"}
-	if err := storetest.HistoricalProfile(ctx, st, historical); err != nil {
-		t.Fatal(err)
+	if operationErr := storetest.HistoricalProfile(ctx, st, historical); operationErr != nil {
+		t.Fatal(operationErr)
 	}
 	snapshot, err := st.ExportProtectedProfileRetirement(ctx, historical.ID)
 	if err != nil {
@@ -307,11 +307,11 @@ func TestAuditedRetirementSuppressesFreshHostAdmissionAfterReopen(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RetireExportedProfileWithAudit(ctx, historical.ID, digest, store.RetireAgentProfileAudit{ExportID: "private-durable-export", Actor: "private-test-operator", Reason: "Explicit private retirement"}); err != nil {
-		t.Fatal(err)
+	if operationErr := st.RetireExportedProfileWithAudit(ctx, historical.ID, digest, store.RetireAgentProfileAudit{ExportID: "private-durable-export", Actor: "private-test-operator", Reason: "Explicit private retirement"}); operationErr != nil {
+		t.Fatal(operationErr)
 	}
-	if err := st.Close(ctx); err != nil {
-		t.Fatal(err)
+	if operationErr := st.Close(ctx); operationErr != nil {
+		t.Fatal(operationErr)
 	}
 	reopened, err := storetest.New(t, ctx, path)
 	if err != nil {

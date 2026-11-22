@@ -10,7 +10,7 @@ package reflexes
 // legitimate invocation points." Encodes Facet 2's per-action-kind
 // combining algorithm (deny_overrides / first_applicable / all_applicable,
 // modeled on XACML's policy-combining algorithms). Every call site that
-// evaluates a set of agent_reflexes candidates against a State and decides
+// evaluates a set of private_declared_reflexes candidates against a State and decides
 // which fired ones actually get applied calls referenceResolve() instead of
 // hand-rolling its own priority-ordering/first-wins/all-fire loop:
 //   - Engine.EvaluateState (engine.go) — the generic per-turn pass.

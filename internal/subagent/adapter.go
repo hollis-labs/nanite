@@ -52,7 +52,7 @@ func (a Authorizer) AuthorizeSpawn(ctx context.Context, id string) (core.SpawnAu
 	}
 	tier, err := a.Resolver.ResolveTrust(ctx, id)
 	if err != nil {
-		return core.SpawnAuthorization{Refusal: err}, nil
+		return core.SpawnAuthorization{Refusal: err}, err
 	}
 	if tier == dispatch.TrustUntrusted {
 		return core.SpawnAuthorization{Refusal: dispatch.ErrUntrustedRole}, nil

@@ -37,8 +37,8 @@ func TestBackfillAgentToolsFromLegacyColumnsCannotReplayAuthority(t *testing.T) 
 				t.Fatal(err)
 			}
 			for i := 0; i < 2; i++ {
-				if n, err := BackfillAgentToolsFromLegacyColumns(ctx, st); n != 0 || !errors.Is(err, store.ErrVerifiedActorRequired) {
-					t.Fatal(n, err)
+				if n, operationErr := BackfillAgentToolsFromLegacyColumns(ctx, st); n != 0 || !errors.Is(operationErr, store.ErrVerifiedActorRequired) {
+					t.Fatal(n, operationErr)
 				}
 			}
 			names, err := st.ListAgentToolNames(ctx, actor.ID)

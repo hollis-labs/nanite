@@ -29,7 +29,7 @@ import (
 func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID:           "agent-halt-preempt",
 		Name:         "Agent Halt Preempt",
 		Slug:         "agent-halt-preempt",
@@ -40,7 +40,7 @@ func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) 
 		t.Fatalf("CreateAgent: %v", err)
 	}
 
-	haltID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	haltID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "advisor",
 		Name:        "halt_probe",
 		TriggerKind: store.ReflexTriggerEvent,
@@ -52,7 +52,7 @@ func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) 
 	if err != nil {
 		t.Fatalf("InsertAgentReflex halt: %v", err)
 	}
-	reminderID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	reminderID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "advisor",
 		Name:        "reminder_probe_unrelated",
 		TriggerKind: store.ReflexTriggerEvent,
@@ -73,7 +73,7 @@ func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) 
 	engine := NewEngine(st, nil)
 	engine.SetPluginHooks(hooks)
 
-	out, err := engine.EvaluateState(ctx, "agent-halt-preempt", "advisor", State{
+	out, err := engine.evaluatePrivateDeclaredFixtureState(ctx, "agent-halt-preempt", "advisor", State{
 		SessionID:  "sess-halt-preempt",
 		AgentID:    "agent-halt-preempt",
 		AgentClass: "advisor",
@@ -93,7 +93,7 @@ func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) 
 		t.Fatalf("FiredReflexes[0].ID = %q, want the halt reflex %q", out.FiredReflexes[0].ID, haltID)
 	}
 
-	halt, err := st.GetAgentReflex(ctx, haltID)
+	halt, err := declaredFixture(st).GetAgentReflex(ctx, haltID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex halt: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestEvaluateState_HaltSessionPreemptsInjectReminder_SamePass(t *testing.T) 
 		t.Errorf("halt FiredCount = %d, want 1", halt.FiredCount)
 	}
 
-	reminder, err := st.GetAgentReflex(ctx, reminderID)
+	reminder, err := declaredFixture(st).GetAgentReflex(ctx, reminderID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex reminder: %v", err)
 	}

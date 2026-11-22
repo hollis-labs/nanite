@@ -1005,10 +1005,14 @@ func cmdServeWithInitializers(
 
 	if container.TeamRunLauncher != nil {
 		teamRecovery := container.TeamRunLauncher.ReconcileTeamRuns(context.Background(), 100)
-		if len(teamRecovery.Failures) != 0 {
-			return fmt.Errorf("recover Team workflows (pending=%d signals=%d): %v", teamRecovery.PendingInspected, teamRecovery.SignalsInspected, teamRecovery.Failures)
+		if recoveryErr := teamStartupRecoveryError(teamRecovery); recoveryErr != nil {
+			return recoveryErr
 		}
-		slog.Info("Team workflow startup recovery complete", "pending", teamRecovery.PendingInspected, "signals", teamRecovery.SignalsInspected, "recovered", teamRecovery.Recovered)
+		if len(teamRecovery.Failures) != 0 {
+			slog.Info("Team workflow startup recovery unavailable: verified fabric ownership is not configured")
+		} else {
+			slog.Info("Team workflow startup recovery complete", "pending", teamRecovery.PendingInspected, "signals", teamRecovery.SignalsInspected, "recovered", teamRecovery.Recovered)
+		}
 	}
 	workflowRecovery, err := sharedWorkflowEngine.RecoverActive(context.Background(), workflowStepExecutor, 100)
 	if err != nil {
@@ -1684,4 +1688,39 @@ func modelCatalogOptionsFromEnv() []modelsdev.Option {
 		return []modelsdev.Option{modelsdev.WithURL(u)}
 	}
 	return nil
+}
+
+// The absent fabric boundary must not prevent independent native sessions from
+// starting. Genuine recovery failures still abort boot; nothing is recovered
+// or enrolled by treating this one explicit unsupported result as unavailable.
+func teamStartupRecoveryError(report service.TeamRunReconcileReport) error {
+	var failures []error
+	for _, failure := range report.Failures {
+		if !onlyUnavailableFabric(failure) {
+			failures = append(failures, failure)
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("recover Team workflows (pending=%d signals=%d): %w", report.PendingInspected, report.SignalsInspected, errors.Join(failures...))
+}
+
+func onlyUnavailableFabric(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyUnavailableFabric(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyUnavailableFabric(wrapped.Unwrap())
+	}
+	return errors.Is(err, store.ErrVerifiedActorRequired)
 }

@@ -2,7 +2,7 @@ package reflexes
 
 // Qualification replays Nanite-authored fixtures through both implementations.
 // The independent pre-adoption algorithms live only in *_reference_*_test.go.
-// Both the released library and production host wrappers must match their full
+// The released library and standalone host adapters must match their full
 // persisted metadata and effects; no trace normalization masks a divergence.
 import (
 	"context"
@@ -76,7 +76,7 @@ func qualificationPersisted(t *testing.T, st *store.Store, actions, outcomes any
 	if err = rows.Close(); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = st.DB.Query(`SELECT id, fired_count, COALESCE(last_fired_at,'') FROM agent_reflexes ORDER BY id`)
+	rows, err = st.DB.Query(`SELECT id, fired_count, COALESCE(last_fired_at,'') FROM private_declared_reflexes ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func qualificationStore(t *testing.T, candidates []store.AgentReflex) *store.Sto
 	t.Helper()
 	st := newReflexTestStore(t) // storetest.New, fully migrated isolated fixture.
 	ctx := context.Background()
-	if err := st.CreateAgent(ctx, &store.AgentProfile{ID: "qual-agent", Slug: "qual-agent", Name: "Qualification", Class: "advisor", SystemPrompt: "fixture"}); err != nil {
+	if err := declaredFixture(st).CreateAgent(ctx, &store.AgentProfile{ID: "qual-agent", Slug: "qual-agent", Name: "Qualification", Class: "advisor", SystemPrompt: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateSession(ctx, &store.Session{ID: "qual-session", Title: "Qualification"}); err != nil {
@@ -113,7 +113,7 @@ func qualificationStore(t *testing.T, candidates []store.AgentReflex) *store.Sto
 		t.Fatal(err)
 	}
 	for _, r := range candidates {
-		if _, err := st.InsertAgentReflex(ctx, r); err != nil {
+		if _, err := declaredFixture(st).InsertAgentReflex(ctx, r); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -126,7 +126,7 @@ func qualificationReflex(id, kind string, priority int64) store.AgentReflex {
 	return r
 }
 
-// Source gates stay in Nanite. Both engines receive exactly these stored rows.
+// This declared private source supplies identical authored inputs to both standalone resolvers.
 func qualificationCandidates(t *testing.T, st *store.Store, scope string) []store.AgentReflex {
 	t.Helper()
 	ctx := context.Background()
@@ -134,11 +134,11 @@ func qualificationCandidates(t *testing.T, st *store.Store, scope string) []stor
 	var err error
 	switch scope {
 	case "workflow":
-		rows, err = st.ListAgentReflexesForWorkflowRun(ctx, "qual-run", "qual-agent", "advisor")
+		rows, err = declaredFixture(st).ListAgentReflexesForWorkflowRun(ctx, "qual-run", "qual-agent", "advisor")
 	case "loop":
-		rows, err = st.ListAgentReflexesForLoopRun(ctx, "qual-loop")
+		rows, err = declaredFixture(st).ListAgentReflexesForLoopRun(ctx, "qual-loop")
 	default:
-		rows, err = st.ListAgentReflexesForAgent(ctx, "qual-agent", "advisor")
+		rows, err = declaredFixture(st).ListAgentReflexesForAgent(ctx, "qual-agent", "advisor")
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -233,8 +233,8 @@ func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state Sta
 	if err != nil {
 		t.Fatal(err)
 	}
-	referenceEmitFirings(ctx, ns, nil, na, no, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
-	shared.EmitFirings(ctx, ls, nil, la, lo, qualificationState(t, state), shared.FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
+	referenceEmitFirings(ctx, privateFixtureTrace{ns}, nil, na, no, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
+	shared.EmitFirings(ctx, privateFixtureTrace{ls}, nil, la, lo, qualificationState(t, state), shared.FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
 	pr := qualificationCandidates(t, ps, scope)
 	pa, po, err := Resolve(ctx, pr, state, px, func(r store.AgentReflex) bool {
 		k, lookupErr := ps.GetReflexActionKind(ctx, r.ActionKind)
@@ -247,7 +247,7 @@ func qualificationReplay(t *testing.T, candidates []store.AgentReflex, state Sta
 	if err != nil {
 		t.Fatal(err)
 	}
-	EmitFirings(ctx, ps, nil, pa, po, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
+	EmitFirings(ctx, privateFixtureTrace{ps}, nil, pa, po, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, logger)
 	n := qualificationPersisted(t, ns, na.Actions, no, neffects)
 	production := qualificationPersisted(t, ps, pa.Actions, po, peffects)
 	if qualificationJSON(t, n) != qualificationJSON(t, production) {
@@ -490,7 +490,7 @@ func TestGoReflexesQualification_ScalarPredicateEquivalence(t *testing.T) {
 	}
 }
 
-// Compile-time reminder that production Source/TraceStore ownership is Nanite's.
+// The standalone trace adapter shares the production interface, without activation authority.
 var _ shared.TraceStore = (*store.Store)(nil)
 
 type qualificationSource struct {
@@ -564,7 +564,7 @@ func TestGoReflexesQualification_CollectedStateEngineTrace(t *testing.T) {
 	ne := NewEngine(ns, logger)
 	ne.SetPluginHooks(nh)
 	source := qualificationSource{t, ls}
-	le, err := shared.New(source, source, shared.WithTrace(ls), shared.WithLogger(logger), shared.WithClock(func() time.Time { return qualificationNow }), shared.WithFilters(qualificationFilters{lh}))
+	le, err := shared.New(source, source, shared.WithTrace(privateFixtureTrace{ls}), shared.WithLogger(logger), shared.WithClock(func() time.Time { return qualificationNow }), shared.WithFilters(qualificationFilters{lh}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func TestGoReflexesQualification_CollectedStateEngineTrace(t *testing.T) {
 	ph := &fakeReflexPluginHooks{}
 	pe := NewEngine(ps, logger)
 	pe.SetPluginHooks(ph)
-	pa, err := pe.EvaluateState(ctx, "qual-agent", "advisor", state)
+	pa, err := pe.evaluatePrivateDeclaredFixtureState(ctx, "qual-agent", "advisor", state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,7 +603,7 @@ func TestGoReflexesQualification_CollectedStateEngineTrace(t *testing.T) {
 }
 
 func TestGoReflexesQualification_PluginCandidateEligibility(t *testing.T) {
-	// Exercise all three real #425 candidate queries, including revocation,
+	// Exercise explicit private source eligibility for each scope, including revocation,
 	// paused rows and opt-out. Catalog retention is independent of execution.
 	for _, scope := range []string{"agent", "workflow", "loop"} {
 		t.Run(scope, func(t *testing.T) {
@@ -628,16 +628,16 @@ func TestGoReflexesQualification_PluginCandidateEligibility(t *testing.T) {
 			} {
 				t.Run(phase.name, func(t *testing.T) {
 					if phase.active {
-						st.SetPluginReflexGate(func(r store.AgentReflex) bool { return r.ID == plugin.ID })
+						declaredFixture(st).SetPluginReflexGate(func(r store.AgentReflex) bool { return r.ID == plugin.ID })
 					} else {
-						st.SetPluginReflexGate(nil)
+						declaredFixture(st).SetPluginReflexGate(nil)
 					}
 					if phase.optout {
-						if err := st.SetAgentReflexOptOut(ctx, "qual-agent", plugin.ID); err != nil {
+						if err := declaredFixture(st).SetAgentReflexOptOut(ctx, "qual-agent", plugin.ID); err != nil {
 							t.Fatal(err)
 						}
 					} else {
-						if err := st.ClearAgentReflexOptOut(ctx, "qual-agent", plugin.ID); err != nil {
+						if err := declaredFixture(st).ClearAgentReflexOptOut(ctx, "qual-agent", plugin.ID); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -645,7 +645,7 @@ func TestGoReflexesQualification_PluginCandidateEligibility(t *testing.T) {
 					if phase.paused {
 						status = store.ReflexStatusPaused
 					}
-					if _, err := st.DB.Exec(`UPDATE agent_reflexes SET status=? WHERE id=?`, status, plugin.ID); err != nil {
+					if _, err := st.DB.Exec(`UPDATE private_declared_reflexes SET status=? WHERE id=?`, status, plugin.ID); err != nil {
 						t.Fatal(err)
 					}
 					rows := qualificationCandidates(t, st, scope)
@@ -675,7 +675,7 @@ func TestGoReflexesQualification_PluginCandidateEligibility(t *testing.T) {
 					if qualificationJSON(t, na.Actions) != qualificationJSON(t, la.Actions) || len(na.Actions) != want {
 						t.Fatal("source eligibility mismatch")
 					}
-					catalog, err := st.ListAllAgentReflexes(ctx, "qual-agent")
+					catalog, err := declaredFixture(st).ListAllAgentReflexes(ctx, "qual-agent")
 					if err != nil || len(catalog) != 2 {
 						t.Fatalf("catalog retention: %v %+v", err, catalog)
 					}
@@ -742,7 +742,7 @@ func TestGoReflexesQualification_HostEffectsAndObservers(t *testing.T) {
 					t.Fatal(err)
 				}
 				hooks := &qualificationObservers{t: t}
-				emit(ctx, st, hooks, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass, ExtraMetadata: map[string]any{"matched_input_excerpt": "audit"}}, executor.Logger)
+				emit(ctx, privateFixtureTrace{st}, hooks, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass, ExtraMetadata: map[string]any{"matched_input_excerpt": "audit"}}, executor.Logger)
 				results = append(results, qualificationPersisted(t, st, applied.Actions, outcomes, effects))
 				observations = append(observations, hooks.records)
 			}
@@ -797,7 +797,7 @@ func TestGoReflexesQualification_UnsupportedAttr(t *testing.T) {
 				if len(outcomes) != 2 || outcomes[0].ReflexID != bad.ID || outcomes[0].TriggerError != wantError || outcomes[0].TriggerFired || outcomes[0].Selected {
 					t.Fatalf("rejection outcome=%+v", outcomes)
 				}
-				emit(ctx, st, nil, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, slog.Default())
+				emit(ctx, privateFixtureTrace{st}, nil, applied, outcomes, state, FiringContext{AgentID: state.AgentID, AgentClass: state.AgentClass}, slog.Default())
 				results = append(results, qualificationPersisted(t, st, applied.Actions, outcomes, nil))
 			}
 			if qualificationJSON(t, results[0]) != qualificationJSON(t, results[1]) {

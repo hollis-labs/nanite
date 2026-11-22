@@ -131,7 +131,7 @@ func (s *Store) InsertAgentSchedule(ctx context.Context, row AgentSchedule) erro
 		return fmt.Errorf("insert agent_schedules: %w", err)
 	}
 	_, err = s.DB.ExecContext(ctx,
-		`INSERT OR REPLACE INTO agent_schedules
+		`INSERT OR REPLACE INTO actor_schedules
 		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
 		     body, priority, status, expires_at, fired_count, last_fired_at,
 		     created_at, created_by, max_retries, on_fail, next_run,
@@ -165,7 +165,7 @@ func (s *Store) InsertAgentScheduleIfNameMissing(ctx context.Context, row AgentS
 	args := agentScheduleInsertArgs(row)
 	args = append(args, row.AgentID, row.Name)
 	result, err := s.DB.ExecContext(ctx,
-		`INSERT INTO agent_schedules
+		`INSERT INTO actor_schedules
 		    (id, agent_id, session_id, name, schedule_kind, schedule_spec,
 		     body, priority, status, expires_at, fired_count, last_fired_at,
 		     created_at, created_by, max_retries, on_fail, next_run,
@@ -175,7 +175,7 @@ func (s *Store) InsertAgentScheduleIfNameMissing(ctx context.Context, row AgentS
 		        COALESCE(NULLIF(?, ''), datetime('now')),
 		        ?, ?, ?, ?, ?, ?
 		 WHERE NOT EXISTS (
-		     SELECT 1 FROM agent_schedules WHERE agent_id = ? AND name = ?
+		     SELECT 1 FROM actor_schedules WHERE agent_id = ? AND name = ?
 		 )
 		 ON CONFLICT(id) DO NOTHING`,
 		args...,
@@ -310,7 +310,7 @@ func ValidateAgentSchedule(row AgentSchedule) error {
 func (s *Store) GetAgentSchedule(ctx context.Context, id string) (*AgentSchedule, error) {
 	var out AgentSchedule
 	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+agentScheduleColumns+` FROM agent_schedules WHERE id = ?`, id,
+		`SELECT `+agentScheduleColumns+` FROM actor_schedules WHERE id = ?`, id,
 	)
 	if err := scanAgentSchedule(row, &out); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -327,7 +327,7 @@ func (s *Store) GetAgentSchedule(ctx context.Context, id string) (*AgentSchedule
 func (s *Store) ListAgentSchedules(ctx context.Context, agentID string) ([]AgentSchedule, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentScheduleColumns+`
-		 FROM agent_schedules
+		 FROM actor_schedules
 		 WHERE agent_id = ?
 		 ORDER BY priority DESC, created_at ASC`, agentID,
 	)
@@ -359,7 +359,7 @@ func (s *Store) ListAgentSchedules(ctx context.Context, agentID string) ([]Agent
 func (s *Store) ListAllAgentSchedules(ctx context.Context) ([]AgentSchedule, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentScheduleColumns+`
-		 FROM agent_schedules
+		 FROM actor_schedules
 		 ORDER BY priority DESC, created_at ASC`,
 	)
 	if err != nil {
@@ -381,7 +381,7 @@ func (s *Store) ListAllAgentSchedules(ctx context.Context) ([]AgentSchedule, err
 // if no row matched.
 func (s *Store) DeleteAgentSchedule(ctx context.Context, id string) error {
 	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_schedules WHERE id = ?`, id,
+		`DELETE FROM actor_schedules WHERE id = ?`, id,
 	)
 	if err != nil {
 		return fmt.Errorf("delete agent_schedules: %w", err)
@@ -404,7 +404,7 @@ func (s *Store) UpdateAgentScheduleStatus(ctx context.Context, id, status string
 		return fmt.Errorf("update agent_schedules status: invalid status %q", status)
 	}
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_schedules SET status = ? WHERE id = ?`,
+		`UPDATE actor_schedules SET status = ? WHERE id = ?`,
 		status, id,
 	)
 	if err != nil {
@@ -425,7 +425,7 @@ func (s *Store) UpdateAgentScheduleStatus(ctx context.Context, id, status string
 // folded into a tick's procedure body.
 func (s *Store) BumpAgentScheduleFireCount(ctx context.Context, id string, now time.Time) error {
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_schedules
+		`UPDATE actor_schedules
 		    SET fired_count = fired_count + 1,
 		        last_fired_at = ?
 		  WHERE id = ?`,
@@ -462,7 +462,7 @@ func (s *Store) ListDueAgentSchedules(ctx context.Context, now time.Time, limit 
 	}
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+agentScheduleColumns+`
-		 FROM agent_schedules
+		 FROM actor_schedules
 		 WHERE status = ? AND next_run IS NOT NULL AND next_run <= ?
 		 ORDER BY next_run ASC
 		 LIMIT ?`,
@@ -524,7 +524,7 @@ func (s *Store) ListDueAgentSchedules(ctx context.Context, now time.Time, limit 
 // never had.
 func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) error {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, schedule_kind, schedule_spec FROM agent_schedules
+		`SELECT id, schedule_kind, schedule_spec FROM actor_schedules
 		 WHERE status = 'active' AND next_run IS NULL
 		   AND schedule_kind IN ('cron', 'one_shot')`,
 	)
@@ -556,7 +556,7 @@ func (s *Store) backfillScheduleNextRun(ctx context.Context, now time.Time) erro
 			continue
 		}
 		if _, err := s.DB.ExecContext(ctx,
-			`UPDATE agent_schedules SET next_run = ? WHERE id = ? AND next_run IS NULL`,
+			`UPDATE actor_schedules SET next_run = ? WHERE id = ? AND next_run IS NULL`,
 			next.Format(time.RFC3339), c.id,
 		); err != nil {
 			return fmt.Errorf("backfill agent_schedules next_run: update %s: %w", c.id, err)

@@ -49,7 +49,7 @@ func TestAgentProjects_FKCascadesOnAgentDelete(t *testing.T) {
 		t.Fatalf("AddAgentProject: %v", err)
 	}
 
-	if _, err := s.DB.Exec("DELETE FROM agent_profiles WHERE id = ?", agent.ID); err != nil {
+	if _, err := s.DB.Exec("DELETE FROM agent_actor_bindings WHERE actor_uri = ?", agent.ID); err != nil {
 		t.Fatalf("delete agent_profiles row directly: %v", err)
 	}
 

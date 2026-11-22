@@ -167,23 +167,12 @@ func TestBootSessionWorkdir_ProjectWithoutUsableRepoPath(t *testing.T) {
 	}
 }
 
-func TestRegenerateBootDirSlots_KeepsProjectFolder(t *testing.T) {
-	s := &chatServiceImpl{}
-	bootDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(bootDir, ".sandbox"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	s.activeSessionWorkRoots.Store("sess-regen-root", "/home/x/dev/project")
-
-	if err := s.regenerateBootDirSlots("sess-regen-root", bootDir, &store.AgentProfile{Name: "agent"}); err != nil {
-		t.Fatalf("regenerateBootDirSlots: %v", err)
-	}
-	body, err := os.ReadFile(filepath.Join(bootDir, "CLAUDE.md")) //nolint:gosec // reads a file this test just planted into a temp dir
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	if !strings.Contains(string(body), "## Project folder") || !strings.Contains(string(body), "/home/x/dev/project") {
-		t.Fatalf("regenerated CLAUDE.md dropped the project folder:\n%s", body)
+func TestFreshBootPrompt_KeepsProjectFolder(t *testing.T) {
+	agent := &store.AgentProfile{Name: "agent"}
+	prompt := runtimeagent.ResolveSystemPrompt("", agent, runtimeagent.ModeLongLived, "", nil, "/home/x/dev/project")
+	body := runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, prompt)
+	if !strings.Contains(body, "## Project folder") || !strings.Contains(body, "/home/x/dev/project") {
+		t.Fatalf("fresh boot dropped project folder: %s", body)
 	}
 }
 

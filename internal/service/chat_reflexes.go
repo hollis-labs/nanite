@@ -10,9 +10,15 @@ import (
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
-func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) []reflexes.AppliedAction {
-	if s.reflexEngine == nil || session == nil || agent == nil || slotResult == nil || slotResult.Window == nil {
-		return nil
+func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session *store.Session, agent *store.AgentProfile, slotResult *SlotAssemblyResult) ([]reflexes.AppliedAction, error) {
+	if session == nil || agent == nil || slotResult == nil || slotResult.Window == nil {
+		return nil, nil
+	}
+	if agent.DefinitionPolicy != nil {
+		return s.evaluateDefinitionReflexes(ctx, session, agent, slotResult)
+	}
+	if s.reflexEngine == nil {
+		return nil, nil
 	}
 	class := agent.Class
 	if class == "" {
@@ -24,10 +30,10 @@ func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session
 			// Outcome bookkeeping must survive cancellation of the reflex evaluation it records.
 			s.store.LogEvent(context.WithoutCancel(ctx), session.ID, "reflex_eval_error", "reflex", err.Error(), "{}")
 		}
-		return nil
+		return nil, nil
 	}
 	if len(applied.Actions) == 0 {
-		return nil
+		return nil, nil
 	}
 	// TASKS/reflex-taxonomy/06-unified-reflex-telemetry.md: the per-action
 	// event_log write that used to live here (one layer above the engine)
@@ -37,10 +43,10 @@ func (s *chatServiceImpl) evaluateAndInjectReflexes(ctx context.Context, session
 	// for every firing this pass.
 	injection := formatReflexReminder(applied.Actions)
 	if injection == "" {
-		return applied.Actions
+		return applied.Actions, nil
 	}
 	appendUserContext(slotResult, injection)
-	return applied.Actions
+	return applied.Actions, nil
 }
 
 func formatReflexReminder(actions []reflexes.AppliedAction) string {

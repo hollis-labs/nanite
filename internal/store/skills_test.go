@@ -35,7 +35,7 @@ func TestListAgentSkills_ColumnAlignment(t *testing.T) {
 		t.Fatalf("CreateSkill: %v", err)
 	}
 
-	if err := s.AssignSkillToAgent(context.Background(), agent.ID, sk.ID, ""); err != nil {
+	if err := s.InsertAgentKnownSkill(context.Background(), AgentKnownSkill{AgentID: agent.ID, SkillName: sk.Slug}); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestRemoveSkillFromAgent_DeletesBareAssignment(t *testing.T) {
 	if err := s.CreateSkill(context.Background(), sk); err != nil {
 		t.Fatalf("CreateSkill: %v", err)
 	}
-	if err := s.AssignSkillToAgent(context.Background(), agent.ID, sk.ID, ""); err != nil {
+	if err := s.InsertAgentKnownSkill(context.Background(), AgentKnownSkill{AgentID: agent.ID, SkillName: sk.Slug}); err != nil {
 		t.Fatalf("AssignSkillToAgent: %v", err)
 	}
 
@@ -168,8 +168,12 @@ func TestRemoveSkillFromAgent_PreservesKnownSkillGrantData(t *testing.T) {
 		GrantedBy:           "operator",
 		CapabilitiesGranted: `{"read":true}`,
 	}
-	if err := s.InsertAgentKnownSkill(ctx, granted); err != nil {
-		t.Fatalf("InsertAgentKnownSkill: %v", err)
+	if err := s.InsertAgentKnownSkill(ctx, granted); !errors.Is(err, ErrVerifiedActorRequired) {
+		t.Fatal("approval issuer fabricated", err)
+	}
+	// Simulate a previously issued approval in this private database only.
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO actor_known_skills(agent_id,skill_name,pinned,reason,approved_content_hash,granted_at,granted_by,capabilities_granted) VALUES(?,?,?,?,?,?,?,?)`, granted.AgentID, granted.SkillName, granted.Pinned, granted.Reason, granted.ApprovedContentHash, granted.GrantedAt, granted.GrantedBy, granted.CapabilitiesGranted); err != nil {
+		t.Fatal(err)
 	}
 
 	// RemoveSkillFromAgent must report success (matching the Wizard's own

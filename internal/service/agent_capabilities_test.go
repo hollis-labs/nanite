@@ -12,7 +12,7 @@ func newCapabilitiesTestService(t *testing.T) (*AgentCapabilitiesService, *store
 	t.Helper()
 	st := newConfigTestStore(t)
 	agent := &store.AgentProfile{Name: "Capabilities", Slug: "capabilities-agent", SystemPrompt: "x"}
-	if err := st.CreateAgent(context.Background(), agent); err != nil {
+	if err := persistTestActor(context.Background(), st, agent); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return NewAgentCapabilitiesService(st), st, agent.ID
@@ -36,7 +36,7 @@ func TestAgentCapabilitiesUpdateKnownSkillPreservesGrantAndUsage(t *testing.T) {
 		GrantedBy:           "operator-ui",
 		CapabilitiesGranted: `{"network":false}`,
 	}
-	if err := st.InsertAgentKnownSkill(ctx, seeded); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO actor_known_skills(agent_id,skill_name,pinned,activation_count,last_used_at,added_at,ttl_seconds,reason,approved_content_hash,granted_at,granted_by,capabilities_granted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, seeded.AgentID, seeded.SkillName, seeded.Pinned, seeded.ActivationCount, seeded.LastUsedAt, seeded.AddedAt, seeded.TTLSeconds, seeded.Reason, seeded.ApprovedContentHash, seeded.GrantedAt, seeded.GrantedBy, seeded.CapabilitiesGranted); err != nil {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 
@@ -87,33 +87,43 @@ func TestAgentCapabilitiesUpdateKnownToolPreservesUsage(t *testing.T) {
 	}
 }
 
-func TestAgentCapabilitiesUpdateKnowledgeSeedPreservesAppliedAndCreated(t *testing.T) {
-	ctx := context.Background()
-	svc, st, agentID := newCapabilitiesTestService(t)
+func TestAgentCapabilitiesMutableIntrinsicRefusesWithoutEffects(t *testing.T) {
+	ctx := t.Context()
+	svc, st, actor := newCapabilitiesTestService(t)
+	before, readErr := st.GetAgentForActor(ctx, actor)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	attempts := []func() error{
+		func() error {
+			_, err := svc.CreateProcedure(ctx, actor, "procedure", ProcedureInput{Body: "claimed"})
+			return err
+		},
+		func() error {
+			_, err := svc.UpdateProcedure(ctx, actor, "procedure", ProcedureInput{Body: "claimed"})
+			return err
+		},
+		func() error { return svc.DeleteProcedure(ctx, actor, "procedure") },
+		func() error {
+			_, err := svc.CreateKnowledgeSeed(ctx, actor, "seed", KnowledgeSeedInput{Namespace: "project/private", Body: "claimed", TagsJSON: "[]"})
+			return err
+		},
+		func() error {
+			_, err := svc.UpdateKnowledgeSeed(ctx, actor, "seed", KnowledgeSeedInput{Body: "claimed"})
+			return err
+		},
+		func() error { return svc.DeleteKnowledgeSeed(ctx, actor, "seed") },
+	}
+	for _, attempt := range attempts {
+		if err := attempt(); !errors.Is(err, store.ErrImmutableAgentProfile) {
+			t.Fatal("mutable intrinsic admitted", err)
+		}
+	}
+	after, err := st.GetAgentForActor(ctx, actor)
+	if err != nil || after.SystemPrompt != before.SystemPrompt || after.Revision != before.Revision {
+		t.Fatalf("refused intrinsic mutation effects: %+v %v", after, err)
+	}
 
-	seeded := store.AgentKnowledgeSeed{
-		AgentID:   agentID,
-		SeedKey:   "conventions",
-		Namespace: "project/x",
-		Body:      "old",
-		TagsJSON:  "[]",
-		AppliedAt: "2026-09-01 10:00:00",
-		CreatedAt: "2026-08-01 09:00:00",
-	}
-	if err := st.InsertAgentKnowledgeSeed(ctx, seeded); err != nil {
-		t.Fatalf("InsertAgentKnowledgeSeed: %v", err)
-	}
-
-	got, err := svc.UpdateKnowledgeSeed(ctx, agentID, "conventions", KnowledgeSeedInput{Namespace: "project/y", Body: "new", TagsJSON: `["a"]`})
-	if err != nil {
-		t.Fatalf("UpdateKnowledgeSeed: %v", err)
-	}
-	if got.Namespace != "project/y" || got.Body != "new" || got.TagsJSON != `["a"]` {
-		t.Fatalf("settable columns not applied: %+v", got)
-	}
-	if got.AppliedAt != seeded.AppliedAt || got.CreatedAt != seeded.CreatedAt {
-		t.Fatalf("carried-forward columns lost:\n got  %+v\n want %+v", got, seeded)
-	}
 }
 
 func TestAgentCapabilitiesCreateKnownSkillUpsertsBareAssignment(t *testing.T) {
@@ -155,18 +165,7 @@ func TestAgentCapabilitiesCreateDuplicatesReturnExists(t *testing.T) {
 	if _, err := svc.CreateKnownTool(ctx, agentID, "t", KnownToolInput{}); !errors.Is(err, ErrCapabilityExists) {
 		t.Fatalf("duplicate known tool err = %v, want ErrCapabilityExists", err)
 	}
-	if _, err := svc.CreateProcedure(ctx, agentID, "p", ProcedureInput{Body: "b"}); err != nil {
-		t.Fatalf("CreateProcedure: %v", err)
-	}
-	if _, err := svc.CreateProcedure(ctx, agentID, "p", ProcedureInput{Body: "b"}); !errors.Is(err, ErrCapabilityExists) {
-		t.Fatalf("duplicate procedure err = %v, want ErrCapabilityExists", err)
-	}
-	if _, err := svc.CreateKnowledgeSeed(ctx, agentID, "s", KnowledgeSeedInput{Namespace: "n", Body: "b", TagsJSON: "[]"}); err != nil {
-		t.Fatalf("CreateKnowledgeSeed: %v", err)
-	}
-	if _, err := svc.CreateKnowledgeSeed(ctx, agentID, "s", KnowledgeSeedInput{Namespace: "n", Body: "b", TagsJSON: "[]"}); !errors.Is(err, ErrCapabilityExists) {
-		t.Fatalf("duplicate seed err = %v, want ErrCapabilityExists", err)
-	}
+
 }
 
 func TestAgentCapabilitiesUpdateMissingReturnsStoreNotFound(t *testing.T) {
@@ -179,15 +178,7 @@ func TestAgentCapabilitiesUpdateMissingReturnsStoreNotFound(t *testing.T) {
 	if _, err := svc.UpdateKnownSkill(ctx, agentID, "missing", KnownSkillInput{}); !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
 		t.Fatalf("UpdateKnownSkill err = %v", err)
 	}
-	if _, err := svc.UpdateProcedure(ctx, agentID, "missing", ProcedureInput{}); !errors.Is(err, store.ErrAgentProcedureNotFound) {
-		t.Fatalf("UpdateProcedure err = %v", err)
-	}
-	if _, err := svc.UpdateKnowledgeSeed(ctx, agentID, "missing", KnowledgeSeedInput{}); !errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
-		t.Fatalf("UpdateKnowledgeSeed err = %v", err)
-	}
-	if _, err := svc.MarkKnowledgeSeedApplied(ctx, agentID, "missing"); !errors.Is(err, store.ErrAgentKnowledgeSeedNotFound) {
-		t.Fatalf("MarkKnowledgeSeedApplied err = %v", err)
-	}
+
 }
 
 func TestAgentCapabilitiesWriteErrorKeepsStoreMessage(t *testing.T) {
@@ -214,53 +205,25 @@ func seedCapabilitySkill(t *testing.T, st *store.Store, slug string) *store.Skil
 	return sk
 }
 
-func TestAgentCapabilitiesGrantSkillPreservesRowAndSetsGrant(t *testing.T) {
-	ctx := context.Background()
-	svc, st, agentID := newCapabilitiesTestService(t)
-
-	seeded := store.AgentKnownSkill{
-		AgentID:         agentID,
-		SkillName:       "grantable",
-		Pinned:          true,
-		ActivationCount: 3,
-		LastUsedAt:      "2026-09-01 10:00:00",
-		AddedAt:         "2026-08-01 09:00:00",
-		TTLSeconds:      120,
-		Reason:          "panel pin",
+func TestAgentCapabilitiesGrantSkillRefusesCallerAuthority(t *testing.T) {
+	ctx := t.Context()
+	svc, st, actor := newCapabilitiesTestService(t)
+	if _, err := svc.GrantSkill(ctx, actor, "unissued", SkillGrant{ApprovedContentHash: "claimed", GrantedBy: "operator-ui", CapabilitiesGranted: "{}"}); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatal("claim issued authority", err)
 	}
-	if err := st.InsertAgentKnownSkill(ctx, seeded); err != nil {
-		t.Fatalf("InsertAgentKnownSkill: %v", err)
-	}
-
-	got, err := svc.GrantSkill(ctx, agentID, "grantable", SkillGrant{
-		ApprovedContentHash: "skl-vendor-abc",
-		GrantedBy:           "operator-ui",
-		CapabilitiesGranted: `{"network":false}`,
-	})
-	if err != nil {
-		t.Fatalf("GrantSkill: %v", err)
-	}
-	if got.ApprovedContentHash != "skl-vendor-abc" || got.GrantedBy != "operator-ui" ||
-		got.CapabilitiesGranted != `{"network":false}` || got.GrantedAt == "" {
-		t.Fatalf("grant state not written: %+v", got)
-	}
-	if got.Pinned != seeded.Pinned || got.ActivationCount != seeded.ActivationCount ||
-		got.LastUsedAt != seeded.LastUsedAt || got.AddedAt != seeded.AddedAt ||
-		got.TTLSeconds != seeded.TTLSeconds || got.Reason != seeded.Reason {
-		t.Fatalf("row columns lost:\n got  %+v\n want %+v", got, seeded)
+	if _, err := st.GetAgentKnownSkill(ctx, actor, "unissued"); !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
+		t.Fatal("failed issuance created row", err)
 	}
 }
 
-func TestAgentCapabilitiesGrantSkillCreatesMissingRow(t *testing.T) {
-	ctx := context.Background()
-	svc, _, agentID := newCapabilitiesTestService(t)
-
-	got, err := svc.GrantSkill(ctx, agentID, "fresh", SkillGrant{ApprovedContentHash: "h", GrantedBy: "op", CapabilitiesGranted: "{}"})
-	if err != nil {
-		t.Fatalf("GrantSkill: %v", err)
+func TestAgentCapabilitiesGrantSkillCannotCreateAuthorityRow(t *testing.T) {
+	ctx := t.Context()
+	svc, st, actor := newCapabilitiesTestService(t)
+	if _, err := svc.GrantSkill(ctx, actor, "unissued", SkillGrant{ApprovedContentHash: "claimed", GrantedBy: "operator-ui", CapabilitiesGranted: "{}"}); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatal("claim issued authority", err)
 	}
-	if got.SkillName != "fresh" || got.ApprovedContentHash != "h" {
-		t.Fatalf("row = %+v", got)
+	if _, err := st.GetAgentKnownSkill(ctx, actor, "unissued"); !errors.Is(err, store.ErrAgentKnownSkillNotFound) {
+		t.Fatal("failed issuance created row", err)
 	}
 }
 
@@ -280,7 +243,7 @@ func TestAgentCapabilitiesRevokeSkillGrantClearsOnlyGrant(t *testing.T) {
 		GrantedBy:           "op",
 		CapabilitiesGranted: "{}",
 	}
-	if err := st.InsertAgentKnownSkill(ctx, seeded); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO actor_known_skills(agent_id,skill_name,pinned,activation_count,last_used_at,added_at,ttl_seconds,reason,approved_content_hash,granted_at,granted_by,capabilities_granted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, seeded.AgentID, seeded.SkillName, seeded.Pinned, seeded.ActivationCount, seeded.LastUsedAt, seeded.AddedAt, seeded.TTLSeconds, seeded.Reason, seeded.ApprovedContentHash, seeded.GrantedAt, seeded.GrantedBy, seeded.CapabilitiesGranted); err != nil {
 		t.Fatalf("InsertAgentKnownSkill: %v", err)
 	}
 	if err := svc.RevokeSkillGrant(ctx, agentID, "revocable"); err != nil {
@@ -307,30 +270,20 @@ func TestAgentCapabilitiesRevokeSkillGrantClearsOnlyGrant(t *testing.T) {
 	}
 }
 
-func TestAgentCapabilitiesAssignSkillChecksAgentThenSkill(t *testing.T) {
-	ctx := context.Background()
-	svc, st, agentID := newCapabilitiesTestService(t)
-	sk := seedCapabilitySkill(t, st, "assignable")
-
-	// Both missing: the agent is reported first.
-	if _, err := svc.AssignSkill(ctx, "no-such-agent", "no-such-skill", ""); !errors.Is(err, ErrAgentNotFound) {
-		t.Fatalf("missing agent err = %v, want ErrAgentNotFound", err)
+func TestAgentCapabilitiesAssignSkillRequiresVerifiedIssuer(t *testing.T) {
+	ctx := t.Context()
+	svc, st, actor := newCapabilitiesTestService(t)
+	skill := seedCapabilitySkill(t, st, "assignable")
+	if _, err := svc.AssignSkill(ctx, "claimed-host", "claimed-skill", ""); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatal(err)
 	}
-	if _, err := svc.AssignSkill(ctx, agentID, "no-such-skill", ""); !errors.Is(err, ErrSkillNotFound) {
-		t.Fatalf("missing skill err = %v, want ErrSkillNotFound", err)
+	if _, err := svc.AssignSkill(ctx, actor, "missing-skill", ""); !errors.Is(err, ErrSkillNotFound) {
+		t.Fatal(err)
 	}
-
-	skills, err := svc.AssignSkill(ctx, agentID, sk.ID, "")
-	if err != nil {
-		t.Fatalf("AssignSkill: %v", err)
+	if _, err := svc.AssignSkill(ctx, actor, skill.ID, ""); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatal("invented issuer", err)
 	}
-	if len(skills) != 1 || skills[0].Slug != "assignable" {
-		t.Fatalf("assigned skills = %+v", skills)
-	}
-	if err := svc.RemoveSkill(ctx, agentID, sk.ID); err != nil {
-		t.Fatalf("RemoveSkill: %v", err)
-	}
-	if left, err := svc.ListAssignedSkills(ctx, agentID); err != nil || len(left) != 0 {
-		t.Fatalf("after remove: %v, %+v", err, left)
+	if rows, err := svc.ListAssignedSkills(ctx, actor); err != nil || len(rows) != 0 {
+		t.Fatal("failed issuance effects", rows, err)
 	}
 }

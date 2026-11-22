@@ -59,9 +59,10 @@ func TestHandleRequestTools_PreservesChatSurface(t *testing.T) {
 		{Name: "dev_read", Description: "Read a file."},
 	})
 	reader := newStubReader()
-	reader.addAgent(&store.AgentProfile{ID: "chat-agent", Slug: chatRoleAgentSlug, Status: "active"})
+	reader.addAgent(&store.AgentProfile{ID: "msg://agent/private-chat", Slug: chatRoleAgentSlug, Status: "active"})
+	reader.verifiedBindings["msg://agent/private-chat"] = true
 	svc := NewToolService(tc, nil, reader)
-	loaded, _, err := svc.HandleRequestTools(context.Background(), "chat-agent", map[string]any{
+	loaded, _, err := svc.HandleRequestTools(context.Background(), "msg://agent/private-chat", map[string]any{
 		"tool_names": []any{"tool_validate", "dev_read"},
 	})
 	if err != nil {
@@ -83,13 +84,14 @@ func TestSelectForAgent_ChatRoleStripsLensPrimitives(t *testing.T) {
 
 	reader := newStubReader()
 	reader.addAgent(&store.AgentProfile{
-		ID:     "chat-agent-id",
+		ID:     "msg://agent/private-chat",
 		Slug:   chatRoleAgentSlug, // "default"
 		Status: "active",
 	})
 
+	reader.verifiedBindings["msg://agent/private-chat"] = true
 	svc := NewToolService(tc, nil, reader).(*toolServiceImpl)
-	sel, err := svc.SelectForAgent(context.Background(), "s1", "chat-agent-id", "render report card", "", 0)
+	sel, err := svc.SelectForAgent(context.Background(), "s1", "msg://agent/private-chat", "render report card", "", 0)
 	if err != nil {
 		t.Fatalf("SelectForAgent: %v", err)
 	}
@@ -128,13 +130,14 @@ func TestSelectForAgent_NonChatRoleKeepsLensPrimitives(t *testing.T) {
 	reader := newStubReader()
 	for _, slug := range []string{"worker", "planner", "hint-selector", "mux-orchestrator", "envelope-renderer"} {
 		t.Run(slug, func(t *testing.T) {
-			id := "agent-" + slug
+			id := "msg://agent/private-" + slug
 			reader.addAgent(&store.AgentProfile{
 				ID:     id,
 				Slug:   slug,
 				Status: "active",
 			})
 
+			reader.verifiedBindings[id] = true
 			svc := NewToolService(tc, nil, reader).(*toolServiceImpl)
 			sel, err := svc.SelectForAgent(context.Background(), "s1", id, "render report card", "", 0)
 			if err != nil {

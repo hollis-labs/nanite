@@ -11,11 +11,8 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-
-	"github.com/oklog/ulid/v2"
 )
 
 // ErrAgentContextResolverNotFound is returned when an
@@ -115,47 +112,15 @@ func scanAgentContextResolver(scanner interface{ Scan(...any) error }, r *AgentC
 // UNIQUE(agent_id, slot_name) constraint if the agent already has a
 // resolver bound to that slot.
 func (s *Store) InsertAgentContextResolver(ctx context.Context, row AgentContextResolver) (string, error) {
-	if row.HeadersJSON == "" {
-		row.HeadersJSON = "{}"
-	}
-	if row.ResponseFormat == "" {
-		row.ResponseFormat = "text"
-	}
-	if err := validateAgentContextResolver(row); err != nil {
-		return "", err
-	}
-	if row.ID == "" {
-		row.ID = "acr-" + ulid.Make().String()
-	}
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO agent_context_resolvers
-		    (id, agent_id, slot_name, kind, run, cwd, timeout, url,
-		     headers_json, response_format, json_path, enabled, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?,
-		         ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		row.ID, row.AgentID, row.SlotName, row.Kind, row.Run, row.CWD, row.Timeout, row.URL,
-		row.HeadersJSON, row.ResponseFormat, row.JSONPath, row.Enabled,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert agent_context_resolvers: %w", err)
-	}
-	return row.ID, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return "", ErrImmutableAgentProfile
 }
 
 // GetAgentContextResolver returns the row by ID, or
 // ErrAgentContextResolverNotFound.
 func (s *Store) GetAgentContextResolver(ctx context.Context, id string) (*AgentContextResolver, error) {
-	var out AgentContextResolver
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT `+agentContextResolverColumns+` FROM agent_context_resolvers WHERE id = ?`, id,
-	)
-	if err := scanAgentContextResolver(row, &out); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrAgentContextResolverNotFound
-		}
-		return nil, fmt.Errorf("get agent_context_resolvers: %w", err)
-	}
-	return &out, nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListAgentContextResolvers returns every resolver row bound to agentID
@@ -163,26 +128,8 @@ func (s *Store) GetAgentContextResolver(ctx context.Context, id string) (*AgentC
 // surface, distinct from ListEnabledAgentContextResolvers's boot-time
 // read.
 func (s *Store) ListAgentContextResolvers(ctx context.Context, agentID string) ([]AgentContextResolver, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentContextResolverColumns+`
-		   FROM agent_context_resolvers
-		  WHERE agent_id = ?
-		  ORDER BY slot_name`,
-		agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list agent_context_resolvers: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]AgentContextResolver, 0)
-	for rows.Next() {
-		var r AgentContextResolver
-		if err := scanAgentContextResolver(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan agent_context_resolvers: %w", err)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListEnabledAgentContextResolvers returns only enabled=1 rows for
@@ -190,78 +137,20 @@ func (s *Store) ListAgentContextResolvers(ctx context.Context, agentID string) (
 // is the launch-time read path
 // (internal/service/chat_boot_drive.go's resolveAgentContextForBoot).
 func (s *Store) ListEnabledAgentContextResolvers(ctx context.Context, agentID string) ([]AgentContextResolver, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentContextResolverColumns+`
-		   FROM agent_context_resolvers
-		  WHERE agent_id = ? AND enabled = 1
-		  ORDER BY slot_name`,
-		agentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list enabled agent_context_resolvers: %w", err)
-	}
-	defer closeRows(rows)
-	out := make([]AgentContextResolver, 0)
-	for rows.Next() {
-		var r AgentContextResolver
-		if err := scanAgentContextResolver(rows, &r); err != nil {
-			return nil, fmt.Errorf("scan agent_context_resolvers: %w", err)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return nil, ErrImmutableAgentProfile
 }
 
 // UpdateAgentContextResolver updates an existing row's editable fields.
 // agent_id is immutable (delete + recreate to rebind a resolver to a
 // different agent).
 func (s *Store) UpdateAgentContextResolver(ctx context.Context, row AgentContextResolver) error {
-	if row.ID == "" {
-		return fmt.Errorf("update agent_context_resolvers: id is required")
-	}
-	if row.HeadersJSON == "" {
-		row.HeadersJSON = "{}"
-	}
-	if row.ResponseFormat == "" {
-		row.ResponseFormat = "text"
-	}
-	if err := validateAgentContextResolver(row); err != nil {
-		return err
-	}
-	res, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_context_resolvers
-		    SET slot_name = ?, kind = ?, run = ?, cwd = ?, timeout = ?, url = ?,
-		        headers_json = ?, response_format = ?, json_path = ?, enabled = ?,
-		        updated_at = datetime('now')
-		  WHERE id = ?`,
-		row.SlotName, row.Kind, row.Run, row.CWD, row.Timeout, row.URL,
-		row.HeadersJSON, row.ResponseFormat, row.JSONPath, row.Enabled, row.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update agent_context_resolvers: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update agent_context_resolvers rows affected: %w", err)
-	}
-	if n == 0 {
-		return ErrAgentContextResolverNotFound
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }
 
 // DeleteAgentContextResolver removes a row by id.
 func (s *Store) DeleteAgentContextResolver(ctx context.Context, id string) error {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM agent_context_resolvers WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete agent_context_resolvers: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete agent_context_resolvers rows affected: %w", err)
-	}
-	if n == 0 {
-		return ErrAgentContextResolverNotFound
-	}
-	return nil
+	// Intrinsic content is authored and pinned; mutable profile behavior is retired.
+	return ErrImmutableAgentProfile
 }

@@ -171,21 +171,22 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/retry", a.handleRetryStream)
 
 	// Agents
+	a.registerAgentDefinitionRoutes(mux)
 	a.registerLogicalAgentProvisionRoutes(mux)
 	a.registerProfileRetirementRoutes(mux)
 	mux.HandleFunc("GET /api/agents", a.handleListAgents)
-	mux.HandleFunc("POST /api/agents", a.handleCreateAgent)
+	mux.HandleFunc("POST /api/agents", a.handleRetiredAgentMutation)
 	mux.HandleFunc("GET /api/agents/{id}", a.handleGetAgent)
-	mux.HandleFunc("PUT /api/agents/{id}", a.handleUpdateAgent)
+	mux.HandleFunc("PUT /api/agents/{id}", a.handleRetiredAgentMutation)
 	mux.HandleFunc("GET /api/agents/{id}/revisions", a.handleListAgentRevisions)
-	mux.HandleFunc("POST /api/agents/{id}/revisions/{revisionId}/restore", a.handleRestoreAgentRevision)
-	mux.HandleFunc("DELETE /api/agents/{id}", a.handleDeleteAgent)
-	mux.HandleFunc("POST /api/agents/{id}/copy-to-managed", a.handleCopyAgentToManaged)
+	mux.HandleFunc("POST /api/agents/{id}/revisions/{revisionId}/restore", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/copy-to-managed", a.handleRetiredAgentMutation)
 	// CW-20260910-0013: agent import/sync — the REST twin of
 	// `nanite agent install` / `nanite agent sync`, mirroring the skills
 	// pair below. See internal/api/agent_import.go's header.
-	mux.HandleFunc("POST /api/agents/install", a.handleInstallAgent)
-	mux.HandleFunc("POST /api/agents/{slug}/sync", a.handleSyncAgent)
+	mux.HandleFunc("POST /api/agents/install", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{slug}/sync", a.handleRetiredAgentMutation)
 	mux.HandleFunc("GET /api/agents/{id}/known-tools", a.handleListAgentKnownTools)
 	mux.HandleFunc("POST /api/agents/{id}/known-tools", a.handleCreateAgentKnownTool)
 	mux.HandleFunc("GET /api/agents/{id}/known-tools/{toolName}", a.handleGetAgentKnownTool)
@@ -196,37 +197,37 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/agents/{id}/known-skills/{skillName}", a.handleGetAgentKnownSkill)
 	mux.HandleFunc("PUT /api/agents/{id}/known-skills/{skillName}", a.handleUpdateAgentKnownSkill)
 	mux.HandleFunc("DELETE /api/agents/{id}/known-skills/{skillName}", a.handleDeleteAgentKnownSkill)
-	mux.HandleFunc("GET /api/agents/{id}/procedures", a.handleListAgentProcedures)
-	mux.HandleFunc("POST /api/agents/{id}/procedures", a.handleCreateAgentProcedure)
-	mux.HandleFunc("GET /api/agents/{id}/procedures/{name}", a.handleGetAgentProcedure)
-	mux.HandleFunc("PUT /api/agents/{id}/procedures/{name}", a.handleUpdateAgentProcedure)
-	mux.HandleFunc("DELETE /api/agents/{id}/procedures/{name}", a.handleDeleteAgentProcedure)
-	mux.HandleFunc("GET /api/agents/{id}/knowledge-seeds", a.handleListAgentKnowledgeSeeds)
-	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds", a.handleCreateAgentKnowledgeSeed)
-	mux.HandleFunc("GET /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleGetAgentKnowledgeSeed)
-	mux.HandleFunc("PUT /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleUpdateAgentKnowledgeSeed)
-	mux.HandleFunc("DELETE /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleDeleteAgentKnowledgeSeed)
-	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds/{seedKey}/mark-applied", a.handleMarkAgentKnowledgeSeedApplied)
-	mux.HandleFunc("GET /api/agents/{id}/reflexes", a.handleListAgentReflexes)
-	mux.HandleFunc("POST /api/agents/{id}/reflexes", a.handleCreateAgentReflex)
-	mux.HandleFunc("PATCH /api/agents/{id}/reflexes/{reflexId}", a.handlePatchAgentReflex)
-	mux.HandleFunc("DELETE /api/agents/{id}/reflexes/{reflexId}", a.handleDeleteAgentReflex)
-	mux.HandleFunc("POST /api/agents/{id}/reflexes/{reflexId}/opt-out", a.handleSetAgentReflexOptOut)
-	mux.HandleFunc("DELETE /api/agents/{id}/reflexes/{reflexId}/opt-out", a.handleClearAgentReflexOptOut)
-	mux.HandleFunc("POST /api/reflexes/validate", a.handleValidateReflex)
-	mux.HandleFunc("GET /api/pending/reflexes", a.handleListPendingReflexes)
-	mux.HandleFunc("POST /api/pending/reflexes/{id}/approve", a.handleApprovePendingReflex)
-	mux.HandleFunc("POST /api/pending/reflexes/{id}/reject", a.handleRejectPendingReflex)
+	mux.HandleFunc("GET /api/agents/{id}/procedures", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/procedures", a.handleRetiredAgentMutation)
+	mux.HandleFunc("GET /api/agents/{id}/procedures/{name}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("PUT /api/agents/{id}/procedures/{name}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/procedures/{name}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("GET /api/agents/{id}/knowledge-seeds", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds", a.handleRetiredAgentMutation)
+	mux.HandleFunc("GET /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("PUT /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/knowledge-seeds/{seedKey}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/knowledge-seeds/{seedKey}/mark-applied", a.handleRetiredAgentMutation)
+	mux.HandleFunc("GET /api/agents/{id}/reflexes", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/reflexes", a.handleRetiredAgentMutation)
+	mux.HandleFunc("PATCH /api/agents/{id}/reflexes/{reflexId}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/reflexes/{reflexId}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/reflexes/{reflexId}/opt-out", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/reflexes/{reflexId}/opt-out", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/reflexes/validate", a.handleRetiredAgentMutation)
+	mux.HandleFunc("GET /api/pending/reflexes", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/pending/reflexes/{id}/approve", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/pending/reflexes/{id}/reject", a.handleRetiredAgentMutation)
 	mux.HandleFunc("GET /api/agents/{id}/projects", a.handleListAgentProjects)
 	mux.HandleFunc("POST /api/agents/{id}/projects", a.handleAddAgentProject)
 	mux.HandleFunc("DELETE /api/agents/{id}/projects/{projectId}", a.handleRemoveAgentProject)
 	// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
 	// DB-CRUD surface for an agent's cmd/http dynamic context resolvers.
-	mux.HandleFunc("GET /api/agents/{id}/context-resolvers", a.handleListAgentContextResolvers)
-	mux.HandleFunc("POST /api/agents/{id}/context-resolvers", a.handleCreateAgentContextResolver)
-	mux.HandleFunc("GET /api/agents/{id}/context-resolvers/{resolverId}", a.handleGetAgentContextResolver)
-	mux.HandleFunc("PATCH /api/agents/{id}/context-resolvers/{resolverId}", a.handleUpdateAgentContextResolver)
-	mux.HandleFunc("DELETE /api/agents/{id}/context-resolvers/{resolverId}", a.handleDeleteAgentContextResolver)
+	mux.HandleFunc("GET /api/agents/{id}/context-resolvers", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agents/{id}/context-resolvers", a.handleRetiredAgentMutation)
+	mux.HandleFunc("GET /api/agents/{id}/context-resolvers/{resolverId}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("PATCH /api/agents/{id}/context-resolvers/{resolverId}", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/context-resolvers/{resolverId}", a.handleRetiredAgentMutation)
 
 	// Session compaction
 	mux.HandleFunc("POST /api/sessions/{id}/compact", a.handleCompactSession)
@@ -312,9 +313,9 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/durable-agent-recipes/{id}", a.handleGetDurableAgentRecipe)
 	mux.HandleFunc("POST /api/durable-agent-recipes/{id}/dry-run", a.handleDryRunDurableAgentRecipe)
 	mux.HandleFunc("POST /api/durable-agent-recipes/{id}/apply", a.handleApplyDurableAgentRecipe)
-	mux.HandleFunc("POST /api/agent-builder/dry-run", a.handleAgentBuilderDryRun)
-	mux.HandleFunc("POST /api/agent-builder/draft", a.handleAgentBuilderDraft)
-	mux.HandleFunc("POST /api/agent-builder/review", a.handleAgentBuilderReview)
+	mux.HandleFunc("POST /api/agent-builder/dry-run", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agent-builder/draft", a.handleRetiredAgentMutation)
+	mux.HandleFunc("POST /api/agent-builder/review", a.handleRetiredAgentMutation)
 
 	// Product readiness and native agent cognition.
 	mux.HandleFunc("GET /api/start-surface/capabilities", a.handleStartSurfaceCapabilities)
@@ -410,8 +411,8 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// revoke functions were built by Phase 1 item 04). The real FK-based
 	// replacement for tools:/toolPermissions:/roleTools: -- see
 	// internal/api/agent_tools.go's doc comment for the full context.
-	mux.HandleFunc("POST /api/agents/{id}/tools", a.handleGrantAgentTool)
-	mux.HandleFunc("DELETE /api/agents/{id}/tools/{toolId}", a.handleRevokeAgentTool)
+	mux.HandleFunc("POST /api/agents/{id}/tools", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/tools/{toolId}", a.handleRetiredAgentMutation)
 
 	// Permissions & Approvals
 	mux.HandleFunc("GET /api/permissions/mode", a.handleGetPermissionMode)
@@ -456,16 +457,16 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	// internal/api/skills.go's doc comment at the old handler's site.
 	mux.HandleFunc("GET /api/dev-mode", a.handleGetDevMode)
 	mux.HandleFunc("GET /api/agents/{id}/skills", a.handleListAgentSkills)
-	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleAssignAgentSkill)
-	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRemoveAgentSkill)
+	mux.HandleFunc("POST /api/agents/{id}/skills", a.handleRetiredAgentMutation)
+	mux.HandleFunc("DELETE /api/agents/{id}/skills/{skillId}", a.handleRetiredAgentMutation)
 	// TASKS/skills/12: the actual capability grant/revoke action, distinct
 	// from the bare-assignment pair immediately above — see
 	// internal/api/skills.go's doc comment above handleGrantAgentSkill for
 	// why this is a separate route family rather than folded into either
 	// the bare-assignment pair or agent_capabilities.go's known-skills CRUD.
-	mux.HandleFunc("POST /api/agents/{id}/skills/{slug}/grant", a.handleGrantAgentSkill)
+	mux.HandleFunc("POST /api/agents/{id}/skills/{slug}/grant", a.handleRetiredAgentMutation)
 	mux.HandleFunc("GET /api/agents/{id}/skills/{slug}/grant", a.handleGetAgentSkillGrant)
-	mux.HandleFunc("DELETE /api/agents/{id}/skills/{slug}/grant", a.handleRevokeAgentSkillGrant)
+	mux.HandleFunc("DELETE /api/agents/{id}/skills/{slug}/grant", a.handleRetiredAgentMutation)
 
 	// Roles (Phase 1 item 01: TASKS/phase-1/01-add-roles-table-and-cascade-
 	// resolution.md) -- the reusable persona/behavior template an Agent

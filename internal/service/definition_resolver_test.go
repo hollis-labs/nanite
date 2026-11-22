@@ -77,20 +77,14 @@ func TestChatDefinitionUnsupportedSemantics(t *testing.T) {
 	for _, mutate := range mutations {
 		d := *base.Definition
 		mutate(&d)
-		if _, mapErr := MapChatDefinition(VerifiedDefinition{base.Ref, &d}); !errors.Is(mapErr, ErrUnsupportedDefinition) {
+		if _, mapErr := MapChatDefinition(VerifiedDefinition{Ref: base.Ref, Definition: &d}); !errors.Is(mapErr, ErrUnsupportedDefinition) {
 			t.Fatal("unsupported semantics applied", mapErr)
 		}
 	}
 	d := *base.Definition
-	d.Extensions = map[string]agentdef.Extension{"com.hollislabs.nanite/native-policy": {Version: "1", Area: "harness_profile", Mandatory: true, Data: map[string]any{"permission_profile": "read-only"}}}
-	cfg, err := MapChatDefinition(VerifiedDefinition{base.Ref, &d})
-	if err != nil || cfg.PermissionProfile != "read-only" {
-		t.Fatal(cfg, err)
-	}
-	d = *base.Definition
 	d.HarnessProfile.Permissions.Profile = "read-only"
 	d.Extensions = map[string]agentdef.Extension{"example.org/optional": {Version: "1", Area: "behavior", Data: map[string]any{"model": "unauthorized", "grant": "write"}}}
-	cfg, err = MapChatDefinition(VerifiedDefinition{base.Ref, &d})
+	cfg, err := MapChatDefinition(VerifiedDefinition{Ref: base.Ref, Definition: &d})
 	if err != nil || cfg.Model != (ModelSelection{}) || cfg.PermissionProfile != "read-only" {
 		t.Fatal(cfg, err)
 	}
@@ -161,7 +155,7 @@ func TestNativeDefinitionPermissionPostureNarrowsHostYolo(t *testing.T) {
 	}
 	base.Ref.SemanticDigest = digest
 	v := &CognitiveViews{Store: f.st, Resolver: definitionResolverFunc(func(context.Context, DefinitionRef) (VerifiedDefinition, error) {
-		return VerifiedDefinition{base.Ref, &d}, nil
+		return VerifiedDefinition{Ref: base.Ref, Definition: &d}, nil
 	}), Models: ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
 		return ModelSelection{"characterization", "characterization-model"}, nil
 	})}
@@ -179,8 +173,18 @@ func TestNativeDefinitionPermissionPostureNarrowsHostYolo(t *testing.T) {
 		t.Fatal("definition/metadata widened host policy", calls)
 	}
 	result := findEvent(events, "tool_result")
-	if result == nil || !result.IsError || !strings.Contains(result.Summary, "PERMISSION DENIED") {
+	// No actor issuer is adopted, so authority admission now refuses before
+	// the narrower permission posture can grant or prompt for this write.
+	if result == nil || !result.IsError || !strings.Contains(result.Summary, "EXECUTION_RULES_DENIED") {
 		t.Fatal(eventTypes(events))
+	}
+	record, err := f.st.GetCognitiveView(t.Context(), view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config ChatDefinitionConfig
+	if err = json.Unmarshal([]byte(record.ChatConfigJSON), &config); err != nil || config.PermissionProfile != "read-only" {
+		t.Fatalf("metadata replaced pinned permission posture: %+v %v", config, err)
 	}
 	// No global mutation: the same host engine still grants the operator mode.
 	if decision := f.svc.permissions.Check(t.Context(), view.ID, tool.Name, tool.Input, permissionlib.ToolMeta{}); decision.Decision != permissionlib.DecisionAllow {

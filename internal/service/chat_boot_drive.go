@@ -16,7 +16,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/store"
 	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 	agentsessions "github.com/hollis-labs/substrate/harness/adapters/agentsessions"
-	"github.com/hollis-labs/substrate/harness/sandbox/atomicfile"
 	llmtypes "github.com/hollis-labs/substrate/llm-core/llmtypes"
 )
 
@@ -34,19 +33,9 @@ const staleResumeFastExitWindow = 5 * time.Second
 // Lifecycle per call:
 //
 //  1. Look up the active runtime session for sessionID. Boot if absent.
-//  2. If active and any of the System / Agent / Mode / Rules slots changed
-//     since the last turn, regenerate CLAUDE.md / agent-context.md in the
-//     boot dir and SendInput a re-read instruction so the agent reloads
-//     context. Independent of that slot-hash gate — TASKS/skills/10:
-//     (re)plant this agent's plantable skill set into the boot dir every
-//     turn of an already-active session with a real boot dir, so a
-//     newly-granted skill appears without a full session restart (skill
-//     grants are structurally invisible to the slot hash, since
-//     CLI-hosted skill delivery adds nothing to any prompt slot — see
-//     PlantAgentSkillFiles's call site below for the full reasoning).
-//     Skipped entirely for a session with no boot dir (ACP-protocol
-//     sessions — internal/runtime/agent/agent_acp.go — leave
-//     Session.BootDir permanently empty by design).
+//  2. A changed bound artifact returns typed unavailable while retaining the
+//     accepted files and binding. Active slot/skill refresh needs the future
+//     Harness custody transition; this path does not write or request a reread.
 //  3. Construct a per-turn turnCh, bind it on the agentEventBridge so the
 //     runtime's EventFanout routes events here instead of broadcasting SSE.
 //     Spawn a watcher goroutine that unbinds + closes turnCh on ctx cancel.
@@ -157,22 +146,8 @@ func (s *chatServiceImpl) driveBootSession(
 			ExternalLifecycleObserver: true,
 		}
 		applyLegacyCLIProviderToBootOpts(&bootOpts, providerName)
-		// Phase 2 item 02 (TASKS/phase-2/02-port-forward-dynamic-resolver.md):
-		// resolve this agent's DB-configured cmd/http context resolvers, if
-		// any, and fold the output into the boot prompt via
-		// Options.DynamicContext. Runs for every agent — not gated behind a
-		// bootprofile session — since the whole point of the port is making
-		// this a first-class mechanism available to every agent.
-		if agent != nil && agent.ID != "" {
-			blocks, resolveErr := s.resolveAgentContextForBoot(ctx, agent.ID, workdir)
-			if resolveErr != nil {
-				return nil, fmt.Errorf("driveBootSession: resolve agent context: %w", resolveErr)
-			}
-			if len(blocks) > 0 {
-				bootOpts.DynamicContext = blocks
-				s.activeSessionContextBlocks.Store(sessionID, blocks)
-			}
-		}
+		// Pinned content is authoritative. Retired mutable cmd/http resolver
+		// rows are never read or executed while assembling a fresh boot.
 		// CW-20260525-0001 Slice 3: resume the provider's prior session after a
 		// host restart. Read the captured provider_session_id BEFORE Boot —
 		// CreateRuntimeRow upserts the row and clears the column. When present,
@@ -225,13 +200,7 @@ func (s *chatServiceImpl) driveBootSession(
 		// flows via SendInput; we don't regen CLAUDE.md for it.
 		if s.slotsChangedFor(sessionID, slotResult) {
 			if err := s.regenerateBootDirSlots(sessionID, sess.BootDir, agent); err != nil {
-				slog.Warn("driveBootSession: slot regen failed",
-					"session_id", sessionID, "err", err)
-			} else {
-				if err := sess.SendInput([]byte(slotRereadInstruction)); err != nil {
-					slog.Warn("driveBootSession: send reread instruction failed",
-						"session_id", sessionID, "err", err)
-				}
+				return nil, fmt.Errorf("driveBootSession: slot refresh: %w", err)
 			}
 		}
 		// 3a. TASKS/skills/10: (re)plant this agent's plantable skill set
@@ -440,41 +409,11 @@ func (s *chatServiceImpl) cleanupFailedRuntimeSend(sessionID string, gen *inFlig
 	}
 }
 
-// resolveAgentContextForBoot loads agentID's enabled
-// agent_context_resolvers rows and resolves them through
-// runtimeagent.ResolveContextBlocks (Phase 2 item 02,
-// TASKS/phase-2/02-port-forward-dynamic-resolver.md), returning the
-// slot-name -> resolved-content map that driveBootSession folds into
-// Options.DynamicContext.
-//
-// Returns (nil, nil) when the store isn't wired, agentID is empty, or
-// the agent has no resolvers configured — the common case, and the
-// pre-existing behavior for every session that predates this
-// mechanism.
-//
-// A resolver-level failure (cmd non-zero exit, HTTP non-2xx, a bad
-// timeout string, …) is NOT swallowed: it propagates as a boot error,
-// mirroring the pre-port bootprofile.ResolveRequirements behavior — a
-// half-resolved boot prompt is worse than a clean stop. An operator
-// who wants a flaky resolver to stop blocking an agent's boot should
-// disable that row (agent_context_resolvers.enabled) rather than rely
-// on silent degradation here.
+// resolveAgentContextForBoot refuses the retired mutable resolver surface.
+// Fresh boots consume verified immutable context; required unsupported hooks
+// are rejected at definition mapping, never silently read from legacy rows.
 func (s *chatServiceImpl) resolveAgentContextForBoot(ctx context.Context, agentID, workdir string) (map[string]string, error) {
-	if s.store == nil || agentID == "" {
-		return nil, nil
-	}
-	rows, err := s.store.ListEnabledAgentContextResolvers(ctx, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("list agent_context_resolvers: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	blocks, err := runtimeagent.ResolveContextBlocks(ctx, rows, workdir)
-	if err != nil {
-		return nil, fmt.Errorf("agent %q: %w", agentID, err)
-	}
-	return blocks, nil
+	return nil, store.ErrImmutableAgentProfile
 }
 
 // composeUserPayload assembles the per-turn payload SendInput delivers to the
@@ -492,13 +431,9 @@ func composeUserPayload(slotResult *SlotAssemblyResult, userContent string) stri
 	return b.String()
 }
 
-// slotRereadInstruction is the system message SendInput delivers after a
-// slot regeneration so the agent reloads CLAUDE.md and agent-context.md.
-const slotRereadInstruction = "System: configuration updated. Please reread CLAUDE.md and apply the latest mode/agent context."
-
 // slotsChangedFor returns true when the System / Agent / Mode / Rules slot
-// content hash differs from the last hash stamped for sessionID. Updates the
-// stamp before returning. UserContext is excluded — it changes per turn by
+// content hash differs from the accepted boot hash for sessionID. A refused
+// refresh never advances that hash. UserContext is excluded — it changes per turn by
 // design and flows via SendInput, not the boot dir.
 func (s *chatServiceImpl) slotsChangedFor(sessionID string, slotResult *SlotAssemblyResult) bool {
 	current := hashSlots(slotResult)
@@ -510,7 +445,6 @@ func (s *chatServiceImpl) slotsChangedFor(sessionID string, slotResult *SlotAsse
 	if prevHash, hashOK := prev.(uint64); hashOK && prevHash == current {
 		return false
 	}
-	s.activeSessionSlots.Store(sessionID, current)
 	return true
 }
 
@@ -804,12 +738,9 @@ func buildSessionExitMeta(agentProfile, provider, workdir string, sessionAge tim
 	}
 }
 
-// regenerateBootDirSlots rewrites the boot dir's CLAUDE.md and
-// .sandbox/agent-context.md atomically. Called when slotsChangedFor returns
-// true mid-session. Phase 4c.5.
-//
-// Phase 0 item 21 ("Cut Modes, in full") removed this function's `mode
-// *store.AgentMode` parameter — Legacy Agent Mode is gone.
+// regenerateBootDirSlots refuses bound-root changes until an active-update
+// contract supplies custody, reader fencing and provider acknowledgement.
+// Atomic replacement alone does not provide any of those guarantees.
 func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agent *store.AgentProfile) error {
 	if bootDir == "" {
 		return errors.New("regenerateBootDirSlots: empty bootDir")
@@ -817,37 +748,7 @@ func (s *chatServiceImpl) regenerateBootDirSlots(sessionID, bootDir string, agen
 	if agent == nil {
 		return errors.New("regenerateBootDirSlots: nil agent profile")
 	}
-	claudePath := filepath.Join(bootDir, "CLAUDE.md")
-	// CW-20260516-0007 round 1: recompute the SAME resolved boot prompt
-	// the initial Boot planted, so a mid-session slot refresh doesn't
-	// silently thin the session's operating instructions.
-	// resolveBootPrompt's inputs: role (from the agent profile), the runtime
-	// Mode (ModeLongLived for every chat session — the only caller), and an
-	// optional Options.BootPromptOverride (currently unset by any chat-side
-	// caller — see runtimeagent.Options's doc comment for the mechanism).
-	role := bootSessionRole(agent)
-	bootPromptOverride := ""
-	// Phase 2 item 02: re-thread the SAME resolved dynamic-context blocks
-	// the initial Boot stashed, so a mid-session slot regen doesn't
-	// silently drop a resolver's live-fetched data the way a bare
-	// re-derive from role/profile/override alone would.
-	var dynamicContext map[string]string
-	if v, ok := s.activeSessionContextBlocks.Load(sessionID); ok {
-		if blocks, blocksOK := v.(map[string]string); blocksOK {
-			dynamicContext = blocks
-		}
-	}
-	workRoot, _ := s.activeSessionWorkRoots.Load(sessionID)
-	workRootPath, _ := workRoot.(string)
-	systemPrompt := runtimeagent.ResolveSystemPrompt(role, agent, runtimeagent.ModeLongLived, bootPromptOverride, dynamicContext, workRootPath)
-	if err := atomicfile.WriteFile(claudePath, []byte(runtimeagent.BuildCLAUDEMD(agent.Name, agent.Description, systemPrompt)), 0o644); err != nil {
-		return fmt.Errorf("regen CLAUDE.md: %w", err)
-	}
-	contextPath := filepath.Join(bootDir, ".sandbox", "agent-context.md")
-	if err := atomicfile.WriteFile(contextPath, []byte(runtimeagent.BuildAgentContext(agent)), 0o644); err != nil {
-		return fmt.Errorf("regen agent-context.md: %w", err)
-	}
-	return nil
+	return &runtimeagent.ArtifactRefreshUnavailable{Provider: "bound-runtime", Operation: "refresh chat slots"}
 }
 
 // bootSessionWorkdir resolves the work root a CLI agent for session is

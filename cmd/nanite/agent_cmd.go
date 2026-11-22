@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 
@@ -39,35 +38,8 @@ import (
 // adds no tier to internal/agent/discovery.go. Every write here is the direct
 // result of one operator invocation naming one path.
 func cmdAgent(args []string) {
-	if len(args) < 1 {
-		agentUsage()
-		os.Exit(1)
-	}
-
-	sub, rest := args[0], args[1:]
-	fs := flag.NewFlagSet("agent "+sub, flag.ExitOnError)
-	adapterFlag := fs.String("adapter", "", "force a specific format adapter (e.g. claude) instead of trying each in priority order")
-	if err := fs.Parse(rest); err != nil {
-		os.Exit(1)
-	}
-	positional := fs.Args()
-
-	switch sub {
-	case "install":
-		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "usage: %s agent install [--adapter <name>] <path>\n", brand.BinaryName)
-			os.Exit(1)
-		}
-		agentInstallCmd(positional[0], *adapterFlag)
-	case "sync":
-		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "usage: %s agent sync [--adapter <name>] <slug> <path>\n", brand.BinaryName)
-			os.Exit(1)
-		}
-		agentSyncCmd(positional[0], positional[1], *adapterFlag)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown agent command: %s\n", args[0])
-		agentUsage()
+	if err := runPinnedAgentCommand(args, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

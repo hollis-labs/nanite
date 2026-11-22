@@ -11,6 +11,14 @@ func TestAgentMembershipSetSessionAgentKeepsOnePrimary(t *testing.T) {
 	ctx := context.Background()
 	st := newConfigTestStore(t)
 	svc := NewAgentMembershipService(st, st)
+	identities := map[string]string{}
+	for _, slug := range []string{"agent-a", "agent-b", "agent-c"} {
+		p := &store.AgentProfile{Name: slug, Slug: slug, SystemPrompt: "Private prior host binding."}
+		if err := persistTestActor(ctx, st, p); err != nil {
+			t.Fatal(err)
+		}
+		identities[slug] = p.ID
+	}
 
 	sess := &store.Session{Title: "membership"}
 	if err := st.CreateSession(ctx, sess); err != nil {
@@ -18,7 +26,7 @@ func TestAgentMembershipSetSessionAgentKeepsOnePrimary(t *testing.T) {
 	}
 
 	// First primary: nothing to demote.
-	prev, err := svc.SetSessionAgent(ctx, sess.ID, "agent-a", "plan", true)
+	prev, err := svc.SetSessionAgent(ctx, sess.ID, identities["agent-a"], "plan", true)
 	if err != nil {
 		t.Fatalf("SetSessionAgent(a): %v", err)
 	}
@@ -27,7 +35,7 @@ func TestAgentMembershipSetSessionAgentKeepsOnePrimary(t *testing.T) {
 	}
 
 	// A participant does not touch the primary and reports none.
-	prev, err = svc.SetSessionAgent(ctx, sess.ID, "agent-c", "default", false)
+	prev, err = svc.SetSessionAgent(ctx, sess.ID, identities["agent-c"], "default", false)
 	if err != nil {
 		t.Fatalf("SetSessionAgent(c): %v", err)
 	}
@@ -36,11 +44,11 @@ func TestAgentMembershipSetSessionAgentKeepsOnePrimary(t *testing.T) {
 	}
 
 	// A new primary demotes the old one and reports it.
-	prev, err = svc.SetSessionAgent(ctx, sess.ID, "agent-b", "default", true)
+	prev, err = svc.SetSessionAgent(ctx, sess.ID, identities["agent-b"], "default", true)
 	if err != nil {
 		t.Fatalf("SetSessionAgent(b): %v", err)
 	}
-	if prev != "agent-a" {
+	if prev != identities["agent-a"] {
 		t.Fatalf("previous primary = %q, want agent-a", prev)
 	}
 
@@ -59,21 +67,21 @@ func TestAgentMembershipSetSessionAgentKeepsOnePrimary(t *testing.T) {
 	if len(byID) != 3 {
 		t.Fatalf("session agents = %v, want agent-a, agent-b and agent-c", agents)
 	}
-	if primaries != 1 || !byID["agent-b"].IsPrimary {
+	if primaries != 1 || !byID[identities["agent-b"]].IsPrimary {
 		t.Fatalf("want agent-b as the only primary, got %v", agents)
 	}
 	// Demotion keeps the demoted agent's mode.
-	if got := byID["agent-a"].Mode; got != "plan" {
+	if got := byID[identities["agent-a"]].Mode; got != "plan" {
 		t.Fatalf("demoted agent-a mode = %q, want plan", got)
 	}
 
 	// Re-asserting the current primary reports itself as previous; the
 	// handler compares the two before emitting agent.switched.
-	prev, err = svc.SetSessionAgent(ctx, sess.ID, "agent-b", "default", true)
+	prev, err = svc.SetSessionAgent(ctx, sess.ID, identities["agent-b"], "default", true)
 	if err != nil {
 		t.Fatalf("SetSessionAgent(b again): %v", err)
 	}
-	if prev != "agent-b" {
+	if prev != identities["agent-b"] {
 		t.Fatalf("previous primary = %q, want agent-b", prev)
 	}
 }

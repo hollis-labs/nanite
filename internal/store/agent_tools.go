@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"time"
 )
 
 // GrantAgentTool inserts an agent_tools row (agent_id, tool_id) if it does
@@ -21,22 +20,8 @@ func (s *Store) GrantAgentTool(ctx context.Context, agentID, toolID, grantedVia 
 }
 
 func grantAgentTool(ctx context.Context, db agentConfigDB, agentID, toolID, grantedVia string) error {
-	if agentID == "" || toolID == "" {
-		return fmt.Errorf("grant agent_tools: agent_id and tool_id are required")
-	}
-	if grantedVia == "" {
-		grantedVia = "explicit"
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO agent_tools (agent_id, tool_id, granted_via, created_at) VALUES (?, ?, ?, ?)
-		 ON CONFLICT(agent_id, tool_id) DO NOTHING`,
-		agentID, toolID, grantedVia, now,
-	)
-	if err != nil {
-		return fmt.Errorf("grant agent_tools: %w", err)
-	}
-	return nil
+	// Host issuance must be supplied through a verified actor grant port.
+	return ErrVerifiedActorRequired
 }
 
 // HasLegacyToolsBackfillRun reports whether BackfillAgentToolsFromLegacyColumns
@@ -50,34 +35,16 @@ func grantAgentTool(ctx context.Context, db agentConfigDB, agentID, toolID, gran
 // backfilled (which would let a later boot silently re-derive and
 // re-assert the very grant the operator revoked).
 func (s *Store) HasLegacyToolsBackfillRun(ctx context.Context, agentID string) (bool, error) {
-	var n int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM agent_tools_legacy_backfill WHERE agent_id = ?`,
-		agentID,
-	).Scan(&n)
-	if err != nil {
-		return false, fmt.Errorf("check agent_tools_legacy_backfill: %w", err)
-	}
-	return n > 0, nil
+	// Legacy profile declarations cannot initialize actor authority.
+	return false, ErrVerifiedActorRequired
 }
 
 // MarkLegacyToolsBackfillRun records that BackfillAgentToolsFromLegacyColumns
 // has considered agentID, regardless of how many (if any) agent_tools rows
 // it granted. Idempotent -- INSERT OR IGNORE.
 func (s *Store) MarkLegacyToolsBackfillRun(ctx context.Context, agentID string) error {
-	if agentID == "" {
-		return fmt.Errorf("mark agent_tools_legacy_backfill: agent_id is required")
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO agent_tools_legacy_backfill (agent_id, created_at) VALUES (?, ?)
-		 ON CONFLICT(agent_id) DO NOTHING`,
-		agentID, now,
-	)
-	if err != nil {
-		return fmt.Errorf("mark agent_tools_legacy_backfill: %w", err)
-	}
-	return nil
+	// Legacy profile declarations cannot initialize actor authority.
+	return ErrVerifiedActorRequired
 }
 
 // HasAgentToolGrantedVia reports whether agentID has at least one
@@ -87,7 +54,7 @@ func (s *Store) MarkLegacyToolsBackfillRun(ctx context.Context, agentID string) 
 func (s *Store) HasAgentToolGrantedVia(ctx context.Context, agentID, grantedVia string) (bool, error) {
 	var n int
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM agent_tools WHERE agent_id = ? AND granted_via = ? LIMIT 1`,
+		`SELECT COUNT(*) FROM actor_granted_tools WHERE agent_id = ? AND granted_via = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=actor_granted_tools.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0) LIMIT 1`,
 		agentID, grantedVia,
 	).Scan(&n)
 	if err != nil {
@@ -100,7 +67,7 @@ func (s *Store) HasAgentToolGrantedVia(ctx context.Context, agentID, grantedVia 
 // row does not exist.
 func (s *Store) RevokeAgentTool(ctx context.Context, agentID, toolID string) error {
 	_, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_tools WHERE agent_id = ? AND tool_id = ?`,
+		`DELETE FROM actor_granted_tools WHERE agent_id = ? AND tool_id = ?`,
 		agentID, toolID,
 	)
 	if err != nil {
@@ -116,9 +83,9 @@ func (s *Store) RevokeAgentTool(ctx context.Context, agentID, toolID string) err
 func (s *Store) ListAgentToolNames(ctx context.Context, agentID string) ([]string, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT kt.name
-		   FROM agent_tools at
+		   FROM actor_granted_tools at
 		   JOIN known_tools kt ON kt.id = at.tool_id
-		  WHERE at.agent_id = ?
+		  WHERE at.agent_id = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=at.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)
 		  ORDER BY kt.name`,
 		agentID,
 	)
@@ -143,7 +110,7 @@ func (s *Store) ListAgentToolNames(ctx context.Context, agentID string) ([]strin
 // agent already has explicit grants without loading the full name list.
 func (s *Store) CountAgentTools(ctx context.Context, agentID string) (int, error) {
 	var n int
-	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_tools WHERE agent_id = ?`, agentID).Scan(&n)
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM actor_granted_tools WHERE agent_id = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=actor_granted_tools.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)`, agentID).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count agent_tools: %w", err)
 	}
@@ -157,26 +124,15 @@ func (s *Store) CountAgentTools(ctx context.Context, agentID string) (int, error
 // may dispatch task_execute to) -- see this migration's doc comment
 // (116_known_tools_and_agent_tools.sql) for the naming-collision analysis.
 func (s *Store) GrantAgentDispatchTool(ctx context.Context, agentID, toolID string) error {
-	if agentID == "" || toolID == "" {
-		return fmt.Errorf("grant agent_dispatch_tool_allowlist: agent_id and tool_id are required")
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO agent_dispatch_tool_allowlist (agent_id, tool_id, created_at) VALUES (?, ?, ?)
-		 ON CONFLICT(agent_id, tool_id) DO NOTHING`,
-		agentID, toolID, now,
-	)
-	if err != nil {
-		return fmt.Errorf("grant agent_dispatch_tool_allowlist: %w", err)
-	}
-	return nil
+	// Host issuance must be supplied through a verified actor grant port.
+	return ErrVerifiedActorRequired
 }
 
 // RevokeAgentDispatchTool deletes a single agent_dispatch_tool_allowlist
 // row. No error if the row does not exist.
 func (s *Store) RevokeAgentDispatchTool(ctx context.Context, agentID, toolID string) error {
 	_, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_dispatch_tool_allowlist WHERE agent_id = ? AND tool_id = ?`,
+		`DELETE FROM actor_dispatch_tool_allowlist WHERE agent_id = ? AND tool_id = ?`,
 		agentID, toolID,
 	)
 	if err != nil {
@@ -190,9 +146,9 @@ func (s *Store) RevokeAgentDispatchTool(ctx context.Context, agentID, toolID str
 func (s *Store) ListAgentDispatchToolNames(ctx context.Context, agentID string) ([]string, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT kt.name
-		   FROM agent_dispatch_tool_allowlist adt
+		   FROM actor_dispatch_tool_allowlist adt
 		   JOIN known_tools kt ON kt.id = adt.tool_id
-		  WHERE adt.agent_id = ?
+		  WHERE adt.agent_id = ? AND EXISTS (SELECT 1 FROM agent_actor_bindings b JOIN agent_host_settings h ON h.id=b.host_settings_id WHERE b.actor_uri=adt.agent_id AND b.enabled=1 AND h.enabled=1 AND length(trim(b.binding_receipt))>0)
 		  ORDER BY kt.name`,
 		agentID,
 	)
@@ -223,25 +179,6 @@ type InitialAgentToolGrant struct {
 // marker and grants commit together, including an intentionally empty grant
 // set. Subsequent imports or boot backfills cannot restore revoked grants.
 func (s *Store) InitializeAgentToolGrants(ctx context.Context, agentID string, grants []InitialAgentToolGrant) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin initial tool grants: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }() // Commit or the original write error owns the result.
-	result, err := tx.ExecContext(ctx, `INSERT INTO agent_tools_legacy_backfill (agent_id, created_at) VALUES (?, ?) ON CONFLICT(agent_id) DO NOTHING`, agentID, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return fmt.Errorf("mark initial tool grants: %w", err)
-	}
-	inserted, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read initial tool grant marker: %w", err)
-	}
-	if inserted != 0 {
-		for _, grant := range grants {
-			if err := grantAgentTool(ctx, tx, agentID, grant.ToolID, grant.GrantedVia); err != nil {
-				return err
-			}
-		}
-	}
-	return tx.Commit()
+	// Legacy profile declarations cannot initialize actor authority.
+	return ErrVerifiedActorRequired
 }

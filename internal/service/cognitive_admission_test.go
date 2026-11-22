@@ -18,6 +18,7 @@ func TestCognitiveAdmissionConcurrentBoundAndNoRejectedMessage(t *testing.T) {
 	}
 	steps[0].hold = hold
 	f := newHandleMessageFixture(t, steps)
+	bindTestDefinedConfiguration(t, f)
 	t.Cleanup(release)
 	ctx := chat.WithDeltaMode(t.Context(), chat.DeltaModeLive)
 	first, err := f.svc.SubmitCognitiveTurn(ctx, f.session, "first")

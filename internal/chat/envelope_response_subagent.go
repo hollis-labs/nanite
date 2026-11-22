@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // SubagentApprovalHandler dispatches a typed envelope-response submission to

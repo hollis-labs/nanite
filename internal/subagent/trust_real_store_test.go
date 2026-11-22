@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	core "github.com/hollis-labs/substrate/agent/subagent"
+
 	"github.com/hollis-labs/nanite/internal/dispatch"
 	"github.com/hollis-labs/nanite/internal/store"
 )
@@ -78,13 +80,13 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 
 	t.Run("untrusted role refused outright", func(t *testing.T) {
 		svc := NewService(db, &notCalledRunner{t: t}, nil, nil, stubSettings{store.UserSettings{SubagentApprovalRequired: false}})
-		svc.SetTrustResolver(st) // real store, not a stub
+		svc.SetSpawnAuthorizer(Authorizer{st}) // real store, not a stub
 
-		_, err := svc.Spawn(context.Background(), SpawnRequest{
+		_, err := svc.Spawn(context.Background(), core.SpawnRequest{
 			ParentSessionID: "sess-real-untrusted",
 			Role:            "plugin-agent",
 			Prompt:          "do something",
-			Mode:            ModeSync,
+			Mode:            core.ModeSync,
 			AgentProfileID:  untrustedProfile.ID,
 		})
 		if !errors.Is(err, dispatch.ErrUntrustedRole) {
@@ -96,17 +98,17 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 		poster := &stubPoster{}
 		logger := &stubEventLogger{}
 		emitter := &stubEmitter{}
-		svc := NewService(db, EchoRunner{}, poster, emitter, stubSettings{
+		svc := NewService(db, core.EchoRunner{}, poster, emitter, stubSettings{
 			store.UserSettings{SubagentApprovalRequired: true},
 		})
-		svc.SetTrustResolver(st)
+		svc.SetSpawnAuthorizer(Authorizer{st})
 		svc.SetEventLogger(logger)
 
-		id, err := svc.Spawn(context.Background(), SpawnRequest{
+		id, err := svc.Spawn(context.Background(), core.SpawnRequest{
 			ParentSessionID: "sess-real-trusted",
 			Role:            "worker",
 			Prompt:          "do work",
-			Mode:            ModeSync,
+			Mode:            core.ModeSync,
 			AgentProfileID:  trustedProfile.ID,
 		})
 		if err != nil {
@@ -116,8 +118,8 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Status: %v", err)
 		}
-		if run.Status != StatusCompleted {
-			t.Errorf("expected StatusCompleted (trusted bypass via real store), got %q", run.Status)
+		if run.Status != core.StatusCompleted {
+			t.Errorf("expected core.StatusCompleted (trusted bypass via real store), got %q", run.Status)
 		}
 		if emitter.Count() != 0 {
 			t.Errorf("expected 0 approval emissions for trusted role, got %d", emitter.Count())
@@ -129,13 +131,13 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 		svc := NewService(db, &notCalledRunner{t: t}, nil, emitter, stubSettings{
 			store.UserSettings{SubagentApprovalRequired: true},
 		})
-		svc.SetTrustResolver(st)
+		svc.SetSpawnAuthorizer(Authorizer{st})
 
-		id, err := svc.Spawn(context.Background(), SpawnRequest{
+		id, err := svc.Spawn(context.Background(), core.SpawnRequest{
 			ParentSessionID: "sess-real-normal",
 			Role:            "chat",
 			Prompt:          "hello",
-			Mode:            ModeSync,
+			Mode:            core.ModeSync,
 			AgentProfileID:  normalProfile.ID,
 		})
 		if err != nil {
@@ -145,8 +147,8 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Status: %v", err)
 		}
-		if run.Status != StatusRequested {
-			t.Errorf("expected StatusRequested (normal + approval required, via real store), got %q", run.Status)
+		if run.Status != core.StatusRequested {
+			t.Errorf("expected core.StatusRequested (normal + approval required, via real store), got %q", run.Status)
 		}
 		if emitter.Count() != 1 {
 			t.Errorf("expected 1 approval emission, got %d", emitter.Count())
@@ -164,13 +166,13 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 		svc := NewService(db, &notCalledRunner{t: t}, nil, emitter, stubSettings{
 			store.UserSettings{SubagentApprovalRequired: true},
 		})
-		svc.SetTrustResolver(st)
+		svc.SetSpawnAuthorizer(Authorizer{st})
 
-		id, err := svc.Spawn(context.Background(), SpawnRequest{
+		id, err := svc.Spawn(context.Background(), core.SpawnRequest{
 			ParentSessionID: "sess-real-unknown",
 			Role:            "chat",
 			Prompt:          "hello",
-			Mode:            ModeSync,
+			Mode:            core.ModeSync,
 			AgentProfileID:  "does-not-exist",
 		})
 		if err != nil {
@@ -180,8 +182,8 @@ func TestSpawn_RealStoreTrustResolver_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Status: %v", err)
 		}
-		if run.Status != StatusRequested {
-			t.Errorf("expected StatusRequested (unknown profile -> TrustNormal fallback), got %q", run.Status)
+		if run.Status != core.StatusRequested {
+			t.Errorf("expected core.StatusRequested (unknown profile -> TrustNormal fallback), got %q", run.Status)
 		}
 	})
 }

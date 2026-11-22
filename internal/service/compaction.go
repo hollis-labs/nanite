@@ -9,7 +9,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // ErrCompactionSessionNotFound distinguishes a missing session from failures

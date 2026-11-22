@@ -9,8 +9,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	permissionlib "github.com/hollis-labs/go-permission"
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -62,7 +63,7 @@ func TestAgentV1ApprovalFacadesShareBoundOutcome(t *testing.T) {
 				}
 			}
 			w := post(native, "allow", "once")
-			var outcome service.CognitiveApprovalDecision
+			var outcome approval.Decision
 			if err := json.Unmarshal(w.Body.Bytes(), &outcome); err != nil || outcome.RunID != "run-"+firstFacade || outcome.CallID != "call-"+firstFacade {
 				t.Fatalf("bound outcome = %+v err=%v", outcome, err)
 			}

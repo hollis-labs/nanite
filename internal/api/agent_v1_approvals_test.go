@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	permissionlib "github.com/hollis-labs/go-permission"
-	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -40,7 +41,7 @@ func TestAgentV1ApprovalResponseRepetitionAndOwnership(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("response = %d %s", w.Code, w.Body.String())
 	}
-	var decision service.CognitiveApprovalDecision
+	var decision approval.Decision
 	if err := json.Unmarshal(w.Body.Bytes(), &decision); err != nil || decision.RunID != "accepted-run" || decision.CallID != "tool-call" {
 		t.Fatalf("decision=%+v err=%v", decision, err)
 	}

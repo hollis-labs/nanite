@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/internal/workspace"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // mkfs is a tiny helper for these tests — mirrors workspace/walkup_test.go's

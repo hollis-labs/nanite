@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	"github.com/hollis-labs/go-chatstream/conformance"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	permissionlib "github.com/hollis-labs/go-permission"
@@ -17,7 +19,7 @@ func TestCognitiveApprovalPromptPublishesBindingBeforeResponse(t *testing.T) {
 	f := newHandleMessageFixture(t, []characterizationProviderStep{{events: toolTurnEvents(tool)}, {events: doneEvents("approved answer")}})
 	f.tools.definitions = []llmtypes.ToolDefinition{{Name: tool.Name, Description: "fixture lookup"}}
 	f.svc.permissions = permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{Rules: []permissionlib.Rule{{Tool: tool.Name, Behavior: permissionlib.DecisionAsk}}})
-	f.svc.cognitiveApprovals = NewCognitiveApprovals(f.svc.permissions)
+	f.svc.cognitiveApprovals = approval.New(f.svc.permissions)
 	runID, err := f.svc.SubmitCognitiveTurn(t.Context(), f.session, "look up the example")
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +53,7 @@ waitPrompt:
 	if calls := f.tools.calls(); len(calls) != 0 {
 		t.Fatalf("tool executed before permission: %v", calls)
 	}
-	if err := f.svc.cognitiveApprovals.RespondRetained(t.Context(), f.session, prompt.RequestID, permissionlib.DecisionAllow, permissionlib.ScopeSession); !errors.Is(err, ErrCognitiveApprovalScope) {
+	if err := f.svc.cognitiveApprovals.RespondRetained(t.Context(), f.session, prompt.RequestID, permissionlib.DecisionAllow, permissionlib.ScopeSession); !errors.Is(err, approval.ErrScope) {
 		t.Fatalf("retained facade widened native prompt: %v", err)
 	}
 	if _, err := f.svc.cognitiveApprovals.Respond(t.Context(), f.session, prompt.RequestID, permissionlib.DecisionAllow, permissionlib.ScopeOnce); err != nil {
@@ -76,7 +78,7 @@ func TestCognitiveBoundApprovalCanonicalCallAndExactExpiry(t *testing.T) {
 	f := newHandleMessageFixture(t, []characterizationProviderStep{{events: toolTurnEvents(tool)}, {events: doneEvents("done")}})
 	f.tools.definitions = []llmtypes.ToolDefinition{{Name: tool.Name, Description: "fixture"}}
 	f.svc.permissions = permissionlib.NewEngine(permissionlib.ModeDefault, &permissionlib.RuleSet{Rules: []permissionlib.Rule{{Tool: tool.Name, Behavior: permissionlib.DecisionAsk}}})
-	f.svc.cognitiveApprovals = NewCognitiveApprovals(f.svc.permissions)
+	f.svc.cognitiveApprovals = approval.New(f.svc.permissions)
 	id, err := f.svc.SubmitCognitiveTurn(t.Context(), f.session, "do it")
 	if err != nil {
 		t.Fatal(err)

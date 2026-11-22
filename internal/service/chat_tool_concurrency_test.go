@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/substrate/agent/tooluse"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/harnessprofile"
@@ -36,7 +38,7 @@ func TestRunBounded_PeakNeverExceedsLimit(t *testing.T) {
 		t.Run(fmt.Sprintf("n%d_limit%d", tc.n, tc.limit), func(t *testing.T) {
 			var g peakGauge
 			var ran atomic.Int64
-			runBounded(context.Background(), tc.n, tc.limit,
+			tooluse.RunBounded(context.Background(), tc.n, tc.limit,
 				func(int) {
 					g.enter()
 					defer g.leave()
@@ -59,7 +61,7 @@ func TestRunBounded_PeakNeverExceedsLimit(t *testing.T) {
 func TestRunBounded_ResultsKeepIndexOrder(t *testing.T) {
 	const n = 50
 	got := make([]int, n)
-	runBounded(context.Background(), n, 4, func(i int) {
+	tooluse.RunBounded(context.Background(), n, 4, func(i int) {
 		time.Sleep(time.Duration(n-i) * 50 * time.Microsecond) // later items finish first
 		got[i] = i * 2
 	}, func(int) {})
@@ -73,7 +75,7 @@ func TestRunBounded_ResultsKeepIndexOrder(t *testing.T) {
 // A panic in one item is confined to it: the rest still run, and the call returns.
 func TestRunBounded_PanicConfinedToItem(t *testing.T) {
 	var ran atomic.Int64
-	runBounded(context.Background(), 10, 2, func(i int) {
+	tooluse.RunBounded(context.Background(), 10, 2, func(i int) {
 		if i == 3 {
 			panic("boom")
 		}
@@ -102,7 +104,7 @@ func TestRunBounded_CancellationDrainsCleanly(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runBounded(ctx, n, limit,
+		tooluse.RunBounded(ctx, n, limit,
 			func(i int) {
 				g.enter()
 				defer g.leave()

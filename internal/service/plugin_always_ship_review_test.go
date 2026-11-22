@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/contextbroker"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 func TestAlwaysShipApprovalTransitionConcurrency(t *testing.T) {

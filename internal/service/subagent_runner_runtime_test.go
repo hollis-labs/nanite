@@ -17,7 +17,7 @@ import (
 	"github.com/hollis-labs/go-providers/provider"
 	runtimeagent "github.com/hollis-labs/nanite/internal/runtime/agent"
 	"github.com/hollis-labs/nanite/internal/store"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // runtimeStore adds the two reads subagentRuntime resolves through to the

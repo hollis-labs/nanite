@@ -14,7 +14,7 @@ func (s *chatServiceImpl) CancelRetainedChat(ctx context.Context, viewID string)
 	if err := requireLegacyTarget(ctx, s.store, viewID); err != nil {
 		return false, err
 	}
-	if s.streams != nil && s.streams.CognitiveTurns().pendingView(viewID) {
+	if s.streams != nil && s.streams.CognitiveTurns().PendingView(viewID) {
 		return false, ErrDefinedViewOperation
 	}
 	return s.CancelActiveGeneration(viewID), nil

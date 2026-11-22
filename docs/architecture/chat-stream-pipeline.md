@@ -230,11 +230,15 @@ Promissory-preamble nudge (iteration 0, once, non-CLI: synthetic assistant and u
 ### 3.9 Native per-run transport
 
 `CognitiveTurns` in `internal/service/cognitive_turns.go` taps the generation
-producer before the retained product ring fans out. It maps text/reasoning parts,
-tool calls/results, bound inband approvals, replacement activities, product
-activities and final outcomes to `go-chatstream/v1`. There is no mesh envelope.
-`hubbind` assigns the event sequence; the shared native sink writes one complete
-canonical event per SSE frame. `Last-Event-ID` is the only resume cursor. A `gap`
+producer before the retained product ring fans out. Its host adapter projects
+producer events and committed output into the substrate agent `service` package,
+which maps text/reasoning parts, tool calls/results, bound inband approvals,
+replacement activities, product activities and final outcomes to `chatstream/v1`. There is no mesh envelope.
+`hubbind` assigns the event sequence; the substrate agent
+`transport/httpstream` writer uses the shared native sink to write one complete
+canonical event per SSE frame. Nanite authenticates and resolves the view/run
+before invoking it. Snapshot persistence remains in the host store, separate
+from bounded process-local replay. `Last-Event-ID` is the only resume cursor. A `gap`
 frame has sequence zero and never advances a client's checkpoint.
 
 The shared hub has independent observers and a bounded in-process log

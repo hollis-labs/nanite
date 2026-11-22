@@ -98,7 +98,12 @@ func recoverAndReport(ctx context.Context, label string) {
 	if r == nil {
 		return
 	}
-	stack := debug.Stack()
+	ReportRecovered(ctx, label, r, debug.Stack())
+}
+
+// ReportRecovered keeps host tracing and panic observers attached to library
+// workers. The worker has already recovered its panic and captured the stack.
+func ReportRecovered(ctx context.Context, label string, r any, stack []byte) {
 	slog.Error("safego: recovered panic",
 		slog.String("label", label),
 		slog.Any("panic", r),

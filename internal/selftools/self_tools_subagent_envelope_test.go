@@ -14,7 +14,8 @@ import (
 	"github.com/hollis-labs/nanite/internal/mcp"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
-	"github.com/hollis-labs/nanite/internal/subagent"
+	subagenthost "github.com/hollis-labs/nanite/internal/subagent"
+	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
 // gatedSubagentTestTransport wires a SelfToolsTransport with a
@@ -37,7 +38,7 @@ func gatedSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfTools
 
 	emitter := &gatedApprovalEmitter{}
 	settings := gatedSettingsReader{us: store.UserSettings{SubagentApprovalRequired: true}}
-	svc := subagent.NewService(s.DB, runner, nil, emitter, settings)
+	svc := subagenthost.NewService(s.DB, runner, nil, emitter, settings)
 	return &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
@@ -75,7 +76,7 @@ func newSubagentTestTransport(t *testing.T, runner subagent.Runner) *SelfToolsTr
 		t.Fatalf("store.New: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close(context.Background()); _ = os.Remove(dbPath) })
-	svc := subagent.NewService(s.DB, runner, nil, nil, nil)
+	svc := subagenthost.NewService(s.DB, runner, nil, nil, nil)
 	return &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 }
 
@@ -514,7 +515,7 @@ func TestSyncSubagentEnvelope_RecoverSummaryError_EmitsInternalNotEmptyReply(t *
 	}
 	t.Cleanup(func() { _ = os.Remove(dbPath) })
 
-	svc := subagent.NewService(s.DB, subagent.EchoRunner{}, nil, nil, nil)
+	svc := subagenthost.NewService(s.DB, subagent.EchoRunner{}, nil, nil, nil)
 	st := &SelfToolsTransport{Reads: testReadServices(s), Writes: testWriteServices(s), Subagent: svc}
 
 	// Build a completed run directly via the service Spawn path

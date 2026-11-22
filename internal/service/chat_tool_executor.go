@@ -9,8 +9,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/hollis-labs/substrate/agent/tooluse"
 
 	"github.com/hollis-labs/nanite/internal/store"
 
@@ -447,43 +448,21 @@ func (s *chatServiceImpl) executeToolBatch(
 
 	results := make([]toolExecResult, len(plans))
 
-	// Separate ready plans into concurrent and serial.
-	type indexedPlan struct {
-		planIdx int
-		plan    toolPlan
+	jobs := make([]tooluse.Job, len(plans))
+	for i, plan := range plans {
+		jobs[i] = tooluse.Job{Ready: plan.status == toolPlanReady, Concurrent: plan.concurrent}
 	}
-	var concurrent, serial []indexedPlan
-	for i, p := range plans {
-		if p.status != toolPlanReady {
-			continue
-		}
-		ip := indexedPlan{planIdx: i, plan: p}
-		if p.concurrent {
-			concurrent = append(concurrent, ip)
-		} else {
-			serial = append(serial, ip)
-		}
-	}
-
-	// Execute concurrent-safe tools in parallel, at most
-	// toolConcurrencyLimit(ls) at a time.
-	if len(concurrent) > 0 {
-		var mu sync.Mutex // protects ch sends ordering (presence events)
-		runBounded(ctx, len(concurrent), s.toolConcurrencyLimit(ls),
-			func(i int) {
-				ip := concurrent[i]
-				results[ip.planIdx] = s.executeSingleTool(ctx, ip.plan.tu, ls, agentID, sessionID, ch, &mu)
-			},
-			func(i int) {
-				results[concurrent[i].planIdx] = canceledBeforeStartResult(concurrent[i].plan.tu)
-			})
-	}
-
-	// Execute serial tools one at a time.
-	for _, ip := range serial {
-		result := s.executeSingleTool(ctx, ip.plan.tu, ls, agentID, sessionID, ch, nil)
-		results[ip.planIdx] = result
-	}
+	var mu sync.Mutex
+	tooluse.Batch(ctx, jobs, s.toolConcurrencyLimit(ls),
+		func(i int, concurrent bool) {
+			var presenceMu *sync.Mutex
+			if concurrent {
+				presenceMu = &mu
+			}
+			results[i] = s.executeSingleTool(ctx, plans[i].tu, ls, agentID, sessionID, ch, presenceMu)
+		},
+		func(i int) { results[i] = canceledBeforeStartResult(plans[i].tu) },
+		safego.ReportRecovered)
 
 	return results
 }
@@ -502,48 +481,6 @@ func (s *chatServiceImpl) toolConcurrencyLimit(ls *loopState) int {
 		return ls.harness.Values.MaxConcurrentTools
 	}
 	return harnessprofile.DefaultMaxConcurrentTools
-}
-
-// runBounded calls run(i) for every i in [0,n) on at most limit goroutines,
-// starting items in index order, and returns when all have finished. Results
-// are the caller's to store by index, so ordering is unaffected by which
-// worker ran what.
-//
-// Cancellation: an item that has not started when ctx is done is not run;
-// skipped(i) is called instead so the caller can fill its result slot (a
-// missing tool_result would leave a dangling tool_use). Items already running
-// are not interrupted here — run sees the same ctx and finishes as it always
-// has — and runBounded still waits for them, so nothing outlives the call.
-// A panic in run(i) is recovered and confined to that item.
-func runBounded(ctx context.Context, n, limit int, run, skipped func(i int)) {
-	if n <= 0 {
-		return
-	}
-	if limit <= 0 || limit > n {
-		limit = n
-	}
-	var (
-		next atomic.Int64
-		wg   sync.WaitGroup
-	)
-	for w := 0; w < limit; w++ {
-		wg.Add(1)
-		safego.Go(ctx, "service.chat.executeSingleTool.concurrent", func() {
-			defer wg.Done()
-			for {
-				i := int(next.Add(1)) - 1
-				if i >= n {
-					return
-				}
-				if ctx.Err() != nil {
-					skipped(i)
-					continue
-				}
-				safego.Call(ctx, "service.chat.executeSingleTool.item", func() { run(i) })
-			}
-		})
-	}
-	wg.Wait()
 }
 
 // canceledBeforeStartResult is the tool_result for a call that never started

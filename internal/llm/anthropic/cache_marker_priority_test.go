@@ -9,7 +9,7 @@ import (
 
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // TestCacheMarkerPriority_UniversalSlotFirst_LoadBearing is the

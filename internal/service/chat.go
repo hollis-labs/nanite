@@ -9,6 +9,10 @@ import (
 	"sync"
 	"time"
 
+	agentservice "github.com/hollis-labs/substrate/agent/service"
+
+	"github.com/hollis-labs/substrate/agent/approval"
+
 	"github.com/google/uuid"
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	"github.com/hollis-labs/go-loopdetect"
@@ -143,7 +147,7 @@ type ChatServiceConfig struct {
 
 	// Permissions engine — nil-safe (permissions disabled).
 	Permissions        *permissionlib.Engine
-	CognitiveApprovals *CognitiveApprovals
+	CognitiveApprovals *approval.Registry
 
 	// PathGrants tracks session-scoped explicit-mention path grants for
 	// the trust-agent permission redesign (CW-20260430-0009). nil-safe.
@@ -254,7 +258,7 @@ type chatServiceImpl struct {
 	utilityProvider    string
 	utilityModel       string
 	permissions        *permissionlib.Engine
-	cognitiveApprovals *CognitiveApprovals
+	cognitiveApprovals *approval.Registry
 	pathGrants         *permission.PathGrants
 
 	// argValidator caches compiled JSON Schemas for tool InputSchema validation.
@@ -1253,14 +1257,14 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 				// Canceled while queued: this turn never ran, and its
 				// predecessor's boundary resolved safely.
 				if isCognitiveTurn(genCtx) {
-					s.streams.CognitiveTurns().ending(assistantMsgID, true)
+					s.streams.CognitiveTurns().Ending(assistantMsgID, true)
 				}
 				close(ch)
 				return
 			}
 			s.retainUnsafePredecessor(sessionID, current, predecessor)
 			if isCognitiveTurn(genCtx) {
-				s.streams.CognitiveTurns().ending(assistantMsgID, genCtx.Err() != nil)
+				s.streams.CognitiveTurns().Ending(assistantMsgID, genCtx.Err() != nil)
 			}
 			close(ch)
 			return
@@ -1279,7 +1283,7 @@ func (s *chatServiceImpl) runGeneration(genCtx context.Context, name, sessionID,
 
 		// CW-20260512-0121: route through the single dispatcher door.
 		if isCognitiveTurn(genCtx) {
-			s.streams.CognitiveTurns().working(assistantMsgID)
+			s.streams.CognitiveTurns().Working(assistantMsgID)
 		}
 		// On dispatcher validation failure (programmer error — should
 		// be unreachable in production), close the channel so the
@@ -1359,7 +1363,7 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	}
 	var persistErr error
 	if isCognitiveTurn(ctx) {
-		initial := CognitiveTurnSnapshot{SessionViewID: sessionID, TurnID: assistantMsgID, RunID: assistantMsgID, OutputMessageID: assistantMsgID, State: "submitted", DeltaMode: chat.DeltaModeFromContext(ctx), Effort: effort.FromContext(ctx).String()}
+		initial := agentservice.Snapshot[store.Message]{SessionViewID: sessionID, TurnID: assistantMsgID, RunID: assistantMsgID, OutputMessageID: assistantMsgID, State: "submitted", DeltaMode: string(chat.DeltaModeFromContext(ctx)), Effort: effort.FromContext(ctx).String()}
 		data, _ := json.Marshal(initial)
 		writer, ok := s.store.(interface {
 			CreateCognitiveTurn(context.Context, *store.Message, string, string) error
@@ -1437,9 +1441,17 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 
 	// Create the already-admitted assistant stream.
 	var ch chan chat.StreamEvent
+	initialSnapshotFailed := false
 	if isCognitiveTurn(ctx) {
 		run := s.streams.CognitiveTurns().create(sessionID, assistantMsgID, selected.Provider, selected.Model, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx).String(), func() (*store.Message, error) { return s.store.GetMessage(context.Background(), assistantMsgID) })
 		ch = s.streams.createCognitiveStream(assistantMsgID, sessionID, run)
+		initialSnapshotFailed = run.PersistenceError() != nil
+		if initialSnapshotFailed {
+			// Admission already committed and Create published a failed outcome.
+			// Settle its producer without running effects behind that terminal.
+			close(ch)
+			s.streams.ScheduleCleanup(assistantMsgID, defaultPostCompletionGrace)
+		}
 	} else {
 		ch = s.streams.CreateStream(assistantMsgID, sessionID)
 	}
@@ -1452,7 +1464,9 @@ func (s *chatServiceImpl) HandleMessage(ctx context.Context, sessionID, content 
 	// it, and is what the generation is dispatched with.
 	// The delta mode arrives the same way: stamped on ctx by the API handler,
 	// absent for durable-agent wakes (which get the phased default).
-	s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx), isCognitiveTurn(ctx), cognitiveModelFromContext(ctx))
+	if !initialSnapshotFailed {
+		s.launchGeneration("handleMessage.generateResponse", sessionID, assistantMsgID, content, ch, callerType, chat.DeltaModeFromContext(ctx), effort.FromContext(ctx), isCognitiveTurn(ctx), cognitiveModelFromContext(ctx))
+	}
 
 	return assistantMsgID, nil
 }

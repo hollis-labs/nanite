@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	agentturn "github.com/hollis-labs/substrate/agent/turn"
+
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 
@@ -20,7 +22,7 @@ const DefaultMaxToolIterations = 10
 
 // workflowTurnIdleTimeout is deliberately owned by the workflow-step Run,
 // rather than inherited from the interactive chat loop. ExecuteLLMStep had no
-// inactivity bound before it adopted ExecuteTurn; fifteen minutes adds a
+// inactivity bound before it adopted agentturn.ExecuteTurn; fifteen minutes adds a
 // generous liveness guard for background workflow model calls without imposing
 // a whole-Run deadline or coupling this path to chat-specific policy.
 const workflowTurnIdleTimeout = 15 * time.Minute
@@ -242,7 +244,7 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 			return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: llm step exceeded max tool iterations (%d)", maxIter)
 		}
 
-		turn, err := ExecuteTurn(ctx, TurnRequest{
+		turn, err := agentturn.ExecuteTurn(ctx, agentturn.TurnRequest{
 			Stream: func(turnCtx context.Context) (<-chan llmtypes.StreamEvent, error) {
 				return prov.StreamChat(turnCtx, llmtypes.ChatRequest{
 					Model:        req.Model,
@@ -252,7 +254,7 @@ func (e *workflowStepExecutor) ExecuteLLMStep(ctx context.Context, req agentwork
 				})
 			},
 			IdleTimeout: workflowTurnIdleTimeout,
-			Sink:        TurnSink{},
+			Sink:        agentturn.TurnSink{},
 		})
 		if err != nil {
 			return agentworkflow.LLMStepResult{}, fmt.Errorf("workflow: llm step stream error: %w", err)

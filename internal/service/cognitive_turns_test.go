@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	agentservice "github.com/hollis-labs/substrate/agent/service"
+
 	chatstream "github.com/hollis-labs/go-chatstream"
 	"github.com/hollis-labs/go-chatstream/hubbind"
 	streamhub "github.com/hollis-labs/go-streamhub"
@@ -108,20 +110,19 @@ func TestCognitiveTurnStatusAndIndependentReplay(t *testing.T) {
 	if len(resumed) == 0 || !resumed[len(resumed)-1].IsTerminal() {
 		t.Fatalf("completed replay=%+v", resumed)
 	}
-	if _, err := turns.Get("other-view", id); !errors.Is(err, ErrCognitiveTurnNotFound) {
+	if _, err := turns.Get("other-view", id); !errors.Is(err, agentservice.ErrTurnNotFound) {
 		t.Fatalf("wrong-owner snapshot=%v", err)
 	}
 }
 
 func TestCognitiveCanonicalGapSlowObserverAndSnapshotAfterExpiry(t *testing.T) {
-	turns := NewCognitiveTurns()
 	// Small real hub limits exercise the same recovery path without waiting
 	// for production's five-minute grace or thousands of model tokens.
-	turns.hub = streamhub.New(streamhub.NewMemoryLog(), streamhub.WithAutoOpen(false), streamhub.WithTerminal(hubbind.Terminal), streamhub.WithRetention(streamhub.Retention{MaxRecords: 8}), streamhub.WithRetainAfterClose(0))
+	turns := newCognitiveTurns(nil, streamhub.New(streamhub.NewMemoryLog(), streamhub.WithAutoOpen(false), streamhub.WithTerminal(hubbind.Terminal), streamhub.WithRetention(streamhub.Retention{MaxRecords: 8}), streamhub.WithRetainAfterClose(0)))
 	run := turns.create("view", "turn", "fixture", "model", chat.DeltaModeLive, "normal", func() (*store.Message, error) {
 		return &store.Message{ID: "turn", SessionID: "view", Content: chat.WrapResponse(strings.Repeat("x", 600), "default", nil, nil, false, false).MarshalContent()}, nil
 	})
-	run.owner.working("turn")
+	run.owner.Working("turn")
 	slow, err := turns.Subscribe(t.Context(), "view", "turn", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +207,7 @@ func TestCognitiveSnapshotsSurviveDatabaseReopen(t *testing.T) {
 	}
 	turns := NewCognitiveTurns(backing)
 	for _, id := range []string{"completed", "unfinished"} {
-		snapshot := CognitiveTurnSnapshot{SessionViewID: view.ID, TurnID: id, RunID: id, OutputMessageID: id, State: "submitted"}
+		snapshot := agentservice.Snapshot[store.Message]{SessionViewID: view.ID, TurnID: id, RunID: id, OutputMessageID: id, State: "submitted"}
 		if id == "unfinished" {
 			snapshot.State, snapshot.PendingApprovalID = "input_required", "lost-prompt"
 		}

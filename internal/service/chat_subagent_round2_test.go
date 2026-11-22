@@ -10,10 +10,10 @@ import (
 
 	messaging "github.com/hollis-labs/go-messaging/mailbox"
 	"github.com/hollis-labs/nanite/internal/chat"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/storetest"
 	sdkprocess "github.com/hollis-labs/plugin-sdk/subprocess"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 func TestSubagentZeroOwnerMultipleMessagesPreserveBaseBatch(t *testing.T) {

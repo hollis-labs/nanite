@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hollis-labs/substrate/agent/runloop"
+
 	llmcontracts "github.com/hollis-labs/go-llm-contracts"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
@@ -17,11 +19,11 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/classify"
-	ctxpkg "github.com/hollis-labs/nanite/internal/context"
 	inspectsvc "github.com/hollis-labs/nanite/internal/inspector"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
 	"github.com/hollis-labs/nanite/internal/sandbox"
 	"github.com/hollis-labs/nanite/internal/store"
+	ctxpkg "github.com/hollis-labs/substrate/agent/context"
 )
 
 // noToolsWarningPrefix is prepended to the per-turn system prefix when the
@@ -161,7 +163,7 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 	defer func() {
 		diagLogDeferReached(sessionID, assistantMsgID, diagCurrentIter, "")
 		if isCognitiveTurn(ctx) {
-			s.streams.CognitiveTurns().ending(assistantMsgID, ctx.Err() != nil)
+			s.streams.CognitiveTurns().Ending(assistantMsgID, ctx.Err() != nil)
 		}
 		close(ch)
 		// CW-20260418-0100: hold the stream's ring buffer for a grace
@@ -182,13 +184,13 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 
 	// --- Load session ---
 	prepareResult := s.prepareTurn(ctx, sessionID, userContent, ch)
-	if prepareResult.directive == generationTerminate {
+	if prepareResult.directive == runloop.Terminate {
 		return
 	}
 	setup := prepareResult.setup
 
 	initializeResult := s.initializeRun(ctx, sessionID, assistantMsgID, setup, lifecycle, ch)
-	if initializeResult.directive == generationTerminate {
+	if initializeResult.directive == runloop.Terminate {
 		return
 	}
 	run := initializeResult.run
@@ -199,50 +201,29 @@ func (s *chatServiceImpl) generateResponse(ctx context.Context, sessionID, assis
 		defer run.startCancel()
 	}
 
-generationLoop:
-	for run.loop.iteration = 0; ; run.loop.iteration++ {
-		// CW-20260418-0043 diagnostic.
-		diagCurrentIter = run.loop.iteration
-		diagLogIterStart(ctx, sessionID, assistantMsgID, run.loop.iteration, ch)
-
-		requestResult := s.requestProviderIteration(ctx, sessionID, assistantMsgID, setup, run, ch)
-		switch requestResult.directive {
-		case generationRetryIteration:
-			run.loop.iteration-- // the retry isn't a fresh turn
-			continue
-		case generationFinishRun:
-			break generationLoop
-		case generationTerminate:
-			return
-		}
-
-		consumeResult := s.consumeProviderIteration(ctx, sessionID, assistantMsgID, setup, run, requestResult.attempt, ch)
-		switch consumeResult.directive {
-		case generationRetryIteration:
-			run.loop.iteration-- // the retry isn't a fresh turn
-			continue
-		case generationContinueIteration:
-			continue
-		case generationFinishRun:
-			break generationLoop
-		case generationTerminate:
-			return
-		}
-
-		settleResult := s.settleToolTurn(ctx, sessionID, assistantMsgID, setup, run, consumeResult.turn, ch)
-		switch settleResult.directive {
-		case generationContinueIteration:
-			continue
-		case generationFinishRun:
-			break generationLoop
-		case generationTerminate:
-			return
-		}
-	}
-
-	finalizeResult := s.finalizeRun(ctx, sessionID, assistantMsgID, setup, run, lifecycle, ch)
-	if finalizeResult.directive == generationTerminate {
-		return
+	_, loopErr := runloop.Execute(ctx, runloop.Ports[*providerAttempt, providerTurn]{
+		Iteration: func(iteration int) {
+			run.loop.iteration = iteration
+			diagCurrentIter = iteration
+			diagLogIterStart(ctx, sessionID, assistantMsgID, iteration, ch)
+		},
+		Request: func(ctx context.Context) (*providerAttempt, runloop.Directive) {
+			result := s.requestProviderIteration(ctx, sessionID, assistantMsgID, setup, run, ch)
+			return result.attempt, result.directive
+		},
+		Consume: func(ctx context.Context, attempt *providerAttempt) (providerTurn, runloop.Directive) {
+			result := s.consumeProviderIteration(ctx, sessionID, assistantMsgID, setup, run, attempt, ch)
+			return result.turn, result.directive
+		},
+		Settle: func(ctx context.Context, turn providerTurn) runloop.Directive {
+			return s.settleToolTurn(ctx, sessionID, assistantMsgID, setup, run, turn, ch).directive
+		},
+		Finalize: func(ctx context.Context) runloop.Directive {
+			return s.finalizeRun(ctx, sessionID, assistantMsgID, setup, run, lifecycle, ch).directive
+		},
+	})
+	if loopErr != nil {
+		s.surfaceProviderFailure(ctx, ch, sessionID, assistantMsgID, setup.agentID, run.fullContent.String(), setup.model, setup.providerName, setup.agent.Slug, loopErr, nil)
 	}
 
 }

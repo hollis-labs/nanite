@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/substrate/agent/runloop"
+
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	feotel "github.com/hollis-labs/go-otel"
 	"github.com/hollis-labs/nanite/internal/chat"
@@ -39,8 +41,8 @@ func TestConsumeProviderIteration_PromissoryPreambleSelfHealingRecovery(t *testi
 
 	result := f.svc.consumeProviderIteration(context.Background(), f.session, "assistant-msg-1", setup, run, attempt, stream)
 
-	if result.directive != generationContinueIteration {
-		t.Fatalf("expected directive generationContinueIteration, got %v", result.directive)
+	if result.directive != runloop.Continue {
+		t.Fatalf("expected directive runloop.Continue, got %v", result.directive)
 	}
 	if run.loop.preambleNudgeCount != 1 {
 		t.Fatalf("expected preambleNudgeCount 1, got %d", run.loop.preambleNudgeCount)
@@ -91,8 +93,8 @@ func TestConsumeProviderIteration_PromissoryPreambleSelfHealingRecovery(t *testi
 	_, span2 := feotel.StartSpan(context.Background(), "test.consume-provider-preamble-no-loop")
 	attempt2 := &providerAttempt{events: eventsCh2, cancel: func() {}, span: span2}
 	result2 := f.svc.consumeProviderIteration(context.Background(), f.session, "assistant-msg-1", setup, run, attempt2, stream)
-	if result2.directive != generationFinishRun {
-		t.Fatalf("second stall expected generationFinishRun, got %v", result2.directive)
+	if result2.directive != runloop.Finish {
+		t.Fatalf("second stall expected runloop.Finish, got %v", result2.directive)
 	}
 }
 
@@ -122,8 +124,8 @@ func TestConsumeProviderIteration_NormalAnswerDoesNotTriggerRecovery(t *testing.
 
 	result := f.svc.consumeProviderIteration(context.Background(), f.session, "assistant-msg-1", setup, run, attempt, stream)
 
-	if result.directive != generationFinishRun {
-		t.Fatalf("normal answer expected directive generationFinishRun, got %v", result.directive)
+	if result.directive != runloop.Finish {
+		t.Fatalf("normal answer expected directive runloop.Finish, got %v", result.directive)
 	}
 	if run.loop.preambleNudgeCount != 0 {
 		t.Fatalf("expected preambleNudgeCount 0, got %d", run.loop.preambleNudgeCount)

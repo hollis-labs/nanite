@@ -53,11 +53,13 @@ capability/tool/skill/resource requirements and durable continuity policies are
 refused because this consumer does not apply them. Unknown mandatory extension
 semantics are refused. Unknown optional extensions remain part of the verified
 digest and confer no authority. `com.hollislabs.nanite/native-policy` version 1
-may narrow the permission profile and request a model, but the selected model
-still has to pass the host `ModelAuthorizer`. Native views refuse
-`com.hollislabs.nanite/reflex-policy` version 1 because there is no retained
-profile to own those reflex rows; retained profile provisioning validates and
-materializes those reflex definitions after explicit profile creation.
+contains intrinsic class, completion/wake behavior, write-claim posture and
+recall behavior. Model/provider and numeric execution settings belong only to
+revisioned host settings. `com.hollislabs.nanite/reflex-policy` version 1
+references a digest-pinned declarative bundle. Supported native effects operate
+on the owning session; definitions cannot create mutable profile reflex rows,
+actors, grants, or dispatch authority. Unsupported required effects are refused
+before admission.
 
 `model_selection`, when supplied, is exactly `{provider, model}`. It is a request
 to `ModelAuthorizer`, independent of definition extensions. The standalone host

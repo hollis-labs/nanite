@@ -17,6 +17,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/effort"
 	"github.com/hollis-labs/nanite/internal/service"
+	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/version"
 )
 
@@ -35,12 +36,15 @@ type agentV1PermissionSupport struct {
 }
 
 type agentV1RouteHints struct {
-	Capabilities     string `json:"capabilities"`
-	Sessions         string `json:"sessions"`
-	TurnStatus       string `json:"turn_status"`
-	TurnEvents       string `json:"turn_events"`
-	TurnCancel       string `json:"turn_cancel"`
-	SessionApprovals string `json:"session_approvals"`
+	DefinitionCatalog string `json:"definition_catalog"`
+	DefinitionAuthor  string `json:"definition_author"`
+	HostSettings      string `json:"host_settings"`
+	Capabilities      string `json:"capabilities"`
+	Sessions          string `json:"sessions"`
+	TurnStatus        string `json:"turn_status"`
+	TurnEvents        string `json:"turn_events"`
+	TurnCancel        string `json:"turn_cancel"`
+	SessionApprovals  string `json:"session_approvals"`
 }
 
 type agentV1InitializeResponse struct {
@@ -97,11 +101,12 @@ type agentV1CapabilitiesResponse struct {
 }
 
 type agentV1CreateSessionRequest struct {
-	DefinitionRef  service.DefinitionRef   `json:"definition_ref"`
-	ModelSelection *service.ModelSelection `json:"model_selection,omitempty"`
-	ProjectID      string                  `json:"project_id,omitempty"`
-	Title          string                  `json:"title,omitempty"`
-	Metadata       map[string]any          `json:"metadata,omitempty"`
+	DefinitionRef  service.DefinitionRef    `json:"definition_ref"`
+	ModelSelection *service.ModelSelection  `json:"model_selection,omitempty"`
+	HostSettings   *service.HostSettingsRef `json:"host_settings,omitempty"`
+	ProjectID      string                   `json:"project_id,omitempty"`
+	Title          string                   `json:"title,omitempty"`
+	Metadata       map[string]any           `json:"metadata,omitempty"`
 }
 
 type agentV1SessionResponse struct {
@@ -181,7 +186,7 @@ func (a *API) handleAgentV1Capabilities(w http.ResponseWriter, r *http.Request) 
 		RuntimeKinds:        []runtimeKindOption{{Value: "api", Label: "Native cognition", ProductSupported: true}},
 		TurnStates:          agentV1SessionActivityOptions(),
 		SupportedEventTypes: agentV1EventTypes(),
-		SessionCreateFields: agentV1FieldSupport{Supported: []string{"definition_ref", "model_selection", "project_id", "title", "metadata"}, Unsupported: []string{"agent_id", "provider", "model", "runtime_kind", "work_root", "durable_agent_id", "boot_profile_id", "subagent_runtime"}},
+		SessionCreateFields: agentV1FieldSupport{Supported: []string{"definition_ref", "host_settings", "model_selection", "project_id", "title", "metadata"}, Unsupported: []string{"agent_id", "provider", "model", "runtime_kind", "work_root", "durable_agent_id", "boot_profile_id", "subagent_runtime"}},
 		TurnSendFields: agentV1FieldSupport{
 			Supported:   []string{"content", "delivery", "effort", "delta_mode"},
 			Unsupported: []string{},
@@ -220,13 +225,13 @@ func (a *API) handleAgentV1CreateSession(w http.ResponseWriter, r *http.Request)
 	if req.Metadata == nil {
 		blob = []byte("{}")
 	}
-	sess, err := a.Services.CognitiveViews.Create(r.Context(), service.CreateDefinedView{DefinitionRef: req.DefinitionRef, ModelSelection: req.ModelSelection, ProjectID: req.ProjectID, Title: req.Title, Metadata: string(blob)})
+	sess, err := a.Services.CognitiveViews.Create(r.Context(), service.CreateDefinedView{DefinitionRef: req.DefinitionRef, HostSettings: req.HostSettings, ModelSelection: req.ModelSelection, ProjectID: req.ProjectID, Title: req.Title, Metadata: string(blob)})
 	if err != nil {
 		status := 500
 		switch {
-		case errors.Is(err, service.ErrDefinitionDigestMismatch):
+		case errors.Is(err, service.ErrDefinitionDigestMismatch), errors.Is(err, store.ErrAgentHostRevisionConflict):
 			status = 409
-		case errors.Is(err, service.ErrDefinitionNotFound):
+		case errors.Is(err, service.ErrDefinitionNotFound), errors.Is(err, sql.ErrNoRows):
 			status = 404
 		case errors.Is(err, service.ErrUnsupportedDefinition), errors.Is(err, service.ErrUnsupportedModel):
 			status = 422
@@ -364,7 +369,7 @@ func agentV1Operations() []string {
 }
 
 func agentV1Routes() agentV1RouteHints {
-	return agentV1RouteHints{Capabilities: agentV1RoutePrefix + "/capabilities", Sessions: agentV1RoutePrefix + "/sessions", TurnStatus: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}", TurnEvents: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}/events", TurnCancel: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}/cancel", SessionApprovals: agentV1RoutePrefix + "/sessions/{id}/approvals/{requestId}/responses"}
+	return agentV1RouteHints{DefinitionCatalog: "/api/agent-definitions", DefinitionAuthor: "/api/agent-definitions/author", HostSettings: "/api/agent-host-settings", Capabilities: agentV1RoutePrefix + "/capabilities", Sessions: agentV1RoutePrefix + "/sessions", TurnStatus: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}", TurnEvents: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}/events", TurnCancel: agentV1RoutePrefix + "/sessions/{id}/turns/{turnId}/cancel", SessionApprovals: agentV1RoutePrefix + "/sessions/{id}/approvals/{requestId}/responses"}
 }
 func agentV1PermissionSupportInfo() agentV1PermissionSupport {
 	return agentV1PermissionSupport{SupportLevel: "inband_once", ApprovalResponseRoute: agentV1RoutePrefix + "/sessions/{id}/approvals/{requestId}/responses", Notes: []string{"approval.request binds approval_id to run_id/call_id, includes its expiry and supports only once scope.", "Identical recorded responses return the same outcome; conflicts, expired and unanswered closed prompts return 409."}}

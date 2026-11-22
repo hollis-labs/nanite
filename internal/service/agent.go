@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
+	"strings"
 
 	svcerr "github.com/hollis-labs/libs/util/svcerr"
 
@@ -85,6 +85,16 @@ func NewAgentService(cfg AgentServiceConfig) AgentService {
 }
 
 func (s *agentServiceImpl) Get(ctx context.Context, id string) (*store.AgentProfile, error) {
+	if strings.HasPrefix(id, "msg://") {
+		reader, ok := s.agents.(interface {
+			GetAgentForActor(context.Context, string) (*store.AgentProfile, error)
+		})
+		if !ok {
+			return nil, store.ErrVerifiedActorRequired
+		}
+		return reader.GetAgentForActor(ctx, id)
+	}
+
 	row, err := s.agents.GetAgent(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, svcerr.Wrap(err, svcerr.CodeNotFound, "agent not found")
@@ -154,81 +164,27 @@ func (s *agentServiceImpl) ResolveForSessionReadOnly(ctx context.Context, sessio
 // and ResolveForSessionReadOnly. allowAutoAssign gates step 4
 // (EnsureSessionAgent + EmitAgentAssigned) only — every other step in the
 // resolution chain runs identically regardless of its value.
-func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID string, allowAutoAssign bool) (*store.AgentProfile, error) {
-	agentID, modeName, autoAssigned := s.resolveBinding(sessionID)
-
-	// Load the agent profile by ID. resolveBinding's own ultimate fallback
-	// returns a bare slug ("default"), not a real ID, so that lookup misses
-	// here by design and falls through to the GetBySlug fallback below —
-	// same two-hop shape a stale pre-reconciliation session_agents/
-	// user_settings value degrades to as well (TASKS/adhoc/01's migration
-	// 123 reconciles those to real IDs going forward, but this fallback
-	// stays as a defensive net regardless).
-	resolved, err := s.Get(ctx, agentID)
+func (s *agentServiceImpl) resolveForSession(ctx context.Context, sessionID string, _ bool) (*store.AgentProfile, error) {
+	binding, err := s.agents.GetSessionPrimaryAgent(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrVerifiedActorRequired
+	}
 	if err != nil {
-		resolved, err = s.GetBySlug(ctx, defaultFallbackSlug)
-		if err != nil {
-			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
-		}
+		return nil, fmt.Errorf("resolve actor for session: %w", err)
 	}
-
-	if resolved.Status == "disabled" {
-		return nil, fmt.Errorf("agent %q is disabled", resolved.Name)
+	reader, ok := s.agents.(interface {
+		GetAgentForActor(context.Context, string) (*store.AgentProfile, error)
+	})
+	if !ok {
+		return nil, store.ErrVerifiedActorRequired
 	}
-
-	// Phase 1 item 01 (TASKS/phase-1/01-add-roles-table-and-cascade-
-	// resolution.md): role -> agent -> task closest-wins cascade for
-	// system_prompt/class/model selection, per architecture/
-	// 01-agent-construction.md. s.roleForProfile is nil today for every
-	// row (agent_profiles.role_id doesn't exist until
-	// 02-add-agents-composition-columns.md adds and backfills it), and no
-	// caller threads a task/invocation-level override into
-	// ResolveForSession yet, so this call is a proven no-op passthrough
-	// right now (see role_cascade_test.go) -- it establishes the
-	// resolution seam at this insertion point rather than a second one,
-	// ready for 02 to make the role layer real without this function's
-	// shape changing again.
-	resolved = applyScalarCascade(resolved, s.roleForProfile(ctx, resolved), nil)
-
-	// Auto-assign to session if we had to fall back (only for the
-	// mutating variant — see resolveForSession's doc comment). modeName
-	// here is the session_agents.mode binding string — a separate table/
-	// column from the cut Legacy AgentMode / Session Mode systems (see
-	// GLOSSARY.md's naming-collision guidance) and out of this task's
-	// scope; resolveBinding's own fallback ("default") threads through
-	// unchanged.
-	if autoAssigned && allowAutoAssign {
-		if err := s.writers.EnsureSessionAgent(ctx, sessionID, resolved.ID, modeName, true); err != nil {
-			slog.Warn("agent-service: failed to auto-assign agent", "agent", resolved.ID, "session_id", sessionID, "err", err)
-		}
-		if s.events != nil {
-			s.events.EmitAgentAssigned(ctx, sessionID, resolved.ID, modeName)
-		}
-	}
-
-	return resolved, nil
+	// Runtime resolution has no role cascade, user-default profile fallback or
+	// automatic session enrollment. Binding verification belongs to its issuer.
+	return reader.GetAgentForActor(ctx, binding.AgentID)
 }
 
 // resolveBinding determines the agent ID and mode for a session.
 // Returns the resolved agentID, modeName, and whether auto-assignment is needed.
-func (s *agentServiceImpl) resolveBinding(sessionID string) (agentID, modeName string, autoAssigned bool) {
-	sa, err := s.agents.GetSessionPrimaryAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, sessionID)
-	if err == nil {
-		return sa.AgentID, sa.Mode, false
-	}
-
-	// No binding — check user settings for a configured default.
-	if s.settings != nil {
-		if us, err := s.settings.GetUserSettings(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */); err == nil && us.DefaultAgent != "" {
-			slog.Info("agent-service: no primary agent, using settings default", "session_id", sessionID, "agent", us.DefaultAgent)
-			return us.DefaultAgent, "default", true
-		}
-	}
-
-	// Ultimate fallback.
-	slog.Info("agent-service: no primary agent, falling back", "session_id", sessionID, "agent", defaultFallbackSlug)
-	return defaultFallbackSlug, "default", true
-}
 
 // roleForProfile resolves the store.Role a profile's role binding points
 // at, or nil when the profile has no role_id set (still true for every

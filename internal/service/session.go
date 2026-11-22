@@ -19,7 +19,7 @@ type CreateSessionOpts struct {
 	ProjectID string
 	Model     string
 	Provider  string
-	AgentID   string // optional; falls back to settings default, then the real "default" agent row
+	AgentID   string // claimed legacy/profile identity is refused; no implicit enrollment
 	// Metadata is the session's initial metadata JSON (the validated harness
 	// selection). Empty leaves the column at its default.
 	Metadata string
@@ -102,6 +102,7 @@ type EnvelopeInstanceGetter interface {
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
+	native   *CognitiveViews
 	sessions SessionReader
 	writer   SessionWriter
 	agents   AgentWriter // for EnsureSessionAgent on create
@@ -135,6 +136,7 @@ func (s *sessionServiceImpl) SetArchiveHook(hook func(ctx context.Context, sessi
 
 // SessionServiceDeps groups the dependencies for constructing a SessionService.
 type SessionServiceDeps struct {
+	Native   *CognitiveViews
 	Sessions SessionReader
 	Writer   SessionWriter
 	Agents   AgentWriter
@@ -156,6 +158,7 @@ type SessionServiceDeps struct {
 // NewSessionService creates a new SessionService.
 func NewSessionService(deps SessionServiceDeps) SessionService {
 	return &sessionServiceImpl{
+		native:      deps.Native,
 		sessions:    deps.Sessions,
 		writer:      deps.Writer,
 		agents:      deps.Agents,
@@ -177,6 +180,22 @@ func NewSessionService(deps SessionServiceDeps) SessionService {
 // Create emits no event. The HTTP handler emits activity session-created;
 // session-start belongs to the first turn.
 func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts) (*store.Session, error) {
+	if opts.AgentID != "" {
+		return nil, store.ErrVerifiedActorRequired
+	}
+	if !opts.SkipAgentBinding {
+		if s.native == nil {
+			return nil, ErrUnsupportedDefinition
+		}
+		if opts.SubagentRuntime != "" && opts.SubagentRuntime != "api" {
+			return nil, ErrUnsupportedDefinition
+		}
+		var requested *ModelSelection
+		if opts.Provider != "" || opts.Model != "" {
+			requested = &ModelSelection{Provider: opts.Provider, Model: opts.Model}
+		}
+		return s.native.Create(ctx, CreateDefinedView{DefinitionRef: s.native.DefaultDefinitionRef, ModelSelection: requested, ProjectID: opts.ProjectID, Metadata: opts.Metadata})
+	}
 	sess := &store.Session{
 		ProjectID: opts.ProjectID,
 		Model:     opts.Model,
@@ -194,37 +213,6 @@ func (s *sessionServiceImpl) Create(ctx context.Context, opts CreateSessionOpts)
 			return nil, err
 		}
 	}
-	if opts.SkipAgentBinding {
-		return sess, nil
-	}
-
-	// Resolve agent: explicit param → user settings default → real
-	// "default" agent row. TASKS/adhoc/01-eliminate-file-based-agent-
-	// runtime.md: this used to fall back to the literal placeholder string
-	// "file-default", written straight into session_agents.agent_id (no FK
-	// on that column, so a bad value was never caught at write time).
-	agentID := opts.AgentID
-	if agentID == "" {
-		if settings, err := s.settings.GetUserSettings(ctx); err == nil && settings.DefaultAgent != "" {
-			agentID = settings.DefaultAgent
-		}
-	}
-	if agentID == "" && s.agentReader != nil {
-		if defaultAgent, err := s.agentReader.GetAgentBySlug(ctx, "default"); err == nil && defaultAgent != nil {
-			agentID = defaultAgent.ID
-		}
-	}
-
-	// Assign the resolved agent as primary (best-effort — matches the
-	// pre-existing contract of this write). Skip it entirely in the true
-	// edge case where even the "default" agent row can't be resolved (no
-	// such row exists at all) rather than write an empty/placeholder
-	// agent_id — the session itself is already created and stays usable
-	// without a primary-agent binding.
-	if agentID != "" {
-		_ = s.agents.EnsureSessionAgent(ctx, sess.ID, agentID, "default", true)
-	}
-
 	return sess, nil
 }
 

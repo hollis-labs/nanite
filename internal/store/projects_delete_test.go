@@ -55,7 +55,7 @@ func TestDeleteProject_DetachesArchivedSessionsAndKeepsThem(t *testing.T) {
 	if n := countProjectDeleteRows(t, s, `SELECT COUNT(*) FROM projects WHERE id = ?`, "proj-archived"); n != 0 {
 		t.Fatalf("project rows = %d, want 0", n)
 	}
-	if n := countProjectDeleteRows(t, s, `SELECT COUNT(*) FROM agent_projects WHERE project_id = ?`, "proj-archived"); n != 0 {
+	if n := countProjectDeleteRows(t, s, `SELECT COUNT(*) FROM actor_projects WHERE project_id = ?`, "proj-archived"); n != 0 {
 		t.Fatalf("agent_projects rows = %d, want 0", n)
 	}
 	for _, id := range []string{"sess-archived-1", "sess-archived-2"} {
@@ -70,7 +70,7 @@ func TestDeleteProject_DetachesArchivedSessionsAndKeepsThem(t *testing.T) {
 			t.Fatalf("session %s messages = %d, want 1 kept", id, n)
 		}
 	}
-	if _, err := s.GetAgent(ctx, agent.ID); err != nil {
+	if _, err := s.GetAgentForActor(ctx, agent.ID); err != nil {
 		t.Fatalf("agent linked to the project was affected: %v", err)
 	}
 }
@@ -101,7 +101,7 @@ func TestDeleteProject_LiveSessionRefusesAndChangesNothing(t *testing.T) {
 	if n := countProjectDeleteRows(t, s, `SELECT COUNT(*) FROM projects WHERE id = ?`, "proj-live"); n != 1 {
 		t.Fatalf("project rows = %d, want 1", n)
 	}
-	if n := countProjectDeleteRows(t, s, `SELECT COUNT(*) FROM agent_projects WHERE project_id = ?`, "proj-live"); n != 1 {
+	if n := countProjectDeleteRows(t, s, `SELECT COUNT(*) FROM actor_projects WHERE project_id = ?`, "proj-live"); n != 1 {
 		t.Fatalf("agent_projects rows = %d, want 1", n)
 	}
 	for _, id := range []string{"sess-live", "sess-old"} {

@@ -501,7 +501,7 @@ func (l *TeamRunLauncher) resolveSlotAgentIdentity(ctx context.Context, slot sto
 		if slot.AgentID == nil || strings.TrimSpace(*slot.AgentID) == "" {
 			return "", fmt.Errorf("team slot %q: resolution=durable requires agent_id", slot.Name)
 		}
-		if _, err := l.store.GetAgent(ctx, *slot.AgentID); err != nil {
+		if _, err := l.store.GetAgentForActor(ctx, *slot.AgentID); err != nil {
 			return "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, *slot.AgentID, err)
 		}
 		return *slot.AgentID, nil
@@ -887,7 +887,7 @@ func (l *TeamRunLauncher) resolveDurableMember(ctx context.Context, slot store.T
 	}
 	profileID := *slot.AgentID
 
-	profile, err := l.store.GetAgent(ctx, profileID)
+	profile, err := l.store.GetAgentForActor(ctx, profileID)
 	if err != nil {
 		return "", "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, profileID, err)
 	}

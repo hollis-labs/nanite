@@ -10,6 +10,7 @@ import (
 
 func TestCognitiveProviderEOFDoesNotCompleteTurn(t *testing.T) {
 	f := newHandleMessageFixture(t, []characterizationProviderStep{{events: []llmtypes.StreamEvent{{Type: "delta", Content: "partial answer"}}}})
+	bindTestDefinedConfiguration(t, f)
 	messageID, err := f.svc.SubmitCognitiveTurn(chat.WithDeltaMode(t.Context(), chat.DeltaModeLive), f.session, "hello")
 	if err != nil {
 		t.Fatal(err)

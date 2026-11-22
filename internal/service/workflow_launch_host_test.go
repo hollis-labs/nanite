@@ -55,7 +55,7 @@ func TestWorkflowLauncherUsesSingleHostForEveryCompatibleEngine(t *testing.T) {
 		}
 		definition.Engine = engine
 		host := &recordingDurableWorkflowHost{}
-		launcher := NewWorkflowLauncher(agentworkflow.NewRegistry(nil), host, exec, NewDurableAgentService(st))
+		launcher := NewWorkflowLauncher(agentworkflow.NewRegistry(nil), host, exec, newPriorWorkflowLifecycleFixture(st))
 
 		if _, err := launcher.LaunchDefinition(t.Context(), definition, WorkflowLaunchRequest{AgentProfileID: profile.ID}); err != nil {
 			t.Fatalf("LaunchDefinition engine[%d]=%q: %v", index, engine, err)
@@ -75,7 +75,7 @@ func TestWorkflowLauncherRejectsUnknownEngineBeforeDurableLifecycle(t *testing.T
 		agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition}),
 		host,
 		NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil),
-		NewDurableAgentService(st),
+		newPriorWorkflowLifecycleFixture(st),
 	)
 
 	_, err := launcher.Launch(t.Context(), WorkflowLaunchRequest{WorkflowName: definition.Name, AgentProfileID: profile.ID})
@@ -120,7 +120,7 @@ func TestWorkflowLauncherRejectsMissingSharedHost(t *testing.T) {
 		agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition}),
 		nil,
 		NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil),
-		NewDurableAgentService(st),
+		newPriorWorkflowLifecycleFixture(st),
 	)
 	_, err := launcher.Launch(t.Context(), WorkflowLaunchRequest{WorkflowName: definition.Name, AgentProfileID: profile.ID})
 	if err == nil || !strings.Contains(err.Error(), "not fully configured") {
@@ -137,7 +137,7 @@ func TestWorkflowLauncherEnforcesRequiredInputsBeforeHostOrDurableLifecycle(t *t
 		agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition}),
 		host,
 		NewWorkflowStepExecutor(&fakeWorkflowToolService{}, &fakeProviderResolver{}, nil),
-		NewDurableAgentService(st),
+		newPriorWorkflowLifecycleFixture(st),
 	)
 
 	_, err := launcher.Launch(t.Context(), WorkflowLaunchRequest{WorkflowName: definition.Name, AgentProfileID: profile.ID})

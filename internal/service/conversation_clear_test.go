@@ -94,6 +94,7 @@ func TestClearConversation_ConfirmationCancelsExactNativeQueue(t *testing.T) {
 		{events: []llmtypes.StreamEvent{{Type: "delta", Content: "partial"}}, hold: hold},
 		{events: doneEvents("after clear")},
 	})
+	bindTestDefinedConfiguration(t, f)
 	ctx := chat.WithDeltaMode(t.Context(), chat.DeltaModeLive)
 	first, err := f.svc.SubmitCognitiveTurn(ctx, f.session, "before clear")
 	if err != nil {

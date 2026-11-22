@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -40,53 +41,56 @@ func newSessionCreateTestService(t *testing.T) (SessionService, *sessionStartCou
 	return svc, events, runtimeOf
 }
 
-func TestSessionCreateSetsRuntimeMetadataAndPrimaryWithoutEvents(t *testing.T) {
-	ctx := context.Background()
-	svc, events, runtimeOf := newSessionCreateTestService(t)
+func TestSessionCreateActorClaimsRefuseBeforeEffects(t *testing.T) {
+	ctx := t.Context()
+	svc, events, _ := newSessionCreateTestService(t)
+	for _, id := range []string{"agent-x", "host-settings-uuid", "msg://agent/claimed"} {
+		created, err := svc.Create(ctx, CreateSessionOpts{AgentID: id, Provider: "fixture", Model: "model", SkipAgentBinding: true})
+		if created != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("claim admitted: %+v %v", created, err)
+		}
+	}
+	rows, err := svc.List(ctx, true)
+	if err != nil || len(rows) != 0 || events.starts != 0 {
+		t.Fatalf("refused actor creation effects: %+v %v starts=%d", rows, err, events.starts)
+	}
+}
 
-	sess, err := svc.Create(ctx, CreateSessionOpts{
-		Provider:        "anthropic",
-		Model:           "m",
-		AgentID:         "agent-x",
-		Metadata:        `{"harness_profile":"lean"}`,
-		SubagentRuntime: "cli",
-	})
+func TestSessionCreateDefaultUsesActualPinnedDefinitionWithoutEnrollment(t *testing.T) {
+	ctx := t.Context()
+	st := newConfigTestStore(t)
+	if err := installEmbeddedChatDefinition(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := EmbeddedDefinition()
 	if err != nil {
-		t.Fatalf("Create: %v", err)
+		t.Fatal(err)
 	}
-
-	got, err := svc.Get(ctx, sess.ID)
+	native := &CognitiveViews{Store: st, Resolver: &StoredDefinitionResolver{Store: st}, DefaultDefinitionRef: verified.Ref, Models: ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
+		return ModelSelection{Provider: "private-model-authorizer", Model: "private-model"}, nil
+	})}
+	svc := NewSessionService(SessionServiceDeps{Native: native, Sessions: st, Writer: st, Agents: st, AgentReader: st})
+	created, err := svc.Create(ctx, CreateSessionOpts{Metadata: `{"caller_presentation":"test"}`})
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatal(err)
 	}
-	if got.Metadata != `{"harness_profile":"lean"}` {
-		t.Fatalf("metadata = %q, want the harness selection", got.Metadata)
+	view, err := st.GetCognitiveView(ctx, created.ID)
+	if err != nil || view.DefinitionRefJSON == "" {
+		t.Fatalf("pin not persisted: %+v %v", view, err)
 	}
-	rt, err := runtimeOf(sess.ID)
-	if err != nil || rt != "cli" {
-		t.Fatalf("subagent runtime = %q, %v; want cli", rt, err)
+	bindings, err := st.ListSessionAgents(ctx, created.ID)
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("native view minted actor: %+v %v", bindings, err)
 	}
-
-	st := svc.(*sessionServiceImpl).agentReader
-	primary, err := st.GetSessionPrimaryAgent(ctx, sess.ID)
-	if err != nil {
-		t.Fatalf("GetSessionPrimaryAgent: %v", err)
-	}
-	if primary.AgentID != "agent-x" {
-		t.Fatalf("primary agent = %q, want agent-x", primary.AgentID)
-	}
-
-	// The HTTP handler emits activity session-created itself; Create must
-	// not add a session-start on top of it.
-	if events.starts != 0 {
-		t.Fatalf("Create emitted %d session-start events, want 0", events.starts)
+	if created.Provider != "private-model-authorizer" || created.Model != "private-model" || created.Metadata != `{"caller_presentation":"test"}` {
+		t.Fatalf("host/presentation mapping: %+v", created)
 	}
 }
 
 func TestSessionCreateReturnsRuntimeErrorUnwrapped(t *testing.T) {
 	svc, _, _ := newSessionCreateTestService(t)
 
-	_, err := svc.Create(context.Background(), CreateSessionOpts{SubagentRuntime: "bogus"})
+	_, err := svc.Create(context.Background(), CreateSessionOpts{SubagentRuntime: "bogus", SkipAgentBinding: true})
 	if err == nil {
 		t.Fatal("Create with an invalid runtime succeeded")
 	}
@@ -142,10 +146,10 @@ func TestSessionCreateSkipAgentBindingResolvesAndBindsNothing(t *testing.T) {
 	}
 	// With an AgentID, Create would normally bind it; the flag ignores it.
 	withID, err := svc.Create(ctx, CreateSessionOpts{AgentID: "agent-x", SkipAgentBinding: true})
-	if err != nil {
-		t.Fatalf("Create with AgentID: %v", err)
+	if withID != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatal("skip flag admitted actor claim", withID, err)
 	}
-	for _, id := range []string{sess.ID, withID.ID} {
+	for _, id := range []string{sess.ID} {
 		bound, err := st.ListSessionAgents(ctx, id)
 		if err != nil {
 			t.Fatalf("ListSessionAgents: %v", err)

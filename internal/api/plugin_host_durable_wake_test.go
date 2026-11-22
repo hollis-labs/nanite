@@ -18,6 +18,7 @@ import (
 	"github.com/hollis-labs/nanite/internal/plugin/subprocess"
 	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/nanite/pkg/pluginapi"
 )
 
@@ -59,13 +60,11 @@ func TestPluginHostDurableWakeApprovedScopeAndRevocation(t *testing.T) {
 	runtime := &wakeRuntimeCapture{}
 	durable := service.NewDurableAgentServiceWithRuntime(st, runtime)
 	profile := &store.AgentProfile{Name: "Curator", Slug: "loom-curator", SystemPrompt: "Classify fragments.", Source: "user", Durable: true}
-	if err := st.CreateAgent(ctx, profile); err != nil {
+	if err := storetest.PriorAuthorizedActor(ctx, st, profile); err != nil {
 		t.Fatal(err)
 	}
 	instance := &store.DurableAgentInstance{Name: "Curator", Slug: "loom-curator", ProfileID: profile.ID, LifecycleClass: store.DurableAgentClassProcess, RuntimeKind: "api", LaunchSourceType: store.DurableAgentLaunchProcessTick, LaunchSourceID: "loom-curator", Status: store.DurableAgentStatusSleeping}
-	if err := durable.Create(ctx, instance); err != nil {
-		t.Fatal(err)
-	}
+	persistPriorAPIInstance(t, st, instance)
 	a := New(&service.Container{DurableAgents: durable, DurableWake: service.NewDurableAgentWakeService(st, durable)})
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/plugin-host/durable-wake", a.handlePluginHostDurableWake)

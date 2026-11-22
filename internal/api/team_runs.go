@@ -176,6 +176,10 @@ func (a *API) handleLaunchTeam(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.Services.TeamRunLauncher.LaunchTeamRun(r.Context(), id, overrides)
 	if err != nil {
+		if errors.Is(err, store.ErrVerifiedActorRequired) {
+			a.errorResp(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 		if errors.Is(err, store.ErrTeamRunLaunchConflict) {
 			a.errorResp(w, http.StatusConflict, err.Error())
 			return

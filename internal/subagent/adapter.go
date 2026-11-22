@@ -41,18 +41,18 @@ func (a ProfileAdapter) GetAgentBySlug(ctx context.Context, slug string) (*core.
 	return &core.Profile{ID: p.ID, Slug: p.Slug, CanExecute: p.CanExecute}, nil
 }
 
-// Authorizer maps the existing host trust decision without creating authority.
-// Refusal retains dispatch.ErrUntrustedRole; lookup failure retains the existing
-// normal-tier approval posture. Empty profile IDs stay normal.
+// Authorizer maps a host-owned spawn decision without creating authority.
+// Approval cannot replace a missing issuer: resolver errors must be explicit
+// refusals because the core's generic lookup-error posture permits approval.
 type Authorizer struct{ Resolver dispatch.TrustResolver }
 
 func (a Authorizer) AuthorizeSpawn(ctx context.Context, id string) (core.SpawnAuthorization, error) {
 	if a.Resolver == nil || id == "" {
-		return core.SpawnAuthorization{}, nil
+		return core.SpawnAuthorization{Refusal: store.ErrVerifiedActorRequired}, nil
 	}
 	tier, err := a.Resolver.ResolveTrust(ctx, id)
 	if err != nil {
-		return core.SpawnAuthorization{}, err
+		return core.SpawnAuthorization{Refusal: err}, nil
 	}
 	if tier == dispatch.TrustUntrusted {
 		return core.SpawnAuthorization{Refusal: dispatch.ErrUntrustedRole}, nil

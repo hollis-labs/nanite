@@ -64,13 +64,17 @@ func (a *contextServiceWorkflowAssembler) AssembleContext(ctx context.Context, s
 		return "", nil, fmt.Errorf("workflow: context assembly requires both session_id and agent_id")
 	}
 
+	agent, err := a.store.GetAgentForActor(ctx, agentID)
+	if err != nil {
+		return "", nil, fmt.Errorf("workflow: verified actor unavailable: %w", err)
+	}
+	binding, err := a.store.GetSessionPrimaryAgent(ctx, sessionID)
+	if err != nil || binding.AgentID != agent.ID {
+		return "", nil, store.ErrVerifiedActorRequired
+	}
 	session, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return "", nil, fmt.Errorf("workflow: context assembly: load session %q: %w", sessionID, err)
-	}
-	agent, err := a.agents.Get(ctx, agentID)
-	if err != nil {
-		return "", nil, fmt.Errorf("workflow: context assembly: load agent %q: %w", agentID, err)
 	}
 
 	// providerWindowSize=0 falls back to ctxpkg.DefaultContextWindowSize

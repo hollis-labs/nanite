@@ -68,7 +68,7 @@ BEGIN
  INSERT INTO scheduler_fire_identity(fire_id, schedule_id, family, legacy_row_id)
  SELECT NEW.id, NEW.schedule_id, family, NEW.id
  FROM scheduler_schedule_identity WHERE schedule_id = NEW.schedule_id;
- UPDATE agent_schedules SET fired_count = fired_count + 1
+ UPDATE actor_schedules SET fired_count = fired_count + 1
  WHERE id IN (SELECT source_id FROM scheduler_schedule_identity WHERE schedule_id = NEW.schedule_id AND family = 'agent');
  UPDATE workflow_activation_schedules SET updated_at = NEW.scheduled_at
  WHERE schedule_id IN (SELECT source_id FROM scheduler_schedule_identity WHERE schedule_id = NEW.schedule_id AND family = 'workflow');
@@ -76,7 +76,7 @@ END;
 CREATE TRIGGER scheduler_disable_projection AFTER UPDATE OF enabled ON gosched_schedules
 WHEN NEW.enabled = 0 AND OLD.enabled = 1
 BEGIN
- UPDATE agent_schedules SET status = 'expired'
+ UPDATE actor_schedules SET status = 'expired'
  WHERE id IN (SELECT source_id FROM scheduler_schedule_identity WHERE schedule_id = NEW.id AND family = 'agent');
  UPDATE workflow_activation_schedules
  SET status = 'materialized', updated_at = NEW.last_run

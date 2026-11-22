@@ -39,17 +39,13 @@ func TestChatDiscovery_DescribeLoadAndExecute(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 				t.Fatal(err)
 			}
-			f := newCharacterizationFixture(t, []characterizationProviderStep{
+			f := newCharacterizationFixtureWithPrompt(t, []characterizationProviderStep{
 				{events: toolTurnEvents(llmtypes.ToolUseBlock{ID: "describe", Name: "tool_describe", Input: map[string]any{"name": "dev_read"}})},
 				{events: toolTurnEvents(llmtypes.ToolUseBlock{ID: "load", Name: "request_tools", Input: map[string]any{"tool_names": []any{"dev_read", "dev_write"}}})},
 				{events: toolTurnEvents(llmtypes.ToolUseBlock{ID: "read", Name: "dev_read", Input: map[string]any{"path": path}})},
 				{events: doneEvents("Read the orientation file.")},
-			})
+			}, "You are the portfolio assistant.\n"+strings.Repeat("Keep the operator's instructions available throughout this session.\n", 200))
 			agent := f.svc.agents.(*characterizationAgents).agent
-			agent.SystemPrompt = "You are the portfolio assistant.\n" + strings.Repeat("Keep the operator's instructions available throughout this session.\n", 200)
-			if err := f.st.CreateAgent(ctx, agent); err != nil {
-				t.Fatal(err)
-			}
 			f.context.inner = NewContextService(ContextServiceConfig{Client: chat.NewContextClient(f.st), SlotStasher: &fakeArtifactStasher{}})
 			mgr := mcp.NewManager()
 			self := NewSelfToolsTransport(f.st)
@@ -69,7 +65,7 @@ func TestChatDiscovery_DescribeLoadAndExecute(t *testing.T) {
 					t.Fatal(err)
 				}
 				if toolName != "dev_write" {
-					if err := f.st.GrantAgentTool(ctx, agent.ID, id, "explicit"); err != nil {
+					if err := grantTestActorTool(ctx, f.st, agent.ID, id, "explicit"); err != nil {
 						t.Fatal(err)
 					}
 				}

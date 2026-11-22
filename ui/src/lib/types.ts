@@ -585,6 +585,7 @@ export interface DefinitionRef {
 }
 export interface AgentCreateSessionRequest {
   definition_ref: DefinitionRef;
+  host_settings?: { id: string; revision: string };
   model_selection?: { provider: string; model: string };
   project_id?: string;
   title?: string;
@@ -2470,3 +2471,40 @@ export interface MemoryUpdateRequest {
 // TASKS/phase-0/20-retire-workspaces-and-instance-mechanism.md):
 // workspace_role_trust and its REST surface are retired in full,
 // operator-confirmed 2026-08-18.
+
+// Intrinsic definitions and host execution inputs have separate identities.
+export interface CatalogDefinitionRef {
+  id: string;
+  revision: string;
+  digest: string;
+}
+export interface PinnedAgentDefinition {
+  definition_ref: CatalogDefinitionRef;
+  artifact: string;
+}
+export interface NativeAgentHostSettings {
+  version: "1";
+  runtime: "api" | "cli";
+  provider?: string;
+  model?: string;
+  protocol?: string;
+  transport?: string;
+  harness_profile?: string;
+  native_loop: Record<string, unknown>;
+  recall_limit?: number;
+  recall_timeout_ms?: number;
+  directories?: string[];
+  mcp_servers?: string[];
+  debug?: boolean;
+}
+export interface AgentHostSettings {
+  id: string;
+  slug: string;
+  title: string;
+  definition_ref: CatalogDefinitionRef;
+  settings: NativeAgentHostSettings;
+  enabled: boolean;
+  revision: string;
+  source: string;
+  plugin_id: string;
+}

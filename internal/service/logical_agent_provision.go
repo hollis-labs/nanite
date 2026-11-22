@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -12,7 +11,7 @@ import (
 
 var ErrLogicalAgentProvisionInput = errors.New("logical provisioning requires an explicit name, slug and definition pin")
 
-// ProvisionGeneralChatRequest creates a retained logical profile, not a
+// ProvisionGeneralChatRequest creates fresh host settings, not a
 // cognitive session or actor enrollment. No grant, identity or settings map
 // is accepted from this request.
 type ProvisionGeneralChatRequest struct {
@@ -28,9 +27,9 @@ type ProvisionGeneralChatResult struct {
 }
 
 // ProvisionGeneralChat resolves actual agentdef content and creates an
-// editable logical profile through the existing atomic configuration writer.
-// The definition pin in settings records creation provenance; it is not an
-// authority token or a promise that later profile edits track that definition.
+// fresh host settings pinned to immutable content.
+// The definition pin is an immutable reference; host execution inputs can change
+// independently. This does not create an actor or replay profile grants.
 func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *CognitiveViews, req ProvisionGeneralChatRequest) (*ProvisionGeneralChatResult, error) {
 	if strings.TrimSpace(req.Name) == "" || len(req.Name) > 256 || len(req.Slug) > 128 {
 		return nil, ErrLogicalAgentProvisionInput
@@ -58,7 +57,7 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	if digest != req.DefinitionRef.SemanticDigest {
 		return nil, ErrDefinitionDigestMismatch
 	}
-	cfg, err := mapRetainedProfileDefinition(verified)
+	cfg, err := MapChatDefinition(verified)
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +66,7 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	if cfg.PermissionProfile != "default" {
 		return nil, ErrUnsupportedDefinition
 	}
-	modelSelection := req.ModelSelection
-	if modelSelection == nil {
-		modelSelection = cfg.RequestedModel
-	} else if cfg.RequestedModel != nil && *cfg.RequestedModel != *req.ModelSelection {
-		return nil, ErrUnsupportedModel
-	}
-	model, err := host.Models.AuthorizeModel(ctx, req.DefinitionRef, modelSelection)
+	model, err := host.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
 	if err != nil {
 		return nil, err
 	}
@@ -83,33 +76,17 @@ func (s *AgentConfigService) ProvisionGeneralChat(ctx context.Context, host *Cog
 	if contextErr := ctx.Err(); contextErr != nil {
 		return nil, contextErr
 	}
-	settings, err := json.Marshal(struct {
-		DefinitionRef DefinitionRef `json:"provisioned_definition_ref"`
-	}{req.DefinitionRef})
+	saved, err := s.store.CreateAgentHostSettings(ctx, store.AgentHostSettings{Slug: req.Slug, Title: req.Name, DefinitionRef: req.DefinitionRef.MeshRef(), Settings: store.NativeHostSettings{Version: "1", Runtime: "api", Provider: model.Provider, Model: model.Model}, Enabled: true, Source: "operator"})
 	if err != nil {
-		return nil, err
-	}
-	profile := &store.AgentProfile{Name: req.Name, Slug: req.Slug, SystemPrompt: cfg.Instructions, DefaultProvider: model.Provider, DefaultModel: model.Model, Settings: string(settings), Tools: "[]", RoleTools: "[]", RoleSkills: "[]", MCPServers: "[]", ToolPermissions: "{}", CanExecute: false, Durable: false}
-	saved, err := s.CreateWithAssignments(ctx, profile, nil, AgentAssignments{})
-	if err != nil {
-		return nil, err
-	}
-	if policy, ok, err := definitionReflexPolicy(verified.Definition); err != nil {
-		return nil, err
-	} else if ok {
-		reflexes := NewReflexService(s.store)
-		for _, def := range policy.Reflexes {
-			row, rowErr := def.storeRow(saved.Profile.ID)
-			if rowErr != nil {
-				return nil, rowErr
-			}
-			if errs := reflexes.ValidateDefinition(ctx, row); len(errs) > 0 {
-				return nil, &ReflexValidationError{Errors: errs}
-			}
-			if _, insertErr := s.store.InsertAgentReflex(ctx, row); insertErr != nil {
-				return nil, insertErr
-			}
+		if errors.Is(err, store.ErrAgentHostSlugConflict) {
+			return nil, ErrManagedSlugExists
 		}
+		return nil, err
 	}
-	return &ProvisionGeneralChatResult{Agent: saved, DefinitionRef: req.DefinitionRef}, nil
+	projection, err := s.store.GetAgent(ctx, saved.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &ProvisionGeneralChatResult{Agent: &AgentConfigResult{Profile: projection, Class: s.Classify(projection), Revision: saved.Revision}, DefinitionRef: req.DefinitionRef}, nil
+
 }

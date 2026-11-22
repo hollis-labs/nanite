@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -11,18 +13,20 @@ import (
 // --- test doubles ---
 
 type stubAgentReader struct {
-	agents      map[string]*store.AgentProfile // keyed by ID
-	slugIndex   map[string]*store.AgentProfile // keyed by slug
-	sessionBind map[string]*store.SessionAgent // keyed by sessionID
-	roles       map[string]*store.Role         // keyed by ID
+	verifiedBindings map[string]bool                // Explicit private host-port decisions, never inferred from a profile.
+	agents           map[string]*store.AgentProfile // keyed by ID
+	slugIndex        map[string]*store.AgentProfile // keyed by slug
+	sessionBind      map[string]*store.SessionAgent // keyed by sessionID
+	roles            map[string]*store.Role         // keyed by ID
 }
 
 func newStubReader() *stubAgentReader {
 	return &stubAgentReader{
-		agents:      make(map[string]*store.AgentProfile),
-		slugIndex:   make(map[string]*store.AgentProfile),
-		sessionBind: make(map[string]*store.SessionAgent),
-		roles:       make(map[string]*store.Role),
+		verifiedBindings: make(map[string]bool),
+		agents:           make(map[string]*store.AgentProfile),
+		slugIndex:        make(map[string]*store.AgentProfile),
+		sessionBind:      make(map[string]*store.SessionAgent),
+		roles:            make(map[string]*store.Role),
 	}
 }
 
@@ -53,6 +57,17 @@ func (s *stubAgentReader) GetAgent(ctx context.Context, id string) (*store.Agent
 	return nil, fmt.Errorf("not found")
 }
 
+func (s *stubAgentReader) GetAgentForActor(_ context.Context, actor string) (*store.AgentProfile, error) {
+	if !s.verifiedBindings[actor] {
+		return nil, store.ErrVerifiedActorRequired
+	}
+	p := s.agents[actor]
+	if p == nil || p.Status == "disabled" {
+		return nil, store.ErrVerifiedActorRequired
+	}
+	return p, nil
+}
+
 func (s *stubAgentReader) GetAgentBySlug(ctx context.Context, slug string) (*store.AgentProfile, error) {
 	if a, ok := s.slugIndex[slug]; ok {
 		return a, nil
@@ -76,7 +91,7 @@ func (s *stubAgentReader) GetSessionPrimaryAgent(ctx context.Context, sessionID 
 	if sa, ok := s.sessionBind[sessionID]; ok {
 		return sa, nil
 	}
-	return nil, fmt.Errorf("no primary agent")
+	return nil, sql.ErrNoRows
 }
 
 func (s *stubAgentReader) ListSessionAgents(context.Context, string) ([]store.SessionAgent, error) {
@@ -204,10 +219,11 @@ func TestAgentService_CRUD(t *testing.T) {
 // return value entirely, so this test now only covers agent resolution.
 func TestAgentService_ResolveForSession_BoundAgent(t *testing.T) {
 	reader := newStubReader()
-	agent := &store.AgentProfile{ID: "agent-1", Name: "Bound", Slug: "bound", Status: "active"}
+	agent := &store.AgentProfile{ID: "msg://agent/private-bound", Name: "Bound", Slug: "bound", Status: "active"}
 	reader.addAgent(agent)
+	reader.verifiedBindings[agent.ID] = true
 	reader.sessionBind["sess-1"] = &store.SessionAgent{
-		SessionID: "sess-1", AgentID: "agent-1", Mode: "code", IsPrimary: true,
+		SessionID: "sess-1", AgentID: "msg://agent/private-bound", Mode: "code", IsPrimary: true,
 	}
 
 	writer := &stubAgentWriter{}
@@ -220,8 +236,8 @@ func TestAgentService_ResolveForSession_BoundAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveForSession: %v", err)
 	}
-	if got.ID != "agent-1" {
-		t.Errorf("agent ID = %q, want %q", got.ID, "agent-1")
+	if got.ID != "msg://agent/private-bound" {
+		t.Errorf("agent ID = %q, want %q", got.ID, "msg://agent/private-bound")
 	}
 	// Should NOT auto-assign since a binding already existed.
 	if len(writer.ensured) != 0 {
@@ -231,109 +247,62 @@ func TestAgentService_ResolveForSession_BoundAgent(t *testing.T) {
 
 func TestAgentService_ResolveForSession_SettingsDefault(t *testing.T) {
 	reader := newStubReader()
-	agent := &store.AgentProfile{ID: "settings-agent", Name: "Settings", Slug: "settings", Status: "active"}
-	reader.addAgent(agent)
-
-	writer := &stubAgentWriter{}
-	svc := NewAgentService(AgentServiceConfig{
-		Agents:   reader,
-		Writers:  writer,
-		Settings: &stubSettings{defaultAgent: "settings-agent"},
-	})
-
-	got, err := svc.ResolveForSession(context.Background(), "unbound-sess")
-	if err != nil {
-		t.Fatalf("ResolveForSession: %v", err)
-	}
-	if got.ID != "settings-agent" {
-		t.Errorf("agent ID = %q, want %q", got.ID, "settings-agent")
-	}
-	if len(writer.ensured) != 1 || writer.ensured[0] != "unbound-sess" {
-		t.Errorf("auto-assign expected for unbound-sess, got %v", writer.ensured)
-	}
-}
-
-// TestAgentService_ResolveForSessionReadOnly_NoAutoAssign is the
-// regression test for the code-review finding on
-// internal/service/messaging_reactor.go's resolveMessageWakePolicy:
-// resolving the effective agent for an unbound session must not create a
-// session_agents row (EnsureSessionAgent) or emit AgentAssigned, unlike
-// ResolveForSession's deliberate auto-assign-on-first-touch behavior.
-func TestAgentService_ResolveForSessionReadOnly_NoAutoAssign(t *testing.T) {
-	reader := newStubReader()
-	agent := &store.AgentProfile{ID: "settings-agent", Name: "Settings", Slug: "settings", Status: "active"}
-	reader.addAgent(agent)
-
+	reader.addAgent(&store.AgentProfile{ID: "historical-default", Name: "Historical", Slug: "default", Status: "active"})
 	writer := &stubAgentWriter{}
 	events := &fakeEventEmitter{}
-	svc := NewAgentService(AgentServiceConfig{
-		Agents:   reader,
-		Writers:  writer,
-		Settings: &stubSettings{defaultAgent: "settings-agent"},
-		Events:   events,
-	})
-
-	got, err := svc.ResolveForSessionReadOnly(context.Background(), "unbound-sess")
-	if err != nil {
-		t.Fatalf("ResolveForSessionReadOnly: %v", err)
+	svc := NewAgentService(AgentServiceConfig{Agents: reader, Writers: writer, Settings: &stubSettings{defaultAgent: "historical-default"}, Events: events})
+	for _, resolve := range []func(context.Context, string) (*store.AgentProfile, error){svc.ResolveForSession, svc.ResolveForSessionReadOnly} {
+		got, err := resolve(t.Context(), "unbound-session")
+		if got != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatal("implicit enrollment", got, err)
+		}
 	}
-	if got.ID != "settings-agent" {
-		t.Errorf("agent ID = %q, want %q (resolution chain must still run identically to ResolveForSession)", got.ID, "settings-agent")
-	}
-	if len(writer.ensured) != 0 {
-		t.Errorf("expected no EnsureSessionAgent call from the read-only path, got %v", writer.ensured)
-	}
-	if len(events.agentAssigned) != 0 {
-		t.Errorf("expected no AgentAssigned event from the read-only path, got %v", events.agentAssigned)
+	if len(writer.ensured) != 0 || len(events.agentAssigned) != 0 {
+		t.Fatal("missing binding wrote authority", writer.ensured, events.agentAssigned)
 	}
 }
 
-// TestAgentService_ResolveForSession_HardcodedFallback is the DB-only
-// replacement for the pre-TASKS/adhoc/01-eliminate-file-based-agent-
-// runtime.md version of this test (which supplied the built-in default
-// agent via the now-removed FileAgents in-memory registry and asserted the
-// synthetic "file-default" ID). The ultimate fallback is now a bare slug
-// ("default", defaultFallbackSlug) resolved purely through the DB reader:
-// resolveBinding returns that slug as the "agentID," s.Get(ctx, "default")
-// misses (no row's real ID is literally "default"), and resolveForSession's
-// own error-catching net falls through to GetBySlug(ctx, "default") —
-// which finds the real row.
+func TestAgentService_ResolveForSessionReadOnly_NoAutoAssign(t *testing.T) {
+	reader := newStubReader()
+	reader.addAgent(&store.AgentProfile{ID: "historical-default", Name: "Historical", Slug: "default", Status: "active"})
+	writer := &stubAgentWriter{}
+	events := &fakeEventEmitter{}
+	svc := NewAgentService(AgentServiceConfig{Agents: reader, Writers: writer, Settings: &stubSettings{defaultAgent: "historical-default"}, Events: events})
+	for _, resolve := range []func(context.Context, string) (*store.AgentProfile, error){svc.ResolveForSession, svc.ResolveForSessionReadOnly} {
+		got, err := resolve(t.Context(), "unbound-session")
+		if got != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatal("implicit enrollment", got, err)
+		}
+	}
+	if len(writer.ensured) != 0 || len(events.agentAssigned) != 0 {
+		t.Fatal("missing binding wrote authority", writer.ensured, events.agentAssigned)
+	}
+}
+
 func TestAgentService_ResolveForSession_HardcodedFallback(t *testing.T) {
 	reader := newStubReader()
+	reader.addAgent(&store.AgentProfile{ID: "historical-default", Name: "Historical", Slug: "default", Status: "active"})
 	writer := &stubAgentWriter{}
-
-	// Real DB row with a real, non-slug-shaped ID -- mirrors any of the 9
-	// internal builtin profiles' actual agent_profiles.id post-ingest.
-	defaultAgent := &store.AgentProfile{ID: "agt-default-real-id", Name: "Default", Slug: "default", Status: "active"}
-	reader.addAgent(defaultAgent)
-
-	svc := NewAgentService(AgentServiceConfig{
-		Agents:   reader,
-		Writers:  writer,
-		Settings: &stubSettings{defaultAgent: ""},
-	})
-
-	got, err := svc.ResolveForSession(context.Background(), "orphan-sess")
-	if err != nil {
-		t.Fatalf("ResolveForSession: %v", err)
+	events := &fakeEventEmitter{}
+	svc := NewAgentService(AgentServiceConfig{Agents: reader, Writers: writer, Settings: &stubSettings{defaultAgent: "historical-default"}, Events: events})
+	for _, resolve := range []func(context.Context, string) (*store.AgentProfile, error){svc.ResolveForSession, svc.ResolveForSessionReadOnly} {
+		got, err := resolve(t.Context(), "unbound-session")
+		if got != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatal("implicit enrollment", got, err)
+		}
 	}
-	if got.ID != "agt-default-real-id" {
-		t.Errorf("agent ID = %q, want %q", got.ID, "agt-default-real-id")
-	}
-	if got.Slug != "default" {
-		t.Errorf("agent slug = %q, want %q", got.Slug, "default")
-	}
-	if len(writer.ensured) != 1 || writer.ensured[0] != "orphan-sess" {
-		t.Errorf("auto-assign expected for orphan-sess, got %v", writer.ensured)
+	if len(writer.ensured) != 0 || len(events.agentAssigned) != 0 {
+		t.Fatal("missing binding wrote authority", writer.ensured, events.agentAssigned)
 	}
 }
 
 func TestAgentService_ResolveForSession_DisabledAgent(t *testing.T) {
 	reader := newStubReader()
-	agent := &store.AgentProfile{ID: "disabled-1", Name: "Disabled", Slug: "off", Status: "disabled"}
+	agent := &store.AgentProfile{ID: "msg://agent/private-disabled", Name: "Disabled", Slug: "off", Status: "disabled"}
 	reader.addAgent(agent)
+	reader.verifiedBindings[agent.ID] = true
 	reader.sessionBind["sess-d"] = &store.SessionAgent{
-		SessionID: "sess-d", AgentID: "disabled-1", Mode: "default", IsPrimary: true,
+		SessionID: "sess-d", AgentID: "msg://agent/private-disabled", Mode: "default", IsPrimary: true,
 	}
 
 	svc := NewAgentService(AgentServiceConfig{

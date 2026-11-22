@@ -2,141 +2,40 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
+	"errors"
 	"testing"
-	"time"
 
-	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 	"github.com/hollis-labs/substrate/agent/subagent"
 )
 
-// TestEnvelopeResponse_SubagentApproval_Approve drives the full G-4 gated flow:
-// spawn-with-interactive-mode → envelope persisted + streamed → POST respond
-// with Status=submitted → Approve dispatches the runner → run leaves requested.
-func TestEnvelopeResponse_SubagentApproval_Approve(t *testing.T) {
-	a, mux := newTestAPI(t)
-
-	sess := &store.Session{}
-	if err := a.store.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
+func TestSubagentApprovalCannotEnrollFromHostRoleOrRequestClaims(t *testing.T) {
+	a, _ := newTestAPI(t)
+	ctx := context.Background()
+	if _, err := a.store.DB.ExecContext(ctx, `INSERT OR IGNORE INTO user_settings(id) VALUES(1)`); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := a.store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
-		t.Fatalf("seed user_settings: %v", err)
+	session := &store.Session{Title: "Parent"}
+	if err := a.store.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
 	}
-	// Seed an agent with slug "r" so the ChatRunner can resolve the role.
-	// CW-20260519-0123: CanExecute=true so the Spawn-boundary fail-fast
-	// gate admits the role (can_execute=false profiles outside the
-	// text-only whitelist are now rejected at the boundary).
-	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
-		ID: "agent-r", Name: "R", Slug: "r", SystemPrompt: "test",
-		CanExecute: true,
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	p := &store.AgentProfile{Name: "Private prior actor", Slug: "hint-selector"}
+	if err := storetest.PriorAuthorizedActor(ctx, a.store, p); err != nil {
+		t.Fatal(err)
 	}
-
-	svc := a.Services.Subagent
-	runID, err := svc.Spawn(context.Background(), subagent.SpawnRequest{
-		ParentSessionID: sess.ID,
-		ParentAgentID:   "primary",
-		Role:            "r",
-		Prompt:          "hi",
-		Mode:            subagent.ModeInteractive,
-	})
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
+	queries := []string{`SELECT * FROM subagent_runs ORDER BY id`, `SELECT * FROM sessions ORDER BY id`, `SELECT * FROM agent_actor_bindings ORDER BY actor_uri`, `SELECT * FROM messages ORDER BY id`}
+	before := make([][][]any, len(queries))
+	for i, q := range queries {
+		before[i] = retiredAPISnapshot(t, a, q)
 	}
-
-	run, err := svc.Status(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if run.EnvelopeInstanceID == "" {
-		t.Fatalf("envelope instance not persisted on run %s", runID)
-	}
-
-	body, _ := json.Marshal(chat.ResponseV1{
-		V: 1, Kind: "subagent-spawn-approval", ID: run.EnvelopeInstanceID,
-		Status: chat.StatusSubmitted,
-	})
-	w := doPost(mux, "/api/envelopes/"+run.EnvelopeInstanceID+"/respond", body)
-	if w.Code != http.StatusOK {
-		t.Fatalf("respond: %d body=%s", w.Code, w.Body.String())
-	}
-
-	// Poll until the run leaves the requested state (runner was dispatched).
-	// In the test environment the ChatRunner may fail (no real provider),
-	// so we accept any terminal state as evidence that approve dispatched correctly.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		run, _ = svc.Status(context.Background(), runID)
-		switch run.Status {
-		case subagent.StatusCompleted, subagent.StatusFailed:
-			return
+	for _, mode := range []string{subagent.ModeInteractive, subagent.ModeAsync} {
+		id, err := a.Services.Subagent.Spawn(ctx, subagent.SpawnRequest{ParentSessionID: session.ID, ParentAgentID: p.ID, Role: p.Slug, Prompt: "claimed child authority", Mode: mode})
+		if id != "" || !errors.Is(err, store.ErrVerifiedActorRequired) {
+			t.Fatalf("spawn mode=%s id=%s err=%v", mode, id, err)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	run, _ = svc.Status(context.Background(), runID)
-	t.Fatalf("run did not leave requested state after approve; status=%q", run.Status)
-}
-
-// TestEnvelopeResponse_SubagentApproval_Reject drives: spawn-with-interactive
-// → POST respond with Status=canceled + reason → row transitions to rejected
-// with rejection_reason persisted.
-func TestEnvelopeResponse_SubagentApproval_Reject(t *testing.T) {
-	a, mux := newTestAPI(t)
-
-	sess := &store.Session{}
-	if err := a.store.CreateSession(context.Background(), sess); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if _, err := a.store.DB.Exec(`INSERT OR IGNORE INTO user_settings (id) VALUES (1)`); err != nil {
-		t.Fatalf("seed user_settings: %v", err)
-	}
-	// CW-20260519-0123: the Spawn-boundary fail-fast gate requires a
-	// registered profile with CanExecute=true. Seed the same "r" agent
-	// the Approve test uses (different workspace, fresh DB per test).
-	if err := a.store.CreateAgent(context.Background(), &store.AgentProfile{
-		ID: "agent-r", Name: "R", Slug: "r", SystemPrompt: "test",
-		CanExecute: true,
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	svc := a.Services.Subagent
-	runID, err := svc.Spawn(context.Background(), subagent.SpawnRequest{
-		ParentSessionID: sess.ID,
-		ParentAgentID:   "primary",
-		Role:            "r",
-		Prompt:          "hi",
-		Mode:            subagent.ModeInteractive,
-	})
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-
-	run, _ := svc.Status(context.Background(), runID)
-	envelopeID := run.EnvelopeInstanceID
-	if envelopeID == "" {
-		t.Fatalf("envelope instance not persisted")
-	}
-
-	body, _ := json.Marshal(chat.ResponseV1{
-		V: 1, Kind: "subagent-spawn-approval", ID: envelopeID,
-		Status: chat.StatusCanceled,
-		Data:   map[string]any{"reason": "too risky"},
-	})
-	w := doPost(mux, "/api/envelopes/"+envelopeID+"/respond", body)
-	if w.Code != http.StatusOK {
-		t.Fatalf("respond: %d body=%s", w.Code, w.Body.String())
-	}
-
-	run, _ = svc.Status(context.Background(), runID)
-	if run.Status != subagent.StatusRejected {
-		t.Errorf("status = %q, want rejected", run.Status)
-	}
-	if run.RejectionReason != "too risky" {
-		t.Errorf("rejection_reason = %q, want 'too risky'", run.RejectionReason)
+		for i, q := range queries {
+			retiredAPIHistoryUnchanged(t, a, q, before[i])
+		}
 	}
 }

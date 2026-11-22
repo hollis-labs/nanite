@@ -2,18 +2,21 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/hollis-labs/nanite/internal/a2a"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 )
 
 // AgentProfile represents an agent profile record.
 type AgentProfile struct {
+	// DefinitionPolicy is a transient runtime projection of verified immutable
+	// content. It is never accepted or persisted as editable profile JSON.
+	DefinitionPolicy *agentpolicy.NativePolicy `json:"-"`
+	DefinitionReflex *agentpolicy.ReflexBundle `json:"-"`
+	NativeHost       *NativeHostSettings       `json:"-"`
 	// Revision is an opaque identity for the complete persisted profile and assignments.
 	Revision        string `json:"-"`
 	ID              string `json:"id"`
@@ -426,20 +429,29 @@ func scanAgent(scanner interface{ Scan(...any) error }, a *AgentProfile) error {
 
 // GetAgentBySlug returns an agent profile by its slug.
 func (s *Store) GetAgentBySlug(ctx context.Context, slug string) (*AgentProfile, error) {
-	var a AgentProfile
-	row := s.DB.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE slug = ?`, slug)
-	if err := scanAgent(row, &a); err != nil {
-		return nil, fmt.Errorf("get agent by slug %s: %w", slug, err)
+	var id string
+	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM agent_host_settings WHERE slug=?`, slug).Scan(&id); err != nil {
+		return nil, err
 	}
-	return &a, nil
+	return s.GetAgent(ctx, id)
 }
 
-// GetAgent returns an agent profile by ID.
+// GetAgent reads a fresh host projection, never a retained profile fallback.
 func (s *Store) GetAgent(ctx context.Context, id string) (*AgentProfile, error) {
-	return getAgent(ctx, s.DB, id)
+	h, err := s.GetAgentHostSettings(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.projectAgentHost(ctx, h)
 }
 
-func getAgent(ctx context.Context, db agentConfigDB, id string) (*AgentProfile, error) {
+// GetHistoricalAgentProfile is exclusively for retained export/history/retirement.
+// It is not a runtime resolution fallback or an actor binding.
+func (s *Store) GetHistoricalAgentProfile(ctx context.Context, id string) (*AgentProfile, error) {
+	return getHistoricalAgentProfile(ctx, s.DB, id)
+}
+
+func getHistoricalAgentProfile(ctx context.Context, db agentConfigDB, id string) (*AgentProfile, error) {
 	var a AgentProfile
 	row := db.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE id = ?`, id)
 	if err := scanAgent(row, &a); err != nil {
@@ -454,150 +466,10 @@ func (s *Store) CreateAgent(ctx context.Context, a *AgentProfile) error {
 }
 
 func createAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
-	if a.Slug == a2a.UserSentinel {
-		return fmt.Errorf("agent slug %q is reserved (messaging user sentinel)", a.Slug)
+	if err := checkProfileIngestionRetired(ctx, db, a.ID, a.Slug); err != nil {
+		return err
 	}
-	if a.ID == a2a.UserSentinel {
-		return fmt.Errorf("agent id %q is reserved (messaging user sentinel)", a.ID)
-	}
-	if a.ID == "" {
-		a.ID = uuid.New().String()
-	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	if a.Modes == "" {
-		a.Modes = "[]"
-	}
-	if a.MCPServers == "" {
-		a.MCPServers = "[]"
-	}
-	if a.ToolPermissions == "" {
-		a.ToolPermissions = "{}"
-	}
-	if a.Settings == "" {
-		a.Settings = "{}"
-	}
-	// v2 defaults
-	if a.Tools == "" {
-		a.Tools = "[]"
-	}
-	if a.Directories == "" {
-		a.Directories = "[]"
-	}
-	if a.Constraints == "" {
-		a.Constraints = "{}"
-	}
-	if a.Tags == "" {
-		a.Tags = "[]"
-	}
-	if a.Status == "" {
-		a.Status = "active"
-	}
-	if a.Source == "" {
-		a.Source = "api"
-	}
-	if a.Version == 0 {
-		a.Version = 1
-	}
-	if a.AgentHash == "" {
-		a.AgentHash = ComputeAgentHash(a.SystemPrompt, a.Tools, a.ToolPermissions)
-	}
-	// S7 T5 registry defaults — match the CHECK/NOT NULL column
-	// defaults so DB insert sees non-empty values for these new
-	// columns without forcing every caller to populate them.
-	if a.Kind == "" {
-		a.Kind = "internal"
-	}
-	if a.CapabilitiesJSON == "" {
-		a.CapabilitiesJSON = "[]"
-	}
-	if a.LimitsJSON == "" {
-		a.LimitsJSON = "{}"
-	}
-
-	if a.Format == "" {
-		a.Format = "markdown"
-	}
-	// ParentDispatchAllowlist (CW-20260512-0107): JSON array of role slugs
-	// this agent may dispatch via task_execute. Default '[]' matches the
-	// migration 059 column default — keeps inserts succeeding without
-	// forcing every caller to populate the field.
-	if a.ParentDispatchAllowlist == "" {
-		a.ParentDispatchAllowlist = "[]"
-	}
-	// RoleTools (FU-7a): JSON array of tool-name patterns to pre-seed into
-	// agent_known_tools. Default '[]' matches the migration 066 column
-	// default — keeps inserts succeeding without forcing every caller to
-	// populate the field.
-	if a.RoleTools == "" {
-		a.RoleTools = "[]"
-	}
-	// RoleSkills (FU-33): JSON array of skill slugs to pre-seed into
-	// agent_known_skills. Default '[]' matches the migration 074 column
-	// default — keeps inserts succeeding without forcing every caller to
-	// populate the field.
-	if a.RoleSkills == "" {
-		a.RoleSkills = "[]"
-	}
-	if a.ContextPolicy == "" {
-		a.ContextPolicy = "{}"
-	}
-
-	// FU-28: multi-agent foundation defaults + enum validation. Mint a
-	// URN if absent and inject the slug-form alias so legacy routing
-	// resolves. Enum-shape fields are enforced here because migration
-	// 070 deliberately skipped per-column CHECKs (idempotency papercut).
-	applyMultiAgentDefaults(a)
-	if err := validateAgentMultiAgentFields(a); err != nil {
-		return fmt.Errorf("create agent: %w", err)
-	}
-
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO agent_profiles (id, name, slug, avatar, system_prompt, description,
-		                              modes, default_model, default_provider,
-		                              mcp_servers, tool_permissions, can_execute, settings,
-		                              created_at, updated_at,
-		                              agent_hash, version, tools, directories, constraints,
-		                              tags, status, source, source_ref, icon,
-		                              kind, capabilities_json, limits_json, model_strategy,
-		                              imported_at, origin_system, format,
-		                              parent_dispatch_allowlist,
-		                              role_tools,
-		                              role_skills,
-		                              context_policy,
-		                              durable,
-		                              activation_mode, class, default_state,
-		                              consumer_id,
-		                              role_id, model_id, runtime_kind,
-		                              protocol, transport,
-		                              plugin_id,
-		                              tether_managed, tether_urn)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
-		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
-		now, now,
-		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
-		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
-		a.Kind, a.CapabilitiesJSON, a.LimitsJSON, a.ModelStrategy,
-		a.ImportedAt, a.OriginSystem, a.Format,
-		a.ParentDispatchAllowlist,
-		a.RoleTools,
-		a.RoleSkills,
-		a.ContextPolicy,
-		a.Durable,
-		a.ActivationMode, a.Class, a.DefaultState,
-		nullIfEmpty(a.ConsumerID),
-		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
-		nullIfEmpty(a.Protocol), nullIfEmpty(a.Transport),
-		nullIfEmpty(a.PluginID),
-		a.TetherManaged, a.TetherURN,
-	)
-	if err != nil {
-		return fmt.Errorf("create agent: %w", err)
-	}
-	a.CreatedAt = now
-	a.UpdatedAt = now
-	return nil
+	return ErrImmutableAgentProfile
 }
 
 // DeleteAgent removes an agent profile by slug, including related records
@@ -620,22 +492,7 @@ func createAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
 // its own cleanup line below already covers it.
 // Messages have their agent_id nullified to preserve user data.
 func (s *Store) DeleteAgent(ctx context.Context, slug string) error {
-	agent, err := s.GetAgentBySlug(ctx, slug)
-	if err != nil {
-		return nil // agent doesn't exist — nothing to delete
-	}
-
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer rollbackUnlessCommitted(tx)
-
-	if err := deleteAgentTx(ctx, tx, agent); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return ErrImmutableAgentProfile
 }
 
 // UpdateAgent updates mutable fields on an agent profile.
@@ -645,95 +502,10 @@ func (s *Store) UpdateAgent(ctx context.Context, a *AgentProfile) error {
 }
 
 func updateAgent(ctx context.Context, db agentConfigDB, a *AgentProfile) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Recompute hash; bump version if content changed.
-	newHash := ComputeAgentHash(a.SystemPrompt, a.Tools, a.ToolPermissions)
-	if a.AgentHash != "" && newHash != a.AgentHash {
-		a.Version++
+	if err := checkProfileIngestionRetired(ctx, db, a.ID, a.Slug); err != nil {
+		return err
 	}
-	a.AgentHash = newHash
-
-	// ParentDispatchAllowlist (CW-20260512-0107): preserve the column-default
-	// '[]' shape if a caller leaves the field empty during an update.
-	if a.ParentDispatchAllowlist == "" {
-		a.ParentDispatchAllowlist = "[]"
-	}
-	// RoleTools (FU-7a): preserve the column-default '[]' shape if a caller
-	// leaves the field empty during an update.
-	if a.RoleTools == "" {
-		a.RoleTools = "[]"
-	}
-	// RoleSkills (FU-33): preserve the column-default '[]' shape if a caller
-	// leaves the field empty during an update.
-	if a.RoleSkills == "" {
-		a.RoleSkills = "[]"
-	}
-	if a.ContextPolicy == "" {
-		a.ContextPolicy = "{}"
-	}
-
-	// FU-28: ensure all multi-agent fields are populated and valid.
-	// applyMultiAgentDefaults preserves an existing URN; it only mints
-	// when URN is empty (e.g. on the first UPDATE after migration 070
-	// landed on a previously-deployed row).
-	applyMultiAgentDefaults(a)
-	if err := validateAgentMultiAgentFields(a); err != nil {
-		return fmt.Errorf("update agent: %w", err)
-	}
-
-	// CW-20260512-0111: include `source` and `source_ref` in the UPDATE so
-	// that file-source-of-truth boot sync can flip an already-deployed row
-	// from source='builtin' (or any prior value) to source='internal' when
-	// the file profile is now the canonical source. Without this, the
-	// Wave 2 cleanup (CW-20260512-0112: DELETE WHERE source != 'internal')
-	// would wipe rows whose body was re-synced from internal/agent/builtin/
-	// profiles/*.md but whose source column never flipped.
-	_, err := db.ExecContext(ctx,
-		`UPDATE agent_profiles SET name = ?, slug = ?, avatar = ?, system_prompt = ?, description = ?,
-		        modes = ?, default_model = ?, default_provider = ?,
-		        mcp_servers = ?, tool_permissions = ?, can_execute = ?, settings = ?,
-		        updated_at = ?,
-		        agent_hash = ?, version = ?, tools = ?, directories = ?, constraints = ?,
-		        tags = ?, status = ?, source = ?, source_ref = ?, icon = ?,
-		        imported_at = ?, origin_system = ?, format = ?,
-		        parent_dispatch_allowlist = ?,
-		        role_tools = ?,
-		        role_skills = ?,
-		        context_policy = ?,
-		        durable = ?,
-		        activation_mode = ?, class = ?, default_state = ?,
-		        consumer_id = ?,
-		        role_id = ?, model_id = ?, runtime_kind = ?,
-		        protocol = ?, transport = ?,
-		        plugin_id = ?,
-		        tether_managed = ?, tether_urn = ?
-		 WHERE id = ?`,
-		a.Name, a.Slug, nullIfEmpty(a.Avatar), a.SystemPrompt, nullIfEmpty(a.Description),
-		a.Modes, nullIfEmpty(a.DefaultModel), a.DefaultProvider,
-		a.MCPServers, a.ToolPermissions, a.CanExecute, a.Settings,
-		now,
-		a.AgentHash, a.Version, a.Tools, a.Directories, a.Constraints,
-		a.Tags, a.Status, a.Source, a.SourceRef, nullIfEmpty(a.Icon),
-		a.ImportedAt, a.OriginSystem, a.Format,
-		a.ParentDispatchAllowlist,
-		a.RoleTools,
-		a.RoleSkills,
-		a.ContextPolicy,
-		a.Durable,
-		a.ActivationMode, a.Class, a.DefaultState,
-		nullIfEmpty(a.ConsumerID),
-		nullIfEmpty(a.RoleID), nullIfEmpty(a.ModelID), a.RuntimeKind,
-		nullIfEmpty(a.Protocol), nullIfEmpty(a.Transport),
-		nullIfEmpty(a.PluginID),
-		a.TetherManaged, a.TetherURN,
-		a.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("update agent: %w", err)
-	}
-	a.UpdatedAt = now
-	return nil
+	return ErrImmutableAgentProfile
 }
 
 // UpdateAgentComposition sets an agent's composition
@@ -751,40 +523,7 @@ func (s *Store) UpdateAgentComposition(ctx context.Context, agentID string, role
 }
 
 func updateAgentComposition(ctx context.Context, db agentConfigDB, agentID string, roleID, consumerID, modelID *string) error {
-	if agentID == "" {
-		return fmt.Errorf("update agent composition: agent_id is required")
-	}
-	sets := make([]string, 0, 3)
-	args := make([]any, 0, 4)
-	if roleID != nil {
-		sets = append(sets, "role_id = ?")
-		args = append(args, nullIfEmpty(*roleID))
-	}
-	if consumerID != nil {
-		sets = append(sets, "consumer_id = ?")
-		args = append(args, nullIfEmpty(*consumerID))
-	}
-	if modelID != nil {
-		sets = append(sets, "model_id = ?")
-		args = append(args, nullIfEmpty(*modelID))
-	}
-	if len(sets) == 0 {
-		return nil
-	}
-	args = append(args, agentID)
-	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
-	res, err := db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("update agent composition: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update agent composition: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("update agent composition: agent %q not found", agentID)
-	}
-	return nil
+	return ErrImmutableAgentProfile
 }
 
 // UpdateAgentACPConfig sets an agent's Protocol/Transport columns
@@ -802,53 +541,7 @@ func (s *Store) UpdateAgentACPConfig(ctx context.Context, agentID string, protoc
 }
 
 func updateAgentACPConfig(ctx context.Context, db agentConfigDB, agentID string, protocol, transport *string) error {
-	if agentID == "" {
-		return fmt.Errorf("update agent acp config: agent_id is required")
-	}
-	if protocol != nil || transport != nil {
-		existing, err := getAgent(ctx, db, agentID)
-		if err != nil {
-			return fmt.Errorf("update agent acp config: %w", err)
-		}
-		probe := AgentProfile{RuntimeKind: "cli", Protocol: existing.Protocol, Transport: existing.Transport}
-		if protocol != nil {
-			probe.Protocol = *protocol
-		}
-		if transport != nil {
-			probe.Transport = *transport
-		}
-		if err := validateAgentMultiAgentFields(&probe); err != nil {
-			return fmt.Errorf("update agent acp config: %w", err)
-		}
-	}
-
-	sets := make([]string, 0, 2)
-	args := make([]any, 0, 3)
-	if protocol != nil {
-		sets = append(sets, "protocol = ?")
-		args = append(args, nullIfEmpty(*protocol))
-	}
-	if transport != nil {
-		sets = append(sets, "transport = ?")
-		args = append(args, nullIfEmpty(*transport))
-	}
-	if len(sets) == 0 {
-		return nil
-	}
-	args = append(args, agentID)
-	query := "UPDATE agent_profiles SET " + strings.Join(sets, ", ") + " WHERE id = ?"
-	res, err := db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("update agent acp config: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("update agent acp config: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("update agent acp config: agent %q not found", agentID)
-	}
-	return nil
+	return ErrImmutableAgentProfile
 }
 
 // SessionAgent represents a record in the session_agents table.
@@ -865,7 +558,7 @@ func (s *Store) GetSessionPrimaryAgent(ctx context.Context, sessionID string) (*
 	var sa SessionAgent
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT session_id, agent_id, mode, joined_at, is_primary
-		 FROM session_agents WHERE session_id = ? AND is_primary = TRUE`, sessionID,
+		 FROM session_actor_bindings WHERE session_id = ? AND is_primary = TRUE`, sessionID,
 	).Scan(&sa.SessionID, &sa.AgentID, &sa.Mode, &sa.JoinedAt, &sa.IsPrimary)
 	if err != nil {
 		return nil, fmt.Errorf("get session primary agent for %s: %w", sessionID, err)
@@ -876,7 +569,7 @@ func (s *Store) GetSessionPrimaryAgent(ctx context.Context, sessionID string) (*
 // SetSessionAgentMode updates the mode for a specific agent in a session.
 func (s *Store) SetSessionAgentMode(ctx context.Context, sessionID, agentID, mode string) error {
 	_, err := s.DB.ExecContext(ctx,
-		`UPDATE session_agents SET mode = ? WHERE session_id = ? AND agent_id = ?`,
+		`UPDATE session_actor_bindings SET mode = ? WHERE session_id = ? AND agent_id = ?`,
 		mode, sessionID, agentID,
 	)
 	if err != nil {
@@ -887,24 +580,33 @@ func (s *Store) SetSessionAgentMode(ctx context.Context, sessionID, agentID, mod
 
 // EnsureSessionAgent upserts a session_agents record.
 func (s *Store) EnsureSessionAgent(ctx context.Context, sessionID, agentID, mode string, isPrimary bool) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO session_agents (session_id, agent_id, mode, joined_at, is_primary)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(session_id, agent_id) DO UPDATE SET mode = excluded.mode, is_primary = excluded.is_primary`,
-		sessionID, agentID, mode, now, isPrimary,
-	)
-	if err != nil {
-		return fmt.Errorf("ensure session agent: %w", err)
+	if _, err := s.GetAgentForActor(ctx, agentID); err != nil {
+		return err
 	}
-	return nil
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if isPrimary {
+		if _, err = tx.ExecContext(ctx, `UPDATE session_actor_bindings SET is_primary=FALSE WHERE session_id=? AND agent_id<>? AND is_primary=TRUE`, sessionID, agentID); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = tx.ExecContext(ctx, `INSERT INTO session_actor_bindings(session_id,agent_id,mode,joined_at,is_primary) VALUES(?,?,?,?,?) ON CONFLICT(session_id,agent_id) DO UPDATE SET mode=excluded.mode,is_primary=excluded.is_primary`, sessionID, agentID, mode, now, isPrimary)
+	if err != nil {
+		return fmt.Errorf("ensure session actor: %w", err)
+	}
+	return tx.Commit()
+
 }
 
 // ListSessionAgents returns all agents in a given session.
 func (s *Store) ListSessionAgents(ctx context.Context, sessionID string) ([]SessionAgent, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT session_id, agent_id, mode, joined_at, is_primary
-		 FROM session_agents WHERE session_id = ?
+		 FROM session_actor_bindings WHERE session_id = ?
 		 ORDER BY joined_at`, sessionID,
 	)
 	if err != nil {
@@ -930,7 +632,7 @@ var ErrSessionAgentNotFound = errors.New("session agent not found")
 // Returns an error if the row does not exist.
 func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID string) error {
 	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM session_agents WHERE session_id = ? AND agent_id = ?`,
+		`DELETE FROM session_actor_bindings WHERE session_id = ? AND agent_id = ?`,
 		sessionID, agentID,
 	)
 	if err != nil {
@@ -948,40 +650,34 @@ func (s *Store) DeleteSessionAgent(ctx context.Context, sessionID, agentID strin
 
 // ListAgents returns all agent profiles.
 func (s *Store) ListAgents(ctx context.Context) ([]AgentProfile, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles ORDER BY name`)
+	hs, err := s.ListAgentHostSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list agents: %w", err)
+		return nil, err
 	}
-	defer closeRows(rows)
-
-	out := make([]AgentProfile, 0)
-	for rows.Next() {
-		var a AgentProfile
-		if err := scanAgent(rows, &a); err != nil {
-			return nil, fmt.Errorf("scan agent: %w", err)
+	out := make([]AgentProfile, 0, len(hs))
+	for _, h := range hs {
+		p, err := s.projectAgentHost(ctx, h)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, a)
+		out = append(out, *p)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ListAgentsBySource returns all agent profiles with the given source.
 func (s *Store) ListAgentsBySource(ctx context.Context, source string) ([]AgentProfile, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE source = ? ORDER BY name`, source)
+	all, err := s.ListAgents(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list agents by source: %w", err)
+		return nil, err
 	}
-	defer closeRows(rows)
-
 	out := make([]AgentProfile, 0)
-	for rows.Next() {
-		var a AgentProfile
-		if err := scanAgent(rows, &a); err != nil {
-			return nil, fmt.Errorf("scan agent: %w", err)
+	for _, p := range all {
+		if p.Source == source {
+			out = append(out, p)
 		}
-		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ListAgentsByRoleID returns every agent_profiles row bound to roleID
@@ -996,21 +692,7 @@ func (s *Store) ListAgentsBySource(ctx context.Context, source string) ([]AgentP
 // today only as a plugin-unload deletion guard) but returning full rows
 // instead of a count.
 func (s *Store) ListAgentsByRoleID(ctx context.Context, roleID string) ([]AgentProfile, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE role_id = ? ORDER BY name`, roleID)
-	if err != nil {
-		return nil, fmt.Errorf("list agents by role_id: %w", err)
-	}
-	defer closeRows(rows)
-
-	out := make([]AgentProfile, 0)
-	for rows.Next() {
-		var a AgentProfile
-		if err := scanAgent(rows, &a); err != nil {
-			return nil, fmt.Errorf("scan agent: %w", err)
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListAgentsByPluginID returns every agent_profiles row tagged with the
@@ -1022,21 +704,17 @@ func (s *Store) ListAgentsByRoleID(ctx context.Context, roleID string) ([]AgentP
 // correct even for a plugin uninstalled while disabled (never loaded into
 // the current host process at all).
 func (s *Store) ListAgentsByPluginID(ctx context.Context, pluginID string) ([]AgentProfile, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+agentColumns+` FROM agent_profiles WHERE plugin_id = ? ORDER BY slug`, pluginID)
+	all, err := s.ListAgents(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list agents by plugin_id: %w", err)
+		return nil, err
 	}
-	defer closeRows(rows)
-
 	out := make([]AgentProfile, 0)
-	for rows.Next() {
-		var a AgentProfile
-		if err := scanAgent(rows, &a); err != nil {
-			return nil, fmt.Errorf("scan agent: %w", err)
+	for _, p := range all {
+		if p.PluginID == pluginID {
+			out = append(out, p)
 		}
-		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // CountAgentsByRoleID returns how many agent_profiles rows currently
@@ -1046,80 +724,34 @@ func (s *Store) ListAgentsByPluginID(ctx context.Context, pluginID string) ([]Ag
 // see agent_profiles.go's resolveOrCreatePluginRole) is never removed out
 // from under it.
 func (s *Store) CountAgentsByRoleID(ctx context.Context, roleID string) (int, error) {
-	var n int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_profiles WHERE role_id = ?`, roleID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count agents by role_id: %w", err)
-	}
-	return n, nil
+	return 0, ErrImmutableAgentProfile
 }
 
 // UpsertAgentBySlug inserts or updates an agent profile by slug.
 // Used by framework sync plugins (agentrc, etc.) to keep DB in sync with config.
 func (s *Store) UpsertAgentBySlug(ctx context.Context, a *AgentProfile) error {
-	existing, err := s.GetAgentBySlug(ctx, a.Slug)
-	if err != nil {
-		// Not found — create.
-		return s.CreateAgent(ctx, a)
-	}
-	// Found — update, preserving the ID.
-	a.ID = existing.ID
-	a.AgentHash = existing.AgentHash
-	a.Version = existing.Version
-	// Preserve the existing URN + alias list so URN identity is stable
-	// across re-ingest. FU-28.
-	return s.UpdateAgent(ctx, a)
+	return ErrImmutableAgentProfile
 }
 
 func (s *Store) ListAgentsFilter(ctx context.Context, class, activationMode, status string, tagsAny []string) ([]AgentProfile, error) {
-	var clauses []string
-	var args []any
-	if class != "" {
-		clauses = append(clauses, "class = ?")
-		args = append(args, class)
-	}
-	if activationMode != "" {
-		clauses = append(clauses, "activation_mode = ?")
-		args = append(args, activationMode)
-	}
-	if status != "" {
-		clauses = append(clauses, "status = ?")
-		args = append(args, status)
-	}
-	// tagsAny uses LIKE on the tags JSON column. Each tag becomes a
-	// disjunction of LIKE patterns; collectively they OR together to
-	// match any row that contains at least one of the requested tags.
-	if len(tagsAny) > 0 {
-		var tagClauses []string
-		for _, t := range tagsAny {
-			if t == "" {
-				continue
-			}
-			tagClauses = append(tagClauses, "tags LIKE ?")
-			args = append(args, `%"`+t+`"%`)
-		}
-		if len(tagClauses) > 0 {
-			clauses = append(clauses, "("+strings.Join(tagClauses, " OR ")+")")
-		}
-	}
-	query := `SELECT ` + agentColumns + ` FROM agent_profiles`
-	if len(clauses) > 0 {
-		query += " WHERE " + strings.Join(clauses, " AND ")
-	}
-	query += " ORDER BY slug ASC"
-	rows, err := s.DB.QueryContext(ctx, query, args...)
+	all, err := s.ListAgents(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list agents filter: %w", err)
+		return nil, err
 	}
-	defer closeRows(rows)
 	out := make([]AgentProfile, 0)
-	for rows.Next() {
-		var a AgentProfile
-		if err := scanAgent(rows, &a); err != nil {
-			return nil, fmt.Errorf("scan agent filter: %w", err)
+	for _, p := range all {
+		if class != "" && p.Class != class {
+			continue
 		}
-		out = append(out, a)
+		if status != "" && p.Status != status {
+			continue
+		}
+		if activationMode != "" || len(tagsAny) > 0 {
+			return nil, ErrImmutableAgentProfile
+		}
+		out = append(out, p)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // DeleteAgentByID removes an agent profile by ID. Mirrors DeleteAgent
@@ -1128,14 +760,7 @@ func (s *Store) ListAgentsFilter(ctx context.Context, class, activationMode, sta
 // Tombstones for durable=1 rows are deferred future work; today a DELETE
 // wipes the row regardless of durable. FU-28.
 func (s *Store) DeleteAgentByID(ctx context.Context, id string) error {
-	a, err := s.GetAgent(ctx, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("delete agent by id %s: %w", id, err)
-	}
-	return s.DeleteAgent(ctx, a.Slug)
+	return ErrImmutableAgentProfile
 }
 
 // CloneAgent copies an existing agent profile under a new slug + name,
@@ -1143,37 +768,7 @@ func (s *Store) DeleteAgentByID(ctx context.Context, id string) error {
 // AgentProfile. Tags, role_tools, system_prompt are copied verbatim.
 // FU-28.
 func (s *Store) CloneAgent(ctx context.Context, srcID, newSlug, newName string) (*AgentProfile, error) {
-	src, err := s.GetAgent(ctx, srcID)
-	if err != nil {
-		return nil, fmt.Errorf("clone agent: lookup source %s: %w", srcID, err)
-	}
-	if newSlug == "" {
-		return nil, fmt.Errorf("clone agent: new_slug is required")
-	}
-	if newName == "" {
-		newName = src.Name + " (clone)"
-	}
-	clone := *src
-	clone.ID = ""
-	clone.Slug = newSlug
-	clone.Name = newName
-	clone.Version = 1
-	clone.AgentHash = ""
-	// Reset ingestion provenance so the clone isn't confused with a
-	// file-sourced row on the next boot sync.
-	clone.Source = "user"
-	clone.SourceRef = ""
-	clone.ImportedAt = ""
-	// A clone is a distinct agent, not a second holder of the same
-	// external identity -- copying TetherURN verbatim would leave two
-	// profiles claiming one Tether registration. Reset both; the clone
-	// re-registers under its own URN if/when it's flipped tether_managed.
-	clone.TetherManaged = false
-	clone.TetherURN = ""
-	if err := s.CreateAgent(ctx, &clone); err != nil {
-		return nil, fmt.Errorf("clone agent: create: %w", err)
-	}
-	return &clone, nil
+	return nil, ErrImmutableAgentProfile
 }
 
 // ListSessionsByAgentID returns all sessions linked to an agent via
@@ -1181,7 +776,7 @@ func (s *Store) CloneAgent(ctx context.Context, srcID, newSlug, newName string) 
 func (s *Store) ListSessionsByAgentID(ctx context.Context, agentID string) ([]SessionAgent, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT sa.session_id, sa.agent_id, sa.mode, sa.joined_at, sa.is_primary
-		 FROM session_agents sa
+		 FROM session_actor_bindings sa
 		 WHERE sa.agent_id = ?
 		 ORDER BY sa.joined_at DESC`, agentID,
 	)
@@ -1206,7 +801,7 @@ func (s *Store) ListSessionsByAgentID(ctx context.Context, agentID string) ([]Se
 func (s *Store) SetSessionStatusByAgentID(ctx context.Context, agentID, status string) (int64, error) {
 	res, err := s.DB.ExecContext(ctx,
 		`UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP
-		 WHERE id IN (SELECT session_id FROM session_agents WHERE agent_id = ?)`,
+		 WHERE id IN (SELECT session_id FROM session_actor_bindings WHERE agent_id = ?)`,
 		status, agentID,
 	)
 	if err != nil {
@@ -1230,15 +825,5 @@ func (s *Store) SetSessionStatusByAgentID(ctx context.Context, agentID, status s
 // UPDATE keyed on slug/id respectively; converting them is a separate change,
 // not a drive-by.
 func (s *Store) SetAgentDefaultTrustTier(ctx context.Context, agentID, tier string) error {
-	switch tier {
-	case "trusted", "normal", "untrusted":
-	default:
-		return fmt.Errorf("set agent trust tier: invalid tier %q", tier)
-	}
-	if _, err := s.DB.ExecContext(ctx,
-		`UPDATE agent_profiles SET default_trust_tier = ? WHERE id = ?`, tier, agentID,
-	); err != nil {
-		return fmt.Errorf("set agent trust tier for %s: %w", agentID, err)
-	}
-	return nil
+	return ErrImmutableAgentProfile
 }

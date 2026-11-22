@@ -23,7 +23,7 @@ func (s *Store) ListAgentProjects(ctx context.Context, agentID string) ([]Projec
 		`SELECT p.id, p.name, COALESCE(p.description,''), COALESCE(p.repo_path,''),
 		        p.settings, p.sort_order, p.created_at, p.updated_at
 		 FROM projects p
-		 JOIN agent_projects ap ON p.id = ap.project_id
+		 JOIN actor_projects ap ON p.id = ap.project_id
 		 WHERE ap.agent_id = ?
 		 ORDER BY p.name`, agentID,
 	)
@@ -46,34 +46,40 @@ func (s *Store) ListAgentProjects(ctx context.Context, agentID string) ([]Projec
 
 // ListProjectAgents returns all agents linked to a project.
 func (s *Store) ListProjectAgents(ctx context.Context, projectID string) ([]AgentProfile, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+agentColumns+`
-		 FROM agent_profiles
-		 JOIN agent_projects ap ON agent_profiles.id = ap.agent_id
-		 WHERE ap.project_id = ?
-		 ORDER BY agent_profiles.name`, projectID,
-	)
+	rows, err := s.DB.QueryContext(ctx, `SELECT b.host_settings_id FROM actor_projects a JOIN agent_actor_bindings b ON b.actor_uri=a.agent_id WHERE a.project_id=? AND b.enabled=1`, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("list project agents: %w", err)
+		return nil, err
 	}
-	defer closeRows(rows)
-
-	out := make([]AgentProfile, 0)
+	var ids []string
 	for rows.Next() {
-		var a AgentProfile
-		if err := scanAgent(rows, &a); err != nil {
-			return nil, fmt.Errorf("scan project agent: %w", err)
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			closeRows(rows)
+			return nil, err
 		}
-		out = append(out, a)
+		ids = append(ids, id)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	closeRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentProfile, 0, len(ids))
+	for _, id := range ids {
+		p, err := s.GetAgent(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, nil
 }
 
 // AddAgentProject links an agent to a project.
 func (s *Store) AddAgentProject(ctx context.Context, agentID, projectID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO agent_projects (agent_id, project_id, created_at)
+		`INSERT OR IGNORE INTO actor_projects (agent_id, project_id, created_at)
 		 VALUES (?, ?, ?)`,
 		agentID, projectID, now,
 	)
@@ -86,7 +92,7 @@ func (s *Store) AddAgentProject(ctx context.Context, agentID, projectID string) 
 // RemoveAgentProject unlinks an agent from a project.
 func (s *Store) RemoveAgentProject(ctx context.Context, agentID, projectID string) error {
 	res, err := s.DB.ExecContext(ctx,
-		`DELETE FROM agent_projects WHERE agent_id = ? AND project_id = ?`,
+		`DELETE FROM actor_projects WHERE agent_id = ? AND project_id = ?`,
 		agentID, projectID,
 	)
 	if err != nil {

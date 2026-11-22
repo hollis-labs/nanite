@@ -66,7 +66,7 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 	// for older versions; a buggy drop would lose rows.
 	canonical := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range canonical {
-		got, err := s.GetAgentBySlug(context.Background(), slug)
+		got, err := migrationHistoricalAgentBySlug(s, context.Background(), slug)
 		if err != nil {
 			t.Fatalf("post-063 GetAgentBySlug %q: %v (DROP COLUMN may have scrambled data)", slug, err)
 		}
@@ -88,10 +88,8 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 		SystemPrompt: "test agent",
 		Source:       "user",
 	}
-	if err := s.CreateAgent(context.Background(), fresh); err != nil {
-		t.Fatalf("CreateAgent on post-063 schema: %v", err)
-	}
-	got, err := s.GetAgentBySlug(context.Background(), "round-trip-063")
+	migrationHistoricalProfile(t, s, fresh)
+	got, err := migrationHistoricalAgentBySlug(s, context.Background(), "round-trip-063")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug round-trip-063: %v", err)
 	}

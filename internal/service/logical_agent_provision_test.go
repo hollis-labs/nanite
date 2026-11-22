@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/substrate/mesh/agentdef"
 )
 
@@ -39,7 +40,14 @@ func logicalProvisionHost(t *testing.T) (*CognitiveViews, VerifiedDefinition) {
 
 func TestLogicalGeneralChatProvisionCreatesProfileNotSessionOrAuthority(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
+	var historicalBefore int
+	if err := st.DB.QueryRow(`SELECT count(*) FROM agent_profiles`).Scan(&historicalBefore); err != nil {
+		t.Fatal(err)
+	}
 	host, verified := logicalProvisionHost(t)
+	if err := installEmbeddedChatDefinition(t.Context(), st); err != nil {
+		t.Fatal(err)
+	}
 	result, err := svc.ProvisionGeneralChat(t.Context(), host, ProvisionGeneralChatRequest{Name: "General chat", Slug: "general-chat", DefinitionRef: verified.Ref})
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +60,7 @@ func TestLogicalGeneralChatProvisionCreatesProfileNotSessionOrAuthority(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.SystemPrompt != cfg.Instructions || p.DefaultProvider != "fixture-provider" || p.DefaultModel != "fixture-model" || p.Source != "user" || !result.Agent.Class.Editable() || p.Revision == "" {
+	if p.SystemPrompt != cfg.Instructions || p.DefaultProvider != "fixture-provider" || p.DefaultModel != "fixture-model" || p.Source != "operator" || result.Agent.Class.Editable() || p.Revision == "" {
 		t.Fatal("logical profile lost verified mapped configuration")
 	}
 	if p.TetherManaged || p.TetherURN != "" || p.Durable || p.CanExecute || p.RoleID != "" || p.ConsumerID != "" {
@@ -62,11 +70,16 @@ func TestLogicalGeneralChatProvisionCreatesProfileNotSessionOrAuthority(t *testi
 	if err != nil || len(grants) != 0 {
 		t.Fatal("provisioning granted tools", err)
 	}
-	var settings struct {
-		DefinitionRef DefinitionRef `json:"provisioned_definition_ref"`
-	}
-	if err = json.Unmarshal([]byte(p.Settings), &settings); err != nil || settings.DefinitionRef != verified.Ref {
+	hostRow, err := st.GetAgentHostSettings(t.Context(), p.ID)
+	if err != nil || hostRow.DefinitionRef != verified.Ref.MeshRef() {
 		t.Fatal("creation pin not retained", err)
+	}
+	var historical, actors int
+	if err = st.DB.QueryRow(`SELECT count(*) FROM agent_profiles`).Scan(&historical); err != nil || historical != historicalBefore {
+		t.Fatal("historical profile graph changed", err)
+	}
+	if err = st.DB.QueryRow(`SELECT count(*) FROM agent_actor_bindings`).Scan(&actors); err != nil || actors != 0 {
+		t.Fatal("unverified actor created", err)
 	}
 	var sessions int
 	if err = st.DB.QueryRow(`SELECT count(*) FROM sessions`).Scan(&sessions); err != nil || sessions != 0 {
@@ -77,73 +90,42 @@ func TestLogicalGeneralChatProvisionCreatesProfileNotSessionOrAuthority(t *testi
 	}
 }
 
-func TestLogicalGeneralChatProvisionAppliesNanitePolicyExtensions(t *testing.T) {
-	svc, st, _ := newAgentConfigTestService(t)
-	host, verified := logicalProvisionHost(t)
-	raw, err := json.Marshal(verified.Definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var definition agentdef.Definition
-	if err = json.Unmarshal(raw, &definition); err != nil {
-		t.Fatal(err)
-	}
-	definition.Extensions = map[string]agentdef.Extension{
-		"com.hollislabs.nanite/native-policy": {
-			Version:   "1",
-			Area:      "harness_profile",
-			Mandatory: true,
-			Data: map[string]any{"model_selection": map[string]any{
-				"provider": "fixture-provider",
-				"model":    "fixture-model",
-			}},
-		},
-		"com.hollislabs.nanite/reflex-policy": {
-			Version:   "1",
-			Area:      "behavior",
-			Mandatory: true,
-			Data: map[string]any{"reflexes": []any{map[string]any{
-				"name":         "agentdef-reminder",
-				"trigger_kind": "predicate",
-				"trigger_spec": map[string]any{"kind": "always"},
-				"action_kind":  "inject_reminder",
-				"action_spec":  map[string]any{"message": "stay on task"},
-				"priority":     float64(12),
-			}}},
-		},
-	}
-	digest, err := agentdef.Digest(&definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verified.Definition = &definition
-	verified.Ref.SemanticDigest = digest
-	host.Resolver = logicalProvisionResolver(func(context.Context, DefinitionRef) (VerifiedDefinition, error) { return verified, nil })
-	host.Models = ModelAuthorizerFunc(func(_ context.Context, pin DefinitionRef, requested *ModelSelection) (ModelSelection, error) {
-		model := ModelSelection{Provider: "fixture-provider", Model: "fixture-model"}
-		if pin != verified.Ref || requested == nil || *requested != model {
-			return ModelSelection{}, ErrUnsupportedModel
+func TestLogicalGeneralChatProvisionRefusesDefinitionHostModelAndMutableReflexClaims(t *testing.T) {
+	for _, extension := range []agentdef.Extension{
+		{Version: "1", Area: "harness_profile", Mandatory: true, Data: map[string]any{"model_selection": map[string]any{"provider": "fixture-provider", "model": "fixture-model"}}},
+		{Version: "1", Area: "behavior", Mandatory: true, Data: map[string]any{"reflexes": []any{map[string]any{"name": "legacy-row"}}}},
+	} {
+		svc, st, _ := newAgentConfigTestService(t)
+		host, verified := logicalProvisionHost(t)
+		if err := installEmbeddedChatDefinition(t.Context(), st); err != nil {
+			t.Fatal(err)
 		}
-		return model, nil
-	})
-
-	result, err := svc.ProvisionGeneralChat(t.Context(), host, ProvisionGeneralChatRequest{Name: "General chat", Slug: "general-chat", DefinitionRef: verified.Ref})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := st.GetAgent(t.Context(), result.Agent.Profile.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.DefaultProvider != "fixture-provider" || p.DefaultModel != "fixture-model" {
-		t.Fatalf("native-policy model not authorized/applied: %s/%s", p.DefaultProvider, p.DefaultModel)
-	}
-	reflexes, err := st.ListAgentReflexesForAgent(t.Context(), p.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(reflexes) != 1 || reflexes[0].Name != "agentdef-reminder" || reflexes[0].Priority != 12 || reflexes[0].CreatedBy != "operator:agentdef" {
-		t.Fatalf("reflex-policy not materialized: %#v", reflexes)
+		namespace := agentpolicy.NativeNamespace
+		if extension.Area == "behavior" {
+			namespace = agentpolicy.ReflexNamespace
+		}
+		definition := *verified.Definition
+		definition.Extensions = map[string]agentdef.Extension{namespace: extension}
+		digest, err := agentdef.Digest(&definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verified.Definition = &definition
+		verified.Ref.SemanticDigest = digest
+		host.Resolver = logicalProvisionResolver(func(context.Context, DefinitionRef) (VerifiedDefinition, error) { return verified, nil })
+		called := false
+		host.Models = ModelAuthorizerFunc(func(context.Context, DefinitionRef, *ModelSelection) (ModelSelection, error) {
+			called = true
+			return ModelSelection{"fixture-provider", "fixture-model"}, nil
+		})
+		_, err = svc.ProvisionGeneralChat(t.Context(), host, ProvisionGeneralChatRequest{Name: "Refused", Slug: "refused", DefinitionRef: verified.Ref})
+		if !errors.Is(err, ErrUnsupportedDefinition) || called {
+			t.Fatalf("intrinsic host/legacy policy accepted: %v model-called=%v", err, called)
+		}
+		var rows int
+		if err = st.DB.QueryRow(`SELECT count(*) FROM agent_host_settings`).Scan(&rows); err != nil || rows != 0 {
+			t.Fatal("refusal wrote host settings", err)
+		}
 	}
 }
 
@@ -152,6 +134,9 @@ func TestLogicalGeneralChatProvisionRefusesUnappliedSemanticsAndForgedContent(t 
 		t.Run(mutation, func(t *testing.T) {
 			svc, st, _ := newAgentConfigTestService(t)
 			host, verified := logicalProvisionHost(t)
+			if err := installEmbeddedChatDefinition(t.Context(), st); err != nil {
+				t.Fatal(err)
+			}
 			raw, err := json.Marshal(verified.Definition)
 			if err != nil {
 				t.Fatal(err)
@@ -189,7 +174,7 @@ func TestLogicalGeneralChatProvisionRefusesUnappliedSemanticsAndForgedContent(t 
 				t.Fatal("unapplied or forged definition accepted")
 			}
 			var count int
-			if e := st.DB.QueryRow(`SELECT count(*) FROM agent_profiles WHERE slug = 'refused'`).Scan(&count); e != nil || count != 0 {
+			if e := st.DB.QueryRow(`SELECT count(*) FROM agent_host_settings WHERE slug = 'refused'`).Scan(&count); e != nil || count != 0 {
 				t.Fatal("refusal changed logical profiles", e)
 			}
 		})
@@ -199,6 +184,9 @@ func TestLogicalGeneralChatProvisionRefusesUnappliedSemanticsAndForgedContent(t 
 func TestLogicalGeneralChatProvisionRequiresExplicitPinAndHostModelAndHonorsCancel(t *testing.T) {
 	svc, st, _ := newAgentConfigTestService(t)
 	host, verified := logicalProvisionHost(t)
+	if err := installEmbeddedChatDefinition(t.Context(), st); err != nil {
+		t.Fatal(err)
+	}
 	base := ProvisionGeneralChatRequest{Name: "General", Slug: "general", DefinitionRef: verified.Ref}
 	missing := base
 	missing.DefinitionRef = DefinitionRef{}
@@ -219,7 +207,7 @@ func TestLogicalGeneralChatProvisionRequiresExplicitPinAndHostModelAndHonorsCanc
 		t.Fatal("canceled admission accepted", err)
 	}
 	var count int
-	if err := st.DB.QueryRow(`SELECT count(*) FROM agent_profiles WHERE slug = 'general'`).Scan(&count); err != nil || count != 0 {
+	if err := st.DB.QueryRow(`SELECT count(*) FROM agent_host_settings WHERE slug = 'general'`).Scan(&count); err != nil || count != 0 {
 		t.Fatal("rejected admission changed database", err)
 	}
 }

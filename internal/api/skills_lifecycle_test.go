@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,12 +23,13 @@ import (
 
 	"github.com/hollis-labs/nanite/internal/skillvendor"
 	"github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/storetest"
 )
 
 func createTestAgent(t *testing.T, a *testAPI, slug string) *store.AgentProfile {
 	t.Helper()
 	ag := &store.AgentProfile{Name: "Test Agent " + slug, Slug: slug, SystemPrompt: "test"}
-	if err := a.store.CreateAgent(context.Background(), ag); err != nil {
+	if err := storetest.PriorAuthorizedActor(context.Background(), a.store, ag); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	return ag
@@ -271,7 +273,7 @@ func TestAgentSkillGrant_FullLifecycle(t *testing.T) {
 	installed := decodeInstallResponse(t, postSkillJSON(t, mux, "/api/skills/install", map[string]string{"path": pkg}))
 
 	agent := createTestAgent(t, a, "grant-lifecycle-agent")
-	grantPath := fmt.Sprintf("/api/agents/%s/skills/%s/grant", agent.ID, installed.Skill.Slug)
+	grantPath := fmt.Sprintf("/api/agents/%s/skills/%s/grant", url.PathEscape(agent.ID), installed.Skill.Slug)
 
 	// 1. Before any grant -> grant_required.
 	before := decodeGrantView(t, getJSON(t, mux, grantPath))
@@ -279,21 +281,12 @@ func TestAgentSkillGrant_FullLifecycle(t *testing.T) {
 		t.Fatalf("expected grant_required before any grant, got %q (%s)", before.Status, before.Message)
 	}
 
-	// granted_by is required.
-	if w := postSkillJSON(t, mux, grantPath, map[string]any{}); w.Code != http.StatusBadRequest {
-		t.Fatalf("grant without granted_by: expected 400, got %d", w.Code)
+	// The public issuer facade is retired. Supply only a private, previously
+	// issued grant to exercise the surviving read/preview/content-hash boundary.
+	if w := postSkillJSON(t, mux, grantPath, map[string]any{"granted_by": "claimed-operator"}); w.Code != http.StatusGone {
+		t.Fatal(w.Code, w.Body.String())
 	}
-
-	// 2. Grant.
-	w := postSkillJSON(t, mux, grantPath, map[string]any{
-		"granted_by": "test-operator",
-		"capabilities": map[string]any{
-			"network": map[string]any{"allow": true},
-		},
-	})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST grant: expected 201, got %d; body: %s", w.Code, w.Body.String())
-	}
+	priorAPISkillGrant(t, a, agent.ID, installed.Skill.Slug, installed.Skill.ContentHash, `{"network":{"allow":true}}`)
 
 	// 3. View -> approved, with the capability round-tripped.
 	after := decodeGrantView(t, getJSON(t, mux, grantPath))
@@ -346,20 +339,19 @@ func TestAgentSkillGrant_FullLifecycle(t *testing.T) {
 		t.Fatalf("preview with stale approval: expected 409, got %d; body: %s", previewW.Code, previewW.Body.String())
 	}
 
-	// 5. Revoke.
-	revokeW := deleteJSON(t, mux, grantPath)
-	if revokeW.Code != http.StatusOK {
-		t.Fatalf("DELETE grant: expected 200, got %d; body: %s", revokeW.Code, revokeW.Body.String())
+	// A private prior grant can be revoked through the supported host store;
+	// the retired profile facade still cannot change it.
+	if w := deleteJSON(t, mux, grantPath); w.Code != http.StatusGone {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if revoked, err := a.store.RevokeAgentSkillGrant(t.Context(), agent.ID, installed.Skill.Slug); err != nil || !revoked {
+		t.Fatal(revoked, err)
 	}
 	revoked := decodeGrantView(t, getJSON(t, mux, grantPath))
 	if revoked.Status != "grant_required" {
-		t.Fatalf("expected grant_required after revoke, got %q", revoked.Status)
+		t.Fatalf("revoked grant remained usable: %+v", revoked)
 	}
 
-	// Revoking again -> 404.
-	if w := deleteJSON(t, mux, grantPath); w.Code != http.StatusNotFound {
-		t.Fatalf("DELETE grant again: expected 404, got %d", w.Code)
-	}
 }
 
 func TestHandleGrantAgentSkill_RejectsUnvendoredSkill(t *testing.T) {
@@ -373,10 +365,10 @@ func TestHandleGrantAgentSkill_RejectsUnvendoredSkill(t *testing.T) {
 	}
 	agent := createTestAgent(t, a, "bare-row-grant-agent")
 
-	w := postSkillJSON(t, mux, fmt.Sprintf("/api/agents/%s/skills/%s/grant", agent.ID, sk.Slug),
+	w := postSkillJSON(t, mux, fmt.Sprintf("/api/agents/%s/skills/%s/grant", url.PathEscape(agent.ID), sk.Slug),
 		map[string]any{"granted_by": "test-operator"})
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("grant against an unvendored skill: expected 422, got %d; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusGone {
+		t.Fatalf("retired grant against an unvendored skill: expected 410, got %d; body: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -404,11 +396,9 @@ func TestHandlePreviewSkill_RequiresGrant(t *testing.T) {
 		t.Fatalf("preview before grant: expected 403, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	// Grant, then preview succeeds and returns real materialized content.
-	grantPath := fmt.Sprintf("/api/agents/%s/skills/%s/grant", agent.ID, installed.Skill.Slug)
-	if w := postSkillJSON(t, mux, grantPath, map[string]any{"granted_by": "test-operator"}); w.Code != http.StatusCreated {
-		t.Fatalf("grant: expected 201, got %d; body: %s", w.Code, w.Body.String())
-	}
+	// Exercise materialization only with a private prior grant. No public
+	// endpoint or definition claim can create this authority.
+	priorAPISkillGrant(t, a, agent.ID, installed.Skill.Slug, installed.Skill.ContentHash, `{}`)
 
 	w2 := postSkillJSON(t, mux, previewPath, map[string]any{"agent_id": agent.ID})
 	if w2.Code != http.StatusOK {
@@ -431,5 +421,18 @@ func TestHandlePreviewSkill_UnknownSlug(t *testing.T) {
 	w := postSkillJSON(t, mux, "/api/skills/does-not-exist/preview", map[string]any{"agent_id": "whoever"})
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("preview unknown slug: expected 404, got %d", w.Code)
+	}
+}
+
+// priorAPISkillGrant is private simulation of an already issued host grant,
+// not production issuance or conversion of a retained profile.
+func priorAPISkillGrant(t *testing.T, a *testAPI, actor, slug, digest, capabilities string) {
+	t.Helper()
+	if _, err := a.store.GetAgentForActor(t.Context(), actor); err != nil {
+		t.Fatal(err)
+	}
+	_, err := a.store.DB.ExecContext(t.Context(), `INSERT INTO actor_known_skills(agent_id,skill_name,approved_content_hash,granted_at,granted_by,capabilities_granted) VALUES(?,?,?,datetime('now'),'test-operator',?)`, actor, slug, digest, capabilities)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

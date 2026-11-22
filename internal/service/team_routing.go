@@ -116,7 +116,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -264,61 +263,8 @@ type SendToSlotResult struct {
 // resolved to at least one active member — this task's chosen answer to
 // the routing-target-resolution-failure stress test.
 func (svc *TeamRoutingService) SendToSlot(ctx context.Context, req SendToSlotRequest) (*SendToSlotResult, error) {
-	if svc == nil || svc.store == nil || svc.messaging == nil {
-		return nil, fmt.Errorf("team routing: service not fully configured")
-	}
-	if req.WorkflowRunID == "" || req.TeamID == "" || req.FromSlot == "" || req.ToSlot == "" {
-		return nil, fmt.Errorf("team routing: workflow_run_id, team_id, from_slot, and to_slot are all required")
-	}
-	if req.FromSessionID == "" || req.FromAgentID == "" {
-		return nil, fmt.Errorf("team routing: from_session_id and from_agent_id are required")
-	}
-	if req.Body == "" {
-		return nil, fmt.Errorf("team routing: body is required")
-	}
-
-	authorized, err := svc.authorizedForMessage(ctx, req.TeamID, req.FromSlot, req.ToSlot)
-	if err != nil {
-		return nil, fmt.Errorf("team routing: check may_message authorization: %w", err)
-	}
-	if !authorized {
-		return nil, fmt.Errorf("%w: team slot %q -> team slot %q", ErrTeamRoutingNotAuthorized, req.FromSlot, req.ToSlot)
-	}
-
-	members, err := svc.resolveActiveMembers(ctx, req.WorkflowRunID, req.TeamID, req.ToSlot, req.Overrides)
-	if err != nil {
-		return nil, err
-	}
-
-	result := &SendToSlotResult{ToSlot: req.ToSlot, Recipients: make([]SentMessage, 0, len(members))}
-	sentAny := false
-	var lastErr error
-	for _, m := range members {
-		msg, sendErr := svc.messaging.SendMessage(ctx, messaging.SendInput{
-			FromSessionID: req.FromSessionID,
-			FromAgentID:   req.FromAgentID,
-			ToSessionID:   m.SessionID,
-			ToAgentID:     m.AgentID,
-			Channel:       req.Channel,
-			Kind:          req.Kind,
-			PayloadJSON:   req.PayloadJSON,
-			Subject:       req.Subject,
-			Body:          req.Body,
-			Type:          req.Type,
-			ReplyTo:       req.ReplyTo,
-		})
-		if sendErr != nil {
-			lastErr = sendErr
-			result.Recipients = append(result.Recipients, SentMessage{Member: m, Err: sendErr})
-			continue
-		}
-		sentAny = true
-		result.Recipients = append(result.Recipients, SentMessage{Member: m, Message: msg})
-	}
-	if !sentAny {
-		return result, fmt.Errorf("team routing: message send failed for every active member of team slot %q: %w", req.ToSlot, lastErr)
-	}
-	return result, nil
+	// No adopted fabric authority port can authorize this operation.
+	return nil, store.ErrVerifiedActorRequired
 }
 
 // authorizedForMessage reports whether fromSlot may message toSlot within
@@ -474,159 +420,8 @@ func filterActiveMembers(members []store.TeamRunMember) []store.TeamRunMember {
 // via resolveAgentSlugForSlot's static-config fallback, independent of
 // whether the slot has ever been resolved as a team_run_members row).
 func (svc *TeamRoutingService) InstallTeamRunRouting(ctx context.Context, runID, teamID string) ([]string, error) {
-	if svc == nil || svc.store == nil {
-		return nil, fmt.Errorf("team routing: service not fully configured")
-	}
-	if runID == "" || teamID == "" {
-		return nil, fmt.Errorf("team routing: workflow_run_id and team_id are required")
-	}
-
-	team, err := svc.store.GetTeam(ctx, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("team routing: load team %s: %w", teamID, err)
-	}
-	slots, err := team.Slots()
-	if err != nil {
-		return nil, fmt.Errorf("team routing: decode team %q slots: %w", team.Name, err)
-	}
-	routing, err := team.Routing()
-	if err != nil {
-		return nil, fmt.Errorf("team routing: decode team %q routing: %w", team.Name, err)
-	}
-
-	runMembers, err := svc.store.ListTeamRunMembersByRun(ctx, runID)
-	if err != nil {
-		return nil, fmt.Errorf("team routing: list team_run_members for run %s: %w", runID, err)
-	}
-	askers := dedupeActiveAgentIDs(runMembers)
-	if len(askers) == 0 {
-		return nil, fmt.Errorf("team routing: run %s has no active team_run_members to install routing for", runID)
-	}
-
-	var installed []string
-
-	for i, rule := range routing.Rules {
-		targetSlot, ok := findSlot(slots, rule.TargetSlot)
-		if !ok {
-			return installed, fmt.Errorf("team routing: rule %q targets unknown team slot %q", rule.Name, rule.TargetSlot)
-		}
-		agentSlug, err := svc.resolveAgentSlugForSlot(ctx, runID, targetSlot)
-		if err != nil {
-			return installed, fmt.Errorf("team routing: resolve agent_slug for rule %q (target %q): %w", rule.Name, rule.TargetSlot, err)
-		}
-		priority := rule.Priority
-		if priority <= 0 {
-			priority = semanticRulePriorityBase - int64(i)*semanticRulePriorityStep
-		}
-		// Floor guard applies unconditionally to the FINAL priority value,
-		// regardless of whether it came from the derived-default path above
-		// or an explicit TeamRoutingRule.Priority override — the
-		// coordinator fallback (coordinatorFallbackPriority, fixed) must
-		// remain the lowest-priority row in this run's scoped set
-		// (15-teams.md's "Coordinator fallback... the lowest-priority row
-		// in the same scoped set"), full stop. Bug fixed here, found by 09's
-		// fresh reviewer (see 09-team-routing.md's Work Log addendum): this
-		// guard used to live ONLY inside the `priority <= 0` branch above,
-		// so an explicit rule.Priority set at or below
-		// coordinatorFallbackPriority sailed through unclamped and made
-		// that semantic rule permanently unreachable — first_applicable
-		// (internal/agent/reflexes/resolve.go) groups same-ActionKind
-		// (dispatch_to_agent) candidates and picks the single
-		// highest-priority ELIGIBLE one, and the always-firing (`.*`
-		// trigger) coordinator fallback would then always outrank it.
-		//
-		// Chosen behavior for an explicit-but-too-low override: silently
-		// clamp to coordinatorFallbackPriority+1, exactly matching the
-		// derived-default path's own pre-existing behavior, rather than a
-		// hard validation error at install time. Both are defensible (a
-		// hard error would surface the mistake more loudly); silent clamp
-		// was chosen because (1) it is the truly minimal fix — this is
-		// exactly what "the floor guard should apply unconditionally"
-		// means literally, one guard, one behavior, for both paths, not a
-		// second install-time validation rule with its own error shape;
-		// (2) it keeps this function's two priority-derivation paths
-		// (derived-default vs explicit override) behaving identically at
-		// the floor rather than diverging into "one clamps, one rejects,"
-		// which would itself be a surprising asymmetry; (3) this file
-		// already treats other under/mis-specified Team-authored routing
-		// input by silently completing it sensibly rather than hard-
-		// rejecting (e.g. an empty RoutingJSON.CoordinatorSlot defaults to
-		// "orchestrator" a few lines below) — hard validation is reserved
-		// in this function for a genuinely unresolvable reference (a rule
-		// naming a TargetSlot that doesn't exist on the Team at all, where
-		// no sensible default/clamp exists); (4) practically, the outcome
-		// the Team author actually wants — this rule outranks the
-		// coordinator fallback — is still fully achieved even though the
-		// stored number differs from what was typed. Documented trade-off:
-		// a Team author who explicitly writes Priority: 50 expecting it to
-		// win outright will not be told their literal value was raised; it
-		// is silently normalized to coordinatorFallbackPriority+1 instead.
-		if priority <= coordinatorFallbackPriority {
-			if rule.Priority > 0 {
-				// Only warn when an author-supplied value was actually
-				// overridden — the derived-default path already flows
-				// through this same clamp on every install and would
-				// otherwise log on every call for no reason.
-				slog.Warn("team routing: explicit rule priority at or below coordinator fallback floor, raised to stay reachable",
-					"team", team.Name, "rule", rule.Name, "requested_priority", rule.Priority, "applied_priority", coordinatorFallbackPriority+1)
-			}
-			priority = coordinatorFallbackPriority + 1
-		}
-		triggerSpec := map[string]any{
-			"kind":    "user_regex_window",
-			"window":  1,
-			"pattern": anyPhraseRegex(rule.Phrases),
-		}
-		reason := fmt.Sprintf("team routing rule %q -> %s (team %q)", rule.Name, targetSlot.Name, team.Name)
-		for _, agentID := range askers {
-			id, created, err := svc.insertTeamRoutingReflex(ctx, runID, team, agentID, rule.Name, triggerSpec, priority, targetSlot.Name, agentSlug, reason)
-			if err != nil {
-				return installed, err
-			}
-			if created {
-				installed = append(installed, id)
-			}
-		}
-	}
-
-	// Coordinator fallback — structural, always attempted once per Team
-	// (not authored per-rule in RoutingJSON), per 15-teams.md's "add one
-	// additional lowest-priority row per Team for the coordinator
-	// fallback." Skipped (non-fatal, logged) only when the coordinator
-	// slot name doesn't resolve to a real Team Slot on this Team — a Team
-	// author is not required to name its coordinator "orchestrator" or to
-	// have a coordinator slot at all (a fully fluid Team, matching
-	// 15-teams.md's own "a Team is not required to declare any gates at
-	// all" framing extended to routing).
-	coordinatorSlotName := routing.CoordinatorSlot
-	if coordinatorSlotName == "" {
-		coordinatorSlotName = defaultCoordinatorSlotName
-	}
-	coordinatorSlot, ok := findSlot(slots, coordinatorSlotName)
-	if !ok {
-		slog.Warn("team routing: coordinator slot not found on team, skipping coordinator fallback row",
-			"team", team.Name, "coordinator_slot", coordinatorSlotName)
-		return installed, nil
-	}
-	agentSlug, err := svc.resolveAgentSlugForSlot(ctx, runID, coordinatorSlot)
-	if err != nil {
-		slog.Warn("team routing: could not resolve coordinator fallback agent_slug, skipping fallback row",
-			"team", team.Name, "coordinator_slot", coordinatorSlotName, "err", err)
-		return installed, nil
-	}
-	triggerSpec := map[string]any{"kind": "user_regex_window", "window": 1, "pattern": ".*"}
-	reason := fmt.Sprintf("team coordinator fallback -> %s (team %q)", coordinatorSlot.Name, team.Name)
-	for _, agentID := range askers {
-		id, created, err := svc.insertTeamRoutingReflex(ctx, runID, team, agentID, "coordinator_fallback", triggerSpec, coordinatorFallbackPriority, coordinatorSlot.Name, agentSlug, reason)
-		if err != nil {
-			return installed, err
-		}
-		if created {
-			installed = append(installed, id)
-		}
-	}
-
-	return installed, nil
+	// No adopted fabric authority port can authorize this operation.
+	return nil, store.ErrVerifiedActorRequired
 }
 
 // insertTeamRoutingReflex writes one run-scoped dispatch_to_agent
@@ -697,7 +492,7 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 	}
 	for _, m := range members {
 		if m.Status == store.TeamRunMemberStatusActive {
-			profile, err := svc.store.GetAgent(ctx, m.AgentID)
+			profile, err := svc.store.GetAgentForActor(ctx, m.AgentID)
 			if err != nil {
 				return "", fmt.Errorf("look up resolved agent %s for team slot %q: %w", m.AgentID, slot.Name, err)
 			}
@@ -710,7 +505,7 @@ func (svc *TeamRoutingService) resolveAgentSlugForSlot(ctx context.Context, runI
 		if slot.AgentID == nil || *slot.AgentID == "" {
 			return "", fmt.Errorf("team slot %q: resolution=durable requires agent_id", slot.Name)
 		}
-		profile, err := svc.store.GetAgent(ctx, *slot.AgentID)
+		profile, err := svc.store.GetAgentForActor(ctx, *slot.AgentID)
 		if err != nil {
 			return "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, *slot.AgentID, err)
 		}

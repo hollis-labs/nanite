@@ -70,8 +70,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oklog/ulid/v2"
-
 	"github.com/hollis-labs/nanite/internal/agent/override"
 	"github.com/hollis-labs/nanite/internal/agentworkflow"
 	"github.com/hollis-labs/nanite/internal/store"
@@ -287,70 +285,9 @@ func (l *TeamRunLauncher) MarkRoutingReady(ctx context.Context, key, runID strin
 // rows existing yet mid-Launch-call — and gains them the moment Launch
 // returns, before this function itself returns to its own caller.
 func (l *TeamRunLauncher) LaunchTeamRun(ctx context.Context, teamID string, overrides TeamRunOverrides) (*agentworkflow.WorkflowResult, error) {
-	if l == nil || l.store == nil || l.launcher == nil || l.durable == nil {
-		return nil, fmt.Errorf("team run launch: launcher not fully configured")
-	}
-	l.launchMu.Lock()
-	defer l.launchMu.Unlock()
-	if teamID == "" {
-		return nil, fmt.Errorf("team run launch: team id is required")
-	}
-	if strings.TrimSpace(overrides.IdempotencyKey) == "" {
-		overrides.IdempotencyKey = ulid.Make().String()
-	}
-	digest, err := teamRunRequestDigest(teamID, overrides)
-	if err != nil {
-		return nil, err
-	}
-	if existing, loadErr := l.store.GetTeamRunLaunch(ctx, overrides.IdempotencyKey); loadErr == nil {
-		if existing.TeamID != teamID || existing.RequestDigest != digest {
-			return nil, fmt.Errorf("%w: key %q belongs to a different Team launch", store.ErrTeamRunLaunchConflict, overrides.IdempotencyKey)
-		}
-		if existing.Status == store.TeamRunLaunchPlanning {
-			return l.continueTeamRunPlanning(ctx, *existing)
-		}
-		return l.launchPreparedTeamRun(ctx, *existing)
-	} else if !errors.Is(loadErr, store.ErrTeamRunLaunchNotFound) {
-		return nil, fmt.Errorf("team run launch: load idempotency record: %w", loadErr)
-	}
-
-	team, err := l.store.GetTeam(ctx, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: load team %s: %w", teamID, err)
-	}
-	slots, err := team.Slots()
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: decode team %q slots: %w", team.Name, err)
-	}
-	phases, err := team.Phases()
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: decode team %q phases: %w", team.Name, err)
-	}
-	if len(phases) == 0 {
-		return nil, fmt.Errorf("team run launch: team %q has an empty phase sequence", team.Name)
-	}
-
-	plan, err := l.planEagerResolution(ctx, team.ID, slots, overrides)
-	if err != nil {
-		return nil, err
-	}
-	if len(plan) == 0 {
-		return nil, fmt.Errorf("team run launch: team %q has no required or eagerly-resolvable team slots", team.Name)
-	}
-	planningJSON, err := json.Marshal(teamRunPlanningRecord{Team: *team, Plan: plan, Overrides: overrides})
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: encode recovery plan: %w", err)
-	}
-	planning, err := l.store.BeginTeamRunLaunch(ctx, store.TeamRunLaunch{
-		IdempotencyKey: overrides.IdempotencyKey, TeamID: teamID, RequestDigest: digest, PlanningJSON: string(planningJSON),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if planning.Status != store.TeamRunLaunchPlanning {
-		return l.launchPreparedTeamRun(ctx, *planning)
-	}
-	return l.continueTeamRunPlanning(ctx, *planning)
+	// Fabric ownership/enrollment is held; do not read or resume historical
+	// plans, mint instances, or perform partial durable effects.
+	return nil, store.ErrVerifiedActorRequired
 }
 
 type teamRunPlanningRecord struct {
@@ -501,7 +438,7 @@ func (l *TeamRunLauncher) resolveSlotAgentIdentity(ctx context.Context, slot sto
 		if slot.AgentID == nil || strings.TrimSpace(*slot.AgentID) == "" {
 			return "", fmt.Errorf("team slot %q: resolution=durable requires agent_id", slot.Name)
 		}
-		if _, err := l.store.GetAgent(ctx, *slot.AgentID); err != nil {
+		if _, err := l.store.GetAgentForActor(ctx, *slot.AgentID); err != nil {
 			return "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, *slot.AgentID, err)
 		}
 		return *slot.AgentID, nil
@@ -582,82 +519,9 @@ func workflowResultFromLaunch(result *WorkflowLaunchResult) *agentworkflow.Workf
 // ReconcileTeamRuns recovers prepared launches and evaluates every open Team
 // signal through the ordinary durable host Resume surface.
 func (l *TeamRunLauncher) ReconcileTeamRuns(ctx context.Context, limit int) TeamRunReconcileReport {
-	l.recoveryMu.Lock()
-	defer l.recoveryMu.Unlock()
-	l.launchMu.Lock()
-	defer l.launchMu.Unlock()
-	report := TeamRunReconcileReport{}
-	stopped, err := l.store.StopTerminalTeamRunMembers(ctx, limit)
-	if err != nil {
-		report.Failures = append(report.Failures, err)
-		return report
-	}
-	report.MembersStopped = stopped
-	completed, err := l.store.CompleteClosedTeamSignalResolutions(ctx, limit)
-	if err != nil {
-		report.Failures = append(report.Failures, err)
-		return report
-	}
-	report.SignalsCompleted = completed
-	launches, err := l.store.ListPendingTeamRunLaunchesAfter(ctx, l.launchCursor, limit)
-	if err != nil {
-		report.Failures = append(report.Failures, err)
-		return report
-	}
-	for _, launch := range launches {
-		l.launchCursor = launch.IdempotencyKey
-		report.PendingInspected++
-		var recoverErr error
-		if launch.Status == store.TeamRunLaunchPlanning {
-			_, recoverErr = l.continueTeamRunPlanning(ctx, launch)
-		} else {
-			_, recoverErr = l.launchPreparedTeamRun(ctx, launch)
-		}
-		if recoverErr != nil {
-			report.Failures = append(report.Failures, fmt.Errorf("recover Team launch %q: %w", launch.IdempotencyKey, recoverErr))
-		} else {
-			report.Recovered++
-		}
-	}
-	if l.routing != nil {
-		routingLaunches, routingErr := l.store.ListTeamRunLaunchesPendingRoutingAfter(ctx, l.routingCursor, limit)
-		if routingErr != nil {
-			report.Failures = append(report.Failures, routingErr)
-			return report
-		}
-		for _, launch := range routingLaunches {
-			l.routingCursor = launch.IdempotencyKey
-			report.RoutingInspected++
-			if launch.WorkflowRunID == "" {
-				report.Failures = append(report.Failures, fmt.Errorf("recover Team routing %q: workflow run is missing", launch.IdempotencyKey))
-				continue
-			}
-			if _, installErr := l.routing.InstallTeamRunRouting(ctx, launch.WorkflowRunID, launch.TeamID); installErr != nil {
-				report.Failures = append(report.Failures, fmt.Errorf("recover Team routing %q: %w", launch.IdempotencyKey, installErr))
-				continue
-			}
-			if markErr := l.store.MarkTeamRunLaunchRoutingReady(context.WithoutCancel(ctx), launch.IdempotencyKey, launch.WorkflowRunID); markErr != nil {
-				report.Failures = append(report.Failures, fmt.Errorf("complete Team routing %q: %w", launch.IdempotencyKey, markErr))
-				continue
-			}
-			report.Recovered++
-		}
-	}
-	runIDs, err := l.store.ListOpenTeamSignalRunIDsAfter(ctx, l.signalCursor, limit)
-	if err != nil {
-		report.Failures = append(report.Failures, err)
-		return report
-	}
-	for _, runID := range runIDs {
-		l.signalCursor = runID
-		report.SignalsInspected++
-		if _, resumeErr := l.launcher.Resume(ctx, runID); resumeErr != nil {
-			report.Failures = append(report.Failures, fmt.Errorf("reconcile Team signal run %s: %w", runID, resumeErr))
-		} else {
-			report.Recovered++
-		}
-	}
-	return report
+	// Fabric ownership/enrollment is held; do not read or resume historical
+	// plans, mint instances, or perform partial durable effects.
+	return TeamRunReconcileReport{Failures: []error{store.ErrVerifiedActorRequired}}
 }
 
 // RunReconciler is the production cadence for Team launch recovery and signal
@@ -887,7 +751,7 @@ func (l *TeamRunLauncher) resolveDurableMember(ctx context.Context, slot store.T
 	}
 	profileID := *slot.AgentID
 
-	profile, err := l.store.GetAgent(ctx, profileID)
+	profile, err := l.store.GetAgentForActor(ctx, profileID)
 	if err != nil {
 		return "", "", fmt.Errorf("team slot %q: durable agent_id %q: %w", slot.Name, profileID, err)
 	}
@@ -1123,73 +987,9 @@ func (l *TeamRunLauncher) resolveFreshMemberWithProfile(ctx context.Context, slo
 // instruction applies here exactly as much as it does to
 // planEagerResolution.
 func (l *TeamRunLauncher) ResolveLazySlot(ctx context.Context, workflowRunID, teamID, slotName string, overrides TeamRunOverrides) ([]store.TeamRunMember, error) {
-	if l == nil || l.store == nil {
-		return nil, fmt.Errorf("team run launch: launcher not fully configured")
-	}
-	if workflowRunID == "" || teamID == "" || slotName == "" {
-		return nil, fmt.Errorf("team run launch: resolve lazy slot: workflow_run_id, team_id, and slot_name are all required")
-	}
-
-	existing, err := l.store.ListTeamRunMembersBySlot(ctx, workflowRunID, slotName)
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: resolve lazy slot %q: list existing members: %w", slotName, err)
-	}
-	active := make([]store.TeamRunMember, 0, len(existing))
-	for _, m := range existing {
-		if m.Status == store.TeamRunMemberStatusActive {
-			active = append(active, m)
-		}
-	}
-	if len(active) > 0 {
-		return active, nil
-	}
-
-	team, err := l.store.GetTeam(ctx, teamID)
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: resolve lazy slot %q: load team %s: %w", slotName, teamID, err)
-	}
-	slots, err := team.Slots()
-	if err != nil {
-		return nil, fmt.Errorf("team run launch: resolve lazy slot %q: decode team %q slots: %w", slotName, team.Name, err)
-	}
-	slot, ok := findSlot(slots, slotName)
-	if !ok {
-		return nil, fmt.Errorf("%w: team %q has no team slot named %q", ErrTeamSlotNotFound, team.Name, slotName)
-	}
-
-	if !slot.Required {
-		ok, err := l.authorizedForElasticResolution(ctx, teamID, slots, slotName)
-		if err != nil {
-			return nil, fmt.Errorf("team run launch: resolve lazy slot %q: check may_spawn authorization: %w", slotName, err)
-		}
-		if !ok {
-			return nil, fmt.Errorf("%w: team slot %q", ErrTeamRunElasticResolutionUnauthorized, slotName)
-		}
-	}
-
-	count, err := resolveMemberCount(slot, overrides)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]store.TeamRunMember, 0, count)
-	for i := 0; i < count; i++ {
-		agentID, sessionID, err := l.resolveSlotMember(ctx, slot, overrides)
-		if err != nil {
-			return nil, fmt.Errorf("team run launch: resolve lazy slot %q (member %d/%d): %w", slotName, i+1, count, err)
-		}
-		m, err := l.store.InsertTeamRunMember(ctx, store.TeamRunMember{
-			WorkflowRunID: workflowRunID,
-			SlotName:      slotName,
-			AgentID:       agentID,
-			SessionID:     sessionID,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("team run launch: resolve lazy slot %q: record resolved member: %w", slotName, err)
-		}
-		out = append(out, *m)
-	}
-	return out, nil
+	// Fabric ownership/enrollment is held; do not read or resume historical
+	// plans, mint instances, or perform partial durable effects.
+	return nil, store.ErrVerifiedActorRequired
 }
 
 // findSlot returns the TeamSlotDefinition named name, if present.

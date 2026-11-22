@@ -272,16 +272,11 @@ func TestBuildReflexAgentSchedule_MalformedSpecs(t *testing.T) {
 func newReflexScheduleTestStore(t *testing.T, agentID string) *store.Store {
 	t.Helper()
 	st := newTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
-		ID:           agentID,
-		Name:         "Reflex Schedule Test Agent",
-		Slug:         agentID,
-		Class:        "advisor",
-		SystemPrompt: "test",
-		Source:       "test",
-	}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	p := &store.AgentProfile{Name: "Prior schedule actor", Slug: agentID, Class: "advisor", SystemPrompt: "test"}
+	if err := persistTestActor(t.Context(), st, p); err != nil {
+		t.Fatal(err)
 	}
+
 	return st
 }
 
@@ -293,8 +288,9 @@ func newReflexScheduleTestStore(t *testing.T, agentID string) *store.Store {
 // top of) on the next tick.
 func TestNewReflexScheduleHook_InsertsDiscoverableRow(t *testing.T) {
 	ctx := context.Background()
-	agentID := "reflex-schedule-agent"
-	st := newReflexScheduleTestStore(t, agentID)
+	slug := "reflex-schedule-agent"
+	st := newReflexScheduleTestStore(t, slug)
+	agentID := "msg://agent/private-fixture/" + slug
 
 	hook := NewReflexScheduleHook(st)
 	spec := map[string]interface{}{
@@ -356,8 +352,9 @@ func TestNewReflexScheduleHook_InsertsDiscoverableRow(t *testing.T) {
 // through in production), not just the hook function in isolation.
 func TestExecutorApply_AddSchedule_FiresRealHook(t *testing.T) {
 	ctx := context.Background()
-	agentID := "reflex-schedule-apply-agent"
-	st := newReflexScheduleTestStore(t, agentID)
+	slug := "reflex-schedule-apply-agent"
+	st := newReflexScheduleTestStore(t, slug)
+	agentID := "msg://agent/private-fixture/" + slug
 
 	executor := &reflexes.Executor{
 		Schedule: NewReflexScheduleHook(st),
@@ -405,8 +402,9 @@ func TestExecutorApply_AddSchedule_FiresRealHook(t *testing.T) {
 // hook-failure handling in executor.go) never leaves a broken row behind.
 func TestExecutorApply_AddSchedule_MalformedSpec_NoRowInserted(t *testing.T) {
 	ctx := context.Background()
-	agentID := "reflex-schedule-malformed-agent"
-	st := newReflexScheduleTestStore(t, agentID)
+	slug := "reflex-schedule-malformed-agent"
+	st := newReflexScheduleTestStore(t, slug)
+	agentID := "msg://agent/private-fixture/" + slug
 
 	hook := NewReflexScheduleHook(st)
 	if err := hook(ctx, agentID, map[string]interface{}{
@@ -460,8 +458,9 @@ func TestExecutorApply_AddSchedule_MalformedSpec_NoRowInserted(t *testing.T) {
 // dispatch surface) leaves zero agent_schedules rows behind.
 func TestExecutorApply_AddSchedule_MalformedCronSpec_NoRowInserted(t *testing.T) {
 	ctx := context.Background()
-	agentID := "reflex-schedule-malformed-cron-agent"
-	st := newReflexScheduleTestStore(t, agentID)
+	slug := "reflex-schedule-malformed-cron-agent"
+	st := newReflexScheduleTestStore(t, slug)
+	agentID := "msg://agent/private-fixture/" + slug
 
 	hook := NewReflexScheduleHook(st)
 	err := hook(ctx, agentID, map[string]interface{}{

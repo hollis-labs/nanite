@@ -79,7 +79,7 @@ func (s *Store) writeAgentRow(ctx context.Context, p *AgentProfile, create bool)
 	if err != nil {
 		return err
 	}
-	saved, err := getAgent(ctx, tx, p.ID)
+	saved, err := getHistoricalAgentProfile(ctx, tx, p.ID)
 	if err != nil {
 		return err
 	}

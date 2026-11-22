@@ -171,9 +171,6 @@ func TestChatCacheRecovery_SearchThenFetchHiddenEvidence(t *testing.T) {
 			f.svc.resultCache = tool.NewResultCache(f.st.DB, tool.ResultCacheConfig{})
 			f.svc.inspector = inspector.NewService()
 			agent := f.svc.agents.(*characterizationAgents).agent
-			if err := f.st.CreateAgent(ctx, agent); err != nil {
-				t.Fatal(err)
-			}
 			manager := mcp.NewManager()
 			self := NewSelfToolsTransport(f.st)
 			if err := manager.AddServer("self", self, mcp.TierBuiltin); err != nil {
@@ -195,7 +192,7 @@ func TestChatCacheRecovery_SearchThenFetchHiddenEvidence(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := f.st.GrantAgentTool(ctx, agent.ID, id, "explicit"); err != nil {
+				if err := grantTestActorTool(ctx, f.st, agent.ID, id, "explicit"); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -28,10 +28,10 @@ func TestPluginToolsPreserveRosterIdentityAcrossUnload(t *testing.T) {
 		t.Fatal("hidden tool missing from permission catalog")
 	}
 	agent := &store.AgentProfile{Name: "Reader", Slug: "reader", SystemPrompt: "test"}
-	if checkErr := st.CreateAgent(ctx, agent); checkErr != nil {
+	if checkErr := persistTestActor(ctx, st, agent); checkErr != nil {
 		t.Fatal(checkErr)
 	}
-	if checkErr := st.GrantAgentTool(ctx, agent.ID, known.ID, "explicit"); checkErr != nil {
+	if checkErr := grantTestActorTool(ctx, st, agent.ID, known.ID, "explicit"); checkErr != nil {
 		t.Fatal(checkErr)
 	}
 	if registrar.RemoveServersByPlugin("reader") != 1 {

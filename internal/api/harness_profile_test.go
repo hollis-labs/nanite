@@ -89,7 +89,7 @@ func TestCreateSession_BadEnvNoSelection(t *testing.T) {
 // source of each value, honoring the session's selection and ?model=.
 func TestSessionHarnessProfileEndpoint(t *testing.T) {
 	a, s := newToolCallTestAPI(t)
-	rec := postCreateSession(t, a, map[string]any{"harness_profile": "conservative", "model": "claude-opus-5"})
+	rec := postCreateSession(t, a, map[string]any{"harness_profile": "conservative", "provider": "private-api-fixture", "model": "private-model"})
 	var sess store.Session
 	if err := json.Unmarshal(rec.Body.Bytes(), &sess); err != nil || sess.ID == "" {
 		t.Fatalf("create: %v %s", err, rec.Body.String())
@@ -104,7 +104,7 @@ func TestSessionHarnessProfileEndpoint(t *testing.T) {
 		return w, out
 	}
 	w, out := get("/api/sessions/" + sess.ID + "/harness-profile")
-	if w.Code != http.StatusOK || out["profile"] != "conservative" || out["model"] != "claude-opus-5" {
+	if w.Code != http.StatusOK || out["profile"] != "conservative" || out["model"] != "private-model" {
 		t.Fatalf("response: %d %s", w.Code, w.Body.String())
 	}
 	values, _ := out["values"].(map[string]any)

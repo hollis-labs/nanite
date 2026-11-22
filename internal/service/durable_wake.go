@@ -410,7 +410,13 @@ func (s *durableWakeService) activationModeForInstance(inst *store.DurableAgentI
 	if inst == nil || inst.ProfileID == "" {
 		return ""
 	}
-	profile, err := s.store.GetAgent(context.TODO() /* TODO(ctx-sweep): no ctx available at this call site */, inst.ProfileID)
+	reader, ok := s.store.(interface {
+		GetAgentForActor(context.Context, string) (*store.AgentProfile, error)
+	})
+	if !ok {
+		return ""
+	}
+	profile, err := reader.GetAgentForActor(context.TODO(), inst.ProfileID)
 	if err != nil || profile == nil {
 		return ""
 	}

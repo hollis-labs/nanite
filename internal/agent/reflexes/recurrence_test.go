@@ -97,11 +97,11 @@ func fireOnceThenReEvaluate(t *testing.T, engine *Engine, agentID, agentClass st
 	ctx := context.Background()
 	state := State{AgentClass: agentClass, Events: []EventSignal{{EventType: "probe"}}}
 
-	out1, err := engine.EvaluateState(ctx, agentID, agentClass, state)
+	out1, err := engine.evaluatePrivateDeclaredFixtureState(ctx, agentID, agentClass, state)
 	if err != nil {
 		t.Fatalf("EvaluateState (first pass): %v", err)
 	}
-	out2, err := engine.EvaluateState(ctx, agentID, agentClass, state)
+	out2, err := engine.evaluatePrivateDeclaredFixtureState(ctx, agentID, agentClass, state)
 	if err != nil {
 		t.Fatalf("EvaluateState (second pass): %v", err)
 	}
@@ -115,13 +115,13 @@ func fireOnceThenReEvaluate(t *testing.T, engine *Engine, agentID, agentClass st
 func TestEvaluateState_DefaultCooldown_StillDebouncesAt15Minutes(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-default-cooldown", Name: "x", Slug: "agent-default-cooldown",
 		Class: "process", SystemPrompt: "test", Source: "test",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
-	if _, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	if _, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:    "process",
 		Name:        "default_cooldown_probe",
 		TriggerKind: store.ReflexTriggerEvent,
@@ -150,14 +150,14 @@ func TestEvaluateState_DefaultCooldown_StillDebouncesAt15Minutes(t *testing.T) {
 func TestEvaluateState_ReflexLevelZeroOverride_BypassesCooldown(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-zero-override", Name: "x", Slug: "agent-zero-override",
 		Class: "process", SystemPrompt: "test", Source: "test",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	zero := int64(0)
-	if _, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	if _, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:                  "process",
 		Name:                      "zero_override_probe",
 		TriggerKind:               store.ReflexTriggerEvent,
@@ -187,14 +187,14 @@ func TestEvaluateState_ReflexLevelZeroOverride_BypassesCooldown(t *testing.T) {
 func TestEvaluateState_ReflexLevelPositiveOverride_ShortensWindow(t *testing.T) {
 	ctx := context.Background()
 	st := newReflexTestStore(t)
-	if err := st.CreateAgent(context.Background(), &store.AgentProfile{
+	if err := declaredFixture(st).CreateAgent(context.Background(), &store.AgentProfile{
 		ID: "agent-short-override", Name: "x", Slug: "agent-short-override",
 		Class: "process", SystemPrompt: "test", Source: "test",
 	}); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
 	}
 	oneSecond := int64(1)
-	reflexID, err := st.InsertAgentReflex(ctx, store.AgentReflex{
+	reflexID, err := declaredFixture(st).InsertAgentReflex(ctx, store.AgentReflex{
 		ClassTag:                  "process",
 		Name:                      "short_override_probe",
 		TriggerKind:               store.ReflexTriggerEvent,
@@ -210,7 +210,7 @@ func TestEvaluateState_ReflexLevelPositiveOverride_ShortensWindow(t *testing.T) 
 	engine := NewEngine(st, nil)
 	ctx2 := context.Background()
 	state := State{AgentClass: "process", Events: []EventSignal{{EventType: "probe"}}}
-	out1, err := engine.EvaluateState(ctx2, "agent-short-override", "process", state)
+	out1, err := engine.evaluatePrivateDeclaredFixtureState(ctx2, "agent-short-override", "process", state)
 	if err != nil {
 		t.Fatalf("EvaluateState (first pass): %v", err)
 	}
@@ -219,7 +219,7 @@ func TestEvaluateState_ReflexLevelPositiveOverride_ShortensWindow(t *testing.T) 
 	}
 
 	// Immediately re-evaluating (well within 1 second) must still suppress.
-	outImmediate, err := engine.EvaluateState(ctx2, "agent-short-override", "process", state)
+	outImmediate, err := engine.evaluatePrivateDeclaredFixtureState(ctx2, "agent-short-override", "process", state)
 	if err != nil {
 		t.Fatalf("EvaluateState (immediate second pass): %v", err)
 	}
@@ -232,16 +232,16 @@ func TestEvaluateState_ReflexLevelPositiveOverride_ShortensWindow(t *testing.T) 
 	// override (not the default) is what's actually governing eligibility.
 	// Fetch-then-update so every other column (priority, fired_count, etc.)
 	// round-trips unchanged rather than getting clobbered by Go zero values.
-	row, err := st.GetAgentReflex(ctx, reflexID)
+	row, err := declaredFixture(st).GetAgentReflex(ctx, reflexID)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}
 	row.LastFiredAt = time.Now().Add(-2 * time.Second).UTC().Format(time.RFC3339)
-	if err := st.UpdateAgentReflex(ctx, *row); err != nil {
-		t.Fatalf("UpdateAgentReflex: %v", err)
+	if operationErr := declaredFixture(st).UpdateAgentReflex(ctx, *row); operationErr != nil {
+		t.Fatalf("UpdateAgentReflex: %v", operationErr)
 	}
 
-	outLater, err := engine.EvaluateState(ctx2, "agent-short-override", "process", state)
+	outLater, err := engine.evaluatePrivateDeclaredFixtureState(ctx2, "agent-short-override", "process", state)
 	if err != nil {
 		t.Fatalf("EvaluateState (later pass): %v", err)
 	}

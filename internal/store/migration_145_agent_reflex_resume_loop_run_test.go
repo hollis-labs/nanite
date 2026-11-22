@@ -68,7 +68,7 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	id, err := s.InsertAgentReflex(ctx, AgentReflex{
+	id, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		Name:        "resume-loop-run-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
@@ -80,7 +80,7 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex(resume_loop_run): %v", err)
 	}
-	row, err := s.GetAgentReflex(ctx, id)
+	row, err := migrationHistoricalReflex(ctx, s, id)
 	if err != nil {
 		t.Fatalf("GetAgentReflex: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 		t.Errorf("row.ProvenanceTier = %q, want system (created_by=system)", row.ProvenanceTier)
 	}
 
-	if _, err := s.InsertAgentReflex(ctx, AgentReflex{
+	if _, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		Name:        "bogus-action-kind-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
@@ -103,18 +103,15 @@ func TestMigrate145WidensActionKindCheckAndRoundTrips(t *testing.T) {
 		t.Fatal("InsertAgentReflex(action_kind=not_a_real_action_kind) succeeded, want CHECK/FK violation")
 	}
 
-	// ListAgentReflexesForLoopRun's own json_extract-based lookup —
-	// confirms both the widened CHECK/FK and the read path this task adds
-	// work together against a real (non-empty) database.
-	found, err := s.ListAgentReflexesForLoopRun(ctx, "lr-probe-1")
-	if err != nil {
-		t.Fatalf("ListAgentReflexesForLoopRun: %v", err)
+	// The retained schema still supports the old lookup without enabling
+	// mutable reflex runtime readers on the fresh partition.
+	var foundID string
+	if err := s.DB.QueryRowContext(ctx, `SELECT id FROM agent_reflexes WHERE action_kind='resume_loop_run' AND json_extract(action_spec,'$.loop_run_id')=?`, "lr-probe-1").Scan(&foundID); err != nil || foundID != id {
+		t.Fatalf("historical loop lookup: %s %v", foundID, err)
 	}
-	if len(found) != 1 || found[0].ID != id {
-		t.Fatalf("ListAgentReflexesForLoopRun(lr-probe-1) = %+v, want exactly the probe row (id=%s)", found, id)
-	}
-	if none, err := s.ListAgentReflexesForLoopRun(ctx, "lr-does-not-exist"); err != nil || len(none) != 0 {
-		t.Fatalf("ListAgentReflexesForLoopRun(unknown loop_run_id) = %+v, err=%v, want empty/nil, nil", none, err)
+	var n int
+	if err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM agent_reflexes WHERE json_extract(action_spec,'$.loop_run_id')=?`, "lr-does-not-exist").Scan(&n); err != nil || n != 0 {
+		t.Fatal(n, err)
 	}
 }
 
@@ -176,7 +173,7 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 		t.Fatalf("goose Up (replay migration 145): %v", err)
 	}
 
-	row, err := s.GetAgentReflex(ctx, "rfx-145-probe")
+	row, err := migrationHistoricalReflex(ctx, s, "rfx-145-probe")
 	if err != nil {
 		t.Fatalf("GetAgentReflex(pre-145 probe row) after migration 145: %v", err)
 	}
@@ -185,7 +182,7 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 	}
 
 	// And the new capability actually works now that 145 has run.
-	newID, err := s.InsertAgentReflex(ctx, AgentReflex{
+	newID, err := migrationInsertHistoricalReflex(ctx, s, AgentReflex{
 		Name:        "post-145-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,
@@ -197,7 +194,7 @@ func TestMigrate145PreservesExistingRowsAcrossRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertAgentReflex(resume_loop_run) after migration 145: %v", err)
 	}
-	if _, err := s.GetAgentReflex(ctx, newID); err != nil {
+	if _, err := migrationHistoricalReflex(ctx, s, newID); err != nil {
 		t.Fatalf("GetAgentReflex(post-145 probe row): %v", err)
 	}
 }
@@ -277,7 +274,7 @@ func TestRealBackupAgentReflexesSurviveResumeLoopRunMigration(t *testing.T) {
 
 	// And the new capability actually works against this real, migrated
 	// copy.
-	if _, err := rs.InsertAgentReflex(ctx, AgentReflex{
+	if _, err := migrationInsertHistoricalReflex(ctx, rs, AgentReflex{
 		Name:        "post-145-real-backup-probe",
 		ClassTag:    "process",
 		TriggerKind: ReflexTriggerEvent,

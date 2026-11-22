@@ -87,8 +87,16 @@ type CognitiveViews struct {
 }
 type CreateDefinedView struct {
 	DefinitionRef              DefinitionRef
+	HostSettings               *HostSettingsRef
 	ModelSelection             *ModelSelection
 	ProjectID, Title, Metadata string
+}
+
+// HostSettingsRef selects an already validated host document at one revision.
+// It is neither an actor binding nor authority carried by request metadata.
+type HostSettingsRef struct {
+	ID       string `json:"id"`
+	Revision string `json:"revision"`
 }
 
 func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*store.Session, error) {
@@ -102,9 +110,30 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 	if verified.Ref != req.DefinitionRef || verified.Definition == nil || verified.Definition.DefinitionID != req.DefinitionRef.DefinitionID || verified.Definition.Revision != req.DefinitionRef.Revision {
 		return nil, ErrDefinitionDigestMismatch
 	}
-	cfg, err := MapChatDefinition(verified)
+	cfg, err := mapChatDefinition(ctx, verified)
 	if err != nil {
 		return nil, err
+	}
+	if req.HostSettings != nil {
+		h, hostErr := v.Store.GetAgentHostSettings(ctx, req.HostSettings.ID)
+		if hostErr != nil {
+			return nil, hostErr
+		}
+		if req.HostSettings.Revision == "" || h.Revision != req.HostSettings.Revision {
+			return nil, store.ErrAgentHostRevisionConflict
+		}
+		if DefinitionRefFromMesh(h.DefinitionRef) != req.DefinitionRef {
+			return nil, ErrDefinitionDigestMismatch
+		}
+		if !h.Enabled || h.Settings.Runtime != "api" {
+			return nil, ErrUnsupportedDefinition
+		}
+		selected := ModelSelection{Provider: h.Settings.Provider, Model: h.Settings.Model}
+		if req.ModelSelection != nil && *req.ModelSelection != selected {
+			return nil, ErrUnsupportedModel
+		}
+		req.ModelSelection = &selected
+		cfg.HostSettings = &h.Settings
 	}
 	cfg.Model, err = v.Models.AuthorizeModel(ctx, req.DefinitionRef, req.ModelSelection)
 	if err != nil {
@@ -119,9 +148,15 @@ func (v *CognitiveViews) Create(ctx context.Context, req CreateDefinedView) (*st
 		return nil, err
 	}
 	view := &store.Session{ProjectID: req.ProjectID, Title: req.Title, Metadata: req.Metadata, Provider: cfg.Model.Provider, Model: cfg.Model.Model}
-	// The normal native host profile supplies tool grants. No definition or
-	// request selects, creates or modifies an operator-managed profile.
-	if err = v.Store.CreateDefinedCognitiveSession(ctx, view, "", store.CognitiveViewRecord{DefinitionRefJSON: string(refJSON), ChatConfigJSON: string(cfgJSON)}); err != nil {
+	// This local view is not a fabric enrollment. It borrows no profile grants.
+	// Definition requests and caller metadata cannot create actor authority.
+	record := store.CognitiveViewRecord{DefinitionRefJSON: string(refJSON), ChatConfigJSON: string(cfgJSON)}
+	if req.HostSettings != nil {
+		err = v.Store.CreateDefinedSessionWithHost(ctx, view, record, store.HostSettingsAdmission{ID: req.HostSettings.ID, Revision: req.HostSettings.Revision})
+	} else {
+		err = v.Store.CreateDefinedCognitiveSession(ctx, view, "", record)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return view, nil

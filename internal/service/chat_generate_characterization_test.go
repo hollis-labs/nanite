@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"testing"
 
 	sdkplugin "github.com/hollis-labs/libs/plugin-mcp/plugin-sdk"
+	"github.com/hollis-labs/nanite/internal/agentpolicy"
 	"github.com/hollis-labs/nanite/internal/chat"
 	"github.com/hollis-labs/nanite/internal/dispatcher"
 	pluginpkg "github.com/hollis-labs/nanite/internal/plugin"
@@ -258,6 +260,14 @@ func (c *characterizationContext) mutateLast(fn func(*SlotAssemblyResult)) {
 }
 
 func newCharacterizationFixture(t *testing.T, steps []characterizationProviderStep, toolNames ...string) *characterizationFixture {
+	return newCharacterizationFixtureWithPrompt(t, steps, "You are a private already-authorized test actor.", toolNames...)
+}
+
+func newCharacterizationFixtureWithPrompt(t *testing.T, steps []characterizationProviderStep, prompt string, toolNames ...string) *characterizationFixture {
+	return newCharacterizationFixtureWithPolicy(t, steps, prompt, nil, toolNames...)
+}
+
+func newCharacterizationFixtureWithPolicy(t *testing.T, steps []characterizationProviderStep, prompt string, policy *agentpolicy.NativePolicy, toolNames ...string) *characterizationFixture {
 	t.Helper()
 	ctx := context.Background()
 	st, err := storetest.New(t, ctx, filepath.Join(t.TempDir(), "characterization.db"))
@@ -286,10 +296,20 @@ func newCharacterizationFixture(t *testing.T, steps []characterizationProviderSt
 
 	agent := &store.AgentProfile{
 		ID: "agent-characterization", Name: "Characterization Agent", Slug: "characterization-agent",
-		Status: "active", Class: "advisor", DefaultProvider: "characterization", Tags: "[]", Tools: "[]",
+		DefinitionPolicy: policy, SystemPrompt: prompt, Status: "active", Class: "advisor", DefaultProvider: "characterization", Tags: "[]", Tools: "[]",
+	}
+	if err := persistTestActor(ctx, st, agent); err != nil {
+		t.Fatal(err)
 	}
 	definitions := make([]llmtypes.ToolDefinition, 0, len(toolNames))
 	for _, name := range toolNames {
+		id, catalogErr := st.UpsertKnownTool(ctx, name, "private-fixture", "available", "")
+		if catalogErr != nil {
+			t.Fatal(catalogErr)
+		}
+		if grantErr := grantTestActorTool(ctx, st, agent.ID, id, "private-prior-issued"); grantErr != nil {
+			t.Fatal(grantErr)
+		}
 		definitions = append(definitions, llmtypes.ToolDefinition{Name: name, Description: name + " fixture tool"})
 	}
 	toolSvc := &characterizationTools{definitions: definitions}
@@ -310,6 +330,36 @@ func newCharacterizationFixture(t *testing.T, steps []characterizationProviderSt
 	}
 	svc.dispatcher = dispatcher.New(newChatRunnerAdapter(svc))
 	return &characterizationFixture{svc: svc, st: st, provider: prov, tools: toolSvc, context: contextSvc, session: sessionID}
+}
+
+// bindTestDefinedConfiguration installs and maps an actual immutable pin for
+// an existing private fixture view. It creates no actor, authority or fallback.
+func bindTestDefinedConfiguration(t *testing.T, f *characterizationFixture) {
+	t.Helper()
+	ctx := t.Context()
+	if err := installEmbeddedChatDefinition(ctx, f.st); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := EmbeddedDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := MapChatDefinition(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Model = ModelSelection{"characterization", "characterization-model"}
+	pinJSON, err := json.Marshal(verified.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.st.DB.ExecContext(ctx, `INSERT INTO cognitive_views(session_view_id,definition_ref_json,chat_config_json) VALUES(?,?,?)`, f.session, string(pinJSON), string(cfgJSON)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func forceCompactableWindow(result *SlotAssemblyResult) {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -16,53 +17,25 @@ import (
 	"github.com/hollis-labs/nanite/internal/workflowhost"
 )
 
-// TestA2AGateIntegration verifies the full gate ↔ input-required flow:
-//  1. Workflow with a gate reaches waiting_on_gate status
-//  2. Task state derives to input-required
-//  3. Providing input resolves the gate
-//  4. Workflow resumes and completes
-//
-// CW-20260814-0017: A2A gate ↔ input-required Task state mapping.
-func TestA2AGateIntegration(t *testing.T) {
-	// This is a smoke test skeleton. Full implementation requires:
-	//  - A test store with workflow_runs + workflow_run_steps
-	//  - A fake StepExecutor that simulates gate pausing
-	//  - TaskManager wired up with a WorkflowLauncher
-	//
-	// The acceptance criteria verification will be done manually or via
-	// integration tests that can run the full stack.
-
-	t.Skip("Integration test - requires full workflow stack wiring")
-
-	// Placeholder structure for what the test would do:
-	//
-	// 1. Create a workflow definition with a gate step
-	// wf := agentworkflow.WorkflowDefinition{
-	//     Name: "test-gate-flow",
-	//     Steps: []agentworkflow.StepDefinition{
-	//         {ID: "step1", Kind: agentworkflow.StepKindTool},
-	//         {ID: "gate1", Kind: agentworkflow.StepKindGate, DependsOn: []string{"step1"}},
-	//         {ID: "step2", Kind: agentworkflow.StepKindTool, DependsOn: []string{"gate1"}},
-	//     },
-	// }
-	//
-	// 2. Submit a task that launches this workflow
-	// taskMgr := NewTaskManager(...)
-	// result := taskMgr.SubmitTask(ctx, TaskSubmitRequest{Target: "test-gate-flow", ...})
-	//
-	// 3. Poll until task reaches input-required
-	// task := taskMgr.GetTask(ctx, result.TaskID)
-	// if task.State != a2a.TaskStateInputRequired { t.Fatal(...) }
-	//
-	// 4. Provide input to resolve the gate
-	// err := taskMgr.ProvideTaskInput(ctx, result.TaskID, "approved")
-	//
-	// 5. Verify workflow resumes and completes
-	// task = taskMgr.GetTask(ctx, result.TaskID)
-	// if task.State != a2a.TaskStateCompleted { t.Fatal(...) }
+func TestA2AGateIntegrationRequiresVerifiedAuthority(t *testing.T) {
+	st := newTestStore(t)
+	defer st.Close(context.Background())
+	before := a2aRefusalState(t, st)
+	task := &store.A2ATask{ID: "claimed-gate-task", TargetKind: "workflow", TargetRef: "claimed-workflow", State: a2a.TaskStateWorking}
+	if err := st.CreateA2ATask(t.Context(), task); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("task create = %v", err)
+	}
+	tm := &TaskManager{store: st, logger: testLogger(t)}
+	if result, err := tm.GetTask(t.Context(), task.ID); result != nil || !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("GetTask = %+v %v", result, err)
+	}
+	if err := tm.ProvideTaskInput(t.Context(), task.ID, "claimed approval"); !errors.Is(err, store.ErrVerifiedActorRequired) {
+		t.Fatalf("ProvideTaskInput = %v", err)
+	}
+	assertA2ARefusalState(t, st, before)
 }
 
-func TestA2AHadronGateInputResumesExactRunAndPreservesIdentity(t *testing.T) {
+func TestA2AHadronGateInputRefusesWithoutTaskAuthority(t *testing.T) {
 	st := newTestStore(t)
 	state, err := workflowhost.NewWorkflowStateStore(st)
 	if err != nil {
@@ -95,46 +68,24 @@ func TestA2AHadronGateInputResumesExactRunAndPreservesIdentity(t *testing.T) {
 	registry := agentworkflow.NewRegistry(map[string]agentworkflow.WorkflowDefinition{definition.Name: definition})
 	launcher := NewWorkflowLauncher(registry, engine, executor, nil)
 	tm := &TaskManager{store: st, launcher: launcher, registry: registry, logger: testLogger(t), pushNotifier: NewA2APushNotifier(st, testLogger(t))}
-	if createErr := st.CreateA2ATask(t.Context(), &store.A2ATask{
-		ID: taskID, TargetKind: "workflow", TargetRef: definition.Name,
-		WorkflowRunID: sql.NullString{String: waiting.RunID, Valid: true}, State: a2a.TaskStateWorking,
-	}); createErr != nil {
-		t.Fatal(createErr)
+	// Retain only historical correlation in this private DB; it is not an
+	// authenticated responder identity and cannot authorize a gate resume.
+	historicalA2ATask(t, st, &store.A2ATask{ID: taskID, TargetKind: "workflow", TargetRef: definition.Name, WorkflowRunID: sql.NullString{String: waiting.RunID, Valid: true}, State: a2a.TaskStateWorking})
+	before := a2aRefusalState(t, st)
+	if task, getErr := tm.GetTask(t.Context(), taskID); task != nil || !errors.Is(getErr, store.ErrVerifiedActorRequired) {
+		t.Fatalf("GetTask = %+v %v", task, getErr)
 	}
+	if inputErr := tm.ProvideTaskInput(t.Context(), taskID, "claimed approval"); !errors.Is(inputErr, store.ErrVerifiedActorRequired) {
+		t.Fatalf("ProvideTaskInput = %v", inputErr)
+	}
+	if task, cancelErr := tm.CancelTask(t.Context(), taskID); task != nil || !errors.Is(cancelErr, store.ErrVerifiedActorRequired) {
+		t.Fatalf("CancelTask = %+v %v", task, cancelErr)
+	}
+	if len(executor.tools) != 0 {
+		t.Fatalf("held input executed tools: %+v", executor.tools)
+	}
+	assertA2ARefusalState(t, st, before)
 
-	task, err := tm.GetTask(t.Context(), taskID)
-	if err != nil || task.State != a2a.TaskStateInputRequired {
-		t.Fatalf("waiting task = %+v, %v", task, err)
-	}
-	if provideErr := tm.ProvideTaskInput(t.Context(), taskID, "approved"); provideErr != nil {
-		t.Fatalf("ProvideTaskInput: %v", provideErr)
-	}
-	task, err = tm.GetTask(t.Context(), taskID)
-	if err != nil || task.State != a2a.TaskStateCompleted {
-		t.Fatalf("completed task = %+v, %v", task, err)
-	}
-	run, err := st.GetWorkflowRun(t.Context(), waiting.RunID)
-	if err != nil || run == nil || run.DefinitionName != definition.Name || run.Status != "completed" {
-		t.Fatalf("product run = %+v, %v", run, err)
-	}
-	steps, err := st.ListWorkflowRunSteps(t.Context(), waiting.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := make(map[string]*store.WorkflowRunStepRow, len(steps))
-	for _, step := range steps {
-		byID[step.StepID] = step
-	}
-	if gate := byID["approve release"]; gate == nil || gate.Status != "completed" || gate.GateInput != "approved" {
-		t.Fatalf("gate projection = %+v", gate)
-	}
-	if len(executor.tools) != 1 {
-		t.Fatalf("tool calls = %+v", executor.tools)
-	}
-	tool := executor.tools[0]
-	if tool.WorkflowRunID != waiting.RunID || tool.SessionID != "a2a-workflow-session" || tool.AgentID != "release-agent" || tool.Args["approval"] != "approved" {
-		t.Fatalf("tool identity = %+v", tool)
-	}
 }
 
 type a2aHadronStepExecutor struct {
@@ -172,18 +123,7 @@ func TestDeriveFromWorkflowRun_WaitingOnGate(t *testing.T) {
 		t.Fatalf("CreateWorkflowRun: %v", err)
 	}
 
-	// Create a task pointing to this run.
-	task := &store.A2ATask{
-		ID:            "task-gate-test",
-		TargetKind:    "workflow",
-		TargetRef:     "test-workflow",
-		WorkflowRunID: sql.NullString{String: runID, Valid: true},
-		State:         a2a.TaskStateWorking, // Cached state, will be re-derived
-	}
-	if err := st.CreateA2ATask(context.Background(), task); err != nil {
-		t.Fatalf("CreateA2ATask: %v", err)
-	}
-
+	// Workflow-state classification needs no issued A2A task or actor.
 	// Create a TaskManager and derive state.
 	tm := &TaskManager{
 		store:    st,

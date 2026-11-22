@@ -184,7 +184,7 @@ func TestMigrate124BackfillsProvenanceTierFromCreatedBy(t *testing.T) {
 		"rfx-124-probe-approved": "operator",
 	}
 	for id, want := range wantTier {
-		row, err := s.GetAgentReflex(ctx, id)
+		row, err := migrationHistoricalReflex(ctx, s, id)
 		if err != nil {
 			t.Fatalf("GetAgentReflex(%s): %v", id, err)
 		}

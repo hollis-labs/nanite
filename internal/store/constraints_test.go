@@ -7,32 +7,31 @@ import (
 )
 
 func TestAgentConstraintClassification(t *testing.T) {
-	st := newTestStore(t)
-	p := makeTestAgent(t, st, "constraints-agent")
-	invalid := "missing-role"
-	fk := st.UpdateAgentComposition(t.Context(), p.ID, &invalid, nil, nil)
+	s := newTestStore(t)
+	h := makeTestHost(t, s, "constraint-host")
+	_, fk := s.DB.ExecContext(t.Context(), `INSERT INTO agent_actor_bindings(actor_uri,host_settings_id,binding_receipt) VALUES('msg://agent/private-fixture/missing','missing','fixture')`)
 	if fk == nil || !IsForeignKeyViolation(fmt.Errorf("wrapped: %w", fk)) || IsUniqueConstraint(fk) {
-		t.Fatalf("foreign key classification: %v", fk)
+		t.Fatal("FK classification", fk)
 	}
-	duplicate := st.CreateAgent(t.Context(), &AgentProfile{Name: "Duplicate", Slug: p.Slug, SystemPrompt: "fixture"})
+	_, duplicate := s.DB.ExecContext(t.Context(), `INSERT INTO agent_host_settings SELECT * FROM agent_host_settings WHERE id=?`, h.ID)
 	if duplicate == nil || !IsUniqueConstraint(fmt.Errorf("wrapped: %w", duplicate)) || IsForeignKeyViolation(duplicate) {
-		t.Fatalf("unique classification: %v", duplicate)
+		t.Fatal("unique classification", duplicate)
 	}
-	if _, err := st.DB.ExecContext(t.Context(), `CREATE TRIGGER abort_agent_assignment BEFORE UPDATE OF role_id ON agent_profiles BEGIN SELECT RAISE(ABORT,'private infrastructure failure'); END`); err != nil {
+	if _, err := s.DB.ExecContext(t.Context(), `CREATE TRIGGER refuse_host_update BEFORE UPDATE ON agent_host_settings BEGIN SELECT RAISE(ABORT,'private infrastructure failure');END`); err != nil {
 		t.Fatal(err)
 	}
-	empty := ""
-	abort := st.UpdateAgentComposition(t.Context(), p.ID, &empty, nil, nil)
+	h.Title = "Blocked"
+	_, abort := s.UpdateAgentHostSettings(t.Context(), h, h.Revision)
 	if abort == nil || IsForeignKeyViolation(abort) || IsUniqueConstraint(abort) {
-		t.Fatalf("abort classification: %v", abort)
+		t.Fatal("abort classification", abort)
 	}
-	if err := st.DB.Close(); err != nil {
+	if err := s.DB.Close(); err != nil {
 		t.Fatal(err)
 	}
-	closed := st.UpdateAgentComposition(t.Context(), p.ID, &empty, nil, nil)
+	_, closed := s.GetAgentHostSettings(t.Context(), h.ID)
 	for _, err := range []error{nil, errors.New("SQLITE_CONSTRAINT_FOREIGNKEY is just text"), closed} {
 		if IsForeignKeyViolation(err) || IsUniqueConstraint(err) {
-			t.Fatalf("classified an untyped/closed error as a constraint: %v", err)
+			t.Fatal(err)
 		}
 	}
 }

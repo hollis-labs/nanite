@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/hollis-labs/nanite/internal/service"
 	"github.com/hollis-labs/nanite/internal/store"
 )
 
@@ -31,7 +32,29 @@ func profileRetirementErrorStatus(err error) int {
 }
 
 func (a *API) handleProfileRetirementExport(w http.ResponseWriter, r *http.Request) {
-	receipt, err := a.Services.AgentConfig.ExportEditableProfile(r.Context(), r.PathValue("id"))
+	var request struct {
+		IncludeProtected bool `json:"include_protected"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			http.Error(w, "invalid retirement export request", http.StatusBadRequest)
+			return
+		}
+		var extra any
+		if decoder.Decode(&extra) != io.EOF {
+			http.Error(w, "invalid retirement export request", http.StatusBadRequest)
+			return
+		}
+	}
+	var receipt service.ProfileRetirementReceipt
+	var err error
+	if request.IncludeProtected {
+		receipt, err = a.Services.AgentConfig.ExportProtectedProfile(r.Context(), r.PathValue("id"))
+	} else {
+		receipt, err = a.Services.AgentConfig.ExportEditableProfile(r.Context(), r.PathValue("id"))
+	}
 	if err != nil {
 		http.Error(w, "profile export refused", profileRetirementErrorStatus(err))
 		return
@@ -43,8 +66,11 @@ func (a *API) handleProfileRetirementExport(w http.ResponseWriter, r *http.Reque
 
 func (a *API) handleProfileRetire(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		ExportID string `json:"export_id"`
-		Digest   string `json:"digest"`
+		ExportID         string `json:"export_id"`
+		Digest           string `json:"digest"`
+		IncludeProtected bool   `json:"include_protected"`
+		Actor            string `json:"actor"`
+		Reason           string `json:"reason"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	decoder.DisallowUnknownFields()
@@ -57,7 +83,13 @@ func (a *API) handleProfileRetire(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid retirement request", http.StatusBadRequest)
 		return
 	}
-	receipt, err := a.Services.AgentConfig.RetireEditableProfile(r.Context(), r.PathValue("id"), request.ExportID, request.Digest)
+	var receipt service.ProfileRetirementReceipt
+	var err error
+	if request.IncludeProtected {
+		receipt, err = a.Services.AgentConfig.RetireProtectedProfile(r.Context(), r.PathValue("id"), request.ExportID, request.Digest, service.ProtectedProfileRetirementRequest{Actor: request.Actor, Reason: request.Reason})
+	} else {
+		receipt, err = a.Services.AgentConfig.RetireEditableProfile(r.Context(), r.PathValue("id"), request.ExportID, request.Digest)
+	}
 	if err != nil && !receipt.Retired {
 		http.Error(w, "profile retirement refused", profileRetirementErrorStatus(err))
 		return

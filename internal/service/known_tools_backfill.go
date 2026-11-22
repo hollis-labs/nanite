@@ -21,7 +21,6 @@ package service
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/hollis-labs/nanite/internal/store"
 	"github.com/hollis-labs/nanite/internal/toolclient"
@@ -35,57 +34,10 @@ const legacyBackfillProvenance = "legacy_backfill"
 // this boot (the candidate matching below is against the live catalog,
 // not a blind replay of legacy JSON strings) and after AutoIngestAgents
 // (so brand-new agents ingested this same boot are covered too).
+// BackfillAgentToolsFromLegacyColumns is retained only as a retired entrypoint.
+// Historical selection columns never issue or replay fresh actor grants.
 func BackfillAgentToolsFromLegacyColumns(ctx context.Context, st *store.Store) (int, error) {
-	available, err := st.ListAvailableKnownTools(ctx)
-	if err != nil {
-		return 0, err
-	}
-	idByName := make(map[string]string, len(available))
-	allNames := make([]string, 0, len(available))
-	for _, kt := range available {
-		idByName[kt.Name] = kt.ID
-		allNames = append(allNames, kt.Name)
-	}
-
-	agents, err := st.ListAgents(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	total := 0
-	for _, agent := range agents {
-		done, err := st.HasLegacyToolsBackfillRun(ctx, agent.ID)
-		if err != nil {
-			slog.Warn("service: backfill agent_tools — check guard", "agent", agent.ID, "err", err)
-			continue
-		}
-		if done {
-			continue
-		}
-
-		names := legacyGrantCandidates(agent, allNames)
-		for _, name := range names {
-			toolID, ok := idByName[name]
-			if !ok {
-				continue
-			}
-			if err := st.GrantAgentTool(ctx, agent.ID, toolID, legacyBackfillProvenance); err != nil {
-				slog.Warn("service: backfill agent_tools — grant", "agent", agent.ID, "tool", name, "err", err)
-				continue
-			}
-			total++
-		}
-
-		// Mark the agent as considered regardless of how many grants
-		// resulted (including zero, when the catalog is empty or no legacy
-		// pattern matches an available tool) -- see
-		// HasLegacyToolsBackfillRun's doc comment for why this must be an
-		// independent marker, not derived from the grants themselves.
-		if err := st.MarkLegacyToolsBackfillRun(ctx, agent.ID); err != nil {
-			slog.Warn("service: backfill agent_tools — mark done", "agent", agent.ID, "err", err)
-		}
-	}
-	return total, nil
+	return 0, store.ErrVerifiedActorRequired
 }
 
 // legacyGrantCandidates computes, for one agent, the set of currently

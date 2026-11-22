@@ -59,11 +59,11 @@ func TestMCPDiscoverySync_CreateRefreshUpdateAndGrantWithoutRestart(t *testing.T
 		t.Fatalf("create did not publish grantable tool: %+v %v", get, err)
 	}
 	row := &store.AgentProfile{Name: "Reader", Slug: "reader"}
-	if operationErr := st.CreateAgent(ctx, row); operationErr != nil {
+	if operationErr := persistTestActor(ctx, st, row); operationErr != nil {
 		t.Fatal(operationErr)
 	}
 	capabilities := NewAgentCapabilitiesService(st)
-	if operationErr := capabilities.GrantTool(ctx, row.ID, get.ID, "explicit"); operationErr != nil {
+	if operationErr := grantTestActorTool(ctx, st, row.ID, get.ID, "explicit"); operationErr != nil {
 		t.Fatal(operationErr)
 	}
 	change("torque_task_get", "torque_task_list", "tether_gateway_status")
@@ -85,7 +85,7 @@ func TestMCPDiscoverySync_CreateRefreshUpdateAndGrantWithoutRestart(t *testing.T
 			t.Fatalf("upstream exposure became model grant: %s", name)
 		}
 	}
-	if operationErr := capabilities.GrantTool(ctx, row.ID, list.ID, "explicit"); operationErr != nil {
+	if operationErr := grantTestActorTool(ctx, st, row.ID, list.ID, "explicit"); operationErr != nil {
 		t.Fatal(operationErr)
 	}
 	if operationErr := capabilities.RevokeTool(ctx, row.ID, get.ID); operationErr != nil {
@@ -196,10 +196,10 @@ func TestMCPDiscoverySync_CollisionUsesRegistryNameForHostGrant(t *testing.T) {
 		t.Fatalf("opt-in tool not grantable: %+v %v", known, err)
 	}
 	row := &store.AgentProfile{Name: "Scoped", Slug: "scoped"}
-	if operationErr := st.CreateAgent(ctx, row); operationErr != nil {
+	if operationErr := persistTestActor(ctx, st, row); operationErr != nil {
 		t.Fatal(operationErr)
 	}
-	if operationErr := st.GrantAgentTool(ctx, row.ID, known.ID, "explicit"); operationErr != nil {
+	if operationErr := grantTestActorTool(ctx, st, row.ID, known.ID, "explicit"); operationErr != nil {
 		t.Fatal(operationErr)
 	}
 	filtered := filterToolsByAgentTools(ctx, st, row.ID, client.GetAllToolsUnfiltered())

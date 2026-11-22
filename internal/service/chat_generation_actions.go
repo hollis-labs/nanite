@@ -1847,7 +1847,11 @@ func (s *chatServiceImpl) finalizeRun(
 	if streamUsage != nil && *streamUsage == (chat.Usage{}) {
 		streamUsage = nil
 	}
-	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: streamUsage, AgentID: agent.ID, Envelope: envelopeJSON}
+	end := &chat.StreamTermination{Reason: "completed", Outcome: "success"}
+	if interrupted {
+		end.Reason, end.Outcome = "canceled", "canceled"
+	}
+	ch <- chat.StreamEvent{Type: "stream_end", MessageID: assistantMsgID, Usage: streamUsage, AgentID: agent.ID, Envelope: envelopeJSON, Termination: end}
 
 	// Post-response events.
 	if s.events != nil && streamUsage != nil && (streamUsage.InputTokens > 0 || streamUsage.OutputTokens > 0) {

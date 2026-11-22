@@ -379,12 +379,12 @@ func (e *LoopEngine) Resume(ctx context.Context, loopRunID string) (LoopResult, 
 	if err != nil {
 		return LoopResult{}, fmt.Errorf("loop: resume %s: %w", loopRunID, err)
 	}
-	if _, err := e.store.GetAgentForActor(ctx, cfg.AgentProfileID); err != nil {
-		return LoopResult{}, err
+	if _, operationErr := e.store.GetAgentForActor(ctx, cfg.AgentProfileID); operationErr != nil {
+		return LoopResult{}, operationErr
 	}
 	if lr.Status == store.LoopRunStatusWaitingOnEscalation {
-		if err := e.launcher.CheckInstanceCreation(ctx, cfg.AgentProfileID); err != nil {
-			return LoopResult{}, err
+		if operationErr := e.launcher.CheckInstanceCreation(ctx, cfg.AgentProfileID); operationErr != nil {
+			return LoopResult{}, operationErr
 		}
 	}
 	history, err := e.store.ListLoopRunIterations(ctx, lr.ID)

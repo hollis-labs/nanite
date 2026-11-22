@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/hollis-labs/nanite/internal/modelsdevtest"
+"github.com/hollis-labs/nanite/internal/service"
+"github.com/hollis-labs/nanite/internal/store"
 	naniteotel "github.com/hollis-labs/nanite/internal/otel"
 	"github.com/hollis-labs/nanite/internal/slogx"
 )
@@ -93,4 +96,10 @@ func TestModelCatalogOptionsFromEnv(t *testing.T) {
 	if opts := modelCatalogOptionsFromEnv(); len(opts) != 1 {
 		t.Fatalf("set %s: %d options, want WithURL", modelsDevURLEnv, len(opts))
 	}
+}
+
+func TestTeamStartupUnavailableDoesNotHideRecoveryFailures(t *testing.T) {
+ if err := teamStartupRecoveryError(service.TeamRunReconcileReport{Failures: []error{store.ErrVerifiedActorRequired}}); err != nil { t.Fatal(err) }
+ failed := errors.New("private persistence failure")
+ if err := teamStartupRecoveryError(service.TeamRunReconcileReport{Failures: []error{store.ErrVerifiedActorRequired, failed}}); !errors.Is(err, failed) { t.Fatalf("recovery error=%v",err) }
 }

@@ -100,8 +100,8 @@ func TestRetiredDurableAgentFileAuthorityPreservesDatabaseState(t *testing.T) {
 	if err != nil || len(beforeBoot.Instances) != 1 || len(beforeBoot.Schedules) != 1 {
 		t.Fatalf("retained historical state: %+v %v", beforeBoot, err)
 	}
-	if _, err := reopened.GetDurableAgentInstanceBySlug(ctx, instance.Slug); !errors.Is(err, store.ErrDurableAgentInstanceNotFound) {
-		t.Fatalf("historical instance entered fresh runtime: %v", err)
+	if _, operationErr := reopened.GetDurableAgentInstanceBySlug(ctx, instance.Slug); !errors.Is(operationErr, store.ErrDurableAgentInstanceNotFound) {
+		t.Fatalf("historical instance entered fresh runtime: %v", operationErr)
 	}
 
 	container, err := NewContainer(ContainerConfig{

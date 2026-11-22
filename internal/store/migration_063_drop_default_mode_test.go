@@ -66,9 +66,9 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 	// for older versions; a buggy drop would lose rows.
 	canonical := []string{"default", "worker", "planner", "hint-selector"}
 	for _, slug := range canonical {
-		got, err := migrationHistoricalAgentBySlug(s, context.Background(), slug)
-		if err != nil {
-			t.Fatalf("post-063 GetAgentBySlug %q: %v (DROP COLUMN may have scrambled data)", slug, err)
+		got, operationErr := migrationHistoricalAgentBySlug(context.Background(), s, slug)
+		if operationErr != nil {
+			t.Fatalf("post-063 GetAgentBySlug %q: %v (DROP COLUMN may have scrambled data)", slug, operationErr)
 		}
 		if got.Source != "internal" {
 			t.Errorf("canonical slug %q: Source = %q, want 'internal' after migration 063", slug, got.Source)
@@ -89,7 +89,7 @@ func TestMigration063_DropsDefaultModeColumn(t *testing.T) {
 		Source:       "user",
 	}
 	migrationHistoricalProfile(t, s, fresh)
-	got, err := migrationHistoricalAgentBySlug(s, context.Background(), "round-trip-063")
+	got, err := migrationHistoricalAgentBySlug(context.Background(), s, "round-trip-063")
 	if err != nil {
 		t.Fatalf("GetAgentBySlug round-trip-063: %v", err)
 	}

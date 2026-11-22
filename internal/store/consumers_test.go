@@ -178,8 +178,8 @@ func TestMigrate112DownRemovesConsumersAndColumn(t *testing.T) {
 
 	a := &AgentProfile{Name: "Down Test", Slug: "down-test-consumer", SystemPrompt: "x", ConsumerID: loom.ID}
 	a.ID = "historical-down-consumer"
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO agent_profiles(id,name,slug,system_prompt,consumer_id) VALUES(?,?,?,?,?)`, a.ID, a.Name, a.Slug, a.SystemPrompt, a.ConsumerID); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
+	if _, operationErr := s.DB.ExecContext(ctx, `INSERT INTO agent_profiles(id,name,slug,system_prompt,consumer_id) VALUES(?,?,?,?,?)`, a.ID, a.Name, a.Slug, a.SystemPrompt, a.ConsumerID); operationErr != nil {
+		t.Fatalf("CreateAgent: %v", operationErr)
 	}
 
 	migrationsDir, err := fs.Sub(migrationsFS, "migrations")

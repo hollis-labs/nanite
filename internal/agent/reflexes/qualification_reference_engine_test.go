@@ -29,7 +29,7 @@ func (e *Engine) referenceEvaluateState(ctx context.Context, agentID, agentClass
 		}
 	}
 
-	reflexRows, err := e.Store.ListAgentReflexesForAgent(ctx, agentID, agentClass)
+	reflexRows, err := declaredFixture(e.Store).ListAgentReflexesForAgent(ctx, agentID, agentClass)
 	if err != nil {
 		return AppliedActions{}, fmt.Errorf("list reflexes: %w", err)
 	}
@@ -157,7 +157,7 @@ func (e *Engine) referenceEvaluateState(ctx context.Context, agentID, agentClass
 	// above, so hook/trace payloads see the same post-filter action data
 	// they did before this change) and `outcomes` (referenceResolve()'s own
 	// per-candidate detail, for AlternativesConsidered/Category).
-	referenceEmitFirings(ctx, e.Store, e.Plugins, out, outcomes, state, FiringContext{
+	referenceEmitFirings(ctx, privateFixtureTrace{e.Store}, e.Plugins, out, outcomes, state, FiringContext{
 		AgentID:    agentID,
 		AgentClass: agentClass,
 	}, e.Logger)

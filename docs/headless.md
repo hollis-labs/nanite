@@ -87,6 +87,38 @@ and reads claude's reply from the text it returns: `{"behavior":"allow"}` runs t
 original input (`updatedInput` is not applied). A refused call is listed in the turn's
 `result.permission_denials`.
 
+## Questions
+
+With `--input-format stream-json`, a question the agent asks (its `ask_user` tool, or an MCP
+server's elicitation relayed to it) goes to stdout as a control request:
+
+```json
+{"type":"control_request","request_id":"q-1","request":{"subtype":"elicitation","message":"Ready to deploy?","requested_schema":{"type":"boolean"},"question_id":"..."}}
+```
+
+Answer it on stdin with the same `request_id`:
+
+```json
+{"type":"control_response","response":{"subtype":"success","request_id":"q-1","response":{"action":"accept","content":true}}}
+```
+
+`content` must match `requested_schema`. `{"action":"decline"}` or `"cancel"`, an error response,
+an interrupt or stdin closing declines it, and the agent is told so. A question from a subtask
+carries `request.subtask` (its variant, goal and depth). Without stream-json input, questions are
+declined.
+
+## Checking it can run
+
+```sh
+nanite --version                 # vX.Y.Z (Nanite)
+nanite auth status --json        # {"loggedIn":true,"provider":"anthropic","model":"...","authMethod":"keychain://nanite/provider/anthropic",...}
+```
+
+`auth status` checks the key the chat model needs (the agent directory's provider and
+`providers.yaml` selection, else Anthropic), the way a request finds it: the gateway key
+reference, the keychain, then the environment with `NANITE_PROVIDER_KEY_ENV=1`. It never prints
+the key. With `--json` it always exits 0; without, it exits 1 when no key is found.
+
 ## Sessions
 
 `--session-id <id>` opens that conversation, creating it the first time, so the caller picks

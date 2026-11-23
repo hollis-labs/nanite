@@ -135,11 +135,15 @@ type runner struct {
 	o    Options
 	w    *writer
 
-	mu      sync.Mutex
-	current *engine.Run // the running turn, nil between turns
-	inited  bool
-	msgN    int
-	queued  atomic.Int64 // user messages waiting behind the running turn (stream-json input)
+	mu       sync.Mutex
+	current  *engine.Run                     // the running turn, nil between turns
+	stopAsk  context.CancelFunc              // ends the running turn's waits for answers
+	answers  map[string]chan json.RawMessage // control_request id -> where its answer goes
+	answerN  int
+	stdinEOF bool
+	inited   bool
+	msgN     int
+	queued   atomic.Int64 // user messages waiting behind the running turn (stream-json input)
 }
 
 // init writes system/init once (stream-json output only).
@@ -185,12 +189,14 @@ func (h *runner) turn(ctx context.Context, text string) error {
 		h.result(start, events.Result{}, err, nil)
 		return err
 	}
+	askCtx, stopAsk := context.WithCancel(ctx)
+	defer stopAsk()
 	h.mu.Lock()
-	h.current = run
+	h.current, h.stopAsk = run, stopAsk
 	h.mu.Unlock()
 	defer func() {
 		h.mu.Lock()
-		h.current = nil
+		h.current, h.stopAsk = nil, nil
 		h.mu.Unlock()
 	}()
 
@@ -248,10 +254,13 @@ func (h *runner) turn(ctx context.Context, text string) error {
 			}
 		case events.Question:
 			answer := json.RawMessage("null")
-			if h.o.Answer != nil {
-				if a := h.o.Answer(ctx, v); len(a) > 0 {
+			switch {
+			case h.o.Answer != nil:
+				if a := h.o.Answer(askCtx, v); len(a) > 0 {
 					answer = a
 				}
+			case h.o.InputFormat == StreamJSON:
+				answer = h.ask(askCtx, v)
 			}
 			_ = run.Answer(v.ID, events.Answer{Value: answer})
 		}
@@ -360,6 +369,7 @@ func (h *runner) stream(ctx context.Context, in io.Reader) error {
 		case l := <-lines:
 			if l.err != nil {
 				eof = true
+				h.closed()
 				lines = nil // nothing more will come
 				continue
 			}
@@ -380,6 +390,11 @@ func (h *runner) handle(b []byte) (string, bool) {
 		Request   struct {
 			Subtype string `json:"subtype"`
 		} `json:"request"`
+		Response struct {
+			Subtype   string          `json:"subtype"`
+			RequestID string          `json:"request_id"`
+			Response  json.RawMessage `json:"response"`
+		} `json:"response"`
 		Message struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
@@ -391,6 +406,8 @@ func (h *runner) handle(b []byte) (string, bool) {
 	case "user":
 		text := contentText(m.Message.Content)
 		return text, strings.TrimSpace(text) != ""
+	case "control_response":
+		h.answered(m.Response.RequestID, m.Response.Response, m.Response.Subtype != "success")
 	case "control_request":
 		switch m.Request.Subtype {
 		case "interrupt":
@@ -414,13 +431,96 @@ func (h *runner) control(id string, response any) {
 	h.w.json(map[string]any{"type": "control_response", "response": r})
 }
 
-// Interrupt cancels the running turn, if any.
+// Interrupt cancels the running turn, if any, and its waits for answers.
 func (h *runner) interrupt() {
 	h.mu.Lock()
-	run := h.current
+	run, stop := h.current, h.stopAsk
 	h.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 	if run != nil {
 		run.Cancel()
+	}
+}
+
+// ask puts a Question to the client (stream-json input) as an elicitation control request and
+// waits for its control_response: {"action":"accept","content":<value>} answers it; decline,
+// cancel, an error, an interrupt or stdin closing answers null (declined).
+//
+//	{"type":"control_request","request_id":"q-1","request":{"subtype":"elicitation","message":"...","requested_schema":{...}}}
+func (h *runner) ask(ctx context.Context, q events.Question) json.RawMessage {
+	h.mu.Lock()
+	if h.stdinEOF {
+		h.mu.Unlock()
+		return json.RawMessage("null")
+	}
+	if h.answers == nil {
+		h.answers = map[string]chan json.RawMessage{}
+	}
+	h.answerN++
+	id := fmt.Sprintf("q-%d", h.answerN)
+	ch := make(chan json.RawMessage, 1)
+	h.answers[id] = ch
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.answers, id)
+		h.mu.Unlock()
+	}()
+	schema := q.Schema
+	if len(schema) == 0 || !json.Valid(schema) {
+		schema = json.RawMessage(`{}`)
+	}
+	req := map[string]any{"subtype": "elicitation", "message": q.Prompt, "requested_schema": schema, "question_id": q.ID}
+	if q.Subtask != nil {
+		req["subtask"] = q.Subtask
+	}
+	h.w.json(map[string]any{"type": "control_request", "request_id": id, "request": req})
+	select {
+	case a := <-ch:
+		return a
+	case <-ctx.Done():
+		return json.RawMessage("null")
+	}
+}
+
+// answered routes a control_response to the question waiting for it.
+func (h *runner) answered(id string, response json.RawMessage, failed bool) {
+	h.mu.Lock()
+	ch := h.answers[id]
+	h.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	value := json.RawMessage("null")
+	var r struct {
+		Action  string          `json:"action"`
+		Content json.RawMessage `json:"content"`
+	}
+	if !failed && json.Unmarshal(response, &r) == nil && r.Action == "accept" && len(r.Content) > 0 {
+		value = r.Content
+	}
+	select {
+	case ch <- value:
+	default:
+	}
+}
+
+// closed notes that stdin ended: no question can be answered any more.
+func (h *runner) closed() {
+	h.mu.Lock()
+	h.stdinEOF = true
+	waiting := make([]chan json.RawMessage, 0, len(h.answers))
+	for _, ch := range h.answers {
+		waiting = append(waiting, ch)
+	}
+	h.mu.Unlock()
+	for _, ch := range waiting {
+		select {
+		case ch <- json.RawMessage("null"):
+		default:
+		}
 	}
 }
 

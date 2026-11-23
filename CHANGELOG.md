@@ -19,6 +19,12 @@
   with claude's request and reply. `--setting-sources` is accepted.
 - `agent.Options` gains `Model`, `PermissionMode`, `MCPServers`, `StrictMCP`, `Instructions`,
   `PermissionRules`, `AddDirs` and `AddSkillDirs`, applied to every turn over the authored files.
+- **Questions over stdin.** With `--input-format stream-json`, a question the agent asks
+  (`ask_user`, an MCP elicitation) is written as a `control_request` with subtype `elicitation`
+  and answered with a `control_response` (`{"action":"accept","content":...}`); anything else, an
+  interrupt or stdin closing declines it. Before, headless mode always declined.
+- `nanite auth status [--json]` says whether the chat model's provider key can be found and from
+  where, without showing it; `--version` prints the version.
 
 ## 0.16.1
 

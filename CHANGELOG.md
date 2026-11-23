@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Headless like `claude -p`.** `--output-format text|json|stream-json` writes Claude Code's
+  message shapes (`system/init` with the session id and model, `assistant` and `user` content
+  blocks, `result` with usage, stop reason and permission denials), and `--input-format
+  stream-json` keeps the process running, reading user messages and `control_request`
+  interrupts from stdin; a message sent mid-turn waits for the turn to end. SIGINT interrupts
+  the running turn. `--session-id` names the conversation (created on first use). `-p` may now
+  stand alone with the prompt as an argument, as with claude; `-p "text"` and `--output` work as
+  before. See [docs/headless.md](docs/headless.md).
+
 ## 0.16.1
 
 OpenAI adapter fixes found by replaying recorded provider exchanges, plus

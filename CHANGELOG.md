@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.17.0
+
+Nanite runs headless the way `claude -p` does, so a program that drives Claude Code can drive
+Nanite with the same flags and stream-json messages: a long-running session over stdin and
+stdout, interrupts, chosen session ids, MCP and settings flags, approvals through an MCP tool, and
+questions answered over stdin. Plus `nanite auth status` and `--version`. The Go API changes are
+additive.
 
 - **Headless like `claude -p`.** `--output-format text|json|stream-json` writes Claude Code's
   message shapes (`system/init` with the session id and model, `assistant` and `user` content
@@ -9,7 +15,8 @@
   interrupts from stdin; a message sent mid-turn waits for the turn to end. SIGINT interrupts
   the running turn. `--session-id` names the conversation (created on first use). `-p` may now
   stand alone with the prompt as an argument, as with claude; `-p "text"` and `--output` work as
-  before. See [docs/headless.md](docs/headless.md).
+  before, except that a value after `-p` that starts with `-` is now read as the next flag, not as
+  the prompt. See [docs/headless.md](docs/headless.md).
 - **claude -p's flags.** `--model`, `--permission-mode` (claude's names or Nanite's),
   `--dangerously-skip-permissions`, `--mcp-config` (files or inline JSON, repeatable; merged over
   `.mcp.json`) with `--strict-mcp-config`, `--append-system-prompt[-file]`, `--settings`
@@ -24,7 +31,11 @@
   and answered with a `control_response` (`{"action":"accept","content":...}`); anything else, an
   interrupt or stdin closing declines it. Before, headless mode always declined.
 - `nanite auth status [--json]` says whether the chat model's provider key can be found and from
-  where, without showing it; `--version` prints the version.
+  where, without reading it: a keychain entry is checked by its attributes only, so it never
+  raises a macOS keychain access prompt, and a helper reference such as `op://` is not run.
+  `--version` prints the version.
+- `ask_user` no longer needs an approval of its own: it is read-only, so accept-edits mode no
+  longer sends it to the permission prompt tool and plan mode no longer refuses it.
 
 ## 0.16.1
 

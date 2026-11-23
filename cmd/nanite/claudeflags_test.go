@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hollis-labs/nanite/internal/headless/headlesstest"
 )
@@ -180,4 +185,66 @@ func TestClaudeFlagsModelSettingsAndRules(t *testing.T) {
 	if _, err := runRoot(t, dir2, "", "--permission-prompt-tool", "mcp__exo_runner__approve", "--mcp-config", mcpFile(t, "allow", "")); err == nil {
 		t.Fatal("prompt tool in the terminal accepted")
 	}
+}
+
+func TestAskUserNeedsNoApproval(t *testing.T) {
+	// exo passes acceptEdits (and plan for read-only work); in neither may asking the person a
+	// question itself need an approval.
+	for _, mode := range []string{"acceptEdits", "plan", "default"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := scriptedAgent(t, nil, step{tool: "ask_user", args: `{"prompt":"Which branch?","schema":{"type":"string"}}`}, step{text: "ok"})
+			log := filepath.Join(t.TempDir(), "calls.log")
+			ctx := context.Background()
+			started, err := start(ctx, filepath.Join(dir, ".nanite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer started.Stop(ctx)
+			root := newRoot(started.App, dir)
+			inR, inW := io.Pipe()
+			var out syncBuffer
+			root.SetIn(inR)
+			root.SetOut(&out)
+			root.SetArgs([]string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--permission-mode", mode,
+				"--mcp-config", mcpFile(t, "deny", log), "--permission-prompt-tool", "mcp__exo_runner__approve"})
+			done := make(chan error, 1)
+			go func() { done <- root.ExecuteContext(ctx) }()
+			_, _ = io.WriteString(inW, `{"type":"user","message":{"role":"user","content":"go"}}`+"\n")
+			waitFor(t, &out, `"subtype":"elicitation"`)
+			_, _ = io.WriteString(inW, `{"type":"control_response","response":{"subtype":"success","request_id":"q-1","response":{"action":"accept","content":"main"}}}`+"\n")
+			waitFor(t, &out, `"type":"result"`)
+			_ = inW.Close()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			calls, _ := os.ReadFile(log) // #nosec G304 -- the test's own temp file
+			if strings.Contains(string(calls), "ask_user") || strings.Contains(out.String(), `"tool_name":"ask_user"`) ||
+				!strings.Contains(out.String(), `"result":"ok"`) || !strings.Contains(out.String(), `"content":"\"main\""`) {
+				t.Fatalf("prompt tool calls %q\n%s", calls, out.String())
+			}
+		})
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for one writer and one reader.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+func waitFor(t *testing.T, b *syncBuffer, want string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if strings.Contains(b.String(), want) {
+			return
+		}
+	}
+	t.Fatalf("no %s in:\n%s", want, b.String())
 }

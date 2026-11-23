@@ -20,10 +20,15 @@ start of each turn. The loader requires real directories and regular files at
 the authored paths, and limits each authored file to 1 MiB.
 
 Run `nanite` inside the agent directory, or point at it from somewhere else
-with `nanite -C ./my-agent`. With `-C`, the directory you run from is the
-workspace: file tools and Bash resolve relative paths there first, and the
-agent directory stays readable as a second root. Conversations are stored in
-the agent directory either way.
+with `nanite -C ./my-agent` (also `--agent-dir`). With `-C`, the directory you
+run from is the workspace: file tools and Bash resolve relative paths there
+first, and the agent directory stays readable as a second root. Conversations
+are stored in the agent directory either way.
+
+In a directory that is not an agent directory, without `-C`, Nanite's home
+(`~/.nanite`) is the agent instead, with per-session state and the project's
+`AGENTS.md` and settings: see [working in any directory](workspace.md). The
+rest of this page applies to the home too, since it is an agent directory.
 
 ## Portable definition
 

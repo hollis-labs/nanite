@@ -18,6 +18,7 @@ import (
 	libpolicy "github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/nanite/internal/control"
 	nanitestore "github.com/hollis-labs/nanite/internal/store"
+	"github.com/hollis-labs/nanite/internal/workspace"
 	"github.com/hollis-labs/substrate/boot"
 	"github.com/hollis-labs/substrate/module"
 	"github.com/hollis-labs/substrate/modules/policy"
@@ -65,7 +66,7 @@ func run(ctx context.Context) error {
 }
 
 func runArgs(ctx context.Context, argv []string) error {
-	dir, args, err := extractDir(argv)
+	dir, dirGiven, args, err := extractDirGiven(argv)
 	if err != nil {
 		return err
 	}
@@ -81,19 +82,37 @@ func runArgs(ctx context.Context, argv []string) error {
 	}
 	defer restore()
 	// Init and the Substrate commands do not require an agent database.
+	// auth status reads the agent's provider: in a plain directory that is the home's.
+	if len(args) > 0 && args[0] == "auth" && !dirGiven && !workspace.IsAgentDir(dir) {
+		if home, err := workspace.Home(); err == nil && workspace.IsAgentDir(home) {
+			dir = home
+		}
+	}
 	dataDir := ""
+	var ws *wsMode
 	if requiresAgent(args) {
-		if _, err := agentdir.Load(dir); err != nil {
+		// Not an agent directory and no -C: workspace mode, with the home as the agent.
+		if ws, err = detectWorkspace(dirGiven, dir, args, os.Stderr); err != nil {
+			return err
+		}
+		agentDir := dir
+		if ws != nil {
+			agentDir = ws.home
+		}
+		if _, err := agentdir.Load(agentDir); err != nil {
 			return fmt.Errorf("load agent directory: %w", err)
 		}
-		dataDir = filepath.Join(dir, ".nanite")
+		dataDir = filepath.Join(agentDir, ".nanite")
+		if ws != nil {
+			dataDir = ws.dataDir
+		}
 	}
 	started, err := start(ctx, dataDir)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = started.Stop(context.Background()) }()
-	root := newRoot(started.App, dir)
+	root := newRootFor(started.App, dir, ws)
 	root.SetArgs(args)
 	return root.ExecuteContext(ctx)
 }

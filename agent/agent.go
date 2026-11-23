@@ -77,6 +77,11 @@ type Options struct {
 	// AddDirs are more directories the file tools may use, after WorkDir and Dir: existing
 	// absolute directories (claude's --add-dir).
 	AddDirs []string
+	// HideDir keeps Dir out of the file tools' roots, so they see WorkDir and AddDirs only. The
+	// CLI sets it when Dir is the global home (~/.nanite), which holds the agent's own
+	// definition, permissions and every session's state. DataDir may then lie inside Dir; tool
+	// approvals stay in the user config directory, never there.
+	HideDir bool
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
 	// Model, when set, replaces the authored chat model (host.yaml runtime.model and the chat
@@ -372,7 +377,9 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		return nil, fmt.Errorf("load agent: %w", err)
 	}
 	approvalDir := ""
-	if opts.DataDir != "" {
+	// With HideDir the data directory may sit inside Dir (the home's per-session state), where
+	// approvals must not live; they then use the user config directory, as with no DataDir.
+	if opts.DataDir != "" && !opts.HideDir {
 		approvalDir, err = filepath.Abs(filepath.Join(opts.DataDir, "tool-approvals"))
 		if err != nil {
 			return nil, err
@@ -418,11 +425,14 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	}
 	a := &Agent{dir: def.Directory, publication: publication, lock: lock, store: db, slots: Slots{store: slots.NewStore()}}
 	roots := []string{def.Directory}
+	if opts.HideDir {
+		roots = nil
+	}
 	work := opts.WorkDir
 	if work == "" {
 		work, _ = os.Getwd()
 	}
-	if work != "" && filepath.Clean(work) != def.Directory {
+	if work != "" && (filepath.Clean(work) != def.Directory || opts.HideDir) {
 		roots = append([]string{filepath.Clean(work)}, roots...)
 	}
 	for _, d := range opts.AddDirs {

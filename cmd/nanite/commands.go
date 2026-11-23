@@ -35,7 +35,13 @@ import (
 )
 
 func extractDir(args []string) (string, []string, error) {
-	dir := "."
+	dir, _, out, err := extractDirGiven(args)
+	return dir, out, err
+}
+
+// extractDirGiven is extractDir that also says whether -C/--dir was given.
+func extractDirGiven(args []string) (string, bool, []string, error) {
+	dir, given := ".", false
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -44,17 +50,19 @@ func extractDir(args []string) (string, []string, error) {
 			break
 		}
 		switch {
-		case arg == "--dir" || arg == "-C":
+		case arg == "--dir" || arg == "-C" || arg == "--agent-dir":
 			rest := args[i+1:]
 			if len(rest) == 0 || rest[0] == "" {
-				return "", nil, fmt.Errorf("%s requires a directory", arg)
+				return "", false, nil, fmt.Errorf("%s requires a directory", arg)
 			}
-			dir = rest[0]
+			dir, given = rest[0], true
 			i++
 		case strings.HasPrefix(arg, "--dir="):
-			dir = strings.TrimPrefix(arg, "--dir=")
+			dir, given = strings.TrimPrefix(arg, "--dir="), true
+		case strings.HasPrefix(arg, "--agent-dir="):
+			dir, given = strings.TrimPrefix(arg, "--agent-dir="), true
 		case strings.HasPrefix(arg, "-C="):
-			dir = strings.TrimPrefix(arg, "-C=")
+			dir, given = strings.TrimPrefix(arg, "-C="), true
 		case arg == "--prompt" || arg == "-p":
 			// -p may stand alone, as claude's does (the prompt is then an argument or stdin).
 			out = append(out, arg)
@@ -74,7 +82,7 @@ func extractDir(args []string) (string, []string, error) {
 		}
 	}
 	abs, err := filepath.Abs(dir)
-	return abs, out, err
+	return abs, given, out, err
 }
 
 type appPDP struct{ authorizer *policy.Authorizer }
@@ -131,7 +139,14 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate,
 	return agent.Open(cmd.Context(), opts)
 }
 
-func newRoot(app *module.App, dir string) *cobra.Command {
+func newRoot(app *module.App, dir string) *cobra.Command { return newRootFor(app, dir, nil) }
+
+// newRootFor is the root command; ws is set in workspace mode (dir is then the workspace and the
+// agent directory is ws.home).
+func newRootFor(app *module.App, dir string, ws *wsMode) *cobra.Command {
+	if ws != nil {
+		dir = ws.home
+	}
 	root := cli.Root(app)
 	stopCmd := &cobra.Command{Use: "stop --all", Short: "Cancel all work in the running agent; reopen it to accept work again", Args: cobra.NoArgs}
 	stopCmd.Flags().Bool("all", false, "Stop all turns, subtasks and background jobs")
@@ -155,7 +170,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root.Flags().StringVar(&resume, "resume", "", "Resume an interrupted turn in the given conversation")
 	root.Flags().StringVar(&discard, "discard", "", "Abandon the interrupted turn in the given conversation")
 	root.Flags().StringVar(&eventPath, "events", "", "Runtime event log path (default .nanite/events.jsonl, - for stdout)")
-	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory")
+	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory (also --agent-dir). Without it, a directory that is not an agent directory is the workspace and the agent is NANITE_HOME (~/.nanite)")
 	root.Args = cobra.MaximumNArgs(1)
 	root.RunE = func(cmd *cobra.Command, args []string) (retErr error) {
 		nonInteractive := cmd.Flags().Changed("prompt") || inputFormat == headless.StreamJSON
@@ -176,6 +191,9 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			terminal = repl.NewTerminal(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
 			gate = terminal
 		}
+		if ws != nil && eventPath == "" {
+			eventPath = filepath.Join(ws.dataDir, "events.jsonl")
+		}
 		sink, closeEvents, err := cliEvents(dir, eventPath, cmd.OutOrStdout())
 		if err != nil {
 			return err
@@ -187,7 +205,11 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 				5*time.Second, hotel.WithServiceName("nanite"))()
 		}
 		var opts agent.Options
-		promptGate, closeGate, err := claude.apply(app, dir, cmd.ErrOrStderr(), &opts)
+		var base projectConfig
+		if ws != nil {
+			base = projectConfig{settings: ws.project.Settings, mcp: ws.project.MCP, skillDirs: ws.project.SkillDirs}
+		}
+		promptGate, closeGate, err := claude.apply(app, dir, cmd.ErrOrStderr(), &opts, base)
 		if err != nil {
 			return err
 		}
@@ -201,6 +223,9 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		a, err := openAgent(cmd, app, dir, gate, sink, func(o *agent.Options) {
 			o.Model, o.PermissionMode, o.MCPServers, o.StrictMCP = opts.Model, opts.PermissionMode, opts.MCPServers, opts.StrictMCP
 			o.Instructions, o.PermissionRules, o.AddDirs, o.AddSkillDirs = opts.Instructions, opts.PermissionRules, opts.AddDirs, opts.AddSkillDirs
+			if ws != nil {
+				ws.options(o)
+			}
 		})
 		if err != nil {
 			return err
@@ -220,9 +245,13 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			}
 		}
 		var conversation *agent.Conversation
-		if sessionID != "" {
+		switch {
+		case ws != nil && resume == "":
+			// A workspace session is one conversation, named by the session id.
+			conversation, err = a.EnsureConversation(cmd.Context(), ws.session)
+		case sessionID != "":
 			conversation, err = a.EnsureConversation(cmd.Context(), sessionID)
-		} else {
+		default:
 			conversation, err = selectConversation(cmd.Context(), a, resume, latest)
 		}
 		if err != nil {

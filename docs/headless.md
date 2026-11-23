@@ -1,7 +1,9 @@
 # Running Nanite headless
 
 A program can drive Nanite the way it drives `claude -p`: the same flags, the same stream-json
-messages in and out. exo runs Nanite like this, with the adapter it uses for Claude Code.
+messages in and out. exo runs Nanite like this, with the adapter it uses for Claude Code. Run it
+in the workspace with no agent directory, as with claude: Nanite's home is the agent, and
+`--session-id` names the session ([working in any directory](workspace.md)).
 
 ## One prompt
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/hollis-labs/libs/core/panics"
@@ -117,7 +118,11 @@ func hasHelpFlag(args []string) bool {
 		switch args[i] {
 		case "--":
 			return false
-		case "-p", "--prompt", "--output", "--resume", "--events":
+		case "-p", "--prompt":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+			}
+		case "--output", "--resume", "--events", "--session-id", "--input-format", "--output-format":
 			i++
 		case "-h", "--help":
 			return true

@@ -21,6 +21,7 @@ import (
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/internal/authored"
 	"github.com/hollis-labs/nanite/internal/definition"
+	"github.com/hollis-labs/nanite/internal/headless"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/repl"
 	"github.com/hollis-labs/nanite/internal/subagent"
@@ -44,20 +45,29 @@ func extractDir(args []string) (string, []string, error) {
 		}
 		switch {
 		case arg == "--dir" || arg == "-C":
-			i++
-			if i == len(args) || args[i] == "" {
+			rest := args[i+1:]
+			if len(rest) == 0 || rest[0] == "" {
 				return "", nil, fmt.Errorf("%s requires a directory", arg)
 			}
-			dir = args[i]
+			dir = rest[0]
+			i++
 		case strings.HasPrefix(arg, "--dir="):
 			dir = strings.TrimPrefix(arg, "--dir=")
 		case strings.HasPrefix(arg, "-C="):
 			dir = strings.TrimPrefix(arg, "-C=")
-		case arg == "--prompt" || arg == "-p" || arg == "--resume" || arg == "--output" || arg == "--events":
+		case arg == "--prompt" || arg == "-p":
+			// -p may stand alone, as claude's does (the prompt is then an argument or stdin).
 			out = append(out, arg)
-			if i+1 < len(args) {
+			if rest := args[i+1:]; len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+				out = append(out, rest[0])
 				i++
-				out = append(out, args[i])
+			}
+		case arg == "--resume" || arg == "--output" || arg == "--events" || arg == "--session-id" ||
+			arg == "--input-format" || arg == "--output-format":
+			out = append(out, arg)
+			if rest := args[i+1:]; len(rest) > 0 {
+				out = append(out, rest[0])
+				i++
 			}
 		default:
 			out = append(out, arg)
@@ -114,18 +124,34 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root.AddCommand(stopCmd, toolsCommand(dir), agentsCommand())
 	root.SilenceUsage = true
 	root.SilenceErrors = true
-	var prompt, output, resume, discard, eventPath string
-	var latest bool
-	root.Flags().StringVarP(&prompt, "prompt", "p", "", "Run one prompt")
+	var prompt, output, resume, discard, eventPath, inputFormat, outputFormat, sessionID string
+	var latest, verbose bool
+	root.Flags().StringVarP(&prompt, "prompt", "p", "", "Run without the terminal: one prompt (-p \"...\" or -p \"...\" as an argument), or turns from stdin with --input-format stream-json")
+	root.Flags().Lookup("prompt").NoOptDefVal = " "
+	root.Flags().StringVar(&inputFormat, "input-format", "", "With -p: text (the prompt) or stream-json (user messages and control requests on stdin, as claude -p reads them)")
+	root.Flags().StringVar(&outputFormat, "output-format", "", "With -p: text, json or stream-json in Claude Code's message shapes")
+	root.Flags().StringVar(&sessionID, "session-id", "", "Use this conversation id, creating the conversation if it is new")
+	root.Flags().BoolVar(&verbose, "verbose", false, "Accepted for compatibility with claude -p (stream-json output is always complete)")
 	root.Flags().StringVar(&output, "output", "text", "Output format for -p: text, json or stream-json")
 	root.Flags().BoolVar(&latest, "continue", false, "Continue the latest conversation")
 	root.Flags().StringVar(&resume, "resume", "", "Resume an interrupted turn in the given conversation")
 	root.Flags().StringVar(&discard, "discard", "", "Abandon the interrupted turn in the given conversation")
 	root.Flags().StringVar(&eventPath, "events", "", "Runtime event log path (default .nanite/events.jsonl, - for stdout)")
 	root.PersistentFlags().StringP("dir", "C", dir, "Agent directory")
-	root.Args = cobra.NoArgs
-	root.RunE = func(cmd *cobra.Command, _ []string) (retErr error) {
-		nonInteractive := cmd.Flags().Changed("prompt")
+	root.Args = cobra.MaximumNArgs(1)
+	root.RunE = func(cmd *cobra.Command, args []string) (retErr error) {
+		nonInteractive := cmd.Flags().Changed("prompt") || inputFormat == headless.StreamJSON
+		prompt = strings.TrimSpace(prompt)
+		if len(args) == 1 {
+			if !nonInteractive || prompt != "" {
+				return fmt.Errorf("unexpected argument %q (the prompt goes after -p)", args[0])
+			}
+			prompt = args[0]
+		}
+		claudeStyle := inputFormat != "" || outputFormat != ""
+		if sessionID != "" && (resume != "" || latest) {
+			return errors.New("--session-id cannot be combined with --resume or --continue")
+		}
 		var gate agent.Gate
 		var terminal repl.Terminal
 		if !nonInteractive {
@@ -160,7 +186,12 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 				return err
 			}
 		}
-		conversation, err := selectConversation(cmd.Context(), a, resume, latest)
+		var conversation *agent.Conversation
+		if sessionID != "" {
+			conversation, err = a.EnsureConversation(cmd.Context(), sessionID)
+		} else {
+			conversation, err = selectConversation(cmd.Context(), a, resume, latest)
+		}
 		if err != nil {
 			return err
 		}
@@ -212,7 +243,15 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			}
 		}
 
+		if nonInteractive && claudeStyle {
+			return runHeadless(cmd, a, conversation, headless.Options{
+				SessionID: conversation.ID(), Prompt: prompt, InputFormat: inputFormat, OutputFormat: outputFormat,
+			})
+		}
 		if nonInteractive {
+			if prompt == "" {
+				return errors.New("no prompt: give -p \"...\" or use --input-format stream-json")
+			}
 			return repl.One(cmd.Context(), conversation, prompt, output, cmd.OutOrStdout())
 		}
 		return terminal.Chat(cmd.Context(), func(ctx context.Context) (repl.Sender, error) {

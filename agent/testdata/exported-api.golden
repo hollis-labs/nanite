@@ -243,6 +243,7 @@ type Options struct
   field DataDir string
   field WorkDir string
   field AddDirs []string
+  field HideDir bool
   field GlobalSkillsDir string
   field Model string
   field PermissionMode string

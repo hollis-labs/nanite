@@ -6,11 +6,16 @@ Nanite runs an authored agent directory as a local CLI or an embedded Go library
 
 ```sh
 go install github.com/hollis-labs/nanite/cmd/nanite@latest
-nanite init ./my-agent
-cd ./my-agent
-nanite
+cd ~/code/my-project
+nanite                                   # works in any directory, like claude
 nanite -p 'Summarize this workspace' --output json
 ```
+
+In a directory that is not an agent directory, Nanite's home (`~/.nanite`) is the agent and the
+directory is the workspace; it reads `AGENTS.md` (or `CLAUDE.md`) walking up and the project's
+`.nanite/settings.json` and `.mcp.json`. See [working in any directory](docs/workspace.md). For a
+dedicated agent of your own, `nanite init ./my-agent` makes an agent directory; run `nanite` in it
+or with `-C ./my-agent`.
 
 Configure an Anthropic or OpenAI provider before the first model turn. See [agent directory and gateway settings](docs/agent-directory.md). See [validation](docs/validation.md) for building from a source checkout.
 
@@ -32,4 +37,4 @@ func ask(ctx context.Context, dir, prompt string) (string, error) {
 }
 ```
 
-[Running headless, like claude -p](docs/headless.md) · [Registry agent materialization](docs/registry-agents.md) · [Embedding walkthrough](docs/embedding.md) · [Architecture](docs/architecture.md) · [Validation](docs/validation.md)
+[Working in any directory](docs/workspace.md) · [Running headless, like claude -p](docs/headless.md) · [Registry agent materialization](docs/registry-agents.md) · [Embedding walkthrough](docs/embedding.md) · [Architecture](docs/architecture.md) · [Validation](docs/validation.md)

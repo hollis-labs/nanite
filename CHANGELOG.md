@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Works in any directory, like claude.** In a directory that is not an agent directory, without
+  `-C`, the directory is the workspace and Nanite's home (`$NANITE_HOME`, default `~/.nanite`) is
+  the agent; Nanite writes the home's missing `agent.md` (its built-in base) and `host.yaml` the
+  first time and says so. Instructions layer `agent.md`, `~/.nanite/AGENTS.md`, then each
+  `AGENTS.md` (else `CLAUDE.md`) from the outermost directory below `$HOME` down to the workspace,
+  then `--append-system-prompt`. Project `.nanite/settings.json`, `.mcp.json` and
+  `.nanite/skills` apply, the closest winning over `~/.nanite/settings.json`, and the flags over
+  all. Each session keeps its state in `~/.nanite/projects/<workspace>/<session id>/`; `--continue`
+  takes the workspace's latest. The file tools do not reach the home. `--agent-dir` is `-C`'s long
+  name. Agent directories and `-C` work as before. See [docs/workspace.md](docs/workspace.md).
+- `agent.Options.HideDir` keeps the agent directory out of the file tools' roots (and keeps tool
+  approvals out of a data directory inside it).
+
 ## 0.17.0
 
 Nanite runs headless the way `claude -p` does, so a program that drives Claude Code can drive

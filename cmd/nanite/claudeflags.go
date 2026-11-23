@@ -44,27 +44,44 @@ func (f *claudeFlags) register(cmd *cobra.Command) {
 	fl.StringVar(&f.settingSources, "setting-sources", "", "Accepted for compatibility; Nanite reads only --settings")
 }
 
-// apply sets the flags on the agent's options. It returns the gate to use when
+// projectConfig is what workspace mode found for the workspace (internal/workspace), least
+// specific first: settings files, MCP files and skill directories that the flags then override.
+type projectConfig struct {
+	settings, mcp, skillDirs []string
+}
+
+// apply sets the flags on the agent's options, over base. It returns the gate to use when
 // --permission-prompt-tool is set, and a func that releases it.
-func (f *claudeFlags) apply(app *module.App, dir string, stderr io.Writer, o *agent.Options) (agent.Gate, func() error, error) {
+func (f *claudeFlags) apply(app *module.App, dir string, stderr io.Writer, o *agent.Options, base projectConfig) (agent.Gate, func() error, error) {
 	noop := func() error { return nil }
+	// Settings: each file in order, then --settings; a later one's model, mode and env win, and
+	// rules and directories add up.
 	var settings headless.Settings
+	sources := append([]string(nil), base.settings...)
 	if f.settings != "" {
-		var err error
-		if settings, err = headless.ReadSettings(f.settings); err != nil {
+		sources = append(sources, f.settings)
+	}
+	for _, src := range sources {
+		one, err := headless.ReadSettings(src)
+		if err != nil {
 			return nil, noop, err
 		}
-		if len(settings.Ignored) > 0 {
-			_, _ = fmt.Fprintf(stderr, "nanite: --settings: not used: %s\n", strings.Join(settings.Ignored, ", "))
+		if len(one.Ignored) > 0 {
+			_, _ = fmt.Fprintf(stderr, "nanite: settings %s: not used: %s\n", settingsName(src), strings.Join(one.Ignored, ", "))
 		}
-		for k, v := range settings.Env {
+		for k, v := range one.Env {
 			if err := os.Setenv(k, v); err != nil {
-				return nil, noop, fmt.Errorf("--settings env %s: %w", k, err)
+				return nil, noop, fmt.Errorf("settings env %s: %w", k, err)
 			}
 		}
-		if o.PermissionRules, err = settings.Rules(); err != nil {
-			return nil, noop, fmt.Errorf("--settings: %w", err)
+		rules, err := one.Rules()
+		if err != nil {
+			return nil, noop, fmt.Errorf("settings %s: %w", settingsName(src), err)
 		}
+		o.PermissionRules = append(o.PermissionRules, rules...)
+		settings.Model = firstNonEmpty(one.Model, settings.Model)
+		settings.Permissions.DefaultMode = firstNonEmpty(one.Permissions.DefaultMode, settings.Permissions.DefaultMode)
+		settings.Permissions.AdditionalDirectories = append(settings.Permissions.AdditionalDirectories, one.Permissions.AdditionalDirectories...)
 	}
 	o.Model = firstNonEmpty(f.model, settings.Model)
 	mode := firstNonEmpty(f.permissionMode, settings.Permissions.DefaultMode)
@@ -75,7 +92,11 @@ func (f *claudeFlags) apply(app *module.App, dir string, stderr io.Writer, o *ag
 	if o.PermissionMode, err = headless.PermissionMode(mode); err != nil {
 		return nil, noop, err
 	}
-	mcp, err := headless.ReadMCPConfig(f.mcpConfig)
+	mcpFiles := f.mcpConfig
+	if !f.strictMCP {
+		mcpFiles = append(append([]string(nil), base.mcp...), f.mcpConfig...)
+	}
+	mcp, err := headless.ReadMCPConfig(mcpFiles)
 	if err != nil {
 		return nil, noop, err
 	}
@@ -97,6 +118,7 @@ func (f *claudeFlags) apply(app *module.App, dir string, stderr io.Writer, o *ag
 		}
 		o.AddDirs = append(o.AddDirs, abs)
 	}
+	o.AddSkillDirs = append(o.AddSkillDirs, base.skillDirs...)
 	for _, d := range f.pluginDirs {
 		skills := filepath.Join(d, "skills")
 		if info, err := os.Stat(skills); err == nil && info.IsDir() {
@@ -120,6 +142,14 @@ func (f *claudeFlags) apply(app *module.App, dir string, stderr io.Writer, o *ag
 		return nil, noop, err
 	}
 	return gate, gate.Close, nil
+}
+
+// settingsName is a settings source as messages name it: inline JSON or a file path.
+func settingsName(src string) string {
+	if strings.HasPrefix(strings.TrimSpace(src), "{") {
+		return "(inline)"
+	}
+	return src
 }
 
 func promptServer(tool string) string {

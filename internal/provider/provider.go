@@ -20,10 +20,9 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
-	"os"
+	"strings"
 
 	"github.com/hollis-labs/libs/core/panics"
 	"github.com/hollis-labs/libs/llm/core/llmcontracts"
@@ -70,35 +69,16 @@ func New(cfg Config) (llmcontracts.Provider, error) {
 		resolver = secrets.New()
 	}
 	load := func(ctx context.Context) (string, error) {
-		var refs []string
-		if cfg.Gateway.KeyRef != "" {
-			refs = append(refs, cfg.Gateway.KeyRef)
+		value, st, err := ResolveKey(ctx, cfg.Provider, cfg.Gateway, resolver)
+		if err != nil {
+			return "", err
 		}
-		refs = append(refs, "keychain://nanite/provider/"+cfg.Provider)
-		var failures []error
-		for _, ref := range refs {
-			resolved, err := resolver.Resolve(ctx, ref)
-			if err == nil {
-				value := resolved.Secret.Reveal()
-				cfg.Redactor.Add("provider key", value)
-				return value, nil
-			}
-			failures = append(failures, err)
-			if ctx.Err() != nil {
-				return "", ctx.Err()
-			}
+		label := "provider key"
+		if name, ok := strings.CutPrefix(st.Source, "env:"); ok {
+			label = name
 		}
-		if os.Getenv("NANITE_PROVIDER_KEY_ENV") == "1" {
-			name := "ANTHROPIC_API_KEY"
-			if cfg.Provider == "openai" {
-				name = "OPENAI_API_KEY"
-			}
-			if value := os.Getenv(name); value != "" {
-				cfg.Redactor.Add(name, value)
-				return value, nil
-			}
-		}
-		return "", fmt.Errorf("resolve %s provider key: %w", cfg.Provider, errors.Join(failures...))
+		cfg.Redactor.Add(label, value)
+		return value, nil
 	}
 	switch cfg.Provider {
 	case "anthropic":

@@ -106,7 +106,7 @@ func configIndependent(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "version", "init", "validate", "help", "completion", "stop", "tools", "agents":
+	case "version", "--version", "-v", "init", "validate", "help", "completion", "stop", "tools", "agents":
 		return true
 	default:
 		return false
@@ -132,7 +132,7 @@ func hasHelpFlag(args []string) bool {
 }
 
 func requiresAgent(args []string) bool {
-	return !configIndependent(args) && (len(args) == 0 || (args[0] != "config" && args[0] != "health"))
+	return !configIndependent(args) && (len(args) == 0 || (args[0] != "config" && args[0] != "health" && args[0] != "auth"))
 }
 
 type localBoundary struct{}

@@ -84,7 +84,9 @@ func (p appPDP) Evaluate(ctx context.Context, req libpolicy.Request) (libpolicy.
 	return result.Decision, err
 }
 
-func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate, sink agent.EventSink, adjust ...func(*agent.Options)) (*agent.Agent, error) {
+// gatewaySettings reads nanite.gateway (url or base_url, key_ref, auth, headers) from the
+// configuration, with NANITE_GATEWAY_URL and NANITE_GATEWAY_KEY_REF over it.
+func gatewaySettings(app *module.App) (agent.Gateway, error) {
 	top, _ := app.Config["nanite"].(map[string]any)
 	settings, _ := top["gateway"].(map[string]any)
 	base, _ := settings["url"].(string)
@@ -98,7 +100,7 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate,
 		for k, v := range values {
 			value, ok := v.(string)
 			if !ok {
-				return nil, fmt.Errorf("gateway header %q must be a string", k)
+				return agent.Gateway{}, fmt.Errorf("gateway header %q must be a string", k)
 			}
 			headers[k] = value
 		}
@@ -109,11 +111,19 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate,
 	if value := os.Getenv("NANITE_GATEWAY_KEY_REF"); value != "" {
 		ref = value
 	}
+	return agent.Gateway{BaseURL: base, Headers: headers, KeyRef: ref, Auth: auth}, nil
+}
+
+func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate, sink agent.EventSink, adjust ...func(*agent.Options)) (*agent.Agent, error) {
+	gw, err := gatewaySettings(app)
+	if err != nil {
+		return nil, err
+	}
 	value, _ := app.Value(logging.Key)
 	logger, _ := value.(*slog.Logger)
 	// The terminal agent gets every built-in group, whatever kind its directory declares.
 	opts := agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger, Events: sink, Builtins: agent.AllBuiltins(), TraceFiles: true,
-		Secrets: secrets.Resolver(app), PDP: appPDP{policy.From(app)}, Gateway: agent.Gateway{BaseURL: base, Headers: headers, KeyRef: ref, Auth: auth},
+		Secrets: secrets.Resolver(app), PDP: appPDP{policy.From(app)}, Gateway: gw,
 	}
 	for _, f := range adjust {
 		f(&opts)
@@ -125,7 +135,9 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root := cli.Root(app)
 	stopCmd := &cobra.Command{Use: "stop --all", Short: "Cancel all work in the running agent; reopen it to accept work again", Args: cobra.NoArgs}
 	stopCmd.Flags().Bool("all", false, "Stop all turns, subtasks and background jobs")
-	root.AddCommand(stopCmd, toolsCommand(dir), agentsCommand())
+	root.AddCommand(stopCmd, toolsCommand(dir), agentsCommand(), authCommand(app, dir))
+	root.Version = naniteVersion()
+	root.SetVersionTemplate("{{.Version}} (Nanite)\n")
 	root.SilenceUsage = true
 	root.SilenceErrors = true
 	var prompt, output, resume, discard, eventPath, inputFormat, outputFormat, sessionID string

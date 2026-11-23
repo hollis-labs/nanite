@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -238,5 +239,100 @@ func TestInterruptsChannelCancelsAOneShot(t *testing.T) {
 	err := Run(t.Context(), c, Options{Prompt: "hi", OutputFormat: JSON, Interrupts: ints}, nil, &out)
 	if err == nil || !strings.Contains(out.String(), `"stop_reason":"interrupted"`) {
 		t.Fatalf("%v %s", err, out.String())
+	}
+}
+
+func TestQuestionsGoToStdin(t *testing.T) {
+	c := newConversation(t,
+		askUser("Ready?"), fake.Text("answered"),
+		askUser("Sure?"), fake.Text("declined"),
+		askUser("Still there?"), fake.Text("closed"),
+	)
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(t.Context(), c, Options{InputFormat: StreamJSON, OutputFormat: StreamJSON, SessionID: "s"}, inR, outW)
+		_ = outW.Close()
+	}()
+	lines := make(chan msg, 64)
+	go func() {
+		sc := bufio.NewScanner(outR)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			lines <- decode(t, sc.Text())
+		}
+		close(lines)
+	}()
+	next := func(want string) msg {
+		t.Helper()
+		for {
+			select {
+			case m, ok := <-lines:
+				if !ok {
+					t.Fatalf("output ended before %s", want)
+				}
+				if m.Type+"/"+m.Subtype == want || m.Type == want {
+					return m
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("timed out waiting for %s", want)
+			}
+		}
+	}
+	write := func(s string) {
+		t.Helper()
+		if _, err := io.WriteString(inW, s+"\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	toolResult := func() string {
+		t.Helper()
+		m := next("user")
+		return fmt.Sprint(m.raw["message"].(map[string]any)["content"].([]any)[0].(map[string]any)["content"])
+	}
+	question := func(prompt string) string {
+		t.Helper()
+		q := next("control_request")
+		req := q.raw["request"].(map[string]any)
+		if req["subtype"] != "elicitation" || req["message"] != prompt || req["requested_schema"].(map[string]any)["type"] != "boolean" {
+			t.Fatalf("question: %v", q.raw)
+		}
+		return q.raw["request_id"].(string)
+	}
+
+	write(`{"type":"user","message":{"role":"user","content":"one"}}`)
+	id := question("Ready?")
+	write(`{"type":"control_response","response":{"subtype":"success","request_id":"` + id + `","response":{"action":"accept","content":true}}}`)
+	if r := toolResult(); !strings.Contains(r, "true") {
+		t.Fatalf("accepted answer: %s", r)
+	}
+	if r := next("result"); r.raw["result"] != "answered" {
+		t.Fatalf("%v", r.raw)
+	}
+
+	write(`{"type":"user","message":{"role":"user","content":"two"}}`)
+	id = question("Sure?")
+	write(`{"type":"control_response","response":{"subtype":"success","request_id":"nope","response":{"action":"accept","content":true}}}`) // not this question
+	write(`{"type":"control_response","response":{"subtype":"success","request_id":"` + id + `","response":{"action":"decline"}}}`)
+	if r := toolResult(); strings.Contains(r, "true") {
+		t.Fatalf("declined answer: %s", r)
+	}
+	next("result")
+
+	// Stdin closes while a question waits: it is declined and the turn finishes.
+	write(`{"type":"user","message":{"role":"user","content":"three"}}`)
+	question("Still there?")
+	_ = inW.Close()
+	if r := next("result"); r.raw["result"] != "closed" {
+		t.Fatalf("%v", r.raw)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("did not end")
 	}
 }

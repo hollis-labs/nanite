@@ -84,7 +84,7 @@ func (p appPDP) Evaluate(ctx context.Context, req libpolicy.Request) (libpolicy.
 	return result.Decision, err
 }
 
-func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate, sink agent.EventSink) (*agent.Agent, error) {
+func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate, sink agent.EventSink, adjust ...func(*agent.Options)) (*agent.Agent, error) {
 	top, _ := app.Config["nanite"].(map[string]any)
 	settings, _ := top["gateway"].(map[string]any)
 	base, _ := settings["url"].(string)
@@ -112,9 +112,13 @@ func openAgent(cmd *cobra.Command, app *module.App, dir string, gate agent.Gate,
 	value, _ := app.Value(logging.Key)
 	logger, _ := value.(*slog.Logger)
 	// The terminal agent gets every built-in group, whatever kind its directory declares.
-	return agent.Open(cmd.Context(), agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger, Events: sink, Builtins: agent.AllBuiltins(), TraceFiles: true,
+	opts := agent.Options{Dir: dir, Store: database.From(app), Gate: gate, Logger: logger, Events: sink, Builtins: agent.AllBuiltins(), TraceFiles: true,
 		Secrets: secrets.Resolver(app), PDP: appPDP{policy.From(app)}, Gateway: agent.Gateway{BaseURL: base, Headers: headers, KeyRef: ref, Auth: auth},
-	})
+	}
+	for _, f := range adjust {
+		f(&opts)
+	}
+	return agent.Open(cmd.Context(), opts)
 }
 
 func newRoot(app *module.App, dir string) *cobra.Command {
@@ -131,6 +135,8 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 	root.Flags().StringVar(&inputFormat, "input-format", "", "With -p: text (the prompt) or stream-json (user messages and control requests on stdin, as claude -p reads them)")
 	root.Flags().StringVar(&outputFormat, "output-format", "", "With -p: text, json or stream-json in Claude Code's message shapes")
 	root.Flags().StringVar(&sessionID, "session-id", "", "Use this conversation id, creating the conversation if it is new")
+	var claude claudeFlags
+	claude.register(root)
 	root.Flags().BoolVar(&verbose, "verbose", false, "Accepted for compatibility with claude -p (stream-json output is always complete)")
 	root.Flags().StringVar(&output, "output", "text", "Output format for -p: text, json or stream-json")
 	root.Flags().BoolVar(&latest, "continue", false, "Continue the latest conversation")
@@ -168,7 +174,22 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 			defer hotel.InitOrWarn(cmd.Context(), func(format string, args ...any) { _, _ = fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) },
 				5*time.Second, hotel.WithServiceName("nanite"))()
 		}
-		a, err := openAgent(cmd, app, dir, gate, sink)
+		var opts agent.Options
+		promptGate, closeGate, err := claude.apply(app, dir, cmd.ErrOrStderr(), &opts)
+		if err != nil {
+			return err
+		}
+		defer func() { retErr = errors.Join(retErr, closeGate()) }()
+		if promptGate != nil {
+			if !nonInteractive {
+				return errPromptToolInteractive
+			}
+			gate = promptGate
+		}
+		a, err := openAgent(cmd, app, dir, gate, sink, func(o *agent.Options) {
+			o.Model, o.PermissionMode, o.MCPServers, o.StrictMCP = opts.Model, opts.PermissionMode, opts.MCPServers, opts.StrictMCP
+			o.Instructions, o.PermissionRules, o.AddDirs, o.AddSkillDirs = opts.Instructions, opts.PermissionRules, opts.AddDirs, opts.AddSkillDirs
+		})
 		if err != nil {
 			return err
 		}
@@ -246,6 +267,7 @@ func newRoot(app *module.App, dir string) *cobra.Command {
 		if nonInteractive && claudeStyle {
 			return runHeadless(cmd, a, conversation, headless.Options{
 				SessionID: conversation.ID(), Prompt: prompt, InputFormat: inputFormat, OutputFormat: outputFormat,
+				Model: opts.Model, PermissionMode: firstNonEmpty(claude.permissionMode, opts.PermissionMode), MCPServers: sortedKeys(opts.MCPServers),
 			})
 		}
 		if nonInteractive {

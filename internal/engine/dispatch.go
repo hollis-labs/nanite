@@ -174,6 +174,9 @@ func (e *Engine) dispatch(ctx context.Context, r *Run, info store.Conversation, 
 	} else {
 		def, err = definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	}
+	if err == nil {
+		err = e.cfg.Overrides.Apply(&def)
+	}
 	if err != nil {
 		return events.Result{}, err
 	}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/hollis-labs/libs/security/policy"
 	"github.com/hollis-labs/libs/security/secrets"
 	"github.com/hollis-labs/nanite/internal/control"
+	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/engine"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/nanite/internal/recovery"
@@ -72,8 +74,29 @@ type Options struct {
 	// never changed. MCP stdio servers are not affected: they start in the
 	// process's working directory.
 	WorkDir string
+	// AddDirs are more directories the file tools may use, after WorkDir and Dir: existing
+	// absolute directories (claude's --add-dir).
+	AddDirs []string
 	// GlobalSkillsDir defaults to ~/.nanite/skills. Use "-" to disable it.
 	GlobalSkillsDir string
+	// Model, when set, replaces the authored chat model (host.yaml runtime.model and the chat
+	// selection in providers.yaml) for every turn.
+	Model string
+	// PermissionMode, when set, replaces the authored permission mode: default, accept-edits,
+	// plan or yolo.
+	PermissionMode string
+	// MCPServers are added to the agent directory's .mcp.json; a server of the same name
+	// replaces the authored one. With StrictMCP only these are used.
+	MCPServers map[string]MCPServer
+	StrictMCP  bool
+	// AddSkillDirs hold more skills (<name>/SKILL.md directories), offered like
+	// GlobalSkillsDir's: the agent directory's skill of the same name wins.
+	AddSkillDirs []string
+	// Instructions are added to the Context slot after the authored context, in order.
+	Instructions []string
+	// PermissionRules are evaluated together with permissions.yaml's rules (deny, then ask,
+	// then allow).
+	PermissionRules []PermissionRule
 	// ToolPackageEnv names credential-like host variables (provider key
 	// variables, PATs, DSNs, credential URLs, or names containing KEY, TOKEN,
 	// SECRET, AUTH, PASSWORD or CREDENTIAL) that tool packages may pass through
@@ -317,6 +340,16 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if opts.TurnTokenBudget < 0 {
 		return nil, fmt.Errorf("nanite: TurnTokenBudget must not be negative")
 	}
+	for _, d := range opts.AddDirs {
+		if info, err := os.Stat(d); !filepath.IsAbs(d) || err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("nanite: AddDirs entry %q is not an existing absolute directory", d)
+		}
+	}
+	switch opts.PermissionMode {
+	case "", "default", "accept-edits", "plan", "yolo":
+	default:
+		return nil, fmt.Errorf("nanite: PermissionMode %q is not default, accept-edits, plan or yolo", opts.PermissionMode)
+	}
 	publication, err := agentlock.Publication(opts.Dir, true)
 	if err != nil {
 		return nil, err
@@ -392,6 +425,11 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 	if work != "" && filepath.Clean(work) != def.Directory {
 		roots = append([]string{filepath.Clean(work)}, roots...)
 	}
+	for _, d := range opts.AddDirs {
+		if d = filepath.Clean(d); !slices.Contains(roots, d) {
+			roots = append(roots, d)
+		}
+	}
 	offered := opts.Builtins
 	if offered == nil && def.Profile.Kind == agentdir.Embedded {
 		// An application decides what its embedded agent can do: no built-in
@@ -428,8 +466,17 @@ func Open(ctx context.Context, opts Options) (*Agent, error) {
 		}
 		providers[spec.Name] = spec
 	}
+	overrides := definition.Overrides{Model: opts.Model, PermissionMode: opts.PermissionMode, StrictMCP: opts.StrictMCP,
+		MCP: agentdir.MCPConfig{Servers: maps.Clone(opts.MCPServers)}, Rules: slices.Clone(opts.PermissionRules),
+		SkillDirs: slices.Clone(opts.AddSkillDirs)}
+	for i, text := range opts.Instructions {
+		if strings.TrimSpace(text) != "" {
+			overrides.Context = append(overrides.Context, definition.Context{Name: fmt.Sprintf("host-instructions-%d", i+1), Text: text})
+		}
+	}
 	a.engine, err = engine.New(engine.Config{
-		Logger: opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolRegistry: opts.ToolRegistry, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AutoApprove: opts.AutoApprove, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
+		Overrides: overrides,
+		Logger:    opts.Logger, Events: opts.Events, Dir: def.Directory, GlobalSkillsDir: opts.GlobalSkillsDir, ToolPackageEnv: opts.ToolPackageEnv, ToolRegistry: opts.ToolRegistry, ToolApprovalDir: approvalDir, Builtins: builtins, Provider: opts.Provider, Store: db, Gate: opts.Gate, AutoApprove: opts.AutoApprove, AskWait: opts.SubtaskAskWait, PDP: opts.PDP,
 		ProviderConfig: provider.Config{Gateway: opts.Gateway, Secrets: opts.Secrets}, Providers: providers, Identity: identity, OnAuthWaiting: onWaiting, OnAuthGranted: onGranted,
 		Slots: a.slots.store, SlotSources: slices.Clone(opts.SlotSources), SlotSelector: opts.SlotSelector,
 		Tools: &a.tools.groups, Skills: &a.skills.groups, WorkspaceRoots: roots, PanicReporter: opts.PanicReporter,

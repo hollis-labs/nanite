@@ -1,9 +1,11 @@
 package main
 
 import (
+	"maps"
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 
 	"github.com/hollis-labs/nanite/agent"
 	"github.com/hollis-labs/nanite/internal/headless"
@@ -13,7 +15,7 @@ import (
 // runHeadless runs a conversation as claude -p does for a program driving it (internal/headless):
 // SIGINT interrupts the running turn.
 func runHeadless(cmd *cobra.Command, a *agent.Agent, c *agent.Conversation, o headless.Options) error {
-	if info, err := a.Info(cmd.Context()); err == nil {
+	if info, err := a.Info(cmd.Context()); err == nil && o.Model == "" {
 		o.Model = info.Definition.Profile.Runtime.Model
 	}
 	if o.Model == "" {
@@ -51,6 +53,10 @@ func naniteVersion() string {
 		return bi.Main.Version
 	}
 	return "dev"
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }
 
 func firstNonEmptyEnv(key, fallback string) string {

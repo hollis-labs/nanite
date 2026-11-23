@@ -10,6 +10,15 @@
   the running turn. `--session-id` names the conversation (created on first use). `-p` may now
   stand alone with the prompt as an argument, as with claude; `-p "text"` and `--output` work as
   before. See [docs/headless.md](docs/headless.md).
+- **claude -p's flags.** `--model`, `--permission-mode` (claude's names or Nanite's),
+  `--dangerously-skip-permissions`, `--mcp-config` (files or inline JSON, repeatable; merged over
+  `.mcp.json`) with `--strict-mcp-config`, `--append-system-prompt[-file]`, `--settings`
+  (permissions allow/ask/deny in claude's rule syntax, `defaultMode`, `additionalDirectories`,
+  `env`, `model`; other keys are reported and ignored), `--add-dir`, `--plugin-dir` (its skills)
+  and `--permission-prompt-tool mcp__<server>__<tool>`: with `-p`, approvals go to that MCP tool
+  with claude's request and reply. `--setting-sources` is accepted.
+- `agent.Options` gains `Model`, `PermissionMode`, `MCPServers`, `StrictMCP`, `Instructions`,
+  `PermissionRules`, `AddDirs` and `AddSkillDirs`, applied to every turn over the authored files.
 
 ## 0.16.1
 

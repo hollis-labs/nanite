@@ -210,6 +210,13 @@ type InterruptedTurn = github.com/hollis-labs/nanite/internal/store.InterruptedT
 func IsAuthWaiting(err error) (AuthWaiting, bool)
 const JobReasonProcessExit untyped string
 const JobReasonShutdown untyped string
+type MCPServer = github.com/hollis-labs/libs/agent/agentdir.MCPServer struct
+  field Type string
+  field Command string
+  field Args []string
+  field Env map[string]string
+  field URL string
+  field Headers map[string]string
 type Message = github.com/hollis-labs/nanite/internal/store.Message struct
   field ID string
   field TurnID string
@@ -235,7 +242,15 @@ type Options struct
   field Dir string
   field DataDir string
   field WorkDir string
+  field AddDirs []string
   field GlobalSkillsDir string
+  field Model string
+  field PermissionMode string
+  field MCPServers map[string]MCPServer
+  field StrictMCP bool
+  field AddSkillDirs []string
+  field Instructions []string
+  field PermissionRules []PermissionRule
   field ToolPackageEnv []string
   field ToolRegistry *github.com/hollis-labs/nanite/toolregistry.Client
   field Provider github.com/hollis-labs/libs/llm/core/llmcontracts.Provider
@@ -300,6 +315,13 @@ type PermissionResolved = github.com/hollis-labs/nanite/internal/events.Permissi
   field EventMeta github.com/hollis-labs/nanite/internal/events.EventMeta
   field ID string
   field Decision github.com/hollis-labs/nanite/internal/permission.PermissionDecision
+type PermissionRule = github.com/hollis-labs/libs/security/policy/permission.Rule struct
+  field Tool string
+  field Pattern string
+  field Behavior github.com/hollis-labs/libs/security/policy/permission.Decision
+  field Source string
+  (*PermissionRule) Matches(toolName string, input map[string]any) bool
+  (PermissionRule) ResolvePattern(canonicalWorkingDir string) (github.com/hollis-labs/libs/security/policy/permission.Rule, error)
 type PermissionScope = github.com/hollis-labs/nanite/internal/permission.PermissionScope uint8
 type PreparedSteer = github.com/hollis-labs/nanite/internal/engine.PreparedSteer struct
   (*PreparedSteer) Halted() bool

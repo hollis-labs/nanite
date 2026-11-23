@@ -23,6 +23,8 @@ func TestMain(m *testing.M) {
 	if headlesstest.ServeIfAsked() {
 		return
 	}
+	// No test may reach a real keychain: every lookup finds nothing.
+	keychainLookup = func(context.Context, string, string) (bool, bool, error) { return false, true, nil }
 	os.Exit(m.Run())
 }
 

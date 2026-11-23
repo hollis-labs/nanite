@@ -116,8 +116,11 @@ nanite auth status --json        # {"loggedIn":true,"provider":"anthropic","mode
 
 `auth status` checks the key the chat model needs (the agent directory's provider and
 `providers.yaml` selection, else Anthropic), the way a request finds it: the gateway key
-reference, the keychain, then the environment with `NANITE_PROVIDER_KEY_ENV=1`. It never prints
-the key. With `--json` it always exits 0; without, it exits 1 when no key is found.
+reference, the keychain, then the environment with `NANITE_PROVIDER_KEY_ENV=1`. It never reads
+the key, so it never raises a keychain access prompt: a keychain entry is checked by its
+attributes only, a `file://` or `env://` reference is resolved, and a helper reference such as
+`op://` is not run (reported as found but not checked). With `--json` it always exits 0;
+without, it exits 1 when no key is found.
 
 ## Sessions
 

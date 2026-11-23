@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.18.0
+
+Nanite works in any directory, the way `claude` and `codex` do: run it in a project and the
+project is the workspace, the global home (`~/.nanite`) is the agent, instructions come from
+`AGENTS.md` (or `CLAUDE.md`) walking up, project settings and MCP servers apply, and each session
+keeps its own state. One behavior change: `nanite` in a directory that is not an agent directory,
+without `-C`, used to fail and now runs in that directory with the home as the agent, setting
+the home up on first use. Agent directories and `-C` work as before. The Go API change is
+additive (`agent.Options.HideDir`).
 
 - **Works in any directory, like claude.** In a directory that is not an agent directory, without
   `-C`, the directory is the workspace and Nanite's home (`$NANITE_HOME`, default `~/.nanite`) is

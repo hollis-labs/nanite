@@ -10,7 +10,6 @@ import (
 	"github.com/hollis-labs/nanite/internal/definition"
 	"github.com/hollis-labs/nanite/internal/provider"
 	"github.com/hollis-labs/substrate/module"
-	"github.com/hollis-labs/substrate/modules/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -53,12 +52,13 @@ func authCommand(app *module.App, dir string) *cobra.Command {
 					}
 				}
 			}
+			// Never read a key here: a keychain read can raise an access dialog (keyHas).
 			var ks provider.KeyStatus
 			if named != nil {
-				ks = provider.NamedKeyStatus(cmd.Context(), *named, secrets.Resolver(app))
+				ks = provider.NamedKeyStatus(cmd.Context(), *named, keyHas(app))
 				st.Gateway = named.BaseURL
 			} else {
-				_, ks, _ = provider.ResolveKey(cmd.Context(), st.Provider, gw, secrets.Resolver(app))
+				ks = provider.KeyStatusFor(cmd.Context(), st.Provider, gw, keyHas(app))
 			}
 			st.LoggedIn, st.AuthMethod, st.Tried, st.Error = ks.Found, ks.Source, ks.Tried, ks.Error
 			out := cmd.OutOrStdout()

@@ -64,35 +64,70 @@ func ResolveKey(ctx context.Context, provider string, gateway Gateway, resolver 
 	return "", st, err
 }
 
-// NamedKeyStatus is ResolveKey for a providers.yaml provider: its key_ref (else
+// Has reports whether a secret reference resolves, without the secret: for a status check that
+// must not read it (a keychain read can prompt). checked is false when it could not tell
+// without reading (a helper backend), and then found is the caller's best guess.
+type Has func(ctx context.Context, ref string) (found, checked bool, err error)
+
+// KeyStatusFor is ResolveKey's lookup without reading the key: the same references in the same
+// order, each asked of has.
+func KeyStatusFor(ctx context.Context, provider string, gateway Gateway, has Has) KeyStatus {
+	st := KeyStatus{Provider: provider, Tried: []string{}}
+	var refs []string
+	if gateway.KeyRef != "" {
+		refs = append(refs, gateway.KeyRef)
+	}
+	refs = append(refs, "keychain://nanite/provider/"+provider)
+	name := "ANTHROPIC_API_KEY"
+	if provider == "openai" {
+		name = "OPENAI_API_KEY"
+	}
+	return walk(ctx, st, refs, name, has)
+}
+
+// NamedKeyStatus is KeyStatusFor for a providers.yaml provider: its key_ref (else
 // keychain://nanite/provider/<name>), then its key_env with NANITE_PROVIDER_KEY_ENV=1. A provider
 // with auth none or warden needs no key.
-func NamedKeyStatus(ctx context.Context, spec Spec, resolver *secrets.Resolver) KeyStatus {
+func NamedKeyStatus(ctx context.Context, spec Spec, has Has) KeyStatus {
 	st := KeyStatus{Provider: spec.Name, Tried: []string{}}
 	if spec.Auth == AuthNone || spec.Auth == AuthWarden {
 		st.Found, st.Source = true, spec.Auth
 		return st
 	}
-	if resolver == nil {
-		resolver = secrets.New()
-	}
 	ref := spec.KeyRef
 	if ref == "" {
 		ref = "keychain://nanite/provider/" + spec.Name
 	}
-	st.Tried = append(st.Tried, ref)
-	_, err := resolver.Resolve(ctx, ref)
-	if err == nil {
-		st.Found, st.Source = true, ref
-		return st
+	return walk(ctx, st, []string{ref}, spec.KeyEnv, has)
+}
+
+func walk(ctx context.Context, st KeyStatus, refs []string, envName string, has Has) KeyStatus {
+	var failures []error
+	for _, ref := range refs {
+		st.Tried = append(st.Tried, ref)
+		found, checked, err := has(ctx, ref)
+		if found {
+			st.Found, st.Source = true, ref
+			if !checked {
+				st.Error = "not checked: reading " + ref + " could prompt"
+			}
+			return st
+		}
+		if err != nil {
+			failures = append(failures, err)
+		}
 	}
-	if spec.KeyEnv != "" && os.Getenv("NANITE_PROVIDER_KEY_ENV") == "1" {
-		st.Tried = append(st.Tried, "env:"+spec.KeyEnv)
-		if os.Getenv(spec.KeyEnv) != "" {
-			st.Found, st.Source = true, "env:"+spec.KeyEnv
+	if envName != "" && os.Getenv("NANITE_PROVIDER_KEY_ENV") == "1" {
+		st.Tried = append(st.Tried, "env:"+envName)
+		if os.Getenv(envName) != "" {
+			st.Found, st.Source = true, "env:"+envName
 			return st
 		}
 	}
-	st.Error = err.Error()
+	if err := errors.Join(failures...); err != nil {
+		st.Error = err.Error()
+	} else {
+		st.Error = "no key found"
+	}
 	return st
 }

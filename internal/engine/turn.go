@@ -220,6 +220,9 @@ func (e *Engine) turn(ctx context.Context, r *Run, info store.Conversation, inpu
 	} else {
 		def, err = definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	}
+	if err == nil {
+		err = e.cfg.Overrides.Apply(&def)
+	}
 	if err != nil {
 		return events.Result{}, err
 	}

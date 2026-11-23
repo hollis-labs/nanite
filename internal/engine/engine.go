@@ -87,6 +87,9 @@ type Config struct {
 	Tools          *tools.Groups
 	Skills         *skills.Groups
 	WorkspaceRoots []string
+	// Overrides are the host's settings over the authored files (model, permission mode, MCP
+	// servers, extra context and rules), applied to every turn's definition.
+	Overrides definition.Overrides
 	// Providers are named providers the host defines. They take precedence
 	// over providers.yaml entries with the same name.
 	Providers map[string]provider.Spec

@@ -34,6 +34,9 @@ func (e *Engine) Complete(ctx context.Context, use, system, prompt string, maxTo
 	} else {
 		def, err = definition.Load(e.cfg.Dir, e.cfg.GlobalSkillsDir)
 	}
+	if err == nil {
+		err = e.cfg.Overrides.Apply(&def)
+	}
 	if err != nil {
 		return "", err
 	}
